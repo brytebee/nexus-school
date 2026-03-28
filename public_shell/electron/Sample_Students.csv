@@ -1,0 +1,13 @@
+Student_ID,First_Name,Last_Name,Class,Teacher_ID,Teacher_Name,Teacher_Phone,Subjects
+A-001,Obi,Ndidi,JSS1,TCH-001,Mr. Adebayo Okonkwo,08012345678,Mathematics|English
+A-002,Aisha,Bello,JSS1,TCH-001,Mr. Adebayo Okonkwo,08012345678,Mathematics|English
+A-003,Chinedu,Okafor,JSS1,TCH-001,Mr. Adebayo Okonkwo,08012345678,Mathematics|English
+A-004,Fatima,Yusuf,JSS1,TCH-002,Mrs. Ngozi Eze,08023456789,Biology|Chemistry
+A-005,Emeka,Nwosu,JSS1,TCH-002,Mrs. Ngozi Eze,08023456789,Biology|Chemistry
+A-006,Zainab,Aliyu,JSS2,TCH-001,Mr. Adebayo Okonkwo,08012345678,Mathematics|English
+A-007,Oluwaseun,Adeyemi,JSS2,TCH-001,Mr. Adebayo Okonkwo,08012345678,Mathematics|English
+A-008,Ngozi,Eze-Jr,JSS2,TCH-003,Mr. Kunle Fashola,08034567890,Physics|Further Mathematics
+A-009,Ibrahim,Musa,JSS2,TCH-003,Mr. Kunle Fashola,08034567890,Physics|Further Mathematics
+A-010,Blessing,Okon,SS1,TCH-002,Mrs. Ngozi Eze,08023456789,Biology|Chemistry
+A-011,Tunde,Bakare,SS1,TCH-003,Mr. Kunle Fashola,08034567890,Physics|Further Mathematics
+A-012,Chisom,Nnaji,SS1,TCH-001,Mr. Adebayo Okonkwo,08012345678,Mathematics|English

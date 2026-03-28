@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus Report Card</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #fff;
+            color: #1a1a2e;
+        }
+
+        /* Each student gets a page-break after them */
+        .report-page {
+            width: 210mm;
+            min-height: 297mm;
+            padding: 16mm 16mm 12mm 16mm;
+            page-break-after: always;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        .report-page:last-child { page-break-after: auto; }
+
+        /* ── HEADER ── */
+        .report-header {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            padding-bottom: 16px;
+            border-bottom: 3px solid var(--primary, #1A237E);
+        }
+        .school-logo {
+            width: 72px;
+            height: 72px;
+            border-radius: 12px;
+            object-fit: contain;
+        }
+        .logo-placeholder {
+            width: 72px;
+            height: 72px;
+            border-radius: 12px;
+            background: var(--primary, #1A237E);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .school-info { flex: 1; }
+        .school-name {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--primary, #1A237E);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .school-address { font-size: 11px; color: #666; margin-top: 2px; }
+        .school-motto { font-size: 11px; color: #999; font-style: italic; margin-top: 2px; }
+        .report-title {
+            text-align: right;
+            font-size: 11px;
+        }
+        .report-title strong {
+            display: block;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--primary, #1A237E);
+        }
+
+        /* ── STUDENT PROFILE BAND ── */
+        .student-band {
+            background: var(--primary, #1A237E);
+            color: #fff;
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin: 20px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .student-name { font-size: 20px; font-weight: 700; }
+        .student-id { font-size: 12px; opacity: 0.7; margin-top: 3px; }
+        .student-class { 
+            font-size: 13px;
+            background: rgba(255,255,255,0.15);
+            padding: 6px 14px;
+            border-radius: 20px;
+        }
+
+        /* ── GRADES TABLE ── */
+        .section-title {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #999;
+            margin: 16px 0 10px;
+        }
+
+        .grades-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 24px;
+        }
+        .grades-table th {
+            background: #f0f2ff;
+            color: var(--primary, #1A237E);
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 10px 14px;
+            text-align: left;
+            border-bottom: 2px solid var(--primary, #1A237E);
+        }
+        .grades-table td {
+            padding: 12px 14px;
+            border-bottom: 1px solid #eee;
+            font-size: 13px;
+        }
+        .grades-table tr:last-child td { border-bottom: none; }
+        .grades-table tr:hover td { background: #fafbff; }
+        .score-cell { font-weight: 700; font-size: 15px; color: var(--primary, #1A237E); }
+        .grade-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+        .grade-A { background: #e8f5e9; color: #2e7d32; }
+        .grade-B { background: #e3f2fd; color: #1565c0; }
+        .grade-C { background: #fff8e1; color: #f57f17; }
+        .grade-F { background: #fde8e8; color: #c62828; }
+
+        /* ── SUMMARY BOX ── */
+        .summary-row {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        .summary-card {
+            flex: 1;
+            border: 2px solid var(--primary, #1A237E);
+            border-radius: 12px;
+            padding: 14px 16px;
+            text-align: center;
+        }
+        .summary-card .value {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--primary, #1A237E);
+        }
+        .summary-card .label {
+            font-size: 11px;
+            color: #999;
+            margin-top: 4px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* ── FOOTER ── */
+        .report-footer {
+            margin-top: auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+        .footer-note { font-size: 10px; color: #bbb; }
+        .signature-block { text-align: center; }
+        .signature-name {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--primary, #1A237E);
+            border-top: 1px solid #ccc;
+            padding-top: 8px;
+        }
+        .signature-title { font-size: 10px; color: #999; margin-top: 2px; }
+
+        @media print {
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+    </style>
+</head>
+<body>
+<div id="report-container">
+    <!-- Pages are injected here by JS -->
+</div>
+
+<script>
+    // Grading scale helper
+    function getGrade(score) {
+        if (score >= 70) return { letter: 'A', css: 'grade-A' };
+        if (score >= 55) return { letter: 'B', css: 'grade-B' };
+        if (score >= 40) return { letter: 'C', css: 'grade-C' };
+        return { letter: 'F', css: 'grade-F' };
+    }
+
+    function renderReports(identity, studentsWithGrades) {
+        const primary = identity.themePrimary || '#1A237E';
+        document.documentElement.style.setProperty('--primary', primary);
+
+        const logoHtml = identity.logoBase64
+            ? `<img src="${identity.logoBase64}" class="school-logo" alt="Logo">`
+            : `<div class="logo-placeholder">${(identity.name || 'N').charAt(0).toUpperCase()}</div>`;
+
+        const container = document.getElementById('report-container');
+        container.innerHTML = '';
+
+        const now = new Date();
+        const dateStr = now.toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric'});
+
+        studentsWithGrades.forEach(student => {
+            const grade = getGrade(student.total || 0);
+            const breakdown = student.breakdown || {};
+
+            const page = document.createElement('div');
+            page.className = 'report-page';
+            page.innerHTML = `
+                <div class="report-header">
+                    ${logoHtml}
+                    <div class="school-info">
+                        <div class="school-name">${identity.name || 'Nexus Academy'}</div>
+                        <div class="school-address">${identity.address || ''}</div>
+                        <div class="school-motto">${identity.motto ? '"' + identity.motto + '"' : ''}</div>
+                    </div>
+                    <div class="report-title">
+                        <strong>Report Card</strong>
+                        ${dateStr}
+                    </div>
+                </div>
+
+                <div class="student-band">
+                    <div>
+                        <div class="student-name">${student.name}</div>
+                        <div class="student-id">Student ID: ${student.id}</div>
+                    </div>
+                    <div class="student-class">${student.class_name || 'N/A'}</div>
+                </div>
+
+                <div class="section-title">Grade Breakdown</div>
+                <table class="grades-table">
+                    <thead>
+                        <tr>
+                            <th>Assessment</th>
+                            <th>Max Score</th>
+                            <th>Score Obtained</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>1st Continuous Assessment (CA1)</td>
+                            <td>10</td>
+                            <td class="score-cell">${breakdown.CA1 ?? '—'}</td>
+                        </tr>
+                        <tr>
+                            <td>2nd Continuous Assessment (CA2)</td>
+                            <td>10</td>
+                            <td class="score-cell">${breakdown.CA2 ?? '—'}</td>
+                        </tr>
+                        <tr>
+                            <td>Terminal Examination</td>
+                            <td>80</td>
+                            <td class="score-cell">${breakdown.Exam ?? '—'}</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="summary-row">
+                    <div class="summary-card">
+                        <div class="value">${student.total ?? '—'}</div>
+                        <div class="label">Total Score</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="value">${student.total ? student.total + '%' : '—'}</div>
+                        <div class="label">Percentage</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="value"><span class="grade-badge ${grade.css}">${student.total ? grade.letter : '—'}</span></div>
+                        <div class="label">Grade</div>
+                    </div>
+                </div>
+
+                <div class="report-footer">
+                    <div class="footer-note">Generated by Nexus School OS • ${dateStr}</div>
+                    <div class="signature-block">
+                        <div class="signature-name">${identity.signature || 'Principal'}</div>
+                        <div class="signature-title">Principal / Head Teacher</div>
+                    </div>
+                </div>
+            `;
+            container.appendChild(page);
+        });
+
+        // Signal to the main process that we are ready to print
+        if (window.__nexusPrint) {
+            window.__nexusPrint();
+        }
+    }
+
+    // Use the secure IPC bridge exposed by pdf-preload.js
+    if (window.nexusPDF) {
+        window.nexusPDF.onPrintData(({ identity, students }) => {
+            renderReports(identity, students);
+        });
+        // Signal to main that we are mounted and ready to receive data
+        window.nexusPDF.ready();
+    }
+</script>
+</body>
+</html>

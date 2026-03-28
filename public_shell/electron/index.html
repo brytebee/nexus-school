@@ -1,0 +1,808 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nexus Shell | Discover</title>
+    <link rel="stylesheet" href="index.css" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="background-glow"></div>
+    <main class="glass-container">
+      <header>
+        <div class="school-identity">
+          <div class="logo-placeholder">N</div>
+          <h1 id="school-name">Nexus Discovery</h1>
+        </div>
+        <div
+          class="header-actions"
+          style="display: flex; gap: 20px; align-items: center"
+        >
+          <div class="forge-action" data-tooltip="Identity Settings">
+            <button id="settings-btn" class="forge-icon-btn">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <circle cx="12" cy="12" r="3"></circle>
+                <path
+                  d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+                ></path>
+              </svg>
+            </button>
+            <span class="forge-tooltip">Identity Settings</span>
+          </div>
+          <div class="forge-action" data-tooltip="Upload Students CSV">
+            <label for="csv-upload" class="forge-icon-btn">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+              <input
+                type="file"
+                id="csv-upload"
+                accept=".csv"
+                style="display: none"
+              />
+            </label>
+            <span id="upload-status-tooltip" class="forge-tooltip"
+              >Upload Students CSV</span
+            >
+          </div>
+          <div class="status-badge" id="thermal-badge">
+            <span class="dot"></span> Hardware: COOL
+          </div>
+        </div>
+      </header>
+
+      <section class="discovery-hero" id="handshake-section">
+        <div class="qr-wrapper">
+          <div
+            id="qr-code"
+            style="background: white; padding: 12px; border-radius: 16px"
+          ></div>
+          <div class="qr-ring"></div>
+          <div class="qr-ring-outer"></div>
+        </div>
+        <div class="discovery-text">
+          <h2>Ready to Sync</h2>
+          <p>
+            Scan the code with your Nexus Mobile app to begin the "Day 1"
+            Handshake.
+          </p>
+          <div class="connection-info">
+            <code id="server-ip">0.0.0.0</code>
+            <span class="separator">:</span>
+            <code id="server-port">3000</code>
+          </div>
+        </div>
+      </section>
+
+      <!-- Live Dashboard Section (Hidden initially) -->
+      <section
+        class="live-dashboard"
+        id="dashboard-section"
+        style="display: none"
+      >
+        <div class="dashboard-header">
+          <h2>Command Center</h2>
+          <div class="pulse-indicator">
+            <div class="pulse-dot"></div>
+            <span id="pulse-label">Ready for teacher sync...</span>
+          </div>
+        </div>
+        <!-- Stats Row -->
+        <div class="stats-row" id="stats-row">
+          <div class="stat-card" id="stat-students">
+            <div class="stat-icon">👥</div>
+            <div class="stat-value" id="stat-students-count">0</div>
+            <div class="stat-label">Students Loaded</div>
+          </div>
+          <div class="stat-card" id="stat-devices">
+            <div class="stat-icon">📱</div>
+            <div class="stat-value" id="stat-devices-count">0</div>
+            <div class="stat-label">Devices Married</div>
+          </div>
+          <div class="stat-card" id="stat-events">
+            <div class="stat-icon">📊</div>
+            <div class="stat-value" id="stat-events-count">0</div>
+            <div class="stat-label">Grade Events</div>
+          </div>
+        </div>
+        <div class="events-container" id="events-container">
+          <!-- Sync events will appear here -->
+        </div>
+        <div style="padding: 16px 0">
+          <button
+            id="generate-pdf-btn"
+            class="primary-btn"
+            style="
+              width: 100%;
+              padding: 16px;
+              font-size: 16px;
+              border-radius: 12px;
+              display: none;
+              align-items: center;
+              justify-content: center;
+              gap: 10px;
+            "
+          >
+            <span>📄</span> Generate Report Cards (PDF)
+          </button>
+        </div>
+      </section>
+
+      <!-- Settings Section (Hidden initially) -->
+      <section
+        class="settings-portal"
+        id="settings-section"
+        style="display: none"
+      >
+        <div class="settings-header">
+          <h2>School Identity Forge</h2>
+          <div style="display: flex; gap: 10px;">
+            <button
+              id="reset-btn"
+              class="upload-btn"
+              style="border-color: #ff4444; color: #ff4444"
+            >
+              Reset
+            </button>
+            <button id="close-settings-btn" class="upload-btn">Close</button>
+          </div>
+        </div>
+
+        <div class="settings-content">
+          <div class="settings-column">
+            <h3>Visual Identity</h3>
+
+            <div class="form-group">
+              <label>School Crest (Logo)</label>
+              <div class="logo-uploader" id="logo-dropzone">
+                <div class="uploader-content" id="uploader-content">
+                  <span class="upload-icon">﹢</span>
+                  <p>Drag & Drop PNG/JPEG</p>
+                  <span class="upload-hint">or click to browse</span>
+                </div>
+                <img
+                  id="logo-preview"
+                  src=""
+                  alt="Logo Preview"
+                  style="display: none"
+                />
+                <input
+                  type="file"
+                  id="logo-upload"
+                  accept="image/png, image/jpeg"
+                  style="display: none"
+                />
+              </div>
+            </div>
+
+            <div class="color-pickers-group">
+              <div class="form-group">
+                <label>Primary Theme</label>
+                <div class="color-picker-wrapper">
+                  <input type="color" id="theme-primary" value="#1A237E" />
+                  <span class="color-hex" id="primary-hex">#1A237E</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Accent Color</label>
+                <div class="color-picker-wrapper">
+                  <input type="color" id="theme-secondary" value="#00E5FF" />
+                  <span class="color-hex" id="secondary-hex">#00E5FF</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-column">
+            <h3>School Metadata</h3>
+
+            <div class="form-group">
+              <label>School Name</label>
+              <input
+                type="text"
+                id="school-name-input"
+                class="modern-input"
+                placeholder="e.g. Nexus Academy"
+              />
+            </div>
+
+            <div class="form-group">
+              <label>School Address</label>
+              <input
+                type="text"
+                id="school-address-input"
+                class="modern-input"
+                placeholder="e.g. 123 Education Way"
+              />
+            </div>
+
+            <div class="form-group">
+              <label>Motto</label>
+              <input
+                type="text"
+                id="school-motto-input"
+                class="modern-input"
+                placeholder="e.g. Excellence in all things"
+              />
+            </div>
+
+            <div class="form-group">
+              <label>Principal's Signature (Digital)</label>
+              <input
+                type="text"
+                id="school-signature-input"
+                class="modern-input"
+                placeholder="Full Name"
+              />
+            </div>
+
+            <button id="save-identity-btn" class="primary-btn">
+              Save Identity Shard
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        <div class="eco-status">
+          <label>Energy Profile</label>
+          <div class="bar-container">
+            <div class="bar-fill" style="width: 15%"></div>
+          </div>
+          <span>Optimized</span>
+        </div>
+        <p class="crypto-hint">Ed25519 Secure Handshake Active</p>
+      </footer>
+    </main>
+
+    <script src="libs/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script>
+      const statusBadge = document.getElementById("thermal-badge");
+      const schoolName = document.getElementById("school-name");
+      const barFill = document.querySelector(".bar-fill");
+      let cachedPayload = null;
+
+      function renderQR(payload) {
+        const qrContainer = document.getElementById("qr-code");
+        if (!qrContainer || typeof QRCode === "undefined") {
+          console.warn("QRCode library not ready yet, caching payload.");
+          cachedPayload = payload;
+          return;
+        }
+
+        console.log("Rendering QR for payload:", payload);
+        qrContainer.innerHTML = "";
+
+        // Critical fix: Remove logo base64 from QR string to prevent capacity overflow
+        const qrData = JSON.parse(JSON.stringify(payload));
+        if (qrData.config && qrData.config.logoBase64) {
+          qrData.config.logoBase64 = null;
+        }
+
+        new QRCode(qrContainer, {
+          text: JSON.stringify(qrData),
+          width: 240,
+          height: 240,
+          colorDark: "#000000",
+          colorLight: "#FFFFFF",
+          correctLevel: QRCode.CorrectLevel.H,
+        });
+
+        // Also ensure IP/Port are visible on the Discover Card
+        document.getElementById("server-ip").textContent =
+          payload.ip || "0.0.0.0";
+        document.getElementById("server-port").textContent =
+          payload.port || "3000";
+
+        if (payload.config) {
+          applyIdentityToUI(payload.config);
+        }
+      }
+
+      if (window.electronAPI) {
+        // 1. Initial QR Payload
+        window.electronAPI.onQrPayload((payload) => {
+          renderQR(payload);
+        });
+
+        // 2. Handshake Successful Event
+        let devicesMarried = 0;
+        window.electronAPI.onHandshakeComplete((data) => {
+          console.log("Handshake successful:", data);
+          devicesMarried++;
+
+          // Update thermal badge
+          statusBadge.innerHTML = `<span class="dot"></span> Hardware: ${data.thermal_status || "OPTIMIZED"}`;
+          statusBadge.style.background = "rgba(76, 175, 80, 0.2)";
+          statusBadge.style.color = "#4CAF50";
+
+          schoolName.textContent = `Nexus: ${data.teacher_name}`;
+
+          // Update stats
+          const devicesEl = document.getElementById("stat-devices-count");
+          if (devicesEl) devicesEl.textContent = devicesMarried;
+          const pulseLabel = document.getElementById("pulse-label");
+          if (pulseLabel)
+            pulseLabel.textContent = `📱 ${data.teacher_name} is now married to this hub.`;
+
+          // Transition to Dashboard
+          document.getElementById("handshake-section").style.display = "none";
+          document.getElementById("dashboard-section").style.display = "flex";
+          document.getElementById("settings-section").style.display = "none";
+        });
+
+        // 3. Sync Events (The Pulse)
+        let totalEvents = 0;
+        window.electronAPI.onSyncUpdate((events) => {
+          console.log("Sync events received:", events);
+          const container = document.getElementById("events-container");
+          totalEvents += events?.length || 0;
+          const eventsCountEl = document.getElementById("stat-events-count");
+          if (eventsCountEl) eventsCountEl.textContent = totalEvents;
+
+          const pulseInd = document.querySelector(".pulse-indicator");
+          if (pulseInd) {
+            pulseInd.classList.add("active-sync");
+            setTimeout(() => pulseInd.classList.remove("active-sync"), 3000);
+          }
+
+          const pulseLabel = document.getElementById("pulse-label");
+          if (pulseLabel)
+            pulseLabel.textContent = `⚡ ${events?.length || 0} new grade events received`;
+
+          (events || []).forEach((event) => {
+            const eventEl = document.createElement("div");
+            eventEl.className = "event-card slide-in";
+
+            let parsedPayload = {};
+            try {
+              parsedPayload = JSON.parse(event.payload);
+            } catch (e) {}
+
+            let scoreDisplay = `Score: ${parsedPayload.score || "N/A"}`;
+            if (parsedPayload.breakdown) {
+              scoreDisplay += ` <span style="font-size: 10px; opacity: 0.7; margin-left: 8px;">(CA1: ${parsedPayload.breakdown.CA1}, CA2: ${parsedPayload.breakdown.CA2}, Ex: ${parsedPayload.breakdown.Exam})</span>`;
+            }
+
+            eventEl.innerHTML = `
+                        <div class="event-type">${event.event_type || "UPDATE"}</div>
+                        <div class="event-details">
+                            <span class="student-id">Student: ${parsedPayload.student_id || "Unknown"}</span>
+                            <span class="score-pill">${scoreDisplay}</span>
+                        </div>
+                        <div class="event-time">${new Date(event.created_at).toLocaleTimeString()}</div>
+                    `;
+
+            container.prepend(eventEl);
+
+            if (container.children.length > 20) {
+              container.lastElementChild.remove();
+            }
+          });
+        });
+
+        // 4. File Upload Logic
+        let totalStudentsLoaded = 0;
+        let loadedStudents = []; // Keep a reference to the CSV student objects
+        document
+          .getElementById("csv-upload")
+          .addEventListener("change", async (event) => {
+            const file = event.target.files[0];
+            if (file) {
+              const tooltip = document.getElementById("upload-status-tooltip");
+              tooltip.textContent = "Processing CSV...";
+              tooltip.style.color = "#00E5FF";
+              if (window.electronAPI.processCSV) {
+                window.electronAPI.processCSV(file.path);
+              }
+            }
+          });
+
+        // 5. CSV Processed Update
+        window.electronAPI.onCSVLoaded((count) => {
+          totalStudentsLoaded = count;
+          const tooltip = document.getElementById("upload-status-tooltip");
+          tooltip.textContent = `✅ ${count} Students Ready`;
+          tooltip.style.color = "#4CAF50";
+          document.querySelector('label[for="csv-upload"]').style.borderColor =
+            "#4CAF50";
+          const studentsCountEl = document.getElementById(
+            "stat-students-count",
+          );
+          if (studentsCountEl) studentsCountEl.textContent = count;
+          const pulseLabel = document.getElementById("pulse-label");
+          if (pulseLabel)
+            pulseLabel.textContent = `${count} students ready to push on next handshake.`;
+
+          if (count > 0 && typeof Swal !== "undefined") {
+            Swal.fire({
+              title: "Upload Successful",
+              text: `${count} students have been ingested.`,
+              icon: "success",
+              background: "#0A0E2E",
+              color: "#fff",
+              confirmButtonColor: "#1A237E",
+              backdrop: false,
+              heightAuto: false,
+              scrollbarPadding: false,
+            });
+          }
+        });
+
+        // 6. Generate Report Cards (PDF)
+        const allGradeEvents = [];
+        const originalOnSyncUpdate = window._nexusSyncUpdateSet;
+
+        document
+          .getElementById("generate-pdf-btn")
+          .addEventListener("click", async () => {
+            if (allGradeEvents.length === 0) {
+              Swal.fire({
+                title: "No Grade Data",
+                text: "Sync grade events from the Android device before generating PDFs.",
+                icon: "warning",
+                background: "#0A0E2E",
+                color: "#fff",
+                confirmButtonColor: "#1A237E",
+                backdrop: false,
+              });
+              return;
+            }
+
+            Swal.fire({
+              title: "Generating PDF Reports",
+              html: `
+                        <div style="margin-top: 10px; margin-bottom: 20px; font-size: 14px; opacity: 0.8;">
+                            Nexus Engine is rendering A4 layouts...
+                        </div>
+                        <div style="display: flex; justify-content: center; width: 100%;">
+                            <div class="bar-container" style="width: 200px;">
+                                <div class="bar-fill"></div>
+                            </div>
+                        </div>
+                    `,
+              allowOutsideClick: false,
+              showConfirmButton: false,
+              background: "#0A0E2E",
+              color: "#fff",
+              backdrop: false,
+            });
+
+            // Merge grade events into student objects
+            // Build a map of studentId -> breakdown from allGradeEvents
+            const gradeMap = {};
+            allGradeEvents.forEach((evt) => {
+              try {
+                const p = JSON.parse(evt.payload);
+                gradeMap[p.student_id] = {
+                  total: p.score,
+                  breakdown: p.breakdown || {},
+                };
+              } catch (e) {}
+            });
+
+            // Pull identity
+            const identity = await window.electronAPI.getIdentity();
+
+            // Build a student list from the grade map (we may not have full CSV data in JS yet)
+            // Use grade events as source since that's what we have
+            const studentsForPdf = Object.entries(gradeMap).map(
+              ([id, gradeData]) => ({
+                id,
+                name: id, // Fallback to ID if name not available
+                class_name: "",
+                ...gradeData,
+              }),
+            );
+
+            try {
+              const result = await window.electronAPI.generateReports({
+                identity,
+                students: studentsForPdf,
+              });
+              Swal.fire({
+                title: "✅ Reports Generated!",
+                html: `${studentsForPdf.length} report cards saved to:<br><code style="font-size:11px;">${result.folder}</code>`,
+                icon: "success",
+                background: "#0A0E2E",
+                color: "#fff",
+                confirmButtonColor: "#1A237E",
+                backdrop: false,
+              });
+            } catch (err) {
+              Swal.fire({
+                title: "Error",
+                text: "PDF generation failed. Check the console.",
+                icon: "error",
+                background: "#0A0E2E",
+                color: "#fff",
+                backdrop: false,
+              });
+            }
+          });
+
+        // Track events for PDF generation — also reveal the button
+        window.electronAPI.onSyncUpdate((events) => {
+          if (Array.isArray(events)) {
+            allGradeEvents.push(...events);
+            // Reveal the generate button now that we have grade data
+            const genBtn = document.getElementById("generate-pdf-btn");
+            if (genBtn && allGradeEvents.length > 0) {
+              genBtn.style.display = "flex";
+            }
+          }
+        });
+
+      // Reset App Data
+      document.getElementById("reset-btn").addEventListener("click", async () => {
+        const { isConfirmed } = await Swal.fire({
+          title: "Reset All Data?",
+          text: "This will clear school identity and all student records. This cannot be undone.",
+          icon: "warning",
+          showCancelButton: true,
+          confirmButtonColor: "#ff4444",
+          cancelButtonColor: "#3085d6",
+          confirmButtonText: "Yes, reset it!",
+          background: "#0A0E2E",
+          color: "#fff",
+          backdrop: false,
+        });
+
+        if (isConfirmed && window.electronAPI.resetAppData) {
+          await window.electronAPI.resetAppData();
+          Swal.fire({
+            title: "System Reset",
+            text: "All data has been wiped. The app will now reload.",
+            icon: "success",
+            background: "#0A0E2E",
+            color: "#fff",
+            showConfirmButton: false,
+            timer: 2000,
+            backdrop: false,
+          });
+          setTimeout(() => {
+            window.location.reload();
+          }, 2000);
+        }
+      });
+      }
+      // Apply Identity Details to UI
+      function applyIdentityToUI(identity) {
+        if (!identity) return;
+        console.log("Applying identity to UI:", identity);
+
+        if (schoolName)
+          schoolName.textContent = identity.name || "Nexus Discovery";
+
+        // Apply colors directly as inline styles to root variables
+        document.documentElement.style.setProperty(
+          "--primary",
+          identity.themePrimary || "#1A237E",
+        );
+        document.documentElement.style.setProperty(
+          "--accent",
+          identity.themeSecondary || "#00E5FF",
+        );
+
+        // Adjust glowing artifacts based on primary color
+        const hex = identity.themePrimary || "#1A237E";
+        let r = 26,
+          g = 35,
+          b = 126; // Default
+        if (/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)) {
+          let c = hex.substring(1).split("");
+          if (c.length == 3) {
+            c = [c[0], c[0], c[1], c[1], c[2], c[2]];
+          }
+          c = "0x" + c.join("");
+          r = (c >> 16) & 255;
+          g = (c >> 8) & 255;
+          b = c & 255;
+        }
+        const bgGlow = document.querySelector(".background-glow");
+        if (bgGlow)
+          bgGlow.style.background = `radial-gradient(circle, rgba(${r}, ${g}, ${b}, 0.4) 0%, rgba(10, 14, 46, 0) 70%)`;
+
+        // Handle Logo
+        const logoPlaceholder = document.querySelector(".logo-placeholder");
+        if (logoPlaceholder) {
+          if (identity.logoBase64) {
+            logoPlaceholder.innerHTML = `<img src="${identity.logoBase64}" alt="Logo" style="width: 100%; height: 100%; object-fit: contain; border-radius: 12px;">`;
+          } else {
+            logoPlaceholder.innerHTML = identity.name
+              ? identity.name.charAt(0).toUpperCase()
+              : "N";
+          }
+        }
+      }
+
+      // --- Settings Section Logic ---
+      const settingsBtn = document.getElementById("settings-btn");
+      const closeSettingsBtn = document.getElementById("close-settings-btn");
+      const handshakeSection = document.getElementById("handshake-section");
+      const settingsSection = document.getElementById("settings-section");
+      const dashboardSection = document.getElementById("dashboard-section");
+
+      // Form elements
+      const logoDropzone = document.getElementById("logo-dropzone");
+      const logoUpload = document.getElementById("logo-upload");
+      const logoPreview = document.getElementById("logo-preview");
+      const uploaderContent = document.getElementById("uploader-content");
+      const themePrimary = document.getElementById("theme-primary");
+      const primaryHex = document.getElementById("primary-hex");
+      const themeSecondary = document.getElementById("theme-secondary");
+      const secondaryHex = document.getElementById("secondary-hex");
+
+      let currentLogoBase64 = null;
+
+      settingsBtn.addEventListener("click", async () => {
+        console.log("Settings button clicked");
+        if (handshakeSection) handshakeSection.style.display = "none";
+        if (dashboardSection) dashboardSection.style.display = "none";
+        if (settingsSection) settingsSection.style.display = "flex";
+        else console.error("Settings section not found in DOM");
+
+        // Load existing identity into form
+        if (window.electronAPI && window.electronAPI.getIdentity) {
+          const identity = await window.electronAPI.getIdentity();
+          document.getElementById("school-name-input").value =
+            identity.name || "";
+          document.getElementById("school-address-input").value =
+            identity.address || "";
+          document.getElementById("school-motto-input").value =
+            identity.motto || "";
+          document.getElementById("school-signature-input").value =
+            identity.signature || "";
+
+          themePrimary.value = identity.themePrimary || "#1A237E";
+          primaryHex.textContent = themePrimary.value.toUpperCase();
+
+          themeSecondary.value = identity.themeSecondary || "#00E5FF";
+          secondaryHex.textContent = themeSecondary.value.toUpperCase();
+
+          if (identity.logoBase64) {
+            currentLogoBase64 = identity.logoBase64;
+            logoPreview.src = currentLogoBase64;
+            logoPreview.style.display = "block";
+            uploaderContent.style.display = "none";
+          }
+        }
+      });
+
+      closeSettingsBtn.addEventListener("click", () => {
+        settingsSection.style.display = "none";
+        handshakeSection.style.display = "flex";
+      });
+
+      // Color Picker text updates
+      themePrimary.addEventListener(
+        "input",
+        (e) => (primaryHex.textContent = e.target.value.toUpperCase()),
+      );
+      themeSecondary.addEventListener(
+        "input",
+        (e) => (secondaryHex.textContent = e.target.value.toUpperCase()),
+      );
+
+      // Logo Upload Logic
+      logoDropzone.addEventListener("click", () => logoUpload.click());
+
+      logoUpload.addEventListener("change", (e) => {
+        if (e.target.files && e.target.files[0]) {
+          handleLogoFile(e.target.files[0]);
+        }
+      });
+
+      logoDropzone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        logoDropzone.style.borderColor = "var(--accent)";
+        logoDropzone.style.background = "rgba(255,255,255,0.1)";
+      });
+
+      logoDropzone.addEventListener("dragleave", (e) => {
+        e.preventDefault();
+        logoDropzone.style.borderColor = "var(--glass-border)";
+        logoDropzone.style.background = "transparent";
+      });
+
+      logoDropzone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        logoDropzone.style.borderColor = "var(--glass-border)";
+        logoDropzone.style.background = "transparent";
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+          handleLogoFile(e.dataTransfer.files[0]);
+        }
+      });
+
+      function handleLogoFile(file) {
+        if (file.type === "image/png" || file.type === "image/jpeg") {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            currentLogoBase64 = e.target.result;
+            logoPreview.src = currentLogoBase64;
+            logoPreview.style.display = "block";
+            uploaderContent.style.display = "none";
+          };
+          reader.readAsDataURL(file);
+        } else {
+          alert("Please upload a PNG or JPEG file.");
+        }
+      }
+
+      // Save Identity
+      document
+        .getElementById("save-identity-btn")
+        .addEventListener("click", async () => {
+          const saveBtn = document.getElementById("save-identity-btn");
+          saveBtn.textContent = "Saving...";
+
+          const newIdentity = {
+            name: document.getElementById("school-name-input").value.trim(),
+            themePrimary: themePrimary.value,
+            themeSecondary: themeSecondary.value,
+            logoBase64: currentLogoBase64,
+            address: document
+              .getElementById("school-address-input")
+              .value.trim(),
+            motto: document.getElementById("school-motto-input").value.trim(),
+            signature: document
+              .getElementById("school-signature-input")
+              .value.trim(),
+          };
+
+          if (window.electronAPI && window.electronAPI.saveIdentity) {
+            await window.electronAPI.saveIdentity(newIdentity);
+            applyIdentityToUI(newIdentity);
+
+            saveBtn.textContent = "Saved!";
+            setTimeout(() => {
+              saveBtn.textContent = "Save Identity Shard";
+              closeSettingsBtn.click();
+            }, 1000);
+          }
+        });
+
+      // Initialize UI with existing identity if possible immediately
+      if (window.electronAPI && window.electronAPI.getIdentity) {
+        window.electronAPI.getIdentity().then((identity) => {
+          if (identity) applyIdentityToUI(identity);
+        });
+      }
+
+      // Final Robustness: Check for cached payload every 500ms until QRCode is ready
+      const readyInterval = setInterval(() => {
+        if (typeof QRCode !== "undefined" && cachedPayload) {
+          renderQR(cachedPayload);
+          cachedPayload = null;
+          clearInterval(readyInterval);
+        }
+      }, 500);
+
+      // Tell the main process we are ready for the payload
+      if (window.electronAPI && window.electronAPI.uiReady) {
+        window.electronAPI.uiReady();
+      }
+    </script>
+  </body>
+</html>

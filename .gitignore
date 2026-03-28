@@ -1,0 +1,9 @@
+# Shield Configuration: Exclude Private Engine from Public Repo
+private_engine/
+*.key
+.env
+node_modules/
+build/
+.gradle/
+*.log
+.DS_Store

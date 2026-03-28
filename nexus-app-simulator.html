@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus School OS - Interactive Grading Demo</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        
+        body {
+            background-color: transparent; /* Allows embedding seamlessly */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .phone-frame {
+            width: 375px;
+            height: 812px;
+            background-color: #0A0E2E;
+            border-radius: 40px;
+            border: 12px solid #1e293b;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            /* Scale down on smaller screens */
+            max-height: 90vh;
+            max-width: calc(90vh * (375/812));
+        }
+
+        /* The Notch */
+        .phone-frame::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 40%;
+            height: 30px;
+            background-color: #1e293b;
+            border-bottom-left-radius: 20px;
+            border-bottom-right-radius: 20px;
+            z-index: 100;
+        }
+
+        .header {
+            padding: 50px 20px 20px;
+            background: linear-gradient(90deg, #1A237E 0%, rgba(26, 35, 126, 0.7) 100%);
+            color: white;
+            position: relative;
+        }
+
+        .school-name { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.8; font-weight: 600; }
+        .page-title { font-size: 24px; font-weight: 700; margin-top: 4px; }
+        
+        /* Breathing Shield */
+        .shield {
+            position: absolute;
+            top: 55px;
+            right: 20px;
+            width: 32px;
+            height: 32px;
+            background: rgba(67, 160, 71, 0.2);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 16px;
+            animation: breathe 2s infinite ease-in-out alternate;
+        }
+
+        @keyframes breathe {
+            0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(67, 160, 71, 0.4); }
+            100% { transform: scale(1.1); box-shadow: 0 0 0 10px rgba(67, 160, 71, 0); }
+        }
+
+        .pager-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            color: white;
+            font-weight: 600;
+        }
+
+        .card-container {
+            padding: 20px;
+            height: calc(100% - 250px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .student-card {
+            background: rgba(255, 255, 255, 0.05);
+            width: 100%;
+            border-radius: 24px;
+            padding: 30px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: absolute;
+            transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.4s ease;
+        }
+
+        .student-card.entering {
+            transform: translateX(120%);
+            opacity: 0;
+        }
+        
+        .student-card.active {
+            transform: translateX(0);
+            opacity: 1;
+        }
+        
+        .student-card.exiting {
+            transform: translateX(-120%);
+            opacity: 0;
+        }
+
+        .avatar {
+            width: 80px;
+            height: 80px;
+            background: #1A237E;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 15px;
+            position: relative;
+        }
+
+        .student-name { color: white; font-size: 20px; font-weight: 700; text-align: center; }
+        .student-id { color: rgba(255, 255, 255, 0.5); font-size: 13px; margin-bottom: 30px; letter-spacing: 1px;}
+
+        .grades-row {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            margin-bottom: 30px;
+            gap: 10px;
+        }
+
+        .grade-input-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex: 1;
+        }
+
+        .grade-label { color: rgba(255, 255, 255, 0.7); font-size: 10px; margin-bottom: 8px; text-transform: uppercase; font-weight: 700;}
+        
+        .grade-input {
+            width: 100%;
+            height: 50px;
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            color: white;
+            font-size: 20px;
+            font-weight: 700;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: all 0.2s;
+            position: relative;
+        }
+
+        .grade-input.active {
+            border-color: #4CAF50;
+            background: rgba(76, 175, 80, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .grade-input span {
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .grade-input span.visible { opacity: 1; }
+
+        .total-box {
+            background: rgba(0, 0, 0, 0.3);
+            width: 100%;
+            padding: 15px;
+            border-radius: 12px;
+            text-align: center;
+            color: white;
+            font-size: 20px;
+            font-weight: 700;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.3s;
+        }
+        
+        .total-box.complete {
+            background: rgba(26, 35, 126, 0.3);
+            border: 1px solid rgba(26, 35, 126, 0.5);
+        }
+
+        .actions {
+            position: absolute;
+            bottom: 30px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .btn-skip { background: transparent; color: rgba(255, 255, 255, 0.5); border: none; font-size: 16px; font-weight: 500; cursor: pointer; padding: 10px;}
+        .btn-save {
+            background: #1A237E;
+            color: white;
+            border: none;
+            padding: 16px 28px;
+            border-radius: 30px;
+            font-size: 16px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(26, 35, 126, 0.4);
+            transition: all 0.2s;
+            opacity: 0.5;
+            transform: scale(0.95);
+        }
+        
+        .btn-save.ready {
+            opacity: 1;
+            transform: scale(1);
+            background: linear-gradient(135deg, #1A237E, #283593);
+        }
+        
+        .btn-save.clicked {
+            transform: scale(0.9);
+            box-shadow: 0 0 0 rgba(26, 35, 126, 0);
+        }
+
+        /* Simulated Touch Pointer */
+        .touch-pointer {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.3);
+            border: 2px solid white;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 1000;
+            opacity: 0;
+            transform: translate(-50%, -50%) scale(1.5);
+            transition: top 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), left 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s, transform 0.2s;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+
+        .touch-pointer.pressing {
+            transform: translate(-50%, -50%) scale(0.8);
+            background: rgba(255, 255, 255, 0.6);
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+        }
+        
+        /* Floating particles for sync effect */
+        .sync-particle {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: #4CAF50;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 500;
+            opacity: 0;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="phone-frame" id="demo-frame">
+        <div class="header">
+            <div class="school-name">NEXUS DEMO HIGH</div>
+            <div class="page-title">Offline Grading</div>
+            <div class="shield" title="Eco-Guardian Active">🛡</div>
+        </div>
+
+        <div class="pager-header">
+            <div>←</div>
+            <div>Focus Mode</div>
+            <div style="opacity: 0.5;"><span id="student-index">1</span>/45</div>
+        </div>
+
+        <div class="card-container" id="card-container">
+            <!-- Cards injected via JS -->
+        </div>
+
+        <div class="actions">
+            <button class="btn-skip">Skip</button>
+            <button class="btn-save" id="btn-save">Save & Next →</button>
+        </div>
+
+        <div class="touch-pointer" id="pointer"></div>
+    </div>
+
+    <script>
+        // Demo Data
+        const students = [
+            { name: "Obinna Chukwuemeka", id: "NEX/2026/0042", avatar: "O", grades: { ca1: 8, ca2: 9, exam: 72 } },
+            { name: "Aisha Mohammed", id: "NEX/2026/0015", avatar: "A", grades: { ca1: 10, ca2: 8, exam: 65 } },
+            { name: "Tolu Olatunji", id: "NEX/2026/0088", avatar: "T", grades: { ca1: 7, ca2: 7, exam: 80 } }
+        ];
+
+        let currentIndex = 0;
+        const container = document.getElementById('card-container');
+        const pointer = document.getElementById('pointer');
+        const btnSave = document.getElementById('btn-save');
+        const indexDisplay = document.getElementById('student-index');
+        const frame = document.getElementById('demo-frame');
+
+        // Create a card DOM element
+        function createCard(student) {
+            const el = document.createElement('div');
+            el.className = 'student-card entering';
+            el.innerHTML = `
+                <div class="avatar">${student.avatar}</div>
+                <div class="student-name">${student.name}</div>
+                <div class="student-id">${student.id}</div>
+                <div class="grades-row">
+                    <div class="grade-input-group">
+                        <div class="grade-label">1st CA (10)</div>
+                        <div class="grade-input input-ca1"><span>${student.grades.ca1}</span></div>
+                    </div>
+                    <div class="grade-input-group">
+                        <div class="grade-label">2nd CA (10)</div>
+                        <div class="grade-input input-ca2"><span>${student.grades.ca2}</span></div>
+                    </div>
+                    <div class="grade-input-group">
+                        <div class="grade-label">Exam (80)</div>
+                        <div class="grade-input input-exam"><span>${student.grades.exam}</span></div>
+                    </div>
+                </div>
+                <div class="total-box">
+                    Total: <span class="total-val">0</span> / 100
+                </div>
+            `;
+            return el;
+        }
+
+        // Animation Sequence Engine
+        async function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+        
+        function movePointer(selector, offsetY = 0) {
+            return new Promise(resolve => {
+                const target = document.querySelector(selector);
+                const rect = target.getBoundingClientRect();
+                const frameRect = frame.getBoundingClientRect();
+                
+                // Calculate position relative to the phone frame
+                const x = rect.left - frameRect.left + (rect.width / 2);
+                const y = rect.top - frameRect.top + (rect.height / 2) + offsetY;
+                
+                pointer.style.opacity = 1;
+                pointer.style.left = `${x}px`;
+                pointer.style.top = `${y}px`;
+                
+                setTimeout(resolve, 500); // Wait for movement transition
+            });
+        }
+
+        async function tap(selector) {
+            pointer.classList.add('pressing');
+            const target = document.querySelector(selector);
+            target.classList.add('active');
+            
+            await sleep(200);
+            
+            pointer.classList.remove('pressing');
+            target.classList.remove('active');
+            await sleep(200);
+        }
+
+        async function createSyncParticles(buttonEl) {
+            const rect = buttonEl.getBoundingClientRect();
+            const frameRect = frame.getBoundingClientRect();
+            const startX = rect.left - frameRect.left + (rect.width / 2);
+            const startY = rect.top - frameRect.top + (rect.height / 2);
+
+            for(let i=0; i<5; i++) {
+                const p = document.createElement('div');
+                p.className = 'sync-particle';
+                p.style.left = startX + 'px';
+                p.style.top = startY + 'px';
+                frame.appendChild(p);
+
+                // Animate up and out
+                setTimeout(() => {
+                    p.style.transition = 'all 0.8s cubic-bezier(0.2, 0.8, 0.2, 1)';
+                    p.style.opacity = 1;
+                    p.style.transform = `translate(${(Math.random()-0.5)*100}px, -${150 + Math.random()*100}px) scale(0)`;
+                }, 50);
+
+                setTimeout(() => p.remove(), 900);
+            }
+        }
+
+        async function runSimulationCard(studentEl, studentData) {
+            // 1. Enter state
+            await sleep(100);
+            studentEl.classList.remove('entering');
+            studentEl.classList.add('active');
+            btnSave.classList.remove('ready');
+            
+            await sleep(1000); // Pause for reading
+
+            // 2. Type CA 1
+            await movePointer('.input-ca1');
+            await tap('.input-ca1');
+            document.querySelector('.input-ca1').classList.add('active');
+            await sleep(200);
+            document.querySelector('.input-ca1 span').classList.add('visible');
+            await sleep(300);
+
+            // 3. Type CA 2
+            await movePointer('.input-ca2');
+            await tap('.input-ca2');
+            document.querySelector('.input-ca1').classList.remove('active');
+            document.querySelector('.input-ca2').classList.add('active');
+            await sleep(200);
+            document.querySelector('.input-ca2 span').classList.add('visible');
+            await sleep(300);
+
+            // 4. Type Exam
+            await movePointer('.input-exam');
+            await tap('.input-exam');
+            document.querySelector('.input-ca2').classList.remove('active');
+            document.querySelector('.input-exam').classList.add('active');
+            await sleep(200);
+            document.querySelector('.input-exam span').classList.add('visible');
+            
+            // 5. Calculate Total
+            await sleep(500);
+            document.querySelector('.input-exam').classList.remove('active');
+            const total = studentData.grades.ca1 + studentData.grades.ca2 + studentData.grades.exam;
+            const totalEl = document.querySelector('.total-val');
+            
+            // Animate number counting up (fake quickly)
+            let curr = 0;
+            const step = Math.ceil(total / 10);
+            const counter = setInterval(() => {
+                curr += step;
+                if(curr >= total) {
+                    curr = total;
+                    clearInterval(counter);
+                    document.querySelector('.total-box').classList.add('complete');
+                    btnSave.classList.add('ready');
+                }
+                totalEl.innerText = curr;
+            }, 30);
+
+            await sleep(800);
+
+            // 6. Hit Save
+            await movePointer('.btn-save');
+            pointer.classList.add('pressing');
+            btnSave.classList.add('clicked');
+            createSyncParticles(btnSave);
+            
+            await sleep(200);
+            pointer.classList.remove('pressing');
+            btnSave.classList.remove('clicked');
+            
+            await sleep(300);
+            pointer.style.opacity = 0; // Hide pointer during transition
+            
+            // 7. Exit
+            studentEl.classList.remove('active');
+            studentEl.classList.add('exiting');
+        }
+
+        async function loopSimulation() {
+            while(true) {
+                const studentData = students[currentIndex];
+                const card = createCard(studentData);
+                container.appendChild(card);
+                indexDisplay.innerText = currentIndex + 1;
+
+                await runSimulationCard(card, studentData);
+                
+                await sleep(400); // Wait for exit animation
+                card.remove();
+
+                currentIndex = (currentIndex + 1) % students.length;
+            }
+        }
+
+        // Start Loop
+        setTimeout(loopSimulation, 500);
+
+    </script>
+</body>
+</html>
