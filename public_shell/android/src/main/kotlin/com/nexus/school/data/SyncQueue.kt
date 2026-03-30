@@ -18,7 +18,7 @@ data class SyncEvent(
     @PrimaryKey
     val event_id: String = UUID.randomUUID().toString(),
     val event_type: String, // e.g., "UPDATE_GRADE"
-    val payload: String,    // JSON string: {"student_id": "123", "score": 85}
+    val payload: String,    // JSON string: {"student_id": "123", "score": 85, "subject": "Math", "assessment": "CA1"}
     val is_synced: Int = 0,
     val created_at: Long = System.currentTimeMillis()
 )
@@ -35,7 +35,7 @@ interface SyncDao {
     suspend fun markEventsSynced(eventIds: List<String>)
 }
 
-@Database(entities = [SyncEvent::class, Student::class], version = 2, exportSchema = false)
+@Database(entities = [SyncEvent::class, Student::class], version = 3, exportSchema = false)
 abstract class SyncDatabase : RoomDatabase() {
     abstract fun syncDao(): SyncDao
     abstract fun studentDao(): StudentDao
@@ -44,6 +44,16 @@ abstract class SyncDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: SyncDatabase? = null
 
+        private val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // Change primary key to composite (id, subject)
+                database.execSQL("CREATE TABLE students_new (id TEXT NOT NULL, name TEXT NOT NULL, class_name TEXT NOT NULL, subject TEXT NOT NULL DEFAULT 'General', PRIMARY KEY(id, subject))")
+                database.execSQL("INSERT INTO students_new (id, name, class_name) SELECT id, name, class_name FROM students")
+                database.execSQL("DROP TABLE students")
+                database.execSQL("ALTER TABLE students_new RENAME TO students")
+            }
+        }
+
         fun getDatabase(context: Context): SyncDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -51,6 +61,7 @@ abstract class SyncDatabase : RoomDatabase() {
                     SyncDatabase::class.java,
                     "nexus_sync_database"
                 )
+                .addMigrations(MIGRATION_2_3)
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
