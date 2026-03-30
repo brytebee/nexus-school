@@ -119,26 +119,52 @@ app.post('/handshake', (req, res) => {
 
     console.log(`[Handshake] Received identity from ${teacher_name} (${device_id})`);
 
+    let db;
+    try {
+        db = database.getDb();
+    } catch (e) {
+        return res.status(500).json({ error: "Database not initialized" });
+    }
+
+    // Lookup teacher by name (case-insensitive) to ensure robust matching
+    const teacher = db.prepare('SELECT id, name FROM teachers WHERE name = ? COLLATE NOCASE LIMIT 1').get(teacher_name);
+
+    if (!teacher) {
+        console.warn(`[Handshake] Teacher not found: ${teacher_name}`);
+        return res.status(404).json({ error: "Teacher not found in the vault." });
+    }
+
     // Notify Main Process
     eventEmitter.emit('handshake-success', req.body);
 
+    // Fetch targeted students via JOIN on teacher_allocations
+    // This creates row-per-student-per-subject matching the Android Room expectation (Prompt 4)
+    const students = db.prepare(`
+        SELECT s.id, s.name, s.class_name, a.subject 
+        FROM students s
+        JOIN teacher_allocations a ON s.class_name = a.class_name
+        WHERE a.teacher_id = ?
+    `).all(teacher.id);
+
     const payloadObj = {
         status: "MARRIED",
-        message: `Welcome to the ecosystem, ${teacher_name}.`,
+        message: `Welcome to the ecosystem, ${teacher.name}.`,
         school_config: app.locals.school_config || {
             name: "Grace Academy",
             primary_color: "#800000",
             modules: ["grading", "attendance"]
         },
-        students: [], // [Prompt 3 Stub] Will be populated from SQLite filtered by teacher_id
+        students: students,
         server_timestamp: new Date().toISOString()
     };
 
     const jsonString = JSON.stringify(payloadObj);
 
     // PM Rule: Gzip if > 500 students to prevent Heat Spikes on the mobile side
-    // Stubbing length check — teacher-scoped students populated in Prompt 3
-    if (false) {
+    // For testing/QA, let's keep the threshold tight or test dynamically, 
+    // but the prompt specifies chunk/gzip if > 500.
+    if (students.length > 500) {
+        console.log(`[Eco-Mode] Payload > 500 targeted students (${students.length}). Gzipping for ${device_id}...`);
         const zlib = require('zlib');
         zlib.gzip(jsonString, (err, buffer) => {
             if (!err) {
@@ -150,6 +176,7 @@ app.post('/handshake', (req, res) => {
             }
         });
     } else {
+        console.log(`[Handshake] Sending ${students.length} targeted student records to ${device_id}`);
         res.status(200).json(payloadObj);
     }
 });
