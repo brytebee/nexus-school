@@ -1,5 +1,4 @@
-const electron = require('electron');
-const { app, BrowserWindow, ipcMain } = typeof electron === 'object' ? electron : require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 
 const path = require('path');
 const fs = require('fs');
@@ -91,18 +90,11 @@ ipcMain.handle('reset-app-data', async () => {
 
     return true;
 });
-
 ipcMain.handle('generate-reports', async (event, payload) => {
     console.log('[Electron] generate-reports handler FIRED. Payload keys:', payload ? Object.keys(payload) : 'null');
     const { identity, students } = payload || {};
     try {
-        const { shell } = require('electron');
-
-
         const primary = identity.themePrimary || '#1A237E';
-        const logoHtml = identity.logoBase64
-            ? `<img src="${identity.logoBase64}" class="school-logo" alt="Logo">`
-            : `<div class="logo-placeholder">${(identity.name || 'N').charAt(0).toUpperCase()}</div>`;
 
         const dateStr = new Date().toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' });
 
