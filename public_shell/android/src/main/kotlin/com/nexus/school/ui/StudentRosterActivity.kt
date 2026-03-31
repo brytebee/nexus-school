@@ -505,6 +505,25 @@ fun FocusModePager(
                     ca2State[studentId]  = ca2
                     examState[studentId] = exam
                 },
+                onAutoSave = { ca1, ca2, exam ->
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            val db = SyncDatabase.getDatabase(context)
+                            val total = (ca1.toIntOrNull() ?: 0) + (ca2.toIntOrNull() ?: 0) + (exam.toIntOrNull() ?: 0)
+                            val breakdown = """{"CA1": ${ca1.toIntOrNull() ?: 0}, "CA2": ${ca2.toIntOrNull() ?: 0}, "Exam": ${exam.toIntOrNull() ?: 0}}"""
+                            val subject = students[page].subject
+                            val payload = """{"student_id": "$studentId", "score": $total, "subject": "$subject", "assessment": "CA1", "breakdown": $breakdown}"""
+                            
+                            val explicitEventId = "GRADE_${studentId}_$subject"
+                            db.syncDao().insertEvent(
+                                com.nexus.school.data.SyncEvent(event_id = explicitEventId, event_type = "UPDATE_GRADE", payload = payload, is_synced = 0)
+                            )
+                            launch(Dispatchers.Main) {
+                                onLogSave(studentId, true)
+                            }
+                        } catch (e: Exception) {}
+                    }
+                },
                 onSave = { ca1, ca2, exam ->
                     scope.launch(Dispatchers.IO) {
                         try {
@@ -514,8 +533,10 @@ fun FocusModePager(
                             // ─── Prompt 4: Subject is now embedded in every grade event ───
                             val subject = students[page].subject
                             val payload = """{"student_id": "$studentId", "score": $total, "subject": "$subject", "assessment": "CA1", "breakdown": $breakdown}"""
+                            
+                            val explicitEventId = "GRADE_${studentId}_$subject"
                             db.syncDao().insertEvent(
-                                com.nexus.school.data.SyncEvent(event_type = "UPDATE_GRADE", payload = payload, is_synced = 0)
+                                com.nexus.school.data.SyncEvent(event_id = explicitEventId, event_type = "UPDATE_GRADE", payload = payload, is_synced = 0)
                             )
                             launch(Dispatchers.Main) {
                                 onLogSave(studentId, true)
@@ -546,6 +567,7 @@ fun StudentFocusCard(
     initialCa2: String,
     initialExam: String,
     onInputsChanged: (String, String, String) -> Unit,
+    onAutoSave: (String, String, String) -> Unit,
     onSave: (String, String, String) -> Unit,
     onSkip: () -> Unit
 ) {
@@ -553,6 +575,13 @@ fun StudentFocusCard(
     var ca2  by remember(initialCa2)   { mutableStateOf(initialCa2) }
     var exam by remember(initialExam)  { mutableStateOf(initialExam) }
     val total = (ca1.toIntOrNull() ?: 0) + (ca2.toIntOrNull() ?: 0) + (exam.toIntOrNull() ?: 0)
+
+    // Detached auto-save with a 650ms debounce
+    LaunchedEffect(ca1, ca2, exam) {
+        if (ca1 == initialCa1 && ca2 == initialCa2 && exam == initialExam) return@LaunchedEffect
+        delay(650)
+        onAutoSave(ca1, ca2, exam)
+    }
 
     Box(modifier = Modifier.fillMaxSize().padding(24.dp)) {
         Card(
