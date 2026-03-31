@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, shell } = require('electron');
 
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { startServer, setSchoolConfig, handleCSVUpload, clearData } = require('./server');
 const database = require('./database');
 const address = require('address');
@@ -262,6 +263,60 @@ function createWindow() {
     const port = 3000;
     const server = startServer(port);
 
+    // ── License Enforcement Engine ─────────────────────────────────────
+    let licenseStatus = { locked: false, message: "" };
+    
+    try {
+        const userDataPath = app.getPath('userData');
+        const licensePath = path.join(userDataPath, 'license.nexus');
+        
+        // 1. Hardcoded Nexus Public Key (In reality, Public Key only ships with app)
+        // For demonstration, we generate a keypair dynamically to sign a dummy token.
+        const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+        
+        if (!fs.existsSync(licensePath)) {
+            // Generate a dummy license expiring in 4 months (1 typical term)
+            const expiresAt = Date.now() + (4 * 30 * 24 * 60 * 60 * 1000);
+            const payload = {
+                tier: "Gold",
+                school_id: "PREMIUM_ACADEMY_001",
+                expires_at: expiresAt
+            };
+            const payloadStr = JSON.stringify(payload);
+            const signature = crypto.sign(null, Buffer.from(payloadStr), privateKey);
+            
+            const licenseFile = {
+                payload: payloadStr,
+                signature: signature.toString('hex')
+            };
+            fs.writeFileSync(licensePath, JSON.stringify(licenseFile, null, 2));
+            console.log("[License Engine] Generated dummy terminal license ending in 4 months.");
+        }
+
+        // 2. Verify License
+        const licenseDisk = JSON.parse(fs.readFileSync(licensePath, 'utf-8'));
+        const isValidSignature = crypto.verify(
+            null,
+            Buffer.from(licenseDisk.payload),
+            publicKey,
+            Buffer.from(licenseDisk.signature, 'hex')
+        );
+
+        if (!isValidSignature) {
+            licenseStatus = { locked: true, message: "Tampering Detected. Cryptographic signature invalid. Contact Administrator." };
+        } else {
+            const payloadDecoded = JSON.parse(licenseDisk.payload);
+            if (Date.now() > payloadDecoded.expires_at) {
+                licenseStatus = { locked: true, message: `License Expired. Your ${payloadDecoded.tier} tier has lapsed. Contact Administrator.` };
+            } else {
+                console.log(`[License Engine] Valid ${payloadDecoded.tier} License. Access Granted.`);
+            }
+        }
+    } catch (e) {
+        console.error("[License Engine] Failure:", e);
+        licenseStatus = { locked: true, message: "License vault corrupted. Re-install required." };
+    }
+
     // Load IdentityPacket from disk
     try {
         const userDataPath = app.getPath('userData');
@@ -308,9 +363,15 @@ function createWindow() {
         }
     });
 
-    // Send initial QR payload when UI signals ready
+    // Fallback: also send on did-finish-load
+    mainWindow.webContents.on('did-finish-load', () => {
+        mainWindow.webContents.send('qr-payload', qrPayload);
+        mainWindow.webContents.send('license-status', licenseStatus);
+    });
+
     ipcMain.on('ui-ready', () => {
         mainWindow.webContents.send('qr-payload', qrPayload);
+        mainWindow.webContents.send('license-status', licenseStatus);
         console.log("[Electron] Payload sent to UI");
     });
 
@@ -318,11 +379,6 @@ function createWindow() {
         handleCSVUpload(filePath, (count) => {
             event.reply('csv-loaded', count);
         });
-    });
-
-    // Fallback: also send on did-finish-load
-    mainWindow.webContents.on('did-finish-load', () => {
-        mainWindow.webContents.send('qr-payload', qrPayload);
     });
 
     console.log("QR Payload:", JSON.stringify({

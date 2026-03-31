@@ -91,6 +91,9 @@
             <span class="separator">:</span>
             <code id="server-port">3000</code>
           </div>
+          <button id="copy-payload-btn" style="margin-top: 16px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #fff; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; transition: all 0.2s;">
+              <span id="copy-btn-text">Copy Manual Sync Code</span>
+          </button>
         </div>
       </section>
 
@@ -283,6 +286,18 @@
       </footer>
     </main>
 
+    <!-- Soft-Lock Overlay -->
+    <div id="license-lock-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(10, 14, 46, 0.95); z-index: 99999; justify-content: center; align-items: center; backdrop-filter: blur(10px);">
+        <div style="text-align: center; max-width: 400px; padding: 32px; background: rgba(255,0,0,0.1); border: 1px solid rgba(255,0,0,0.3); border-radius: 16px;">
+            <div style="font-size: 48px; margin-bottom: 16px;">🔒</div>
+            <h2 style="color: #ff4444; margin-bottom: 16px;">License Locked</h2>
+            <p id="license-lock-message" style="color: #ccc; font-size: 14px; line-height: 1.5; margin-bottom: 24px;">
+                Your Nexus School OS license has expired or failed cryptographic verification.
+            </p>
+            <button class="primary-btn" style="background: transparent; border: 1px solid #ff4444; color: #ff4444;" onclick="window.close()">Close Application</button>
+        </div>
+    </div>
+
     <script src="libs/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script>
@@ -326,9 +341,33 @@
         if (payload.config) {
           applyIdentityToUI(payload.config);
         }
+
+        // Bind raw payload copy
+        const copyBtn = document.getElementById("copy-payload-btn");
+        if (copyBtn) {
+            copyBtn.onclick = () => {
+                navigator.clipboard.writeText(JSON.stringify(qrData));
+                const textSpan = document.getElementById("copy-btn-text");
+                textSpan.textContent = "Copied!";
+                setTimeout(() => { textSpan.textContent = "Copy Manual Sync Code"; }, 2000);
+            };
+        }
       }
 
       if (window.electronAPI) {
+        
+        // 0. License Checker
+        if (window.electronAPI.onLicenseStatus) {
+            window.electronAPI.onLicenseStatus((status) => {
+                if (status && status.locked) {
+                    document.getElementById('license-lock-overlay').style.display = 'flex';
+                    if (status.message) {
+                        document.getElementById('license-lock-message').textContent = status.message;
+                    }
+                }
+            });
+        }
+
         // 1. Initial QR Payload
         window.electronAPI.onQrPayload((payload) => {
           renderQR(payload);
