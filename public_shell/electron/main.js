@@ -145,7 +145,7 @@ ipcMain.handle('generate-reports', async (event, payload) => {
 <title>Report Cards — ${identity.name || 'Nexus Academy'}</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
-*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Inter',sans-serif}
+*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Inter',sans-serif;background:#fff;}
 .report-page{width:210mm;min-height:297mm;padding:16mm;page-break-after:always;display:flex;flex-direction:column}
 .report-page:last-child{page-break-after:auto}
 .rh{display:flex;align-items:center;gap:16px;padding-bottom:14px;border-bottom:3px solid ${primary}}
@@ -156,7 +156,7 @@ ipcMain.handle('generate-reports', async (event, payload) => {
 .rt{text-align:right;font-size:11px}.rt strong{display:block;font-size:14px;font-weight:700;color:${primary}}
 .sb{background:${primary};color:#fff;border-radius:12px;padding:14px 20px;margin:18px 0;display:flex;justify-content:space-between;align-items:center}
 .sn{font-size:20px;font-weight:700}.si{font-size:12px;opacity:.7;margin-top:3px}
-.sc{background:rgba(255,255,255,.15);padding:6px 14px;border-radius:20px;font-size:13px}
+.sc{background:rgba(0,0,0,.15);padding:6px 14px;border-radius:20px;font-size:13px}
 .lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#999;margin:14px 0 8px}
 table{width:100%;border-collapse:collapse;margin-bottom:20px}
 th{background:#f0f2ff;color:${primary};font-size:11px;font-weight:700;text-transform:uppercase;padding:10px 14px;text-align:left;border-bottom:2px solid ${primary}}
@@ -166,25 +166,75 @@ td{padding:10px 14px;border-bottom:1px solid #eee;font-size:13px}
 .v{font-size:26px;font-weight:700;color:${primary}}.l{font-size:11px;color:#999;margin-top:4px;text-transform:uppercase}
 .ft{margin-top:auto;display:flex;justify-content:space-between;align-items:flex-end;padding-top:16px;border-top:1px solid #eee}
 @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-</style></head><body>${pages}
-<script>window.onload=()=>{window.print()}<\/script>
-</body></html>`;
+</style></head><body>${pages}</body></html>`;
 
         const desktopPath = app.getPath('desktop');
         const outFolder = path.join(desktopPath, 'NexusReports');
         if (!fs.existsSync(outFolder)) fs.mkdirSync(outFolder, { recursive: true });
 
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        const outPath = path.join(outFolder, `ReportCards_${timestamp}.html`);
-        fs.writeFileSync(outPath, html, 'utf-8');
+        const outPath = path.join(outFolder, `Master_Batched_Results_${timestamp}.pdf`);
 
-        console.log(`[Electron] Report HTML saved to: ${outPath}`);
-        await shell.openPath(outPath);
+        // Phase 1: Headless Batched PDF Generation
+        await new Promise((resolve, reject) => {
+            let hiddenWindow = new BrowserWindow({
+                show: false,
+                webPreferences: { offscreen: true }
+            });
+
+            hiddenWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+            
+            hiddenWindow.webContents.on('did-finish-load', async () => {
+                try {
+                    const pdfBuffer = await hiddenWindow.webContents.printToPDF({
+                        printBackground: true,
+                        pageSize: 'A4'
+                    });
+                    fs.writeFileSync(outPath, pdfBuffer);
+                    console.log(`[Electron] Master PDF securely generated at: ${outPath}`);
+                    hiddenWindow.close();
+                    hiddenWindow = null;
+                    resolve();
+                } catch (e) {
+                    hiddenWindow.close();
+                    reject(e);
+                }
+            });
+        });
+
+        // Phase 2: The Neutral Ground (Premium Plan Extraction)
+        // Feature gate: Only extract single HTMLs for Easy WhatsApp sharing if school has premium plan.
+        if (identity.premiumPlan === true || identity.premiumPlan === "true" || identity.isPremium) {
+            const extractFolder = path.join(outFolder, 'Digital_Copies_PREMIUM');
+            if (!fs.existsSync(extractFolder)) fs.mkdirSync(extractFolder, { recursive: true });
+            
+            // Generate single HTML page per student
+            students.forEach(student => {
+                const singlePageHtml = html.replace('${pages}', pages.split('</div></div></div>')[students.indexOf(student)] + '</div></div></div>');
+                // Extremely lightweight template specifically for this student
+                const studentSafeName = (student.name || student.id).replace(/[^a-z0-9]/gi, '_');
+                const singlePath = path.join(extractFolder, `${studentSafeName}_Report.html`);
+                
+                // Hacky injection of just their page inside a wrapper
+                const cleanSingleHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${student.name} Report</title>
+                <style>${html.split('<style>')[1].split('</style>')[0]}
+                body { padding: 0 !important; background: #e0e0e0; display:flex; justify-content:center; align-items:center; min-height: 100vh;}
+                .report-page { background: #fff; box-shadow: 0 10px 30px rgba(0,0,0,0.1); margin: 20px 0; border-radius: 8px;}
+                </style></head><body>
+                ${pages.split('<div class="report-page">')[students.indexOf(student) + 1].split('<div class="ft">')[0]}<div class="ft">${pages.split('<div class="report-page">')[students.indexOf(student) + 1].split('<div class="ft">')[1].split('</div></div>')[0]}</div></div></div>
+                </body></html>`;
+
+                fs.writeFileSync(singlePath, cleanSingleHtml, 'utf-8');
+            });
+            console.log(`[Electron] Generated ${students.length} premium digital envelopes.`);
+        }
+
+        await shell.openPath(outFolder);
 
         return { success: true, path: outPath, folder: outFolder };
 
     } catch (err) {
-        console.error('[Electron] Report generation failed:', err);
+        console.error('[Electron] PDF generation failed:', err);
         throw err;
     }
 });
