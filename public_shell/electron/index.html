@@ -256,7 +256,15 @@
               />
             </div>
 
-            <button id="save-identity-btn" class="primary-btn">
+            <div class="form-group" style="background: rgba(255,215,0,0.05); padding: 12px; border-radius: 8px; border: 1px dashed rgba(255,215,0,0.3);">
+              <label style="color: #FFD700;">⭐ Nexus Premium Plan</label>
+              <div style="display:flex; align-items:center; gap: 8px; margin-top: 6px;">
+                <input type="checkbox" id="premium-plan-toggle" style="width: 16px; height: 16px; accent-color: #FFD700;"/>
+                <span style="font-size:12px; color:#ccc;">Enable 'Digital Envelope' HTML Exports for WhatsApp</span>
+              </div>
+            </div>
+
+            <button id="save-identity-btn" class="primary-btn" style="margin-top: 16px;">
               Save Identity Shard
             </button>
           </div>
@@ -532,9 +540,15 @@
                 identity,
                 students: studentsForPdf,
               });
+
+              let outputMsg = `Batched Master PDF saved to:<br><code style="font-size:11px;">${result.folder}</code>`;
+              if (identity.premiumPlan) {
+                  outputMsg += `<br><br><span style="color:#FFD700; font-size:12px;">⭐ Premium Plan:<br>Individual Digital Envelopes generated!</span>`;
+              }
+
               Swal.fire({
-                title: "✅ Reports Generated!",
-                html: `${studentsForPdf.length} report cards saved to:<br><code style="font-size:11px;">${result.folder}</code>`,
+                title: "✅ Reports Completed!",
+                html: outputMsg,
                 icon: "success",
                 background: "#0A0E2E",
                 color: "#fff",
@@ -687,6 +701,13 @@
           document.getElementById("school-signature-input").value =
             identity.signature || "";
 
+          // Hydrate Premium Toggle
+          if (identity.premiumPlan) {
+            document.getElementById("premium-plan-toggle").checked = true;
+          } else {
+            document.getElementById("premium-plan-toggle").checked = false;
+          }
+
           themePrimary.value = identity.themePrimary || "#1A237E";
           primaryHex.textContent = themePrimary.value.toUpperCase();
 
@@ -774,6 +795,7 @@
             themePrimary: themePrimary.value,
             themeSecondary: themeSecondary.value,
             logoBase64: currentLogoBase64,
+            premiumPlan: document.getElementById("premium-plan-toggle").checked,
             address: document
               .getElementById("school-address-input")
               .value.trim(),
