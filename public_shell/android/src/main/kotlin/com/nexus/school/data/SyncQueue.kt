@@ -25,7 +25,7 @@ data class SyncEvent(
 
 @Dao
 interface SyncDao {
-    @Insert
+    @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
     suspend fun insertEvent(event: SyncEvent)
 
     @Query("SELECT * FROM sync_queue WHERE is_synced = 0 ORDER BY created_at ASC")
