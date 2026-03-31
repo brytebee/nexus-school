@@ -35,4 +35,16 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/overlay" />
 
+    <Button
+        android:id="@+id/manual_setup_btn"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Camera Broken? Manual Setup"
+        android:textColor="#FFFFFF"
+        android:backgroundTint="#1A237E"
+        android:layout_marginBottom="48dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
 </androidx.constraintlayout.widget.ConstraintLayout>

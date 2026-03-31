@@ -41,7 +41,30 @@ class HandshakeActivity : AppCompatActivity() {
         previewView = findViewById(R.id.previewView)
         identityManager = IdentityManager(this)
         
+        findViewById<android.widget.Button>(R.id.manual_setup_btn).setOnClickListener {
+            showManualSetupDialog()
+        }
+
         checkCameraPermission()
+    }
+
+    private fun showManualSetupDialog() {
+        val input = android.widget.EditText(this).apply {
+            hint = "Paste School Payload Here"
+            setPadding(48, 48, 48, 48)
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Manual Setup")
+            .setMessage("If your camera is broken, ask the Admin to copy the raw payload text from the Dashboard and send it to you.")
+            .setView(input)
+            .setPositiveButton("Connect") { _, _ ->
+                val payloadText = input.text.toString()
+                if (payloadText.isNotEmpty()) {
+                    onQrScanned(payloadText, identityManager)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun checkCameraPermission() {

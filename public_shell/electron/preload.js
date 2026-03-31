@@ -10,5 +10,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getIdentity: () => ipcRenderer.invoke('get-identity'),
     saveIdentity: (packet) => ipcRenderer.invoke('save-identity', packet),
     generateReports: (payload) => ipcRenderer.invoke('generate-reports', payload),
-    resetAppData: () => ipcRenderer.invoke('reset-app-data')
+    resetAppData: () => ipcRenderer.invoke('reset-app-data'),
+    onLicenseStatus: (callback) => ipcRenderer.on('license-status', (_event, value) => callback(value))
 });
