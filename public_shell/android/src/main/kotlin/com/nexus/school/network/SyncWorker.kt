@@ -17,6 +17,7 @@ import kotlinx.serialization.json.Json
 @Serializable
 data class SyncPayload(
     val device_id: String,
+    val teacher_name: String,
     val signature: String,
     val events: List<com.nexus.school.data.SyncEvent>
 )
@@ -51,9 +52,11 @@ class SyncWorker(private val context: Context) {
             )
             val signature = identityManager.signPayload(eventsJson)
             val deviceId = identityManager.getDeviceId()
+            val teacherName = identityManager.getTeacherName()
 
             val payload = SyncPayload(
                 device_id = deviceId,
+                teacher_name = teacherName,
                 signature = signature,
                 events = pendingEvents
             )

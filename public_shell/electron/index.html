@@ -354,10 +354,16 @@
 
         // 3. Sync Events (The Pulse)
         let totalEvents = 0;
-        window.electronAPI.onSyncUpdate((events) => {
-          console.log("Sync events received:", events);
+        window.electronAPI.onSyncUpdate((payload) => {
+          // Backward compatibility check for raw arrays from old workflows
+          const events = Array.isArray(payload) ? payload : (payload.events || []);
+          const teacherName = payload.teacher_name || "A Teacher";
+          const syncCount = payload.count || events.length || 0;
+          
+          console.log("Sync payload received:", payload);
           const container = document.getElementById("events-container");
-          totalEvents += events?.length || 0;
+          totalEvents += syncCount;
+          
           const eventsCountEl = document.getElementById("stat-events-count");
           if (eventsCountEl) eventsCountEl.textContent = totalEvents;
 
@@ -368,8 +374,13 @@
           }
 
           const pulseLabel = document.getElementById("pulse-label");
-          if (pulseLabel)
-            pulseLabel.textContent = `⚡ ${events?.length || 0} new grade events received`;
+          if (pulseLabel) {
+            if (payload && !Array.isArray(payload) && payload.teacher_name) {
+                pulseLabel.textContent = `⚡ ${teacherName} just synced ${syncCount} scores!`;
+            } else {
+                pulseLabel.textContent = `⚡ ${syncCount} new grade events received`;
+            }
+          }
 
           (events || []).forEach((event) => {
             const eventEl = document.createElement("div");
@@ -543,9 +554,10 @@
           });
 
         // Track events for PDF generation — also reveal the button
-        window.electronAPI.onSyncUpdate((events) => {
-          if (Array.isArray(events)) {
-            allGradeEvents.push(...events);
+        window.electronAPI.onSyncUpdate((payload) => {
+          const eventsList = Array.isArray(payload) ? payload : (payload.events || []);
+          if (Array.isArray(eventsList) && eventsList.length > 0) {
+            allGradeEvents.push(...eventsList);
             // Reveal the generate button now that we have grade data
             const genBtn = document.getElementById("generate-pdf-btn");
             if (genBtn && allGradeEvents.length > 0) {
