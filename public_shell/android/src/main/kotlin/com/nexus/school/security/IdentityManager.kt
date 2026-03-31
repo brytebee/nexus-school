@@ -5,6 +5,13 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 import com.nexus.school.utils.ThermalMonitor
 import java.util.UUID
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
+import java.security.KeyPairGenerator
+import java.security.KeyStore
+import java.security.Signature
+import java.security.spec.ECGenParameterSpec
 
 class IdentityManager(context: Context) {
     private val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
@@ -26,9 +33,57 @@ class IdentityManager(context: Context) {
         return deviceId!!
     }
 
+    private val keyStoreAlias = "nexus_device_key"
+
+    init {
+        generateKeyPairIfNeeded()
+    }
+
+    private fun generateKeyPairIfNeeded() {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        if (!keyStore.containsAlias(keyStoreAlias)) {
+            val keyPairGenerator = KeyPairGenerator.getInstance(
+                KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore"
+            )
+            val parameterSpec = KeyGenParameterSpec.Builder(
+                keyStoreAlias,
+                KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
+            ).run {
+                setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
+                setDigests(KeyProperties.DIGEST_SHA256)
+                // Optional: require user authentication (biometrics)
+                // setUserAuthenticationRequired(true)
+                build()
+            }
+            keyPairGenerator.initialize(parameterSpec)
+            keyPairGenerator.generateKeyPair()
+        }
+    }
+
     fun getPublicKey(): String {
-        // Placeholder for Ed25519 public key generation
-        return "DEVICE_SPECIFIC_PUBLIC_KEY_PLACEHOLDER"
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val cert = keyStore.getCertificate(keyStoreAlias)
+        return if (cert != null) {
+            Base64.encodeToString(cert.publicKey.encoded, Base64.NO_WRAP)
+        } else {
+            "DEVICE_SPECIFIC_PUBLIC_KEY_PLACEHOLDER"
+        }
+    }
+
+    fun signPayload(payload: String): String {
+        return try {
+            val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            val privateKey = keyStore.getKey(keyStoreAlias, null) as java.security.PrivateKey
+            val signature = Signature.getInstance("SHA256withECDSA").run {
+                initSign(privateKey)
+                update(payload.toByteArray(Charsets.UTF_8))
+                sign()
+            }
+            Base64.encodeToString(signature, Base64.NO_WRAP)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            "SIGNATURE_FAILED"
+        }
     }
 
     fun getTeacherName(): String {
