@@ -56,9 +56,21 @@ function init(dbPath) {
             payload TEXT NOT NULL,
             synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+
+        -- Table 5: Student Records (The Ledger)
+        CREATE TABLE IF NOT EXISTS student_records (
+            student_id TEXT,
+            subject TEXT,
+            assessment TEXT,
+            score INTEGER,
+            breakdown TEXT,
+            teacher_id TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(student_id, subject, assessment)
+        );
     `);
 
-    console.log(`[Database] Core tables (students, teachers, teacher_allocations, sync_logs) verified.`);
+    console.log(`[Database] Core tables (students, teachers, teacher_allocations, sync_logs, student_records) verified.`);
     
     return db;
 }

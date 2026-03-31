@@ -183,7 +183,7 @@ app.post('/handshake', (req, res) => {
 
 // The "Day 2" Sync Endpoint
 app.post('/sync', (req, res) => {
-    const { device_id, signature, events } = req.body || {};
+    const { device_id, teacher_name, signature, events } = req.body || {};
     const eventsArray = events || [];
 
     console.log(`[Sync] Received ${eventsArray.length} signed events from device: ${device_id || 'UNKNOWN'}`);
@@ -191,8 +191,67 @@ app.post('/sync', (req, res) => {
         console.log(`[Sync] ECDSA Signature Attached: ${signature.substring(0, 30)}...`);
     }
 
-    // Forward events to main.js via EventEmitter (main.js then forwards to the UI window)
-    eventEmitter.emit('sync-events', eventsArray);
+    let db;
+    try {
+        db = database.getDb();
+    } catch (e) {
+        console.error("[Sync] DB not ready.");
+        return res.status(500).json({ error: "Database not initialized" });
+    }
+
+    // Attempt to lookup teacher_id
+    let teacherId = "UNKNOWN_TEACHER";
+    if (teacher_name) {
+        const teacher = db.prepare('SELECT id FROM teachers WHERE name = ? COLLATE NOCASE LIMIT 1').get(teacher_name);
+        if (teacher) teacherId = teacher.id;
+    }
+
+    // Process Ledger insertions in a single atomic transaction
+    const insertLog = db.prepare('INSERT INTO sync_logs (event_id, device_id, teacher_id, payload) VALUES (?, ?, ?, ?)');
+    const upsertRecord = db.prepare(`
+        INSERT OR REPLACE INTO student_records 
+        (student_id, subject, assessment, score, breakdown, teacher_id) 
+        VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    let successfullyInserted = 0;
+
+    const processSyncTransaction = db.transaction(() => {
+        for (const evt of eventsArray) {
+            try {
+                // 1. Audit Trail
+                insertLog.run(evt.event_id, device_id || 'UNKNOWN', teacherId, JSON.stringify(evt));
+
+                // 2. Ledger Upsert
+                if (evt.event_type === "UPDATE_GRADE") {
+                    const p = JSON.parse(evt.payload);
+                    const breakdownStr = p.breakdown ? JSON.stringify(p.breakdown) : "{}";
+                    
+                    upsertRecord.run(
+                        p.student_id, 
+                        p.subject || 'General', 
+                        p.assessment || 'CA1', 
+                        p.score, 
+                        breakdownStr, 
+                        teacherId
+                    );
+                    successfullyInserted++;
+                }
+            } catch (err) {
+                console.error(`[Sync] Failed to process event ${evt.event_id}:`, err.message);
+            }
+        }
+    });
+
+    try {
+        processSyncTransaction();
+        console.log(`[Sync] Successfully upserted ${successfullyInserted} grade records into Ledger.`);
+    } catch (err) {
+        console.error("[Sync] Transaction failed:", err);
+    }
+
+    // Forward enriched events to main.js via EventEmitter
+    eventEmitter.emit('sync-events', { teacher_name: teacher_name || "A Teacher", events: eventsArray, count: successfullyInserted });
 
     res.status(200).json({ status: 'ACK' });
 });
