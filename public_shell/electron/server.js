@@ -183,12 +183,16 @@ app.post('/handshake', (req, res) => {
 
 // The "Day 2" Sync Endpoint
 app.post('/sync', (req, res) => {
-    const events = req.body.events || [];
+    const { device_id, signature, events } = req.body || {};
+    const eventsArray = events || [];
 
-    console.log(`[Sync] Received ${events.length} events from connected device.`);
+    console.log(`[Sync] Received ${eventsArray.length} signed events from device: ${device_id || 'UNKNOWN'}`);
+    if (signature) {
+        console.log(`[Sync] ECDSA Signature Attached: ${signature.substring(0, 30)}...`);
+    }
 
     // Forward events to main.js via EventEmitter (main.js then forwards to the UI window)
-    eventEmitter.emit('sync-events', events);
+    eventEmitter.emit('sync-events', eventsArray);
 
     res.status(200).json({ status: 'ACK' });
 });

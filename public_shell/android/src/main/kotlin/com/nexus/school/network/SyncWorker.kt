@@ -16,6 +16,8 @@ import kotlinx.serialization.json.Json
 
 @Serializable
 data class SyncPayload(
+    val device_id: String,
+    val signature: String,
     val events: List<com.nexus.school.data.SyncEvent>
 )
 
@@ -42,7 +44,22 @@ class SyncWorker(private val context: Context) {
         }
 
         return try {
-            val payload = SyncPayload(events = pendingEvents)
+            // Sign the payload for the Eco-Guardian vault
+            val eventsJson = Json.encodeToString(
+                kotlinx.serialization.builtins.ListSerializer(com.nexus.school.data.SyncEvent.serializer()), 
+                pendingEvents
+            )
+            val signature = identityManager.signPayload(eventsJson)
+            val deviceId = identityManager.getDeviceId()
+
+            val payload = SyncPayload(
+                device_id = deviceId,
+                signature = signature,
+                events = pendingEvents
+            )
+            
+            Log.d("SyncWorker", "Syncing... Outputting Payload with signature length: ${signature.length}")
+
             val response: HttpResponse = client.post("http://$ip:$port/sync") {
                 contentType(ContentType.Application.Json)
                 setBody(payload)
