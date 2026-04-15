@@ -1,0 +1,24 @@
+# Dependency directories
+node_modules/
+
+# Build outputs
+dist/
+nexus-school-os-darwin-arm64/
+nexus-school-os-darwin-x64/
+nexus-school-os-win32-x64/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# User data / local database
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+identity.json
+license.nexus
+demo_keypair.json
+
+# Temporary / Backup files
+*.zip
+*.log

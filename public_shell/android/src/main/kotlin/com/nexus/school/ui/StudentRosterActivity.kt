@@ -150,7 +150,10 @@ class StudentRosterActivity : AppCompatActivity() {
                     events.forEach { event ->
                         try {
                             val obj = org.json.JSONObject(event.payload)
-                            if (obj.has("student_id")) {
+                            if (obj.has("student_id") && obj.has("subject")) {
+                                val key = obj.getString("student_id") + "_" + obj.getString("subject")
+                                studentSyncStatus[key] = true
+                            } else if (obj.has("student_id")) {
                                 studentSyncStatus[obj.getString("student_id")] = true
                             }
                         } catch (e: Exception) {}
@@ -171,7 +174,9 @@ class StudentRosterActivity : AppCompatActivity() {
 
                     // ── Sync Warning Dialog ───────────────────────────────────
                     if (showSyncWarning) {
-                        val missingCount = filteredStudents.size - filteredStudents.count { studentSyncStatus[it.id] == true }
+                        val missingCount = filteredStudents.size - filteredStudents.count { 
+                            studentSyncStatus[it.id + "_" + it.subject] == true || studentSyncStatus[it.id] == true 
+                        }
                         AlertDialog(
                             onDismissRequest = { showSyncWarning = false },
                             containerColor = Color(0xFF1A1A2E),
@@ -199,7 +204,7 @@ class StudentRosterActivity : AppCompatActivity() {
                             selectedTab = selectedTab,
                             primaryColor = primaryColor,
                             onClose = { showFocusMode = false },
-                            onLogSave = { studentId, isSaved -> studentSyncStatus[studentId] = isSaved }
+                            onLogSave = { studentId, subject, isSaved -> studentSyncStatus[studentId + "_" + subject] = isSaved }
                         )
                     } else {
                         Column(modifier = Modifier.fillMaxSize()) {
@@ -211,7 +216,9 @@ class StudentRosterActivity : AppCompatActivity() {
                                 totalCount = students.size,
                                 filteredCount = filteredStudents.size,
                                 onSync = {
-                                    val missing = filteredStudents.count { studentSyncStatus[it.id] != true }
+                                    val missing = filteredStudents.count { 
+                                        studentSyncStatus[it.id + "_" + it.subject] != true && studentSyncStatus[it.id] != true 
+                                    }
                                     if (missing > 0) showSyncWarning = true else triggerSync(primaryColor)
                                 }
                             )
@@ -418,7 +425,7 @@ fun StudentList(
                     student = student,
                     index = idx + 1,
                     primaryColor = primaryColor,
-                    isSaved = statusMap[student.id] == true
+                    isSaved = statusMap[student.id + "_" + student.subject] == true || statusMap[student.id] == true
                 )
             }
         }
@@ -479,7 +486,7 @@ fun FocusModePager(
     selectedTab: Pair<String, String>?,
     primaryColor: Color,
     onClose: () -> Unit,
-    onLogSave: (String, Boolean) -> Unit
+    onLogSave: (String, String, Boolean) -> Unit
 ) {
     val pagerState = rememberPagerState(pageCount = { students.size })
     val scope = rememberCoroutineScope()
@@ -495,7 +502,13 @@ fun FocusModePager(
         events.forEach { event ->
             try {
                 val obj = org.json.JSONObject(event.payload)
-                if (obj.has("student_id") && obj.has("breakdown")) {
+                if (obj.has("student_id") && obj.has("subject") && obj.has("breakdown")) {
+                    val key = obj.getString("student_id") + "_" + obj.getString("subject")
+                    val breakdown = obj.getJSONObject("breakdown")
+                    ca1State[key]  = breakdown.getInt("CA1").toString()
+                    ca2State[key]  = breakdown.getInt("CA2").toString()
+                    examState[key] = breakdown.getInt("Exam").toString()
+                } else if (obj.has("student_id") && obj.has("breakdown")) {
                     val studentId = obj.getString("student_id")
                     val breakdown = obj.getJSONObject("breakdown")
                     ca1State[studentId]  = breakdown.getInt("CA1").toString()
@@ -544,18 +557,21 @@ fun FocusModePager(
         }
 
         HorizontalPager(state = pagerState, modifier = Modifier.weight(1f)) { page ->
-            val studentId = students[page].id
+            val student = students[page]
+            val studentId = student.id
+            val subjectKey = studentId + "_" + student.subject
+            
             StudentFocusCard(
-                student = students[page],
+                student = student,
                 selectedTab = selectedTab,
                 primaryColor = primaryColor,
-                initialCa1 = ca1State[studentId] ?: "",
-                initialCa2 = ca2State[studentId] ?: "",
-                initialExam = examState[studentId] ?: "",
+                initialCa1 = ca1State[subjectKey] ?: ca1State[studentId] ?: "",
+                initialCa2 = ca2State[subjectKey] ?: ca2State[studentId] ?: "",
+                initialExam = examState[subjectKey] ?: examState[studentId] ?: "",
                 onInputsChanged = { ca1, ca2, exam ->
-                    ca1State[studentId]  = ca1
-                    ca2State[studentId]  = ca2
-                    examState[studentId] = exam
+                    ca1State[subjectKey]  = ca1
+                    ca2State[subjectKey]  = ca2
+                    examState[subjectKey] = exam
                 },
                 onAutoSave = { ca1, ca2, exam ->
                     scope.launch(Dispatchers.IO) {
@@ -571,7 +587,7 @@ fun FocusModePager(
                                 com.nexus.school.data.SyncEvent(event_id = explicitEventId, event_type = "UPDATE_GRADE", payload = payload, is_synced = 0)
                             )
                             launch(Dispatchers.Main) {
-                                onLogSave(studentId, true)
+                                onLogSave(studentId, subject, true)
                             }
                         } catch (e: Exception) {}
                     }
@@ -591,7 +607,7 @@ fun FocusModePager(
                                 com.nexus.school.data.SyncEvent(event_id = explicitEventId, event_type = "UPDATE_GRADE", payload = payload, is_synced = 0)
                             )
                             launch(Dispatchers.Main) {
-                                onLogSave(studentId, true)
+                                onLogSave(studentId, subject, true)
                                 if (page < students.size - 1) pagerState.animateScrollToPage(page + 1)
                                 else onClose()
                             }

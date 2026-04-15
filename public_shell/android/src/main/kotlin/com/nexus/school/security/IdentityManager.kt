@@ -86,6 +86,17 @@ class IdentityManager(context: Context) {
         }
     }
 
+    fun saveTeacherIdentity(id: String, name: String) {
+        prefs.edit()
+            .putString("teacher_id", id)
+            .putString("teacher_name", name)
+            .apply()
+    }
+
+    fun getTeacherId(): String {
+        return prefs.getString("teacher_id", "TCH-001") ?: "TCH-001"
+    }
+
     fun getTeacherName(): String {
         return prefs.getString("teacher_name", "Mr. Adebayo") ?: "Mr. Adebayo"
     }

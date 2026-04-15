@@ -203,6 +203,12 @@ class HandshakeActivity : AppCompatActivity() {
                 // Save IP and Port for future syncs
                 identityManager.saveServerInfo(payload.ip, payload.port)
                 
+                // Adopt the Identity dictated by the Admin Dropdown!
+                if (payload.teacher_id != null && payload.teacher_name != null) {
+                    identityManager.saveTeacherIdentity(payload.teacher_id, payload.teacher_name)
+                    Log.d("Handshake", "Adopted Identity: ${payload.teacher_name} [${payload.teacher_id}]")
+                }
+                
                 runOnUiThread {
                     val schoolDisplayName = payload.config.name ?: "Nexus School"
                     android.widget.Toast.makeText(this@HandshakeActivity, "Syncing with $schoolDisplayName...", android.widget.Toast.LENGTH_SHORT).show()
@@ -210,6 +216,7 @@ class HandshakeActivity : AppCompatActivity() {
 
                 val response = DeviceResponse(
                     device_id = identityManager.getDeviceId(),
+                    teacher_id = identityManager.getTeacherId(),
                     teacher_name = identityManager.getTeacherName(),
                     public_key = identityManager.getPublicKey(),
                     thermal_status = identityManager.getThermalStatus()
