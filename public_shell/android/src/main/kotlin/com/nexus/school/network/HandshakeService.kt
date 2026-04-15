@@ -28,7 +28,9 @@ data class QrPayload(
     val ip: String,
     val port: Int,
     val handshake_key: String,
-    val config: Config
+    val config: Config,
+    val teacher_id: String? = null,
+    val teacher_name: String? = null
 )
 
 @Serializable
@@ -55,6 +57,7 @@ data class HandshakeResponse(
 @Serializable
 data class DeviceResponse(
     val device_id: String,
+    val teacher_id: String,
     val teacher_name: String,
     val public_key: String,
     val thermal_status: String

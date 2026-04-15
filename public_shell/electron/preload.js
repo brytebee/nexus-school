@@ -11,5 +11,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveIdentity: (packet) => ipcRenderer.invoke('save-identity', packet),
     generateReports: (payload) => ipcRenderer.invoke('generate-reports', payload),
     resetAppData: () => ipcRenderer.invoke('reset-app-data'),
-    onLicenseStatus: (callback) => ipcRenderer.on('license-status', (_event, value) => callback(value))
+    getTeachers: () => ipcRenderer.invoke('get-teachers'),
+    setTeacher: (data) => ipcRenderer.invoke('set-teacher', data),
+    getDbStats: () => ipcRenderer.invoke('get-db-stats'),
+    addTeacherForm: (data) => ipcRenderer.invoke('add-teacher-form', data),
+    updateTeacher: (data) => ipcRenderer.invoke('update-teacher', data),
+    addStudentForm: (data) => ipcRenderer.invoke('add-student-form', data),
+    onLicenseStatus: (callback) => ipcRenderer.on('license-status', (_event, value) => callback(value)),
+    getAllTeachers: () => ipcRenderer.invoke('get-all-teachers'),
+    getAllStudents: () => ipcRenderer.invoke('get-all-students'),
+    deleteTeacher: (data) => ipcRenderer.invoke('delete-teacher', data),
+    deleteStudent: (data) => ipcRenderer.invoke('delete-student', data),
+    // Window chrome controls
+    winMinimize: () => ipcRenderer.send('win-minimize'),
+    winMaximize: () => ipcRenderer.send('win-maximize'),
+    winClose:    () => ipcRenderer.send('win-close'),
+    getPlatform: () => ipcRenderer.invoke('get-platform'),
 });
+

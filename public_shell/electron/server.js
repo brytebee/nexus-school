@@ -68,34 +68,33 @@ function handleCSVUpload(filePath, callback) {
                     const teacherPhone = (row['Teacher_Phone'] || '').trim();
                     const subjectsRaw  = (row['Subjects']      || '').trim();
 
-                    // Skip rows missing critical fields
-                    if (!studentId || !firstName || !className || !teacherId) {
-                        console.warn(`[CSV] Skipping incomplete row: Student_ID=${studentId}`);
-                        continue;
+                    // 1. If row defines a Teacher, process teacher logic
+                    if (teacherId) {
+                        if (!teacherIds.has(teacherId)) {
+                            upsertTeacher.run({ id: teacherId, name: teacherName || teacherId, phone: teacherPhone });
+                            teacherIds.add(teacherId);
+                        }
+                        // Upsert allocation if class and subjects exist
+                        if (className) {
+                            const subjects = subjectsRaw
+                                ? subjectsRaw.split('|').map(s => s.trim()).filter(Boolean)
+                                : ['General'];
+                            for (const subject of subjects) {
+                                upsertAllocation.run({ teacher_id: teacherId, class_name: className, subject });
+                                allocationCount++;
+                            }
+                        }
                     }
 
-                    // 1. Upsert teacher (only once per unique teacher ID)
-                    if (!teacherIds.has(teacherId)) {
-                        upsertTeacher.run({ id: teacherId, name: teacherName, phone: teacherPhone });
-                        teacherIds.add(teacherId);
+                    // 2. If row defines a Student, process student logic
+                    if (studentId && (firstName || lastName) && className) {
+                        upsertStudent.run({
+                            id: studentId,
+                            name: `${firstName} ${lastName}`.trim(),
+                            class_name: className
+                        });
+                        studentCount++;
                     }
-
-                    // 2. Upsert teacher_allocations for each pipe-delimited subject
-                    const subjects = subjectsRaw
-                        ? subjectsRaw.split('|').map(s => s.trim()).filter(Boolean)
-                        : ['General'];
-                    for (const subject of subjects) {
-                        upsertAllocation.run({ teacher_id: teacherId, class_name: className, subject });
-                        allocationCount++;
-                    }
-
-                    // 3. Upsert student
-                    upsertStudent.run({
-                        id: studentId,
-                        name: `${firstName} ${lastName}`.trim(),
-                        class_name: className
-                    });
-                    studentCount++;
                 }
 
                 return { studentCount, teacherCount: teacherIds.size, allocationCount };
@@ -115,9 +114,9 @@ function handleCSVUpload(filePath, callback) {
 
 // The "Day 1" Handshake Endpoint
 app.post('/handshake', (req, res) => {
-    const { device_id, teacher_name, public_key, thermal_status } = req.body;
+    const { device_id, teacher_id, teacher_name, public_key, thermal_status } = req.body;
 
-    console.log(`[Handshake] Received identity from ${teacher_name} (${device_id})`);
+    console.log(`[Handshake] Received identity from ${teacher_name} [${teacher_id || 'NO_ID'}] (${device_id})`);
 
     let db;
     try {
@@ -126,12 +125,16 @@ app.post('/handshake', (req, res) => {
         return res.status(500).json({ error: "Database not initialized" });
     }
 
-    // Lookup teacher by name (case-insensitive) to ensure robust matching
-    const teacher = db.prepare('SELECT id, name FROM teachers WHERE name = ? COLLATE NOCASE LIMIT 1').get(teacher_name);
+    // Strict lookup: We must have a teacher_id from the QR Code
+    if (!teacher_id) {
+        return res.status(400).json({ error: "Missing teacher_id in handshake payload." });
+    }
+
+    const teacher = db.prepare('SELECT id, name FROM teachers WHERE id = ? LIMIT 1').get(teacher_id);
 
     if (!teacher) {
-        console.warn(`[Handshake] Teacher not found: ${teacher_name}`);
-        return res.status(404).json({ error: "Teacher not found in the vault." });
+        console.warn(`[Handshake] Teacher ID not found: ${teacher_id}`);
+        return res.status(404).json({ error: "Teacher ID not found in the vault." });
     }
 
     // Notify Main Process

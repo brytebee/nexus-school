@@ -6,7 +6,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "pack": "npx @electron/packager . NexusSchoolOS --platform=darwin --arch=arm64,x64 --icon=assets/icon.icns --overwrite --out=dist"
   },
   "dependencies": {
     "address": "^1.2.2",

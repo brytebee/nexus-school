@@ -3,879 +3,1228 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Nexus Shell | Discover</title>
+    <title>Nexus School OS</title>
     <link rel="stylesheet" href="index.css" />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap"
-      rel="stylesheet"
-    />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div class="background-glow"></div>
-    <main class="glass-container">
-      <header>
-        <div class="school-identity">
-          <div class="logo-placeholder">N</div>
-          <h1 id="school-name">Nexus Discovery</h1>
-        </div>
-        <div
-          class="header-actions"
-          style="display: flex; gap: 20px; align-items: center"
-        >
-          <div class="forge-action" data-tooltip="Identity Settings">
-            <button id="settings-btn" class="forge-icon-btn">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <circle cx="12" cy="12" r="3"></circle>
-                <path
-                  d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
-                ></path>
-              </svg>
-            </button>
-            <span class="forge-tooltip">Identity Settings</span>
-          </div>
-          <div class="forge-action" data-tooltip="Upload Students CSV">
-            <label for="csv-upload" class="forge-icon-btn">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="17 8 12 3 7 8"></polyline>
-                <line x1="12" y1="3" x2="12" y2="15"></line>
-              </svg>
-              <input
-                type="file"
-                id="csv-upload"
-                accept=".csv"
-                style="display: none"
-              />
-            </label>
-            <span id="upload-status-tooltip" class="forge-tooltip"
-              >Upload Students CSV</span
-            >
-          </div>
-          <div class="status-badge" id="thermal-badge">
-            <span class="dot"></span> Hardware: COOL
-          </div>
-        </div>
-      </header>
 
-      <section class="discovery-hero" id="handshake-section">
-        <div class="qr-wrapper">
-          <div
-            id="qr-code"
-            style="background: white; padding: 12px; border-radius: 16px"
-          ></div>
-          <div class="qr-ring"></div>
-          <div class="qr-ring-outer"></div>
-        </div>
-        <div class="discovery-text">
-          <h2>Ready to Sync</h2>
-          <p>
-            Scan the code with your Nexus Mobile app to begin the "Day 1"
-            Handshake.
-          </p>
-          <div class="connection-info">
-            <code id="server-ip">0.0.0.0</code>
-            <span class="separator">:</span>
-            <code id="server-port">3000</code>
-          </div>
-          <button id="copy-payload-btn" style="margin-top: 16px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #fff; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; transition: all 0.2s;">
-              <span id="copy-btn-text">Copy Manual Sync Code</span>
-          </button>
-        </div>
-      </section>
-
-      <!-- Live Dashboard Section (Hidden initially) -->
-      <section
-        class="live-dashboard"
-        id="dashboard-section"
-        style="display: none"
-      >
-        <div class="dashboard-header">
-          <h2>Command Center</h2>
-          <div class="pulse-indicator">
-            <div class="pulse-dot"></div>
-            <span id="pulse-label">Ready for teacher sync...</span>
-          </div>
-        </div>
-        <!-- Stats Row -->
-        <div class="stats-row" id="stats-row">
-          <div class="stat-card" id="stat-students">
-            <div class="stat-icon">👥</div>
-            <div class="stat-value" id="stat-students-count">0</div>
-            <div class="stat-label">Students Loaded</div>
-          </div>
-          <div class="stat-card" id="stat-devices">
-            <div class="stat-icon">📱</div>
-            <div class="stat-value" id="stat-devices-count">0</div>
-            <div class="stat-label">Devices Married</div>
-          </div>
-          <div class="stat-card" id="stat-events">
-            <div class="stat-icon">📊</div>
-            <div class="stat-value" id="stat-events-count">0</div>
-            <div class="stat-label">Grade Events</div>
-          </div>
-        </div>
-        <div class="events-container" id="events-container">
-          <!-- Sync events will appear here -->
-        </div>
-        <div style="padding: 16px 0">
-          <button
-            id="generate-pdf-btn"
-            class="primary-btn"
-            style="
-              width: 100%;
-              padding: 16px;
-              font-size: 16px;
-              border-radius: 12px;
-              display: none;
-              align-items: center;
-              justify-content: center;
-              gap: 10px;
-            "
-          >
-            <span>📄</span> Generate Report Cards (PDF)
-          </button>
-        </div>
-      </section>
-
-      <!-- Settings Section (Hidden initially) -->
-      <section
-        class="settings-portal"
-        id="settings-section"
-        style="display: none"
-      >
-        <div class="settings-header">
-          <h2>School Identity Forge</h2>
-          <div style="display: flex; gap: 10px;">
-            <button
-              id="reset-btn"
-              class="upload-btn"
-              style="border-color: #ff4444; color: #ff4444"
-            >
-              Reset
-            </button>
-            <button id="close-settings-btn" class="upload-btn">Close</button>
-          </div>
-        </div>
-
-        <div class="settings-content">
-          <div class="settings-column">
-            <h3>Visual Identity</h3>
-
-            <div class="form-group">
-              <label>School Crest (Logo)</label>
-              <div class="logo-uploader" id="logo-dropzone">
-                <div class="uploader-content" id="uploader-content">
-                  <span class="upload-icon">﹢</span>
-                  <p>Drag & Drop PNG/JPEG</p>
-                  <span class="upload-hint">or click to browse</span>
-                </div>
-                <img
-                  id="logo-preview"
-                  src=""
-                  alt="Logo Preview"
-                  style="display: none"
-                />
-                <input
-                  type="file"
-                  id="logo-upload"
-                  accept="image/png, image/jpeg"
-                  style="display: none"
-                />
-              </div>
-            </div>
-
-            <div class="color-pickers-group">
-              <div class="form-group">
-                <label>Primary Theme</label>
-                <div class="color-picker-wrapper">
-                  <input type="color" id="theme-primary" value="#1A237E" />
-                  <span class="color-hex" id="primary-hex">#1A237E</span>
-                </div>
-              </div>
-              <div class="form-group">
-                <label>Accent Color</label>
-                <div class="color-picker-wrapper">
-                  <input type="color" id="theme-secondary" value="#00E5FF" />
-                  <span class="color-hex" id="secondary-hex">#00E5FF</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="settings-column">
-            <h3>School Metadata</h3>
-
-            <div class="form-group">
-              <label>School Name</label>
-              <input
-                type="text"
-                id="school-name-input"
-                class="modern-input"
-                placeholder="e.g. Nexus Academy"
-              />
-            </div>
-
-            <div class="form-group">
-              <label>School Address</label>
-              <input
-                type="text"
-                id="school-address-input"
-                class="modern-input"
-                placeholder="e.g. 123 Education Way"
-              />
-            </div>
-
-            <div class="form-group">
-              <label>Motto</label>
-              <input
-                type="text"
-                id="school-motto-input"
-                class="modern-input"
-                placeholder="e.g. Excellence in all things"
-              />
-            </div>
-
-            <div class="form-group">
-              <label>Principal's Signature (Digital)</label>
-              <input
-                type="text"
-                id="school-signature-input"
-                class="modern-input"
-                placeholder="Full Name"
-              />
-            </div>
-
-            <div class="form-group" style="background: rgba(255,215,0,0.05); padding: 12px; border-radius: 8px; border: 1px dashed rgba(255,215,0,0.3);">
-              <label style="color: #FFD700;">⭐ Nexus Premium Plan</label>
-              <div style="display:flex; align-items:center; gap: 8px; margin-top: 6px;">
-                <input type="checkbox" id="premium-plan-toggle" style="width: 16px; height: 16px; accent-color: #FFD700;"/>
-                <span style="font-size:12px; color:#ccc;">Enable 'Digital Envelope' HTML Exports for WhatsApp</span>
-              </div>
-            </div>
-
-            <button id="save-identity-btn" class="primary-btn" style="margin-top: 16px;">
-              Save Identity Shard
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <footer>
-        <div class="eco-status">
-          <label>Energy Profile</label>
-          <div class="bar-container">
-            <div class="bar-fill" style="width: 15%"></div>
-          </div>
-          <span>Optimized</span>
-        </div>
-        <p class="crypto-hint">Ed25519 Secure Handshake Active</p>
-      </footer>
-    </main>
-
-    <!-- Soft-Lock Overlay -->
-    <div id="license-lock-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(10, 14, 46, 0.95); z-index: 99999; justify-content: center; align-items: center; backdrop-filter: blur(10px);">
-        <div style="text-align: center; max-width: 400px; padding: 32px; background: rgba(255,0,0,0.1); border: 1px solid rgba(255,0,0,0.3); border-radius: 16px;">
-            <div style="font-size: 48px; margin-bottom: 16px;">🔒</div>
-            <h2 style="color: #ff4444; margin-bottom: 16px;">License Locked</h2>
-            <p id="license-lock-message" style="color: #ccc; font-size: 14px; line-height: 1.5; margin-bottom: 24px;">
-                Your Nexus School OS license has expired or failed cryptographic verification.
-            </p>
-            <button class="primary-btn" style="background: transparent; border: 1px solid #ff4444; color: #ff4444;" onclick="window.close()">Close Application</button>
-        </div>
+    <!-- ═══ License Lock Overlay ══════════════════════════════════════════ -->
+    <div id="license-lock-overlay" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(10,14,46,0.97);z-index:99999;justify-content:center;align-items:center;backdrop-filter:blur(12px);">
+      <div style="text-align:center;max-width:400px;padding:36px;background:rgba(255,0,0,0.08);border:1px solid rgba(255,0,0,0.3);border-radius:18px;">
+        <div style="font-size:52px;margin-bottom:16px;">🔒</div>
+        <h2 style="color:#ff4444;margin-bottom:12px;">License Locked</h2>
+        <p id="license-lock-message" style="color:#ccc;font-size:13px;line-height:1.6;margin-bottom:24px;">Your Nexus School OS license has expired or failed cryptographic verification.</p>
+        <button class="primary-btn" style="background:transparent;border:1px solid #ff4444;color:#ff4444;box-shadow:none;" onclick="window.close()">Close Application</button>
+      </div>
     </div>
+
+    <!-- ═══ App Shell ══════════════════════════════════════════════════════ -->
+    <div class="app-shell" id="app-shell">
+
+      <!-- ── Sidebar ─────────────────────────────────────────────────────── -->
+      <nav class="sidebar" id="app-sidebar">
+
+        <!-- Titlebar strip: pure drag region for macOS traffic-light safe zone -->
+        <div class="sidebar-titlebar" id="sidebar-titlebar">
+          <!-- On macOS hiddenInset, native traffic lights sit here at x:14 y:16 -->
+          <!-- This div is just the reserved clear zone — no interactive children -->
+          <div class="traffic-light-space" id="traffic-light-space"></div>
+        </div>
+        <div class="sidebar-brand">
+          <div class="logo-placeholder" id="sidebar-logo">N</div>
+          <div class="brand-text">
+            <span class="brand-name" id="school-name">Nexus School</span>
+            <span class="brand-sub">Admin Dashboard</span>
+          </div>
+        </div>
+
+        <ul class="sidebar-nav">
+          <li class="nav-item active" data-view="dashboard" onclick="showView('dashboard')">
+            <span class="nav-icon">🏠</span>
+            <span class="nav-label">Dashboard</span>
+          </li>
+          <li class="nav-item" data-view="teachers" onclick="showView('teachers')">
+            <span class="nav-icon">👩‍🏫</span>
+            <span class="nav-label">Teachers</span>
+            <span class="nav-badge" id="badge-teachers">0</span>
+          </li>
+          <li class="nav-item" data-view="students" onclick="showView('students')">
+            <span class="nav-icon">👥</span>
+            <span class="nav-label">Students</span>
+            <span class="nav-badge" id="badge-students">0</span>
+          </li>
+          <li class="nav-item" data-view="sync" onclick="showView('sync')">
+            <span class="nav-icon">📲</span>
+            <span class="nav-label">Sync Hub</span>
+          </li>
+        </ul>
+
+        <div class="sidebar-footer-nav">
+          <li class="nav-item" data-view="settings" onclick="showView('settings')">
+            <span class="nav-icon">⚙️</span>
+            <span class="nav-label">Settings</span>
+          </li>
+          <li class="nav-item" data-view="about" onclick="showView('about')">
+            <span class="nav-icon">ℹ️</span>
+            <span class="nav-label">About</span>
+          </li>
+        </div>
+
+        <div class="sidebar-status" id="thermal-badge">
+          <span class="dot"></span> Hardware: COOL
+        </div>
+      </nav>
+
+      <!-- ── Main Content ────────────────────────────────────────────────── -->
+      <main class="main-content">
+
+        <!-- Custom titlebar: toggle | school name | drag | nav arrows | win controls -->
+        <div class="main-titlebar" id="main-titlebar">
+          <!-- Sidebar collapse toggle — in the titlebar, not the sidebar -->
+          <button class="sidebar-toggle-btn" id="sidebar-toggle-btn" onclick="toggleSidebar()" title="Toggle Sidebar">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <rect x="1" y="3"    width="14" height="1.5" rx="0.75"/>
+              <rect x="1" y="7.25" width="14" height="1.5" rx="0.75"/>
+              <rect x="1" y="11.5" width="14" height="1.5" rx="0.75"/>
+            </svg>
+          </button>
+          <!-- School identity name -->
+          <span class="titlebar-school-name" id="titlebar-school-name">Nexus School OS</span>
+          <!-- Drag region fills remaining space -->
+          <div class="titlebar-drag-region"></div>
+          <div class="titlebar-nav">
+            <button class="titlebar-nav-btn" id="btn-back"    onclick="historyBack()"    title="Go Back"    disabled>&#8592;</button>
+            <button class="titlebar-nav-btn" id="btn-forward" onclick="historyForward()" title="Go Forward" disabled>&#8594;</button>
+          </div>
+          <!-- Win/Linux custom window controls (hidden on macOS) -->
+          <div class="win-controls" id="win-controls" style="display:none;">
+            <button class="win-btn win-minimize" onclick="window.electronAPI.winMinimize()" title="Minimize">&#8722;</button>
+            <button class="win-btn win-maximize" onclick="window.electronAPI.winMaximize()" title="Maximize">&#9633;</button>
+            <button class="win-btn win-close"    onclick="window.electronAPI.winClose()"   title="Close">&#10005;</button>
+          </div>
+        </div>
+
+        <!-- ─────────────────── VIEW: DASHBOARD ─────────────────────────── -->
+        <div class="view active" id="view-dashboard">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">Command Center</h2>
+              <p class="view-sub">Real-time overview of your school vault.</p>
+            </div>
+            <div class="pulse-indicator" id="pulse-indicator">
+              <div class="pulse-dot"></div>
+              <span id="pulse-label">Ready for teacher sync…</span>
+            </div>
+          </div>
+
+          <div class="stats-row">
+            <div class="stat-card" onclick="showView('teachers')" style="cursor:pointer;" title="View Teachers">
+              <div class="stat-icon">👩‍🏫</div>
+              <div class="stat-value" id="dash-teachers-count">0</div>
+              <div class="stat-label">Teachers</div>
+            </div>
+            <div class="stat-card" onclick="showView('students')" style="cursor:pointer;" title="View Students">
+              <div class="stat-icon">👥</div>
+              <div class="stat-value" id="dash-students-count">0</div>
+              <div class="stat-label">Students</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon">📱</div>
+              <div class="stat-value" id="stat-devices-count">0</div>
+              <div class="stat-label">Devices Synced</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon">📊</div>
+              <div class="stat-value" id="stat-events-count">0</div>
+              <div class="stat-label">Grade Events</div>
+            </div>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-shrink:0;">
+            <h3 style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;">Live Grade Events</h3>
+            <button id="generate-pdf-btn" class="primary-btn" style="padding:8px 18px;font-size:12px;display:none;">📄 Generate Report Cards</button>
+          </div>
+          <div class="events-container" id="events-container"></div>
+        </div>
+
+        <!-- ─────────────────── VIEW: TEACHERS ──────────────────────────── -->
+        <div class="view" id="view-teachers">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">Teacher Directory</h2>
+              <p class="view-sub">Manage staff profiles and class-subject allocations.</p>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;">
+              <label for="csv-upload" class="primary-btn" style="background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.18);box-shadow:none;cursor:pointer;" title="Import school roster CSV">
+                ⚡ Import CSV
+              </label>
+              <button class="primary-btn" onclick="toggleAddTeacherForm()">＋ Add Teacher</button>
+            </div>
+          </div>
+
+          <!-- Add Teacher Drawer -->
+          <div id="add-teacher-drawer" style="display:none;background:rgba(0,229,255,0.04);border:1px solid rgba(0,229,255,0.15);border-radius:14px;padding:20px;margin-bottom:18px;flex-shrink:0;">
+            <h3 style="font-size:13px;font-weight:700;margin-bottom:14px;color:#00E5FF;">👩‍🏫 New Teacher Profile
+              <span style="font-size:11px;color:#555;font-weight:400;margin-left:8px;">ID auto-generated</span>
+            </h3>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px;">
+              <input id="wiz-tch-name"  class="modern-input" placeholder="Full Name *" />
+              <input id="wiz-tch-phone" class="modern-input" placeholder="Phone Number" />
+              <input id="wiz-tch-email" class="modern-input" placeholder="Email (optional)" />
+            </div>
+            <p style="font-size:11px;color:#00E5FF;margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Class Allocations *</p>
+            <div id="wiz-alloc-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
+            <div style="display:flex;gap:8px;margin-bottom:14px;">
+              <input id="wiz-alloc-class"    class="modern-input" placeholder="Class (e.g. JSS2)"       style="flex:1;" />
+              <input id="wiz-alloc-subjects" class="modern-input" placeholder="Subjects (Maths|English)" style="flex:2;" />
+              <button onclick="wizAddAllocation()" style="background:rgba(0,229,255,0.14);border:1px solid #00E5FF;color:#00E5FF;border-radius:8px;padding:0 14px;cursor:pointer;font-size:20px;flex-shrink:0;line-height:1;" title="Add class allocation">+</button>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;">
+              <button onclick="wizSaveTeacher()" class="primary-btn" style="padding:9px 22px;font-size:13px;">Save Teacher</button>
+              <button onclick="toggleAddTeacherForm()" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:13px;">Cancel</button>
+              <span id="wiz-tch-log" style="font-size:12px;margin-left:6px;"></span>
+            </div>
+          </div>
+
+          <!-- Teachers Data Table -->
+          <div class="table-container">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Name</th>
+                  <th>Phone</th>
+                  <th>Class Allocations</th>
+                  <th style="text-align:right;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="teachers-tbody">
+                <tr id="teachers-empty-row">
+                  <td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim);">
+                    No teachers yet. Click <strong>＋ Add Teacher</strong> or <strong>Import CSV</strong> to get started.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ─────────────────── VIEW: STUDENTS ──────────────────────────── -->
+        <div class="view" id="view-students">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">Student Directory</h2>
+              <p class="view-sub">View and manage all enrolled students.</p>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;">
+              <select id="student-class-filter" class="modern-input" style="min-width:140px;" onchange="renderStudentsTable()">
+                <option value="">All Classes</option>
+              </select>
+              <label for="csv-upload" class="primary-btn" style="background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.18);box-shadow:none;cursor:pointer;" title="Import school roster CSV">
+                ⚡ Import CSV
+              </label>
+              <button class="primary-btn" onclick="toggleAddStudentForm()">＋ Add Student</button>
+            </div>
+          </div>
+
+          <!-- Add Student Drawer -->
+          <div id="add-student-drawer" style="display:none;background:rgba(255,215,0,0.04);border:1px solid rgba(255,215,0,0.15);border-radius:14px;padding:20px;margin-bottom:18px;flex-shrink:0;">
+            <h3 style="font-size:13px;font-weight:700;margin-bottom:14px;color:#FFD700;">👥 New Student
+              <span style="font-size:11px;color:#555;font-weight:400;margin-left:8px;">ID auto-generated</span>
+            </h3>
+            <div style="display:flex;gap:10px;margin-bottom:14px;">
+              <input id="stu-add-name"  class="modern-input" placeholder="Full Name *"          style="flex:2;" />
+              <input id="stu-add-class" class="modern-input" placeholder="Class (e.g. JSS1) *"  style="flex:1;" />
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;">
+              <button onclick="addStudentFromDirectory()" class="primary-btn" style="padding:9px 22px;font-size:13px;background:linear-gradient(135deg,#b8860b,#FFD700);color:#000;box-shadow:none;">Save Student</button>
+              <button onclick="toggleAddStudentForm()" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:13px;">Cancel</button>
+              <span id="stu-add-log" style="font-size:12px;margin-left:6px;"></span>
+            </div>
+          </div>
+
+          <!-- Students Data Table -->
+          <div class="table-container">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>ID</th>
+                  <th>Full Name</th>
+                  <th>Class</th>
+                  <th style="text-align:right;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="students-tbody">
+                <tr>
+                  <td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim);">
+                    No students loaded. Import a CSV or add manually.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ─────────────────── VIEW: SYNC HUB ──────────────────────────── -->
+        <div class="view" id="view-sync">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">Sync Hub</h2>
+              <p class="view-sub">Select a teacher, then scan the QR with the Nexus tablet app.</p>
+            </div>
+            <span id="upload-status-tooltip" style="font-size:13px;color:#4CAF50;"></span>
+          </div>
+
+          <div class="sync-layout">
+            <!-- QR Panel -->
+            <div class="sync-qr-panel">
+              <div class="qr-wrapper">
+                <div id="qr-skeleton" style="width:264px;height:264px;border-radius:16px;background:rgba(255,255,255,0.04);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;border:1px dashed rgba(255,255,255,0.1);">
+                  <div style="font-size:40px;opacity:0.3;">⬛</div>
+                  <span style="font-size:12px;color:#444;">Select a teacher to generate QR</span>
+                </div>
+                <div id="qr-code" style="background:white;padding:12px;border-radius:16px;display:none;"></div>
+                <div class="qr-ring"></div>
+                <div class="qr-ring-outer"></div>
+              </div>
+            </div>
+
+            <!-- Controls Panel -->
+            <div class="sync-controls-panel">
+              <div style="margin-bottom:20px;">
+                <label style="font-size:11px;color:var(--text-dim);margin-bottom:8px;display:block;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Select Teacher</label>
+                <select id="teacher-picker" class="modern-input" style="font-size:14px;">
+                  <option value="" disabled selected>Select teacher to generate QR…</option>
+                </select>
+              </div>
+              <div style="margin-bottom:20px;">
+                <label style="font-size:11px;color:var(--text-dim);margin-bottom:8px;display:block;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Server Address</label>
+                <div style="display:flex;align-items:center;gap:6px;background:rgba(0,0,0,0.2);border:1px solid var(--glass-border);border-radius:8px;padding:10px 14px;">
+                  <code id="server-ip">0.0.0.0</code>
+                  <span style="color:var(--text-dim);">:</span>
+                  <code id="server-port">3000</code>
+                </div>
+              </div>
+              <button id="copy-payload-btn" class="primary-btn" style="width:100%;background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.18);box-shadow:none;justify-content:center;">
+                <span id="copy-btn-text">Copy Manual Sync Code</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─────────────────── VIEW: SETTINGS ──────────────────────────── -->
+        <div class="view" id="view-settings">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">School Identity Forge</h2>
+              <p class="view-sub">Customize your school's branding and report card metadata.</p>
+            </div>
+            <button id="reset-btn" style="background:transparent;border:1px solid #ff4444;color:#ff4444;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;">🗑 Reset All Data</button>
+          </div>
+
+          <div class="settings-content">
+            <div class="settings-column">
+              <h3>Visual Identity</h3>
+              <div class="form-group">
+                <label>School Crest (Logo)</label>
+                <div class="logo-uploader" id="logo-dropzone">
+                  <div class="uploader-content" id="uploader-content">
+                    <span class="upload-icon">﹢</span>
+                    <p>Drag &amp; Drop PNG/JPEG</p>
+                    <span class="upload-hint">or click to browse</span>
+                  </div>
+                  <img id="logo-preview" src="" alt="Logo Preview" style="display:none;" />
+                  <input type="file" id="logo-upload" accept="image/png, image/jpeg" style="display:none;" />
+                </div>
+              </div>
+              <div class="color-pickers-group">
+                <div class="form-group">
+                  <label>Primary Theme</label>
+                  <div class="color-picker-wrapper">
+                    <input type="color" id="theme-primary" value="#1A237E" />
+                    <span class="color-hex" id="primary-hex">#1A237E</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Accent Color</label>
+                  <div class="color-picker-wrapper">
+                    <input type="color" id="theme-secondary" value="#00E5FF" />
+                    <span class="color-hex" id="secondary-hex">#00E5FF</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-column">
+              <h3>School Metadata</h3>
+              <div class="form-group">
+                <label>School Name</label>
+                <input type="text" id="school-name-input" class="modern-input" placeholder="e.g. Nexus Academy" />
+              </div>
+              <div class="form-group">
+                <label>School Address</label>
+                <input type="text" id="school-address-input" class="modern-input" placeholder="e.g. 123 Education Way" />
+              </div>
+              <div class="form-group">
+                <label>Motto</label>
+                <input type="text" id="school-motto-input" class="modern-input" placeholder="e.g. Excellence in all things" />
+              </div>
+              <div class="form-group">
+                <label>Principal's Name (Digital Signature)</label>
+                <input type="text" id="school-signature-input" class="modern-input" placeholder="Full Name" />
+              </div>
+              <div class="form-group" style="background:rgba(255,215,0,0.05);padding:12px;border-radius:8px;border:1px dashed rgba(255,215,0,0.3);">
+                <label style="color:#FFD700;">⭐ Nexus Premium Plan</label>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+                  <input type="checkbox" id="premium-plan-toggle" style="width:16px;height:16px;accent-color:#FFD700;" />
+                  <span style="font-size:12px;color:#ccc;">Enable 'Digital Envelope' HTML Exports for WhatsApp</span>
+                </div>
+              </div>
+              <button id="save-identity-btn" class="primary-btn" style="margin-top:auto;">Save Identity Shard</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─────────────────── VIEW: ABOUT ─────────────────────────────── -->
+        <div class="view" id="view-about">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">About Nexus School OS</h2>
+              <p class="view-sub">Application information, license and upgrade options.</p>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px;">
+            <div style="background:var(--glass);border:1px solid var(--glass-border);border-radius:16px;padding:24px;">
+              <div style="font-size:44px;margin-bottom:14px;">🏫</div>
+              <h3 style="font-size:17px;margin-bottom:8px;">Nexus School OS</h3>
+              <p style="color:var(--text-dim);font-size:12px;line-height:1.7;margin-bottom:16px;">A secure, offline-first school management system with Ed25519 cryptographic QR handshake and Android tablet integration for grade collection.</p>
+              <div style="font-size:12px;color:#666;font-family:monospace;display:flex;flex-direction:column;gap:5px;">
+                <div>Version: <span style="color:var(--accent);">1.0.0</span></div>
+                <div>Engine: <span style="color:var(--accent);">Electron + SQLite (better-sqlite3)</span></div>
+                <div>Protocol: <span style="color:var(--accent);">Ed25519 Secure Handshake</span></div>
+              </div>
+            </div>
+
+            <div style="background:rgba(255,215,0,0.05);border:1px solid rgba(255,215,0,0.2);border-radius:16px;padding:24px;display:flex;flex-direction:column;">
+              <div style="font-size:44px;margin-bottom:14px;">⭐</div>
+              <h3 style="font-size:17px;margin-bottom:8px;color:#FFD700;">Current Plan</h3>
+              <div id="about-plan-info" style="color:var(--text-dim);font-size:12px;line-height:1.7;flex:1;">Loading plan info…</div>
+              <button onclick="showView('settings')" class="primary-btn" style="margin-top:16px;background:linear-gradient(135deg,#b8860b,#FFD700);color:#000;box-shadow:none;justify-content:center;">⚙️ Manage Plan</button>
+            </div>
+          </div>
+
+          <div style="background:var(--glass);border:1px solid var(--glass-border);border-radius:16px;padding:22px;">
+            <h3 style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:14px;">Security &amp; Architecture</h3>
+            <div style="display:flex;gap:24px;flex-wrap:wrap;">
+              <div style="font-size:12px;color:#4CAF50;">✅ Ed25519 Signature Active</div>
+              <div style="font-size:12px;color:#4CAF50;">✅ Local-Only Network (No Internet Required)</div>
+              <div style="font-size:12px;color:#4CAF50;">✅ SQLite Encrypted Vault</div>
+              <div style="font-size:12px;color:#4CAF50;">✅ Biometric Lock on Android Tablet</div>
+              <div style="font-size:12px;color:#4CAF50;">✅ Admin-Dictated Device Identity</div>
+            </div>
+          </div>
+        </div>
+
+      </main>
+    </div><!-- end .app-shell -->
 
     <script src="libs/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script>
-      const statusBadge = document.getElementById("thermal-badge");
-      const schoolName = document.getElementById("school-name");
-      const barFill = document.querySelector(".bar-fill");
-      let cachedPayload = null;
+    'use strict';
 
-      function renderQR(payload) {
-        const qrContainer = document.getElementById("qr-code");
-        if (!qrContainer || typeof QRCode === "undefined") {
-          console.warn("QRCode library not ready yet, caching payload.");
-          cachedPayload = payload;
-          return;
-        }
+    // ══════════════════════════════════════════════════════════════════════════
+    // State
+    // ══════════════════════════════════════════════════════════════════════════
+    let cachedPayload    = null;
+    let _wizAllocations  = [];       // staged allocations in teacher form
+    let _allTeachers     = [];       // live teacher cache
+    let _allStudents     = [];       // live student cache
+    let devicesMarried   = 0;
+    let totalGradeEvents = 0;
+    const allGradeEvents = [];
 
-        console.log("Rendering QR for payload:", payload);
-        qrContainer.innerHTML = "";
+    // ══════════════════════════════════════════════════════════════════════════
+    // Sidebar Collapse / Expand
+    // ══════════════════════════════════════════════════════════════════════════
+    let _sidebarCollapsed = false;
 
-        // Critical fix: Remove logo base64 from QR string to prevent capacity overflow
-        const qrData = JSON.parse(JSON.stringify(payload));
-        if (qrData.config && qrData.config.logoBase64) {
-          qrData.config.logoBase64 = null;
-        }
+    function toggleSidebar() {
+      _sidebarCollapsed = !_sidebarCollapsed;
+      const shell   = document.getElementById('app-shell');
+      const sidebar = document.getElementById('app-sidebar');
+      if (_sidebarCollapsed) {
+        shell.classList.add('sidebar-collapsed');
+        sidebar.classList.add('collapsed');
+        // Flip the icon to a right-pointing chevron
+        document.getElementById('sidebar-toggle-btn').innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.8"
+                  fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>`;
+      } else {
+        shell.classList.remove('sidebar-collapsed');
+        sidebar.classList.remove('collapsed');
+        document.getElementById('sidebar-toggle-btn').innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <rect x="1" y="3"    width="14" height="1.5" rx="0.75"/>
+            <rect x="1" y="7.25" width="14" height="1.5" rx="0.75"/>
+            <rect x="1" y="11.5" width="14" height="1.5" rx="0.75"/>
+          </svg>`;
+      }
+    }
 
-        new QRCode(qrContainer, {
-          text: JSON.stringify(qrData),
-          width: 240,
-          height: 240,
-          colorDark: "#000000",
-          colorLight: "#FFFFFF",
-          correctLevel: QRCode.CorrectLevel.H,
-        });
+    // ══════════════════════════════════════════════════════════════════════════
+    // Back / Forward History
+    // ══════════════════════════════════════════════════════════════════════════
+    const _viewHistory = [];
+    let   _historyIdx  = -1;
 
-        // Also ensure IP/Port are visible on the Discover Card
-        document.getElementById("server-ip").textContent =
-          payload.ip || "0.0.0.0";
-        document.getElementById("server-port").textContent =
-          payload.port || "3000";
+    function _historyPush(viewId) {
+      // Truncate forward stack on new navigation
+      if (_historyIdx < _viewHistory.length - 1) {
+        _viewHistory.splice(_historyIdx + 1);
+      }
+      _viewHistory.push(viewId);
+      _historyIdx = _viewHistory.length - 1;
+      _updateHistoryBtns();
+    }
 
-        if (payload.config) {
-          applyIdentityToUI(payload.config);
-        }
+    function _updateHistoryBtns() {
+      const back    = document.getElementById('btn-back');
+      const forward = document.getElementById('btn-forward');
+      if (back)    back.disabled    = _historyIdx <= 0;
+      if (forward) forward.disabled = _historyIdx >= _viewHistory.length - 1;
+    }
 
-        // Bind raw payload copy
-        const copyBtn = document.getElementById("copy-payload-btn");
-        if (copyBtn) {
-            copyBtn.onclick = () => {
-                navigator.clipboard.writeText(JSON.stringify(qrData));
-                const textSpan = document.getElementById("copy-btn-text");
-                textSpan.textContent = "Copied!";
-                setTimeout(() => { textSpan.textContent = "Copy Manual Sync Code"; }, 2000);
-            };
-        }
+    function historyBack() {
+      if (_historyIdx <= 0) return;
+      _historyIdx--;
+      _navToView(_viewHistory[_historyIdx]);
+      _updateHistoryBtns();
+    }
+
+    function historyForward() {
+      if (_historyIdx >= _viewHistory.length - 1) return;
+      _historyIdx++;
+      _navToView(_viewHistory[_historyIdx]);
+      _updateHistoryBtns();
+    }
+
+    // Internal: navigate without pushing to history
+    function _navToView(viewId) {
+      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
+      const navEl  = document.querySelector(`.nav-item[data-view="${viewId}"]`);
+      const viewEl = document.getElementById(`view-${viewId}`);
+      if (navEl)  navEl.classList.add('active');
+      if (viewEl) viewEl.classList.add('active');
+      if (viewId === 'teachers') refreshTeachersTable();
+      if (viewId === 'students') refreshStudentsTable();
+      if (viewId === 'sync')     loadTeacherDropdown();
+      if (viewId === 'settings') hydrateSettingsForm();
+      if (viewId === 'about')    hydrateAboutView();
+      if (viewId === 'dashboard') refreshDashboardStats();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Sidebar Navigation (public — pushes to history)
+    // ══════════════════════════════════════════════════════════════════════════
+    function showView(viewId) {
+      // Deactivate all nav items
+      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+      // Deactivate all views
+      document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
+
+      // Activate target nav item
+      const navEl = document.querySelector(`.nav-item[data-view="${viewId}"]`);
+      if (navEl) navEl.classList.add('active');
+
+      // Activate target view
+      const viewEl = document.getElementById(`view-${viewId}`);
+      if (viewEl) viewEl.classList.add('active');
+
+      // On-enter side effects
+      if (viewId === 'teachers') refreshTeachersTable();
+      if (viewId === 'students') refreshStudentsTable();
+      if (viewId === 'sync')     loadTeacherDropdown();
+      if (viewId === 'settings') hydrateSettingsForm();
+      if (viewId === 'about')    hydrateAboutView();
+      if (viewId === 'dashboard') refreshDashboardStats();
+      _historyPush(viewId);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // QR Code Renderer
+    // ══════════════════════════════════════════════════════════════════════════
+    function renderQR(payload) {
+      const qrContainer = document.getElementById('qr-code');
+      const skeleton    = document.getElementById('qr-skeleton');
+      if (!qrContainer || typeof QRCode === 'undefined') {
+        cachedPayload = payload; return;
+      }
+      if (!payload.teacher_id) {
+        cachedPayload = payload; return;
       }
 
-      if (window.electronAPI) {
-        
-        // 0. License Checker
-        if (window.electronAPI.onLicenseStatus) {
-            window.electronAPI.onLicenseStatus((status) => {
-                if (status && status.locked) {
-                    document.getElementById('license-lock-overlay').style.display = 'flex';
-                    if (status.message) {
-                        document.getElementById('license-lock-message').textContent = status.message;
-                    }
-                }
-            });
+      qrContainer.innerHTML = '';
+      const qrData = JSON.parse(JSON.stringify(payload));
+      if (qrData.config && qrData.config.logoBase64) qrData.config.logoBase64 = null;
+
+      new QRCode(qrContainer, {
+        text: JSON.stringify(qrData),
+        width: 240, height: 240,
+        colorDark: '#000000', colorLight: '#FFFFFF',
+        correctLevel: QRCode.CorrectLevel.H,
+      });
+
+      if (skeleton)     skeleton.style.display     = 'none';
+      qrContainer.style.display = 'block';
+
+      const ipEl   = document.getElementById('server-ip');
+      const portEl = document.getElementById('server-port');
+      if (ipEl)   ipEl.textContent   = payload.ip   || '0.0.0.0';
+      if (portEl) portEl.textContent = payload.port || '3000';
+
+      if (payload.config) applyIdentityToUI(payload.config);
+
+      const copyBtn = document.getElementById('copy-payload-btn');
+      if (copyBtn) {
+        copyBtn.onclick = () => {
+          navigator.clipboard.writeText(JSON.stringify(qrData));
+          const span = document.getElementById('copy-btn-text');
+          span.textContent = 'Copied!';
+          setTimeout(() => { span.textContent = 'Copy Manual Sync Code'; }, 2000);
+        };
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Teacher Dropdown (Sync Hub)
+    // ══════════════════════════════════════════════════════════════════════════
+    async function loadTeacherDropdown() {
+      if (!window.electronAPI?.getTeachers) return;
+      const teachers = await window.electronAPI.getTeachers();
+      const picker = document.getElementById('teacher-picker');
+      picker.innerHTML = '<option value="" disabled selected>Select teacher to generate QR…</option>';
+
+      if (teachers && teachers.length > 0) {
+        teachers.forEach(t => {
+          const opt = document.createElement('option');
+          opt.value = t.id;
+          opt.textContent = t.name;
+          opt.dataset.name = t.name;
+          picker.appendChild(opt);
+        });
+      }
+    }
+
+    document.getElementById('teacher-picker').addEventListener('change', async (e) => {
+      const sel = e.target.options[e.target.selectedIndex];
+      if (sel.value && window.electronAPI?.setTeacher) {
+        // Reset QR skeleton while waiting for new payload
+        document.getElementById('qr-code').style.display = 'none';
+        document.getElementById('qr-skeleton').style.display = 'flex';
+        await window.electronAPI.setTeacher({ id: sel.value, name: sel.dataset.name });
+      }
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Teachers Directory
+    // ══════════════════════════════════════════════════════════════════════════
+    function toggleAddTeacherForm() {
+      const drawer = document.getElementById('add-teacher-drawer');
+      drawer.style.display = drawer.style.display === 'none' ? 'block' : 'none';
+      if (drawer.style.display === 'block') {
+        _wizAllocations = [];
+        renderAllocations();
+        ['wiz-tch-name','wiz-tch-phone','wiz-tch-email'].forEach(id => {
+          const el = document.getElementById(id); if (el) el.value = '';
+        });
+        document.getElementById('wiz-tch-log').textContent = '';
+      }
+    }
+
+    function wizAddAllocation() {
+      const classInp = document.getElementById('wiz-alloc-class');
+      const subjInp  = document.getElementById('wiz-alloc-subjects');
+      const class_name = classInp.value.trim();
+      const subjects   = subjInp.value.trim().split('|').map(s => s.trim()).filter(Boolean);
+
+      if (!class_name)       { alert('Please enter a class name.'); return; }
+      if (!subjects.length)  { alert('Please enter at least one subject.'); return; }
+      if (_wizAllocations.find(a => a.class_name.toLowerCase() === class_name.toLowerCase())) {
+        alert(`Allocation for ${class_name} already added. Remove it first.`); return;
+      }
+
+      _wizAllocations.push({ class_name, subjects });
+      renderAllocations();
+      classInp.value = '';
+      subjInp.value  = '';
+    }
+
+    function renderAllocations() {
+      const list = document.getElementById('wiz-alloc-list');
+      list.innerHTML = '';
+      _wizAllocations.forEach((alloc, idx) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;background:rgba(0,229,255,0.07);border:1px solid rgba(0,229,255,0.18);border-radius:7px;padding:6px 10px;font-size:12px;';
+        row.innerHTML = `
+          <span style="color:#00E5FF;font-weight:600;">${alloc.class_name}</span>
+          <span style="color:#555;">—</span>
+          <span style="color:#ccc;flex:1;">${alloc.subjects.join(', ')}</span>
+          <button onclick="wizRemoveAllocation(${idx})" style="background:none;border:none;color:#ff6666;cursor:pointer;font-size:15px;padding:0;line-height:1;" title="Remove">×</button>
+        `;
+        list.appendChild(row);
+      });
+    }
+
+    function wizRemoveAllocation(idx) {
+      _wizAllocations.splice(idx, 1);
+      renderAllocations();
+    }
+
+    async function wizSaveTeacher() {
+      const name  = document.getElementById('wiz-tch-name').value.trim();
+      const phone = document.getElementById('wiz-tch-phone').value.trim();
+      const email = document.getElementById('wiz-tch-email').value.trim();
+      const log   = document.getElementById('wiz-tch-log');
+
+      if (!name)                  { log.style.color='#ff4444'; log.textContent='⚠ Full Name is required.'; return; }
+      if (!_wizAllocations.length){ log.style.color='#ff4444'; log.textContent='⚠ Add at least one class allocation.'; return; }
+
+      const id = 'TCH-' + crypto.randomUUID().split('-')[0].toUpperCase();
+      const res = await window.electronAPI.addTeacherForm({ id, name, phone, email, allocations: _wizAllocations });
+
+      if (res.ok) {
+        log.style.color = '#4CAF50';
+        log.textContent = `✅ ${name} saved! (${id})`;
+        ['wiz-tch-name','wiz-tch-phone','wiz-tch-email'].forEach(f => { document.getElementById(f).value = ''; });
+        _wizAllocations = [];
+        renderAllocations();
+        await refreshTeachersTable();
+        setTimeout(() => toggleAddTeacherForm(), 1400);
+      } else {
+        log.style.color = '#ff4444';
+        log.textContent = `❌ ${res.error}`;
+      }
+    }
+
+    async function refreshTeachersTable() {
+      if (!window.electronAPI?.getAllTeachers) return;
+      _allTeachers = await window.electronAPI.getAllTeachers();
+      const tbody  = document.getElementById('teachers-tbody');
+      tbody.innerHTML = '';
+
+      // Update badge
+      const badge = document.getElementById('badge-teachers');
+      if (badge) badge.textContent = _allTeachers.length;
+      const dashCount = document.getElementById('dash-teachers-count');
+      if (dashCount) dashCount.textContent = _allTeachers.length;
+
+      if (!_allTeachers.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim);">No teachers yet. Click <strong>＋ Add Teacher</strong> or <strong>Import CSV</strong>.</td></tr>';
+        return;
+      }
+
+      _allTeachers.forEach(t => {
+        const row = document.createElement('tr');
+
+        // Build allocation tags grouped by class
+        const classMap = {};
+        (t.allocations || []).forEach(a => {
+          if (!classMap[a.class_name]) classMap[a.class_name] = [];
+          classMap[a.class_name].push(a.subject);
+        });
+        const allocHTML = Object.entries(classMap).map(([cls, subjs]) =>
+          `<span class="alloc-tag"><span class="tag-class">${cls}</span><span class="tag-subj">· ${subjs.join(', ')}</span></span>`
+        ).join('') || '<span style="color:#444;font-size:11px;">No allocations</span>';
+
+        row.innerHTML = `
+          <td style="font-family:monospace;font-size:11px;color:var(--text-dim);">${t.id}</td>
+          <td style="font-weight:600;">${t.name}</td>
+          <td style="color:var(--text-dim);">${t.phone || '—'}</td>
+          <td><div style="display:flex;flex-wrap:wrap;gap:2px;">${allocHTML}</div></td>
+          <td style="text-align:right;">
+            <button class="tbl-action-btn" onclick="deleteTeacher('${t.id}', '${t.name.replace(/'/g,' ')}')">🗑 Remove</button>
+          </td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    async function deleteTeacher(id, name) {
+      const { isConfirmed } = await Swal.fire({
+        title: `Remove ${name}?`,
+        text: 'This will delete the teacher and all their class allocations. Grade records are unaffected.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ff4444',
+        confirmButtonText: 'Yes, remove',
+        background: '#0A0E2E', color: '#fff', backdrop: false,
+      });
+      if (isConfirmed && window.electronAPI?.deleteTeacher) {
+        await window.electronAPI.deleteTeacher({ id });
+        await refreshTeachersTable();
+        await loadTeacherDropdown();
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Students Directory
+    // ══════════════════════════════════════════════════════════════════════════
+    function toggleAddStudentForm() {
+      const drawer = document.getElementById('add-student-drawer');
+      drawer.style.display = drawer.style.display === 'none' ? 'block' : 'none';
+      if (drawer.style.display === 'block') {
+        ['stu-add-name','stu-add-class'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+        document.getElementById('stu-add-log').textContent = '';
+      }
+    }
+
+    async function addStudentFromDirectory() {
+      const name       = document.getElementById('stu-add-name').value.trim();
+      const class_name = document.getElementById('stu-add-class').value.trim();
+      const log        = document.getElementById('stu-add-log');
+
+      if (!name || !class_name) { log.style.color='#ff4444'; log.textContent='⚠ Name and Class are required.'; return; }
+
+      const id  = 'STU-' + crypto.randomUUID().split('-')[0].toUpperCase();
+      const res = await window.electronAPI.addStudentForm({ id, name, class_name });
+
+      if (res.ok) {
+        log.style.color = '#4CAF50';
+        log.textContent = `✅ ${name} added (${id}).`;
+        ['stu-add-name','stu-add-class'].forEach(f => { document.getElementById(f).value=''; });
+        await refreshStudentsTable();
+        setTimeout(() => toggleAddStudentForm(), 1400);
+      } else {
+        log.style.color = '#ff4444';
+        log.textContent = `❌ ${res.error}`;
+      }
+    }
+
+    async function refreshStudentsTable() {
+      if (!window.electronAPI?.getAllStudents) return;
+      _allStudents = await window.electronAPI.getAllStudents();
+
+      // Update badge
+      const badge = document.getElementById('badge-students');
+      if (badge) badge.textContent = _allStudents.length;
+      const dashCount = document.getElementById('dash-students-count');
+      if (dashCount) dashCount.textContent = _allStudents.length;
+
+      // Rebuild class filter dropdown
+      const filter = document.getElementById('student-class-filter');
+      const currentFilter = filter.value;
+      const classes = [...new Set(_allStudents.map(s => s.class_name))].sort();
+      filter.innerHTML = '<option value="">All Classes</option>';
+      classes.forEach(cls => {
+        const opt = document.createElement('option');
+        opt.value = cls; opt.textContent = cls;
+        filter.appendChild(opt);
+      });
+      filter.value = currentFilter;
+
+      renderStudentsTable();
+    }
+
+    function renderStudentsTable() {
+      const filter = document.getElementById('student-class-filter').value;
+      const tbody  = document.getElementById('students-tbody');
+      tbody.innerHTML = '';
+
+      const filtered = filter ? _allStudents.filter(s => s.class_name === filter) : _allStudents;
+
+      if (!filtered.length) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim);">${_allStudents.length ? 'No students in this class.' : 'No students loaded. Import a CSV or add manually.'}</td></tr>`;
+        return;
+      }
+
+      filtered.forEach((s, idx) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td style="color:var(--text-dim);font-size:12px;">${idx + 1}</td>
+          <td style="font-family:monospace;font-size:11px;color:var(--text-dim);">${s.id}</td>
+          <td style="font-weight:600;">${s.name}</td>
+          <td><span style="background:rgba(0,229,255,0.08);border:1px solid rgba(0,229,255,0.15);padding:2px 10px;border-radius:5px;font-size:11px;color:var(--accent);">${s.class_name}</span></td>
+          <td style="text-align:right;">
+            <button class="tbl-action-btn" onclick="deleteStudent('${s.id}', '${s.name.replace(/'/g,' ')}')">🗑 Remove</button>
+          </td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    async function deleteStudent(id, name) {
+      const { isConfirmed } = await Swal.fire({
+        title: `Remove ${name}?`,
+        text: 'This will delete the student record from this device.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ff4444',
+        confirmButtonText: 'Yes, remove',
+        background: '#0A0E2E', color: '#fff', backdrop: false,
+      });
+      if (isConfirmed && window.electronAPI?.deleteStudent) {
+        await window.electronAPI.deleteStudent({ id });
+        await refreshStudentsTable();
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Dashboard Stats
+    // ══════════════════════════════════════════════════════════════════════════
+    async function refreshDashboardStats() {
+      if (!window.electronAPI?.getDbStats) return;
+      const stats = await window.electronAPI.getDbStats();
+      const tc = document.getElementById('dash-teachers-count');
+      const sc = document.getElementById('dash-students-count');
+      const bt = document.getElementById('badge-teachers');
+      const bs = document.getElementById('badge-students');
+      if (tc) tc.textContent = stats.teachers;
+      if (sc) sc.textContent = stats.students;
+      if (bt) bt.textContent = stats.teachers;
+      if (bs) bs.textContent = stats.students;
+    }
+
+    // CSV download shortcut
+    function downloadSampleCSV() {
+      const csv = `Student_ID,First_Name,Last_Name,Class,Teacher_ID,Teacher_Name,Teacher_Phone,Subjects\nA-001,Obi,Ndidi,JSS1,TCH-001,Mr. Example,08012345678,Mathematics|English\n`;
+      const a = Object.assign(document.createElement('a'), {
+        href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })),
+        download: 'nexus_sample_roster.csv',
+      });
+      a.click();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Settings Form
+    // ══════════════════════════════════════════════════════════════════════════
+    let currentLogoBase64 = null;
+
+    async function hydrateSettingsForm() {
+      if (!window.electronAPI?.getIdentity) return;
+      const identity = await window.electronAPI.getIdentity();
+      if (!identity) return;
+      document.getElementById('school-name-input').value     = identity.name      || '';
+      document.getElementById('school-address-input').value  = identity.address   || '';
+      document.getElementById('school-motto-input').value    = identity.motto     || '';
+      document.getElementById('school-signature-input').value= identity.signature || '';
+      document.getElementById('premium-plan-toggle').checked = !!identity.premiumPlan;
+      const tp = document.getElementById('theme-primary');
+      const ts = document.getElementById('theme-secondary');
+      tp.value = identity.themePrimary   || '#1A237E';
+      ts.value = identity.themeSecondary || '#00E5FF';
+      document.getElementById('primary-hex').textContent   = tp.value.toUpperCase();
+      document.getElementById('secondary-hex').textContent = ts.value.toUpperCase();
+      if (identity.logoBase64) {
+        currentLogoBase64 = identity.logoBase64;
+        const prev = document.getElementById('logo-preview');
+        prev.src = identity.logoBase64; prev.style.display = 'block';
+        document.getElementById('uploader-content').style.display = 'none';
+      }
+    }
+
+    async function hydrateAboutView() {
+      const planEl = document.getElementById('about-plan-info');
+      if (!window.electronAPI?.getIdentity) { planEl.textContent = 'Could not load plan info.'; return; }
+      const identity = await window.electronAPI.getIdentity();
+      if (identity?.premiumPlan) {
+        planEl.innerHTML = `<strong style="color:#FFD700;">⭐ Nexus Premium</strong><br><span style="font-size:12px;color:var(--text-dim);">Digital Envelope (WhatsApp HTML) exports enabled.</span>`;
+      } else {
+        planEl.innerHTML = `<strong>Nexus Standard</strong><br><span style="font-size:12px;color:var(--text-dim);">Upgrade to Premium to unlock Digital Envelope WhatsApp exports and priority support.</span>`;
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Identity / Branding
+    // ══════════════════════════════════════════════════════════════════════════
+    function applyIdentityToUI(identity) {
+      if (!identity) return;
+      const sn = document.getElementById('school-name');
+      if (sn) sn.textContent = identity.name || 'Nexus School';
+      const tsn = document.getElementById('titlebar-school-name');
+      if (tsn) tsn.textContent = identity.name || 'Nexus School OS';
+
+
+      document.documentElement.style.setProperty('--primary', identity.themePrimary   || '#1A237E');
+      document.documentElement.style.setProperty('--accent',  identity.themeSecondary || '#00E5FF');
+
+      const hex = identity.themePrimary || '#1A237E';
+      let r=26, g=35, b=126;
+      if (/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)) {
+        let c = hex.substring(1).split('');
+        if (c.length === 3) c = [c[0],c[0],c[1],c[1],c[2],c[2]];
+        c = '0x' + c.join('');
+        r=(c>>16)&255; g=(c>>8)&255; b=c&255;
+      }
+      const glow = document.querySelector('.background-glow');
+      if (glow) glow.style.background = `radial-gradient(ellipse at 20% 50%, rgba(${r},${g},${b},0.35) 0%, transparent 60%)`;
+
+      const logo = document.getElementById('sidebar-logo');
+      if (logo) {
+        if (identity.logoBase64) {
+          logo.innerHTML = `<img src="${identity.logoBase64}" style="width:100%;height:100%;object-fit:contain;border-radius:10px;">`;
+        } else {
+          logo.innerHTML = identity.name ? identity.name.charAt(0).toUpperCase() : 'N';
         }
+      }
+    }
 
-        // 1. Initial QR Payload
-        window.electronAPI.onQrPayload((payload) => {
-          renderQR(payload);
-        });
+    // ══════════════════════════════════════════════════════════════════════════
+    // Boot sequence (runs when electronAPI is available)
+    // ══════════════════════════════════════════════════════════════════════════
+    if (window.electronAPI) {
 
-        // 2. Handshake Successful Event
-        let devicesMarried = 0;
-        window.electronAPI.onHandshakeComplete((data) => {
-          console.log("Handshake successful:", data);
-          devicesMarried++;
-
-          // Update thermal badge
-          statusBadge.innerHTML = `<span class="dot"></span> Hardware: ${data.thermal_status || "OPTIMIZED"}`;
-          statusBadge.style.background = "rgba(76, 175, 80, 0.2)";
-          statusBadge.style.color = "#4CAF50";
-
-          schoolName.textContent = `Nexus: ${data.teacher_name}`;
-
-          // Update stats
-          const devicesEl = document.getElementById("stat-devices-count");
-          if (devicesEl) devicesEl.textContent = devicesMarried;
-          const pulseLabel = document.getElementById("pulse-label");
-          if (pulseLabel)
-            pulseLabel.textContent = `📱 ${data.teacher_name} is now married to this hub.`;
-
-          // Transition to Dashboard
-          document.getElementById("handshake-section").style.display = "none";
-          document.getElementById("dashboard-section").style.display = "flex";
-          document.getElementById("settings-section").style.display = "none";
-        });
-
-        // 3. Sync Events (The Pulse)
-        let totalEvents = 0;
-        window.electronAPI.onSyncUpdate((payload) => {
-          // Backward compatibility check for raw arrays from old workflows
-          const events = Array.isArray(payload) ? payload : (payload.events || []);
-          const teacherName = payload.teacher_name || "A Teacher";
-          const syncCount = payload.count || events.length || 0;
-          
-          console.log("Sync payload received:", payload);
-          const container = document.getElementById("events-container");
-          totalEvents += syncCount;
-          
-          const eventsCountEl = document.getElementById("stat-events-count");
-          if (eventsCountEl) eventsCountEl.textContent = totalEvents;
-
-          const pulseInd = document.querySelector(".pulse-indicator");
-          if (pulseInd) {
-            pulseInd.classList.add("active-sync");
-            setTimeout(() => pulseInd.classList.remove("active-sync"), 3000);
-          }
-
-          const pulseLabel = document.getElementById("pulse-label");
-          if (pulseLabel) {
-            if (payload && !Array.isArray(payload) && payload.teacher_name) {
-                pulseLabel.textContent = `⚡ ${teacherName} just synced ${syncCount} scores!`;
-            } else {
-                pulseLabel.textContent = `⚡ ${syncCount} new grade events received`;
-            }
-          }
-
-          (events || []).forEach((event) => {
-            const eventEl = document.createElement("div");
-            eventEl.className = "event-card slide-in";
-
-            let parsedPayload = {};
-            try {
-              parsedPayload = JSON.parse(event.payload);
-            } catch (e) {}
-
-            let scoreDisplay = `Score: ${parsedPayload.score || "N/A"}`;
-            if (parsedPayload.breakdown) {
-              scoreDisplay += ` <span style="font-size: 10px; opacity: 0.7; margin-left: 8px;">(CA1: ${parsedPayload.breakdown.CA1}, CA2: ${parsedPayload.breakdown.CA2}, Ex: ${parsedPayload.breakdown.Exam})</span>`;
-            }
-
-            eventEl.innerHTML = `
-                        <div class="event-type">${event.event_type || "UPDATE"}</div>
-                        <div class="event-details">
-                            <span class="student-id">Student: ${parsedPayload.student_id || "Unknown"}</span>
-                            <span class="score-pill">${scoreDisplay}</span>
-                        </div>
-                        <div class="event-time">${new Date(event.created_at).toLocaleTimeString()}</div>
-                    `;
-
-            container.prepend(eventEl);
-
-            if (container.children.length > 20) {
-              container.lastElementChild.remove();
-            }
-          });
-        });
-
-        // 4. File Upload Logic
-        let totalStudentsLoaded = 0;
-        let loadedStudents = []; // Keep a reference to the CSV student objects
-        document
-          .getElementById("csv-upload")
-          .addEventListener("change", async (event) => {
-            const file = event.target.files[0];
-            if (file) {
-              const tooltip = document.getElementById("upload-status-tooltip");
-              tooltip.textContent = "Processing CSV...";
-              tooltip.style.color = "#00E5FF";
-              if (window.electronAPI.processCSV) {
-                window.electronAPI.processCSV(file.path);
-              }
-            }
-          });
-
-        // 5. CSV Processed Update
-        window.electronAPI.onCSVLoaded((count) => {
-          totalStudentsLoaded = count;
-          const tooltip = document.getElementById("upload-status-tooltip");
-          tooltip.textContent = `✅ ${count} Students Ready`;
-          tooltip.style.color = "#4CAF50";
-          document.querySelector('label[for="csv-upload"]').style.borderColor =
-            "#4CAF50";
-          const studentsCountEl = document.getElementById(
-            "stat-students-count",
-          );
-          if (studentsCountEl) studentsCountEl.textContent = count;
-          const pulseLabel = document.getElementById("pulse-label");
-          if (pulseLabel)
-            pulseLabel.textContent = `${count} students ready to push on next handshake.`;
-
-          if (count > 0 && typeof Swal !== "undefined") {
-            Swal.fire({
-              title: "Upload Successful",
-              text: `${count} students have been ingested.`,
-              icon: "success",
-              background: "#0A0E2E",
-              color: "#fff",
-              confirmButtonColor: "#1A237E",
-              backdrop: false,
-              heightAuto: false,
-              scrollbarPadding: false,
-            });
+      // ── License Guard ─────────────────────────────────────────────────────
+      if (window.electronAPI.onLicenseStatus) {
+        window.electronAPI.onLicenseStatus((status) => {
+          if (status?.locked) {
+            document.getElementById('license-lock-overlay').style.display = 'flex';
+            if (status.message) document.getElementById('license-lock-message').textContent = status.message;
           }
         });
+      }
 
-        // 6. Generate Report Cards (PDF)
-        const allGradeEvents = [];
-        const originalOnSyncUpdate = window._nexusSyncUpdateSet;
+      // ── QR Payload ────────────────────────────────────────────────────────
+      window.electronAPI.onQrPayload((payload) => { renderQR(payload); });
 
-        document
-          .getElementById("generate-pdf-btn")
-          .addEventListener("click", async () => {
-            if (allGradeEvents.length === 0) {
-              Swal.fire({
-                title: "No Grade Data",
-                text: "Sync grade events from the Android device before generating PDFs.",
-                icon: "warning",
-                background: "#0A0E2E",
-                color: "#fff",
-                confirmButtonColor: "#1A237E",
-                backdrop: false,
-              });
-              return;
-            }
+      // ── Handshake Complete ────────────────────────────────────────────────
+      window.electronAPI.onHandshakeComplete((data) => {
+        devicesMarried++;
+        const badge = document.getElementById('thermal-badge');
+        if (badge) { badge.innerHTML = '<span class="dot"></span> Synced: Active'; badge.style.color = '#4CAF50'; }
 
-            Swal.fire({
-              title: "Generating PDF Reports",
-              html: `
-                        <div style="margin-top: 10px; margin-bottom: 20px; font-size: 14px; opacity: 0.8;">
-                            Nexus Engine is rendering A4 layouts...
-                        </div>
-                        <div style="display: flex; justify-content: center; width: 100%;">
-                            <div class="bar-container" style="width: 200px;">
-                                <div class="bar-fill"></div>
-                            </div>
-                        </div>
-                    `,
-              allowOutsideClick: false,
-              showConfirmButton: false,
-              background: "#0A0E2E",
-              color: "#fff",
-              backdrop: false,
-            });
+        const devEl = document.getElementById('stat-devices-count');
+        if (devEl) devEl.textContent = devicesMarried;
 
-            // Merge grade events into student objects
-            // Build a map of studentId -> breakdown from allGradeEvents
-            const gradeMap = {};
-            allGradeEvents.forEach((evt) => {
-              try {
-                const p = JSON.parse(evt.payload);
-                gradeMap[p.student_id] = {
-                  total: p.score,
-                  breakdown: p.breakdown || {},
-                };
-              } catch (e) {}
-            });
+        const pulse = document.getElementById('pulse-label');
+        if (pulse) pulse.textContent = `📱 ${data.teacher_name} tablet is now married.`;
 
-            // Pull identity
-            const identity = await window.electronAPI.getIdentity();
+        const pi = document.getElementById('pulse-indicator');
+        if (pi) { pi.classList.add('active-sync'); setTimeout(() => pi.classList.remove('active-sync'), 4000); }
 
-            // Build a student list from the grade map (we may not have full CSV data in JS yet)
-            // Use grade events as source since that's what we have
-            const studentsForPdf = Object.entries(gradeMap).map(
-              ([id, gradeData]) => ({
-                id,
-                name: id, // Fallback to ID if name not available
-                class_name: "",
-                ...gradeData,
-              }),
-            );
+        // Auto-navigate to dashboard on first successful handshake
+        if (devicesMarried === 1) showView('dashboard');
+      });
 
-            try {
-              const result = await window.electronAPI.generateReports({
-                identity,
-                students: studentsForPdf,
-              });
+      // ── Sync Events (Grade Pulse) ─────────────────────────────────────────
+      window.electronAPI.onSyncUpdate((payload) => {
+        const events     = Array.isArray(payload) ? payload : (payload.events || []);
+        const syncCount  = payload.count || events.length || 0;
+        const teacherName= payload.teacher_name || 'A Teacher';
 
-              let outputMsg = `Batched Master PDF saved to:<br><code style="font-size:11px;">${result.folder}</code>`;
-              if (identity.premiumPlan) {
-                  outputMsg += `<br><br><span style="color:#FFD700; font-size:12px;">⭐ Premium Plan:<br>Individual Digital Envelopes generated!</span>`;
-              }
+        totalGradeEvents += syncCount;
+        const evEl = document.getElementById('stat-events-count');
+        if (evEl) evEl.textContent = totalGradeEvents;
 
-              Swal.fire({
-                title: "✅ Reports Completed!",
-                html: outputMsg,
-                icon: "success",
-                background: "#0A0E2E",
-                color: "#fff",
-                confirmButtonColor: "#1A237E",
-                backdrop: false,
-              });
-            } catch (err) {
-              Swal.fire({
-                title: "Error",
-                text: "PDF generation failed. Check the console.",
-                icon: "error",
-                background: "#0A0E2E",
-                color: "#fff",
-                backdrop: false,
-              });
-            }
-          });
+        const pi = document.getElementById('pulse-indicator');
+        if (pi) { pi.classList.add('active-sync'); setTimeout(() => pi.classList.remove('active-sync'), 3000); }
 
-        // Track events for PDF generation — also reveal the button
-        window.electronAPI.onSyncUpdate((payload) => {
-          const eventsList = Array.isArray(payload) ? payload : (payload.events || []);
-          if (Array.isArray(eventsList) && eventsList.length > 0) {
-            allGradeEvents.push(...eventsList);
-            // Reveal the generate button now that we have grade data
-            const genBtn = document.getElementById("generate-pdf-btn");
-            if (genBtn && allGradeEvents.length > 0) {
-              genBtn.style.display = "flex";
-            }
-          }
+        const pulse = document.getElementById('pulse-label');
+        if (pulse) pulse.textContent = `⚡ ${teacherName} just synced ${syncCount} scores!`;
+
+        const container = document.getElementById('events-container');
+        events.forEach(event => {
+          let p = {};
+          try { p = JSON.parse(event.payload); } catch(e) {}
+          let scoreDisplay = `Score: ${p.score ?? 'N/A'}`;
+          if (p.breakdown) scoreDisplay += ` <span style="font-size:10px;opacity:0.6;">(CA1:${p.breakdown.CA1} CA2:${p.breakdown.CA2} Ex:${p.breakdown.Exam})</span>`;
+
+          const card = document.createElement('div');
+          card.className = 'event-card slide-in';
+          card.innerHTML = `
+            <div class="event-type">${event.event_type || 'UPDATE'}</div>
+            <div class="event-details">
+              <span class="student-id">${p.student_id || 'Unknown'} · ${p.subject || ''}</span>
+              <span class="score-pill">${scoreDisplay}</span>
+            </div>
+            <div class="event-time">${new Date(event.created_at).toLocaleTimeString()}</div>
+          `;
+          container.prepend(card);
+          if (container.children.length > 20) container.lastElementChild.remove();
         });
 
-      // Reset App Data
-      document.getElementById("reset-btn").addEventListener("click", async () => {
-        const { isConfirmed } = await Swal.fire({
-          title: "Reset All Data?",
-          text: "This will clear school identity and all student records. This cannot be undone.",
-          icon: "warning",
-          showCancelButton: true,
-          confirmButtonColor: "#ff4444",
-          cancelButtonColor: "#3085d6",
-          confirmButtonText: "Yes, reset it!",
-          background: "#0A0E2E",
-          color: "#fff",
-          backdrop: false,
-        });
+        // Track for PDF generation
+        allGradeEvents.push(...events);
+        const genBtn = document.getElementById('generate-pdf-btn');
+        if (genBtn && allGradeEvents.length) genBtn.style.display = 'inline-flex';
+      });
 
-        if (isConfirmed && window.electronAPI.resetAppData) {
-          await window.electronAPI.resetAppData();
+      // Second listener to collect events for PDFs
+      window.electronAPI.onSyncUpdate((payload) => {
+        const eventsList = Array.isArray(payload) ? payload : (payload.events || []);
+        if (eventsList.length) allGradeEvents.push(...eventsList);
+      });
+
+      // ── CSV Upload ────────────────────────────────────────────────────────
+      document.getElementById('csv-upload').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const tooltip = document.getElementById('upload-status-tooltip');
+        if (tooltip) { tooltip.style.color = '#00E5FF'; tooltip.textContent = '⏳ Processing CSV…'; }
+        if (window.electronAPI.processCSV) window.electronAPI.processCSV(file.path);
+      });
+
+      window.electronAPI.onCSVLoaded(async (count) => {
+        const tooltip = document.getElementById('upload-status-tooltip');
+        if (tooltip) { tooltip.style.color = '#4CAF50'; tooltip.textContent = `✅ ${count} Students Ready`; }
+
+        await refreshTeachersTable();
+        await refreshStudentsTable();
+        await loadTeacherDropdown();
+        await refreshDashboardStats();
+
+        if (count > 0 && typeof Swal !== 'undefined') {
           Swal.fire({
-            title: "System Reset",
-            text: "All data has been wiped. The app will now reload.",
-            icon: "success",
-            background: "#0A0E2E",
-            color: "#fff",
-            showConfirmButton: false,
-            timer: 2000,
-            backdrop: false,
+            title: 'Import Successful', text: `${count} students have been ingested.`,
+            icon: 'success', background: '#0A0E2E', color: '#fff',
+            confirmButtonColor: '#1A237E', backdrop: false, heightAuto: false,
           });
-          setTimeout(() => {
-            window.location.reload();
-          }, 2000);
-        }
-      });
-      }
-      // Apply Identity Details to UI
-      function applyIdentityToUI(identity) {
-        if (!identity) return;
-        console.log("Applying identity to UI:", identity);
-
-        if (schoolName)
-          schoolName.textContent = identity.name || "Nexus Discovery";
-
-        // Apply colors directly as inline styles to root variables
-        document.documentElement.style.setProperty(
-          "--primary",
-          identity.themePrimary || "#1A237E",
-        );
-        document.documentElement.style.setProperty(
-          "--accent",
-          identity.themeSecondary || "#00E5FF",
-        );
-
-        // Adjust glowing artifacts based on primary color
-        const hex = identity.themePrimary || "#1A237E";
-        let r = 26,
-          g = 35,
-          b = 126; // Default
-        if (/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)) {
-          let c = hex.substring(1).split("");
-          if (c.length == 3) {
-            c = [c[0], c[0], c[1], c[1], c[2], c[2]];
-          }
-          c = "0x" + c.join("");
-          r = (c >> 16) & 255;
-          g = (c >> 8) & 255;
-          b = c & 255;
-        }
-        const bgGlow = document.querySelector(".background-glow");
-        if (bgGlow)
-          bgGlow.style.background = `radial-gradient(circle, rgba(${r}, ${g}, ${b}, 0.4) 0%, rgba(10, 14, 46, 0) 70%)`;
-
-        // Handle Logo
-        const logoPlaceholder = document.querySelector(".logo-placeholder");
-        if (logoPlaceholder) {
-          if (identity.logoBase64) {
-            logoPlaceholder.innerHTML = `<img src="${identity.logoBase64}" alt="Logo" style="width: 100%; height: 100%; object-fit: contain; border-radius: 12px;">`;
-          } else {
-            logoPlaceholder.innerHTML = identity.name
-              ? identity.name.charAt(0).toUpperCase()
-              : "N";
-          }
-        }
-      }
-
-      // --- Settings Section Logic ---
-      const settingsBtn = document.getElementById("settings-btn");
-      const closeSettingsBtn = document.getElementById("close-settings-btn");
-      const handshakeSection = document.getElementById("handshake-section");
-      const settingsSection = document.getElementById("settings-section");
-      const dashboardSection = document.getElementById("dashboard-section");
-
-      // Form elements
-      const logoDropzone = document.getElementById("logo-dropzone");
-      const logoUpload = document.getElementById("logo-upload");
-      const logoPreview = document.getElementById("logo-preview");
-      const uploaderContent = document.getElementById("uploader-content");
-      const themePrimary = document.getElementById("theme-primary");
-      const primaryHex = document.getElementById("primary-hex");
-      const themeSecondary = document.getElementById("theme-secondary");
-      const secondaryHex = document.getElementById("secondary-hex");
-
-      let currentLogoBase64 = null;
-
-      settingsBtn.addEventListener("click", async () => {
-        console.log("Settings button clicked");
-        if (handshakeSection) handshakeSection.style.display = "none";
-        if (dashboardSection) dashboardSection.style.display = "none";
-        if (settingsSection) settingsSection.style.display = "flex";
-        else console.error("Settings section not found in DOM");
-
-        // Load existing identity into form
-        if (window.electronAPI && window.electronAPI.getIdentity) {
-          const identity = await window.electronAPI.getIdentity();
-          document.getElementById("school-name-input").value =
-            identity.name || "";
-          document.getElementById("school-address-input").value =
-            identity.address || "";
-          document.getElementById("school-motto-input").value =
-            identity.motto || "";
-          document.getElementById("school-signature-input").value =
-            identity.signature || "";
-
-          // Hydrate Premium Toggle
-          if (identity.premiumPlan) {
-            document.getElementById("premium-plan-toggle").checked = true;
-          } else {
-            document.getElementById("premium-plan-toggle").checked = false;
-          }
-
-          themePrimary.value = identity.themePrimary || "#1A237E";
-          primaryHex.textContent = themePrimary.value.toUpperCase();
-
-          themeSecondary.value = identity.themeSecondary || "#00E5FF";
-          secondaryHex.textContent = themeSecondary.value.toUpperCase();
-
-          if (identity.logoBase64) {
-            currentLogoBase64 = identity.logoBase64;
-            logoPreview.src = currentLogoBase64;
-            logoPreview.style.display = "block";
-            uploaderContent.style.display = "none";
-          }
         }
       });
 
-      closeSettingsBtn.addEventListener("click", () => {
-        settingsSection.style.display = "none";
-        handshakeSection.style.display = "flex";
-      });
+      // ── PDF Report Generation ─────────────────────────────────────────────
+      document.getElementById('generate-pdf-btn').addEventListener('click', async () => {
+        if (!allGradeEvents.length) {
+          Swal.fire({ title: 'No Grade Data', text: 'Sync grade events from the Android device first.',
+            icon: 'warning', background: '#0A0E2E', color: '#fff', backdrop: false }); return;
+        }
+        Swal.fire({ title: 'Generating PDF Reports',
+          html: `<div style="margin:10px 0 20px;font-size:14px;opacity:0.8;">Nexus Engine is rendering A4 layouts…</div><div style="display:flex;justify-content:center;"><div class="bar-container" style="width:200px;"><div class="bar-fill"></div></div></div>`,
+          allowOutsideClick: false, showConfirmButton: false,
+          background: '#0A0E2E', color: '#fff', backdrop: false });
 
-      // Color Picker text updates
-      themePrimary.addEventListener(
-        "input",
-        (e) => (primaryHex.textContent = e.target.value.toUpperCase()),
-      );
-      themeSecondary.addEventListener(
-        "input",
-        (e) => (secondaryHex.textContent = e.target.value.toUpperCase()),
-      );
+        const gradeMap = {};
+        allGradeEvents.forEach(evt => {
+          try { const p = JSON.parse(evt.payload); gradeMap[p.student_id] = { total: p.score, breakdown: p.breakdown || {} }; } catch(e) {}
+        });
 
-      // Logo Upload Logic
-      logoDropzone.addEventListener("click", () => logoUpload.click());
+        const identity = await window.electronAPI.getIdentity();
+        const studentsForPdf = Object.entries(gradeMap).map(([id, g]) => ({ id, name: id, class_name: '', ...g }));
 
-      logoUpload.addEventListener("change", (e) => {
-        if (e.target.files && e.target.files[0]) {
-          handleLogoFile(e.target.files[0]);
+        try {
+          const result = await window.electronAPI.generateReports({ identity, students: studentsForPdf });
+          let msg = `Saved to: <code style="font-size:11px;">${result.folder}</code>`;
+          if (identity.premiumPlan) msg += `<br><br><span style="color:#FFD700;font-size:12px;">⭐ Digital Envelopes generated!</span>`;
+          Swal.fire({ title: '✅ Reports Done!', html: msg, icon: 'success',
+            background: '#0A0E2E', color: '#fff', confirmButtonColor: '#1A237E', backdrop: false });
+        } catch(err) {
+          Swal.fire({ title: 'Error', text: 'PDF generation failed.', icon: 'error', background: '#0A0E2E', color: '#fff', backdrop: false });
         }
       });
 
-      logoDropzone.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        logoDropzone.style.borderColor = "var(--accent)";
-        logoDropzone.style.background = "rgba(255,255,255,0.1)";
+      // ── Settings Persistence ──────────────────────────────────────────────
+      document.getElementById('theme-primary').addEventListener('input', (e) => {
+        document.getElementById('primary-hex').textContent = e.target.value.toUpperCase();
+      });
+      document.getElementById('theme-secondary').addEventListener('input', (e) => {
+        document.getElementById('secondary-hex').textContent = e.target.value.toUpperCase();
       });
 
-      logoDropzone.addEventListener("dragleave", (e) => {
-        e.preventDefault();
-        logoDropzone.style.borderColor = "var(--glass-border)";
-        logoDropzone.style.background = "transparent";
-      });
+      const logoDropzone   = document.getElementById('logo-dropzone');
+      const logoUpload     = document.getElementById('logo-upload');
+      const logoPreview    = document.getElementById('logo-preview');
+      const uploaderContent= document.getElementById('uploader-content');
 
-      logoDropzone.addEventListener("drop", (e) => {
-        e.preventDefault();
-        logoDropzone.style.borderColor = "var(--glass-border)";
-        logoDropzone.style.background = "transparent";
-        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-          handleLogoFile(e.dataTransfer.files[0]);
-        }
+      logoDropzone.addEventListener('click', () => logoUpload.click());
+      logoUpload.addEventListener('change', (e) => { if (e.target.files?.[0]) handleLogoFile(e.target.files[0]); });
+      logoDropzone.addEventListener('dragover', (e) => { e.preventDefault(); logoDropzone.style.borderColor = 'var(--accent)'; });
+      logoDropzone.addEventListener('dragleave', () => { logoDropzone.style.borderColor = 'var(--glass-border)'; });
+      logoDropzone.addEventListener('drop', (e) => {
+        e.preventDefault(); logoDropzone.style.borderColor = 'var(--glass-border)';
+        if (e.dataTransfer.files?.[0]) handleLogoFile(e.dataTransfer.files[0]);
       });
 
       function handleLogoFile(file) {
-        if (file.type === "image/png" || file.type === "image/jpeg") {
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            currentLogoBase64 = e.target.result;
-            logoPreview.src = currentLogoBase64;
-            logoPreview.style.display = "block";
-            uploaderContent.style.display = "none";
-          };
-          reader.readAsDataURL(file);
-        } else {
-          alert("Please upload a PNG or JPEG file.");
+        if (file.type !== 'image/png' && file.type !== 'image/jpeg') { alert('PNG or JPEG only.'); return; }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          currentLogoBase64 = e.target.result;
+          logoPreview.src = currentLogoBase64; logoPreview.style.display = 'block';
+          uploaderContent.style.display = 'none';
+        };
+        reader.readAsDataURL(file);
+      }
+
+      document.getElementById('save-identity-btn').addEventListener('click', async () => {
+        const btn = document.getElementById('save-identity-btn');
+        btn.textContent = 'Saving…';
+        const identity = {
+          name:          document.getElementById('school-name-input').value.trim(),
+          address:       document.getElementById('school-address-input').value.trim(),
+          motto:         document.getElementById('school-motto-input').value.trim(),
+          signature:     document.getElementById('school-signature-input').value.trim(),
+          themePrimary:  document.getElementById('theme-primary').value,
+          themeSecondary:document.getElementById('theme-secondary').value,
+          logoBase64:    currentLogoBase64,
+          premiumPlan:   document.getElementById('premium-plan-toggle').checked,
+        };
+        if (window.electronAPI.saveIdentity) {
+          await window.electronAPI.saveIdentity(identity);
+          applyIdentityToUI(identity);
+          btn.textContent = '✅ Saved!';
+          setTimeout(() => { btn.textContent = 'Save Identity Shard'; }, 1500);
         }
-      }
+      });
 
-      // Save Identity
-      document
-        .getElementById("save-identity-btn")
-        .addEventListener("click", async () => {
-          const saveBtn = document.getElementById("save-identity-btn");
-          saveBtn.textContent = "Saving...";
-
-          const newIdentity = {
-            name: document.getElementById("school-name-input").value.trim(),
-            themePrimary: themePrimary.value,
-            themeSecondary: themeSecondary.value,
-            logoBase64: currentLogoBase64,
-            premiumPlan: document.getElementById("premium-plan-toggle").checked,
-            address: document
-              .getElementById("school-address-input")
-              .value.trim(),
-            motto: document.getElementById("school-motto-input").value.trim(),
-            signature: document
-              .getElementById("school-signature-input")
-              .value.trim(),
-          };
-
-          if (window.electronAPI && window.electronAPI.saveIdentity) {
-            await window.electronAPI.saveIdentity(newIdentity);
-            applyIdentityToUI(newIdentity);
-
-            saveBtn.textContent = "Saved!";
-            setTimeout(() => {
-              saveBtn.textContent = "Save Identity Shard";
-              closeSettingsBtn.click();
-            }, 1000);
-          }
+      // ── Reset ─────────────────────────────────────────────────────────────
+      document.getElementById('reset-btn').addEventListener('click', async () => {
+        const { isConfirmed } = await Swal.fire({
+          title: 'Reset All Data?',
+          text: 'This will clear school identity and all student/teacher records. This cannot be undone.',
+          icon: 'warning', showCancelButton: true,
+          confirmButtonColor: '#ff4444', cancelButtonColor: '#3085d6',
+          confirmButtonText: 'Yes, reset everything!',
+          background: '#0A0E2E', color: '#fff', backdrop: false,
         });
+        if (isConfirmed && window.electronAPI.resetAppData) {
+          await window.electronAPI.resetAppData();
+          Swal.fire({ title: 'System Reset', text: 'Reloading…', icon: 'success',
+            background: '#0A0E2E', color: '#fff', showConfirmButton: false, timer: 1800, backdrop: false });
+          setTimeout(() => window.location.reload(), 1800);
+        }
+      });
 
-      // Initialize UI with existing identity if possible immediately
-      if (window.electronAPI && window.electronAPI.getIdentity) {
-        window.electronAPI.getIdentity().then((identity) => {
-          if (identity) applyIdentityToUI(identity);
-        });
+      // ── Boot: load identity + stats ───────────────────────────────────────
+      if (window.electronAPI.getIdentity) {
+        window.electronAPI.getIdentity().then(id => { if (id) applyIdentityToUI(id); });
       }
+      refreshDashboardStats();
 
-      // Final Robustness: Check for cached payload every 500ms until QRCode is ready
+      // Robustness: retry renderQR until QRCode library is ready
       const readyInterval = setInterval(() => {
-        if (typeof QRCode !== "undefined" && cachedPayload) {
+        if (typeof QRCode !== 'undefined' && cachedPayload) {
           renderQR(cachedPayload);
           cachedPayload = null;
           clearInterval(readyInterval);
         }
       }, 500);
 
-      // Tell the main process we are ready for the payload
-      if (window.electronAPI && window.electronAPI.uiReady) {
-        window.electronAPI.uiReady();
-      }
+      if (window.electronAPI.uiReady) window.electronAPI.uiReady();
+
+      // ── Platform Detection: show custom win controls on non-macOS ─────────
+      window.electronAPI.getPlatform().then(platform => {
+        if (platform !== 'darwin') {
+          // Show custom ×  □  − buttons in the titlebar
+          const wc = document.getElementById('win-controls');
+          if (wc) wc.style.display = 'flex';
+          // On Win/Linux, no native inset — remove the traffic light placeholder
+          const tls = document.getElementById('traffic-light-space');
+          if (tls) tls.style.display = 'none';
+        }
+      });
+
+      // Seed the history with the starting view so the back button is disabled correctly
+      _historyPush('dashboard');
+    }
     </script>
+    <!-- Global Hidden Inputs -->
+    <input type="file" id="csv-upload" accept=".csv" style="display:none;" />
   </body>
 </html>
