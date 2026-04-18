@@ -27,5 +27,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     winMaximize: () => ipcRenderer.send('win-maximize'),
     winClose:    () => ipcRenderer.send('win-close'),
     getPlatform: () => ipcRenderer.invoke('get-platform'),
+    // V2: Term config & Print Hub
+    getTermConfig:      ()       => ipcRenderer.invoke('get-term-config'),
+    saveTermConfig:     (data)   => ipcRenderer.invoke('save-term-config', data),
+    queryResults:       (filter) => ipcRenderer.invoke('query-results', filter),
+    saveDomainScores:   (data)   => ipcRenderer.invoke('save-domain-scores', data),
+    saveTeacherRemark:  (data)   => ipcRenderer.invoke('save-teacher-remark', data),
+    // V2.1: Edit existing resources
+    updateStudent:      (data)   => ipcRenderer.invoke('update-student', data),
+    updateTeacherFull:  (data)   => ipcRenderer.invoke('update-teacher-full', data),
+    // V3: Result Studio
+    copyResultImage:    (data)   => ipcRenderer.invoke('copy-result-image', data),
 });
+
 

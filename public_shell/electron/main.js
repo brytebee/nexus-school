@@ -1,15 +1,11 @@
-const { app, BrowserWindow, ipcMain, shell, Menu, dialog, nativeImage } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, Menu, dialog, nativeImage, clipboard, globalShortcut } = require("electron");
 
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
-const {
-  startServer,
-  setSchoolConfig,
-  handleCSVUpload,
-  clearData,
-} = require("./server");
-const database = require("./database");
+const Handlebars = require("handlebars");
+const { database, server, reports } = require("@nexus/engine");
+const { startServer, setSchoolConfig, handleCSVUpload, clearData } = server;
 const address = require("address");
 
 // Set app name BEFORE createWindow so Menu.buildFromTemplate picks it up correctly
@@ -116,30 +112,122 @@ ipcMain.handle(
   },
 );
 
-// ── Form-based Teacher Update (Admin only) ────────────────────────────────────
+// ── Form-based Teacher Update — profile only (legacy stub) ────────────────────────────
 ipcMain.handle("update-teacher", (event, { id, name, phone, email }) => {
   try {
     const db = database.getDb();
     db.prepare(
       "UPDATE teachers SET name=@name, phone=@phone, email=@email WHERE id=@id",
     ).run({ id, name, phone: phone || "", email: email || "" });
-    console.log(`[Form] Teacher updated: ${name}`);
+    console.log(`[Form] Teacher profile updated: ${name}`);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
   }
 });
 
-// ── Form-based Student Entry (mobile adds/edits; this is a DB stub) ───────────
-ipcMain.handle("add-student-form", (event, { id, name, class_name }) => {
+// ── Full Teacher Update — profile + replace all allocations ────────────────────────────
+ipcMain.handle("update-teacher-full", (event, { id, name, phone, email, allocations }) => {
   try {
     const db = database.getDb();
-    db.prepare(
-      "INSERT INTO students (id, name, class_name) VALUES (@id, @name, @class_name) ON CONFLICT(id) DO UPDATE SET name=excluded.name, class_name=excluded.class_name",
-    ).run({ id, name, class_name });
-    console.log(`[Form] Student added: ${name}`);
+    db.transaction(() => {
+      db.prepare(
+        "UPDATE teachers SET name=@name, phone=@phone, email=@email WHERE id=@id",
+      ).run({ id, name: name || "", phone: phone || "", email: email || "" });
+      db.prepare("DELETE FROM teacher_allocations WHERE teacher_id = ?").run(id);
+      if (allocations && allocations.length > 0) {
+        const ins = db.prepare(
+          "INSERT OR IGNORE INTO teacher_allocations (teacher_id, class_name, subject) VALUES (?, ?, ?)",
+        );
+        for (const alloc of allocations) {
+          const { class_name, subjects = [] } = alloc;
+          if (!class_name) continue;
+          for (const subj of subjects) {
+            if (subj.trim()) ins.run(id, class_name, subj.trim());
+          }
+        }
+      }
+    })();
+    console.log(`[Form] Teacher ${id} fully updated: ${name}, ${(allocations||[]).length} allocation group(s).`);
     return { ok: true };
   } catch (err) {
+    console.error('[Form] update-teacher-full failed:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+// ── Form-based Student Entry (mobile adds/edits; this is a DB stub) ───────────
+ipcMain.handle("add-student-form", (event, { id, name, class_name, subjects, reg_no, gender, dob, photo, parent_email, parent_phone, fee_status }) => {
+  try {
+    const db = database.getDb();
+    db.transaction(() => {
+      // 1. Upsert Student (with extended V2 profile fields)
+      db.prepare(`
+        INSERT INTO students (id, name, class_name, reg_no, gender, dob, photo, parent_email, parent_phone, fee_status)
+        VALUES (@id, @name, @class_name, @reg_no, @gender, @dob, @photo, @parent_email, @parent_phone, @fee_status)
+        ON CONFLICT(id) DO UPDATE SET
+          name=excluded.name, class_name=excluded.class_name,
+          reg_no=excluded.reg_no, gender=excluded.gender, dob=excluded.dob,
+          photo=COALESCE(excluded.photo, photo),
+          parent_email=excluded.parent_email, parent_phone=excluded.parent_phone,
+          fee_status=excluded.fee_status
+      `).run({ id, name, class_name,
+        reg_no: reg_no || '', gender: gender || '', dob: dob || '',
+        photo: photo || null, parent_email: parent_email || '',
+        parent_phone: parent_phone || '', fee_status: fee_status || 'cleared'
+      });
+      // 2. Refresh subject enrollment
+      db.prepare("DELETE FROM student_subjects WHERE student_id = ?").run(id);
+      if (subjects && subjects.length > 0) {
+        const stmt = db.prepare("INSERT INTO student_subjects (student_id, subject) VALUES (?, ?)");
+        for (const subj of subjects) stmt.run(id, subj);
+      }
+    })();
+    console.log(`[Form] Student added: ${name} with ${subjects?.length || 0} subjects`);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// ── Form-based Student Update (“Edit” path) ──────────────────────────────────────
+ipcMain.handle("update-student", (event, { id, name, class_name, subjects, reg_no, gender, dob, photo, parent_email, parent_phone, fee_status }) => {
+  try {
+    const db = database.getDb();
+    db.transaction(() => {
+      // photo only updated when explicitly provided (avoids wiping existing photo on minor edits)
+      if (photo !== undefined && photo !== null) {
+        db.prepare(`
+          UPDATE students SET name=@name, class_name=@class_name,
+            reg_no=@reg_no, gender=@gender, dob=@dob, photo=@photo,
+            parent_email=@parent_email, parent_phone=@parent_phone,
+            fee_status=@fee_status
+          WHERE id=@id
+        `).run({ id, name, class_name, reg_no: reg_no||'', gender: gender||'', dob: dob||'',
+                 photo, parent_email: parent_email||'', parent_phone: parent_phone||'',
+                 fee_status: fee_status||'cleared' });
+      } else {
+        db.prepare(`
+          UPDATE students SET name=@name, class_name=@class_name,
+            reg_no=@reg_no, gender=@gender, dob=@dob,
+            parent_email=@parent_email, parent_phone=@parent_phone,
+            fee_status=@fee_status
+          WHERE id=@id
+        `).run({ id, name, class_name, reg_no: reg_no||'', gender: gender||'', dob: dob||'',
+                 parent_email: parent_email||'', parent_phone: parent_phone||'',
+                 fee_status: fee_status||'cleared' });
+      }
+      // Replace subject enrollment
+      db.prepare("DELETE FROM student_subjects WHERE student_id = ?").run(id);
+      if (subjects && subjects.length > 0) {
+        const stmt = db.prepare("INSERT INTO student_subjects (student_id, subject) VALUES (?, ?)");
+        for (const subj of subjects) stmt.run(id, subj);
+      }
+    })();
+    console.log(`[Form] Student ${id} updated: ${name}, ${subjects?.length || 0} subjects.`);
+    return { ok: true };
+  } catch (err) {
+    console.error('[Form] update-student failed:', err);
     return { ok: false, error: err.message };
   }
 });
@@ -168,13 +256,18 @@ ipcMain.handle("get-all-teachers", () => {
 ipcMain.handle("get-all-students", () => {
   try {
     const db = database.getDb();
-    // Deduplicate: student may appear once per subject in Android DB,
-    // but desktop DB stores them once — use DISTINCT on id to be safe.
-    return db
+    const students = db
       .prepare(
-        "SELECT DISTINCT id, name, class_name FROM students ORDER BY class_name ASC, name ASC",
+        "SELECT id, name, class_name, reg_no, gender, dob, photo, parent_email, parent_phone, fee_status FROM students ORDER BY class_name ASC, name ASC",
       )
       .all();
+    // Attach subject enrollment
+    const stmt = db.prepare("SELECT subject FROM student_subjects WHERE student_id = ?");
+    for (const student of students) {
+      student.subjects = stmt.all(student.id).map(row => row.subject);
+    }
+    
+    return students;
   } catch (err) {
     console.error("[Dir] Failed to get students:", err);
     return [];
@@ -185,13 +278,17 @@ ipcMain.handle("get-all-students", () => {
 ipcMain.handle("delete-teacher", (event, { id }) => {
   try {
     const db = database.getDb();
+    // Purge allocations, attributed records, and audit logs before removing
+    // the teacher row itself to avoid orphaned foreign key references.
     db.transaction(() => {
-      db.prepare("DELETE FROM teacher_allocations WHERE teacher_id = ?").run(
-        id,
-      );
+      db.prepare("DELETE FROM teacher_allocations WHERE teacher_id = ?").run(id);
+      // Null-out teacher attribution in grade records rather than deleting
+      // student data — grades remain intact but lose teacher attribution.
+      db.prepare("UPDATE student_records SET teacher_id = NULL WHERE teacher_id = ?").run(id);
+      db.prepare("UPDATE sync_logs       SET teacher_id = 'DELETED' WHERE teacher_id = ?").run(id);
       db.prepare("DELETE FROM teachers WHERE id = ?").run(id);
     })();
-    console.log(`[Dir] Teacher ${id} deleted.`);
+    console.log(`[Dir] Teacher ${id} and all allocations deleted.`);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -202,8 +299,245 @@ ipcMain.handle("delete-teacher", (event, { id }) => {
 ipcMain.handle("delete-student", (event, { id }) => {
   try {
     const db = database.getDb();
-    db.prepare("DELETE FROM students WHERE id = ?").run(id);
-    console.log(`[Dir] Student ${id} deleted.`);
+    // Purge all related rows explicitly so no orphans remain,
+    // regardless of whether FK cascade is active on this SQLite build.
+    db.transaction(() => {
+      db.prepare("DELETE FROM student_subjects  WHERE student_id = ?").run(id);
+      db.prepare("DELETE FROM student_records   WHERE student_id = ?").run(id);
+      db.prepare("DELETE FROM student_domains   WHERE student_id = ?").run(id);
+      db.prepare("DELETE FROM teacher_remarks   WHERE student_id = ?").run(id);
+      db.prepare("DELETE FROM students          WHERE id         = ?").run(id);
+    })();
+    console.log(`[Dir] Student ${id} and all related records deleted.`);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// ── V2: Term Configuration ────────────────────────────────────────────────────
+ipcMain.handle("get-term-config", () => {
+  try {
+    const db = database.getDb();
+    return db.prepare("SELECT * FROM school_term_config WHERE id = 1").get() || {};
+  } catch (err) {
+    return {};
+  }
+});
+
+ipcMain.handle("save-term-config", (event, config) => {
+  try {
+    const db = database.getDb();
+    db.prepare(`
+      INSERT INTO school_term_config (id, academic_session, term, resumption_date, grading_scale, show_position, show_domains, template)
+      VALUES (1, @academic_session, @term, @resumption_date, @grading_scale, @show_position, @show_domains, @template)
+      ON CONFLICT(id) DO UPDATE SET
+        academic_session = excluded.academic_session,
+        term = excluded.term,
+        resumption_date = excluded.resumption_date,
+        grading_scale = excluded.grading_scale,
+        show_position = excluded.show_position,
+        show_domains = excluded.show_domains,
+        template = excluded.template
+    `).run({
+      academic_session: config.academic_session || "2024/2025",
+      term: config.term || "First Term",
+      resumption_date: config.resumption_date || "",
+      grading_scale: typeof config.grading_scale === "string"
+        ? config.grading_scale
+        : JSON.stringify(config.grading_scale || []),
+      show_position: config.show_position ? 1 : 0,
+      show_domains: config.show_domains ? 1 : 0,
+      template: config.template || "clean_slate",
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// ── V2: Query Results (dynamic scope filtering) ───────────────────────────────
+ipcMain.handle("query-results", (event, { scope, session, term, class_name, subject, teacher_id, student_id }) => {
+  try {
+    const db = database.getDb();
+
+    // Build student roster depending on scope
+    let students;
+    if (scope === "student" && student_id) {
+      students = db.prepare("SELECT * FROM students WHERE id = ?").all(student_id);
+    } else if (scope === "class" && class_name) {
+      students = db.prepare("SELECT * FROM students WHERE class_name = ? ORDER BY name ASC").all(class_name);
+    } else if (scope === "teacher" && teacher_id) {
+      // Students who are enrolled in at least one of this teacher's allocated subjects.
+      // The LEFT JOIN + GROUP BY approach keeps students who have student_subjects rows
+      // that match; the HAVING clause filters to only those with ≥1 matching enrollment.
+      // Falls back gracefully: if a student has NO rows in student_subjects at all
+      // (e.g. imported via CSV before the subject fix), they are still included so
+      // report data is never silently suppressed for legacy records.
+      students = db.prepare(`
+        SELECT DISTINCT s.* FROM students s
+        JOIN teacher_allocations a ON s.class_name = a.class_name
+        WHERE a.teacher_id = ?
+          AND (
+            -- Student has explicit subject enrollment that matches this teacher's subject
+            EXISTS (
+              SELECT 1 FROM student_subjects ss
+              WHERE ss.student_id = s.id AND ss.subject = a.subject
+            )
+            OR
+            -- Fallback: student has NO subject rows at all (CSV-imported, pre-fix)
+            NOT EXISTS (
+              SELECT 1 FROM student_subjects ss2
+              WHERE ss2.student_id = s.id
+            )
+          )
+        ORDER BY s.class_name, s.name
+      `).all(teacher_id);
+    } else if (scope === "subject" && subject) {
+      students = db.prepare(`
+        SELECT DISTINCT s.* FROM students s
+        JOIN student_records r ON s.id = r.student_id
+        WHERE r.subject = ? AND r.academic_session = ? AND r.term = ?
+        ORDER BY s.class_name, s.name
+      `).all(subject, session, term);
+    } else {
+      // All students
+      students = db.prepare("SELECT * FROM students ORDER BY class_name, name ASC").all();
+    }
+
+    // For each student, fetch their grade records for this session/term
+    const getRecords = db.prepare(
+      "SELECT subject, score, breakdown FROM student_records WHERE student_id = ? AND academic_session = ? AND term = ?"
+    );
+    const getDomains = db.prepare(
+      "SELECT domain_type, trait, grade FROM student_domains WHERE student_id = ? AND academic_session = ? AND term = ?"
+    );
+    const getRemark = db.prepare(
+      "SELECT remark, principal_remark FROM teacher_remarks WHERE student_id = ? AND academic_session = ? AND term = ?"
+    );
+
+    // Aggregate Explicit Subjects 
+    const getExplicitSubjects = db.prepare("SELECT subject FROM student_subjects WHERE student_id = ?");
+
+    const results = students.map((stu) => {
+      const records = getRecords.all(stu.id, session, term);
+      const explicitSubjs = getExplicitSubjects.all(stu.id).map(r => r.subject);
+
+      // Map explicit subjects. If a record exists, use that.
+      // If a record exists that ISN'T in explicit subjects, we still include it to avoid data loss.
+      const resolvedSubjects = new Map();
+      
+      explicitSubjs.forEach(sName => {
+        resolvedSubjects.set(sName, { name: sName, score: null, breakdown: {} });
+      });
+      
+      records.forEach(r => {
+        resolvedSubjects.set(r.subject, {
+          name: r.subject,
+          score: r.score,
+          breakdown: (() => { try { return JSON.parse(r.breakdown); } catch { return {}; } })(),
+        });
+      });
+
+      let allSubjectsArray = Array.from(resolvedSubjects.values());
+      if (scope === "subject" && subject) {
+        allSubjectsArray = allSubjectsArray.filter(s => s.name === subject);
+      }
+
+      // Filter out zero-score empty subjects so avg isn't polluted by ungraded subjects
+      const gradedSubjects = allSubjectsArray.filter(s => s.score !== null);
+      const totalScore = gradedSubjects.reduce((sum, s) => sum + s.score, 0);
+      const avg = gradedSubjects.length ? (totalScore / gradedSubjects.length).toFixed(1) : "—";
+
+      const domains = getDomains.all(stu.id, session, term);
+      const remark = getRemark.get(stu.id, session, term) || {};
+
+      return {
+        ...stu,
+        subjects: allSubjectsArray,
+        total_score: totalScore,
+        average: avg,
+        domains,
+        remark: remark.remark || "",
+        principal_remark: remark.principal_remark || "",
+      };
+    });
+
+    return { ok: true, results, session, term };
+  } catch (err) {
+    console.error("[query-results] Error:", err.message);
+    return { ok: false, error: err.message, results: [] };
+  }
+});
+
+// ── V2.1: Save Attendance ────────────────────────────────────────────────────
+ipcMain.handle("save-attendance", (event, { student_id, session, term, total_days, days_attended }) => {
+  try {
+    const db = database.getDb();
+    db.prepare(`
+      INSERT INTO student_attendance (student_id, academic_session, term, total_days, days_attended)
+      VALUES (@student_id, @session, @term, @total_days, @days_attended)
+      ON CONFLICT(student_id, academic_session, term)
+      DO UPDATE SET total_days=excluded.total_days, days_attended=excluded.days_attended
+    `).run({ student_id, session, term, total_days: total_days || 0, days_attended: days_attended || 0 });
+    return { ok: true };
+  } catch (err) {
+    console.error('[Attendance] save-attendance failed:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+// ── V2.1: Get Attendance (by class+session+term) ───────────────────────────────
+ipcMain.handle("get-attendance", (event, { class_name, session, term }) => {
+  try {
+    const db = database.getDb();
+    const rows = db.prepare(`
+      SELECT sa.student_id, sa.total_days, sa.days_attended,
+             (sa.total_days - sa.days_attended) AS days_absent
+      FROM student_attendance sa
+      JOIN students s ON s.id = sa.student_id
+      WHERE (`+ (class_name ? `s.class_name = @class_name AND ` : '') +`
+            sa.academic_session = @session AND sa.term = @term)
+    `).all({ class_name: class_name || '', session: session || '2024/2025', term: term || 'First Term' });
+    return { ok: true, rows };
+  } catch (err) {
+    console.error('[Attendance] get-attendance failed:', err);
+    return { ok: false, error: err.message, rows: [] };
+  }
+});
+
+// ── V2: Save Domain Scores (Affective / Psychomotor) ─────────────────────────
+ipcMain.handle("save-domain-scores", (event, { student_id, session, term, domains }) => {
+  try {
+    const db = database.getDb();
+    const upsert = db.prepare(`
+      INSERT INTO student_domains (student_id, academic_session, term, domain_type, trait, grade)
+      VALUES (@student_id, @session, @term, @domain_type, @trait, @grade)
+      ON CONFLICT(student_id, academic_session, term, domain_type, trait)
+      DO UPDATE SET grade = excluded.grade
+    `);
+    const run = db.transaction(() => {
+      for (const d of domains) {
+        upsert.run({ student_id, session, term, domain_type: d.domain_type, trait: d.trait, grade: d.grade });
+      }
+    });
+    run();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// ── V2: Save Teacher / Principal Remark ──────────────────────────────────────
+ipcMain.handle("save-teacher-remark", (event, { student_id, teacher_id, session, term, remark, principal_remark }) => {
+  try {
+    const db = database.getDb();
+    db.prepare(`
+      INSERT INTO teacher_remarks (student_id, teacher_id, academic_session, term, remark, principal_remark)
+      VALUES (@student_id, @teacher_id, @session, @term, @remark, @principal_remark)
+      ON CONFLICT(student_id, academic_session, term)
+      DO UPDATE SET remark = excluded.remark, principal_remark = excluded.principal_remark
+    `).run({ student_id, teacher_id: teacher_id || null, session, term, remark: remark || "", principal_remark: principal_remark || "" });
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -283,191 +617,77 @@ ipcMain.handle("reset-app-data", async () => {
 
   return true;
 });
+// ── Last image path for clipboard ─────────────────────────────────────────────
+let _lastImagePath = null;
+
+ipcMain.handle("copy-result-image", async (event, { imagePath } = {}) => {
+  const target = imagePath || _lastImagePath;
+  if (!target || !fs.existsSync(target)) return { ok: false, error: "No image found" };
+  const img = nativeImage.createFromPath(target);
+  clipboard.writeImage(img);
+  return { ok: true };
+});
+
+// ── Shared helpers ─────────────────────────────────────────────────────────────
+// Templates Extracted to @nexus/engine
+console.log("[Electron] Registering generate-reports handler...");
 ipcMain.handle("generate-reports", async (event, payload) => {
-  console.log(
-    "[Electron] generate-reports handler FIRED. Payload keys:",
-    payload ? Object.keys(payload) : "null",
-  );
-  const { identity, students } = payload || {};
+  const { termConfig, reportType = "terminal", format = "pdf" } = payload || {};
   try {
-    const primary = identity.themePrimary || "#1A237E";
-
-    const dateStr = new Date().toLocaleDateString("en-NG", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
-
-    function getGrade(score) {
-      if (score >= 70) return { letter: "A", bg: "#e8f5e9", color: "#2e7d32" };
-      if (score >= 55) return { letter: "B", bg: "#e3f2fd", color: "#1565c0" };
-      if (score >= 40) return { letter: "C", bg: "#fff8e1", color: "#f57f17" };
-      return { letter: "F", bg: "#fde8e8", color: "#c62828" };
-    }
-
-    const pages = students
-      .map((student) => {
-        const bd = student.breakdown || {};
-        const g = getGrade(student.total || 0);
-        return `
-            <div class="report-page">
-                <div class="rh">
-                    ${logoHtml}
-                    <div class="ri">
-                        <div class="rn">${identity.name || "Nexus Academy"}</div>
-                        <div class="ra">${identity.address || ""}</div>
-                        <div class="rm">${identity.motto ? '"' + identity.motto + '"' : ""}</div>
-                    </div>
-                    <div class="rt"><strong>Report Card</strong><br>${dateStr}</div>
-                </div>
-                <div class="sb">
-                    <div><div class="sn">${student.name || student.id}</div><div class="si">ID: ${student.id}</div></div>
-                    <div class="sc">${student.class_name || "N/A"}</div>
-                </div>
-                <p class="lbl">Grade Breakdown</p>
-                <table><thead><tr><th>Assessment</th><th>Max</th><th>Score</th></tr></thead><tbody>
-                    <tr><td>1st Continuous Assessment (CA1)</td><td>10</td><td><b>${bd.CA1 ?? "—"}</b></td></tr>
-                    <tr><td>2nd Continuous Assessment (CA2)</td><td>10</td><td><b>${bd.CA2 ?? "—"}</b></td></tr>
-                    <tr><td>Terminal Examination</td><td>80</td><td><b>${bd.Exam ?? "—"}</b></td></tr>
-                </tbody></table>
-                <div class="sum">
-                    <div class="sc2"><div class="v">${student.total ?? "—"}</div><div class="l">Total</div></div>
-                    <div class="sc2"><div class="v">${student.total ? student.total + "%" : "—"}</div><div class="l">Percentage</div></div>
-                    <div class="sc2"><div class="v"><span style="background:${g.bg};color:${g.color};padding:4px 12px;border-radius:20px;font-weight:700;">${student.total ? g.letter : "—"}</span></div><div class="l">Grade</div></div>
-                </div>
-                <div class="ft">
-                    <span style="color:#bbb;font-size:10px">Generated by Nexus School OS • ${dateStr}</span>
-                    <div style="text-align:center"><div style="font-size:14px;font-weight:700;color:${primary};border-top:1px solid #ccc;padding-top:8px">${identity.signature || "Principal"}</div><div style="font-size:10px;color:#999">Principal / Head Teacher</div></div>
-                </div>
-            </div>`;
-      })
-      .join("\n");
-
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
-<title>Report Cards — ${identity.name || "Nexus Academy"}</title>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
-*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Inter',sans-serif;background:#fff;}
-.report-page{width:210mm;min-height:297mm;padding:16mm;page-break-after:always;display:flex;flex-direction:column}
-.report-page:last-child{page-break-after:auto}
-.rh{display:flex;align-items:center;gap:16px;padding-bottom:14px;border-bottom:3px solid ${primary}}
-.school-logo{width:72px;height:72px;border-radius:12px;object-fit:contain}
-.logo-placeholder{width:72px;height:72px;border-radius:12px;background:${primary};color:#fff;display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:700;flex-shrink:0}
-.ri{flex:1}.rn{font-size:18px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px}
-.ra,.rm{font-size:11px;color:#888;margin-top:2px}.rm{font-style:italic}
-.rt{text-align:right;font-size:11px}.rt strong{display:block;font-size:14px;font-weight:700;color:${primary}}
-.sb{background:${primary};color:#fff;border-radius:12px;padding:14px 20px;margin:18px 0;display:flex;justify-content:space-between;align-items:center}
-.sn{font-size:20px;font-weight:700}.si{font-size:12px;opacity:.7;margin-top:3px}
-.sc{background:rgba(0,0,0,.15);padding:6px 14px;border-radius:20px;font-size:13px}
-.lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#999;margin:14px 0 8px}
-table{width:100%;border-collapse:collapse;margin-bottom:20px}
-th{background:#f0f2ff;color:${primary};font-size:11px;font-weight:700;text-transform:uppercase;padding:10px 14px;text-align:left;border-bottom:2px solid ${primary}}
-td{padding:10px 14px;border-bottom:1px solid #eee;font-size:13px}
-.sum{display:flex;gap:12px;margin-bottom:20px}
-.sc2{flex:1;border:2px solid ${primary};border-radius:12px;padding:14px;text-align:center}
-.v{font-size:26px;font-weight:700;color:${primary}}.l{font-size:11px;color:#999;margin-top:4px;text-transform:uppercase}
-.ft{margin-top:auto;display:flex;justify-content:space-between;align-items:flex-end;padding-top:16px;border-top:1px solid #eee}
-@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-</style></head><body>${pages}</body></html>`;
-
-    const desktopPath = app.getPath("desktop");
-    const outFolder = path.join(desktopPath, "NexusReports");
+    const outFolder = path.join(app.getPath("desktop"), "NexusReports");
     if (!fs.existsSync(outFolder)) fs.mkdirSync(outFolder, { recursive: true });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 
-    const timestamp = new Date()
-      .toISOString()
-      .replace(/[:.]/g, "-")
-      .slice(0, 19);
-    const outPath = path.join(
-      outFolder,
-      `Master_Batched_Results_${timestamp}.pdf`,
-    );
-
-    // Phase 1: Headless Batched PDF Generation
-    await new Promise((resolve, reject) => {
-      let hiddenWindow = new BrowserWindow({
-        show: false,
-        webPreferences: { offscreen: true },
-      });
-
-      hiddenWindow.loadURL(
-        `data:text/html;charset=utf-8,${encodeURIComponent(html)}`,
-      );
-
-      hiddenWindow.webContents.on("did-finish-load", async () => {
-        try {
-          const pdfBuffer = await hiddenWindow.webContents.printToPDF({
-            printBackground: true,
-            pageSize: "A4",
-          });
-          fs.writeFileSync(outPath, pdfBuffer);
-          console.log(
-            `[Electron] Master PDF securely generated at: ${outPath}`,
-          );
-          hiddenWindow.close();
-          hiddenWindow = null;
-          resolve();
-        } catch (e) {
-          hiddenWindow.close();
-          reject(e);
-        }
-      });
-    });
-
-    // Phase 2: The Neutral Ground (Premium Plan Extraction)
-    // Feature gate: Only extract single HTMLs for Easy WhatsApp sharing if school has premium plan.
-    if (
-      identity.premiumPlan === true ||
-      identity.premiumPlan === "true" ||
-      identity.isPremium
-    ) {
-      const extractFolder = path.join(outFolder, "Digital_Copies_PREMIUM");
-      if (!fs.existsSync(extractFolder))
-        fs.mkdirSync(extractFolder, { recursive: true });
-
-      // Generate single HTML page per student
-      students.forEach((student) => {
-        const singlePageHtml = html.replace(
-          "${pages}",
-          pages.split("</div></div></div>")[students.indexOf(student)] +
-            "</div></div></div>",
-        );
-        // Extremely lightweight template specifically for this student
-        const studentSafeName = (student.name || student.id).replace(
-          /[^a-z0-9]/gi,
-          "_",
-        );
-        const singlePath = path.join(
-          extractFolder,
-          `${studentSafeName}_Report.html`,
-        );
-
-        // Hacky injection of just their page inside a wrapper
-        const cleanSingleHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${student.name} Report</title>
-                <style>${html.split("<style>")[1].split("</style>")[0]}
-                body { padding: 0 !important; background: #e0e0e0; display:flex; justify-content:center; align-items:center; min-height: 100vh;}
-                .report-page { background: #fff; box-shadow: 0 10px 30px rgba(0,0,0,0.1); margin: 20px 0; border-radius: 8px;}
-                </style></head><body>
-                ${pages.split('<div class="report-page">')[students.indexOf(student) + 1].split('<div class="ft">')[0]}<div class="ft">${pages.split('<div class="report-page">')[students.indexOf(student) + 1].split('<div class="ft">')[1].split("</div></div>")[0]}</div></div></div>
-                </body></html>`;
-
-        fs.writeFileSync(singlePath, cleanSingleHtml, "utf-8");
-      });
-      console.log(
-        `[Electron] Generated ${students.length} premium digital envelopes.`,
-      );
+    let html = "";
+    let outPath = "";
+    const baseDir = path.join(__dirname, "../../private_engine");
+    
+    if (reportType !== "broadsheet") {
+        html = reports.generateHTMLPages(payload, baseDir);
+        outPath = path.join(outFolder, `TerminalReport_${termConfig?.term?.replace(/\s/g,"_")||"Term"}_${timestamp}.${format === "image" ? "png" : "pdf"}`);
+    } else {
+        html = reports.generateBroadsheetHTML(payload);
+        outPath = path.join(outFolder, `Broadsheet_${payload.subject?.replace(/\s/g,"_")}_${timestamp}.${format === "image" ? "png" : "pdf"}`);
     }
 
-    await shell.openPath(outFolder);
+    if (format === "html") {
+         outPath = outPath.replace(".pdf", ".html").replace(".png", ".html");
+         fs.writeFileSync(outPath, html, "utf8");
+         require('electron').shell.openPath(outFolder);
+         return { success: true, path: outPath, folder: outFolder, format };
+    }
 
-    return { success: true, path: outPath, folder: outFolder };
+    await new Promise((resolve, reject) => {
+        let hw = new BrowserWindow({ show: false, width: 794, height: 1123, webPreferences: { offscreen: true } });
+        hw.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+        hw.webContents.on("did-finish-load", async () => {
+          try {
+            if (format === "image") {
+              const image = await hw.webContents.capturePage();
+              fs.writeFileSync(outPath, image.toPNG());
+            } else {
+              const buf = await hw.webContents.printToPDF({ printBackground: true, pageSize: "A4", landscape: (reportType === "broadsheet") });
+              fs.writeFileSync(outPath, buf);
+            }
+            hw.close(); hw = null; resolve();
+          } catch(e) { hw?.close(); reject(e); }
+        });
+    });
+
+    require('electron').shell.openPath(outFolder);
+    return { success: true, path: outPath, folder: outFolder, format };
+
   } catch (err) {
-    console.error("[Electron] PDF generation failed:", err);
+    console.error(`[Electron] Report generation failed:`, err);
     throw err;
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
 
 function createWindow() {
   // ── Initialize Persistence First ──────────────────────────────────────────
@@ -508,14 +728,23 @@ function createWindow() {
               });
             },
           },
-          {
-            label: "Quit",
-            click: () => {
-              app.quit();
-            },
-          },
+          { type: 'separator' },
+          { role: 'quit' }
         ],
       },
+      {
+        label: 'Edit',
+        submenu: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'delete' },
+          { role: 'selectall' }
+        ]
+      }
     ]),
   );
 
@@ -550,6 +779,14 @@ function createWindow() {
 
   // (app name already set at module scope)
   mainWindow.loadFile("index.html");
+
+  // ── Dev shortcuts: Cmd+R → reload, Cmd+Option+I → DevTools ───────────────
+  globalShortcut.register("CommandOrControl+R", () => {
+    if (mainWindow) mainWindow.webContents.reload();
+  });
+  globalShortcut.register("CommandOrControl+Alt+I", () => {
+    if (mainWindow) mainWindow.webContents.toggleDevTools();
+  });
 
   // Start the Handshake Server
   const port = 3000;
@@ -714,6 +951,11 @@ if (app) {
 
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();
+  });
+
+  app.on("will-quit", () => {
+    // Release all keyboard shortcuts so they don't linger in other apps
+    globalShortcut.unregisterAll();
   });
 } else {
   console.warn(

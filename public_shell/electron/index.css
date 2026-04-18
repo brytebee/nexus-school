@@ -771,3 +771,142 @@ code {
     min-height: 0;  /* allow flex child to shrink below content height */
 }
 
+/* ==========================================================================
+   Print Hub Styling
+   ========================================================================== */
+.ph-config-strip {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 20px;
+  flex-shrink: 0;
+}
+.ph-config-row {
+  display: flex;
+  gap: 20px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.ph-config-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ph-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+.ph-toggle {
+  font-size: 12px;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.ph-type-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-dim);
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.ph-type-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+}
+.ph-type-btn.active {
+  background: rgba(0, 229, 255, 0.15);
+  border-color: rgba(0, 229, 255, 0.4);
+  color: #00E5FF;
+}
+.ph-scope-row {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  margin-bottom: 20px;
+  flex-shrink: 0;
+}
+
+/* ==========================================================================
+   Dynamic Subject Picker
+   ========================================================================== */
+.subject-preset-pills {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.subject-pill {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-dim);
+  padding: 6px 14px;
+  border-radius: 16px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.subject-pill:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+}
+.subject-pill.active {
+  background: rgba(0, 229, 255, 0.15);
+  border-color: rgba(0, 229, 255, 0.4);
+  color: #00E5FF;
+  font-weight: 600;
+}
+.subject-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+  max-height: 250px;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+.subject-group-title {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  text-transform: uppercase;
+  color: #00E5FF;
+  letter-spacing: 1px;
+  margin-top: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding-bottom: 4px;
+}
+.subject-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+  color: #ddd;
+  cursor: pointer;
+  background: rgba(0,0,0,0.15);
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition: all 0.2s;
+}
+.subject-checkbox:hover { background: rgba(255,255,255,0.05); }
+.subject-checkbox input { margin-top: 1px; accent-color: #00E5FF; }
+.subject-checkbox.checked {
+  background: rgba(0, 229, 255, 0.08);
+  border-color: rgba(0, 229, 255, 0.2);
+  color: #fff;
+  font-weight: 500;
+}
+.custom-subj-row { display: flex; gap: 8px; margin-top: 6px; }

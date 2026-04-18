@@ -46,12 +46,20 @@ data class SchoolConfig(
 )
 
 @Serializable
+data class ScoreComponent(
+    val key: String,
+    val label: String,
+    val max: Int
+)
+
+@Serializable
 data class HandshakeResponse(
     val status: String,
     val message: String,
     val school_config: SchoolConfig,
     val server_timestamp: String,
-    val students: List<com.nexus.school.data.Student> = emptyList()
+    val students: List<com.nexus.school.data.Student> = emptyList(),
+    val score_components: List<ScoreComponent> = emptyList()
 )
 
 @Serializable

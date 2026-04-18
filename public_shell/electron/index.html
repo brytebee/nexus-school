@@ -5,27 +5,74 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Nexus School OS</title>
     <link rel="stylesheet" href="index.css" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
     <div class="background-glow"></div>
 
     <!-- ═══ License Lock Overlay ══════════════════════════════════════════ -->
-    <div id="license-lock-overlay" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(10,14,46,0.97);z-index:99999;justify-content:center;align-items:center;backdrop-filter:blur(12px);">
-      <div style="text-align:center;max-width:400px;padding:36px;background:rgba(255,0,0,0.08);border:1px solid rgba(255,0,0,0.3);border-radius:18px;">
-        <div style="font-size:52px;margin-bottom:16px;">🔒</div>
-        <h2 style="color:#ff4444;margin-bottom:12px;">License Locked</h2>
-        <p id="license-lock-message" style="color:#ccc;font-size:13px;line-height:1.6;margin-bottom:24px;">Your Nexus School OS license has expired or failed cryptographic verification.</p>
-        <button class="primary-btn" style="background:transparent;border:1px solid #ff4444;color:#ff4444;box-shadow:none;" onclick="window.close()">Close Application</button>
+    <div
+      id="license-lock-overlay"
+      style="
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(10, 14, 46, 0.97);
+        z-index: 99999;
+        justify-content: center;
+        align-items: center;
+        backdrop-filter: blur(12px);
+      "
+    >
+      <div
+        style="
+          text-align: center;
+          max-width: 400px;
+          padding: 36px;
+          background: rgba(255, 0, 0, 0.08);
+          border: 1px solid rgba(255, 0, 0, 0.3);
+          border-radius: 18px;
+        "
+      >
+        <div style="font-size: 52px; margin-bottom: 16px">🔒</div>
+        <h2 style="color: #ff4444; margin-bottom: 12px">License Locked</h2>
+        <p
+          id="license-lock-message"
+          style="
+            color: #ccc;
+            font-size: 13px;
+            line-height: 1.6;
+            margin-bottom: 24px;
+          "
+        >
+          Your Nexus School OS license has expired or failed cryptographic
+          verification.
+        </p>
+        <button
+          class="primary-btn"
+          style="
+            background: transparent;
+            border: 1px solid #ff4444;
+            color: #ff4444;
+            box-shadow: none;
+          "
+          onclick="window.close()"
+        >
+          Close Application
+        </button>
       </div>
     </div>
 
     <!-- ═══ App Shell ══════════════════════════════════════════════════════ -->
     <div class="app-shell" id="app-shell">
-
       <!-- ── Sidebar ─────────────────────────────────────────────────────── -->
       <nav class="sidebar" id="app-sidebar">
-
         <!-- Titlebar strip: pure drag region for macOS traffic-light safe zone -->
         <div class="sidebar-titlebar" id="sidebar-titlebar">
           <!-- On macOS hiddenInset, native traffic lights sit here at x:14 y:16 -->
@@ -41,16 +88,28 @@
         </div>
 
         <ul class="sidebar-nav">
-          <li class="nav-item active" data-view="dashboard" onclick="showView('dashboard')">
+          <li
+            class="nav-item active"
+            data-view="dashboard"
+            onclick="showView('dashboard')"
+          >
             <span class="nav-icon">🏠</span>
             <span class="nav-label">Dashboard</span>
           </li>
-          <li class="nav-item" data-view="teachers" onclick="showView('teachers')">
+          <li
+            class="nav-item"
+            data-view="teachers"
+            onclick="showView('teachers')"
+          >
             <span class="nav-icon">👩‍🏫</span>
             <span class="nav-label">Teachers</span>
             <span class="nav-badge" id="badge-teachers">0</span>
           </li>
-          <li class="nav-item" data-view="students" onclick="showView('students')">
+          <li
+            class="nav-item"
+            data-view="students"
+            onclick="showView('students')"
+          >
             <span class="nav-icon">👥</span>
             <span class="nav-label">Students</span>
             <span class="nav-badge" id="badge-students">0</span>
@@ -59,10 +118,30 @@
             <span class="nav-icon">📲</span>
             <span class="nav-label">Sync Hub</span>
           </li>
+          <li
+            class="nav-item"
+            data-view="printhub"
+            onclick="showView('printhub')"
+          >
+            <span class="nav-icon">🖨️</span>
+            <span class="nav-label">Print Hub</span>
+          </li>
+          <li
+            class="nav-item"
+            data-view="result-studio"
+            onclick="showView('result-studio')"
+          >
+            <span class="nav-icon">📊</span>
+            <span class="nav-label">Result Studio</span>
+          </li>
         </ul>
 
         <div class="sidebar-footer-nav">
-          <li class="nav-item" data-view="settings" onclick="showView('settings')">
+          <li
+            class="nav-item"
+            data-view="settings"
+            onclick="showView('settings')"
+          >
             <span class="nav-icon">⚙️</span>
             <span class="nav-label">Settings</span>
           </li>
@@ -79,30 +158,70 @@
 
       <!-- ── Main Content ────────────────────────────────────────────────── -->
       <main class="main-content">
-
         <!-- Custom titlebar: toggle | school name | drag | nav arrows | win controls -->
         <div class="main-titlebar" id="main-titlebar">
           <!-- Sidebar collapse toggle — in the titlebar, not the sidebar -->
-          <button class="sidebar-toggle-btn" id="sidebar-toggle-btn" onclick="toggleSidebar()" title="Toggle Sidebar">
+          <button
+            class="sidebar-toggle-btn"
+            id="sidebar-toggle-btn"
+            onclick="toggleSidebar()"
+            title="Toggle Sidebar"
+          >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <rect x="1" y="3"    width="14" height="1.5" rx="0.75"/>
-              <rect x="1" y="7.25" width="14" height="1.5" rx="0.75"/>
-              <rect x="1" y="11.5" width="14" height="1.5" rx="0.75"/>
+              <rect x="1" y="3" width="14" height="1.5" rx="0.75" />
+              <rect x="1" y="7.25" width="14" height="1.5" rx="0.75" />
+              <rect x="1" y="11.5" width="14" height="1.5" rx="0.75" />
             </svg>
           </button>
           <!-- School identity name -->
-          <span class="titlebar-school-name" id="titlebar-school-name">Nexus School OS</span>
+          <span class="titlebar-school-name" id="titlebar-school-name"
+            >Nexus School OS</span
+          >
           <!-- Drag region fills remaining space -->
           <div class="titlebar-drag-region"></div>
           <div class="titlebar-nav">
-            <button class="titlebar-nav-btn" id="btn-back"    onclick="historyBack()"    title="Go Back"    disabled>&#8592;</button>
-            <button class="titlebar-nav-btn" id="btn-forward" onclick="historyForward()" title="Go Forward" disabled>&#8594;</button>
+            <button
+              class="titlebar-nav-btn"
+              id="btn-back"
+              onclick="historyBack()"
+              title="Go Back"
+              disabled
+            >
+              &#8592;
+            </button>
+            <button
+              class="titlebar-nav-btn"
+              id="btn-forward"
+              onclick="historyForward()"
+              title="Go Forward"
+              disabled
+            >
+              &#8594;
+            </button>
           </div>
           <!-- Win/Linux custom window controls (hidden on macOS) -->
-          <div class="win-controls" id="win-controls" style="display:none;">
-            <button class="win-btn win-minimize" onclick="window.electronAPI.winMinimize()" title="Minimize">&#8722;</button>
-            <button class="win-btn win-maximize" onclick="window.electronAPI.winMaximize()" title="Maximize">&#9633;</button>
-            <button class="win-btn win-close"    onclick="window.electronAPI.winClose()"   title="Close">&#10005;</button>
+          <div class="win-controls" id="win-controls" style="display: none">
+            <button
+              class="win-btn win-minimize"
+              onclick="window.electronAPI.winMinimize()"
+              title="Minimize"
+            >
+              &#8722;
+            </button>
+            <button
+              class="win-btn win-maximize"
+              onclick="window.electronAPI.winMaximize()"
+              title="Maximize"
+            >
+              &#9633;
+            </button>
+            <button
+              class="win-btn win-close"
+              onclick="window.electronAPI.winClose()"
+              title="Close"
+            >
+              &#10005;
+            </button>
           </div>
         </div>
 
@@ -120,12 +239,22 @@
           </div>
 
           <div class="stats-row">
-            <div class="stat-card" onclick="showView('teachers')" style="cursor:pointer;" title="View Teachers">
+            <div
+              class="stat-card"
+              onclick="showView('teachers')"
+              style="cursor: pointer"
+              title="View Teachers"
+            >
               <div class="stat-icon">👩‍🏫</div>
               <div class="stat-value" id="dash-teachers-count">0</div>
               <div class="stat-label">Teachers</div>
             </div>
-            <div class="stat-card" onclick="showView('students')" style="cursor:pointer;" title="View Students">
+            <div
+              class="stat-card"
+              onclick="showView('students')"
+              style="cursor: pointer"
+              title="View Students"
+            >
               <div class="stat-icon">👥</div>
               <div class="stat-value" id="dash-students-count">0</div>
               <div class="stat-label">Students</div>
@@ -142,9 +271,32 @@
             </div>
           </div>
 
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-shrink:0;">
-            <h3 style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;">Live Grade Events</h3>
-            <button id="generate-pdf-btn" class="primary-btn" style="padding:8px 18px;font-size:12px;display:none;">📄 Generate Report Cards</button>
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 14px;
+              flex-shrink: 0;
+            "
+          >
+            <h3
+              style="
+                font-size: 11px;
+                color: var(--text-dim);
+                text-transform: uppercase;
+                letter-spacing: 1px;
+              "
+            >
+              Live Grade Events
+            </h3>
+            <button
+              id="generate-pdf-btn"
+              class="primary-btn"
+              style="padding: 8px 18px; font-size: 12px; display: none"
+            >
+              📄 Generate Report Cards
+            </button>
           </div>
           <div class="events-container" id="events-container"></div>
         </div>
@@ -154,37 +306,206 @@
           <div class="view-header">
             <div>
               <h2 class="view-title">Teacher Directory</h2>
-              <p class="view-sub">Manage staff profiles and class-subject allocations.</p>
+              <p class="view-sub">
+                Manage staff profiles and class-subject allocations.
+              </p>
             </div>
-            <div style="display:flex;gap:10px;align-items:center;">
-              <label for="csv-upload" class="primary-btn" style="background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.18);box-shadow:none;cursor:pointer;" title="Import school roster CSV">
+            <div style="display: flex; gap: 10px; align-items: center">
+              <label
+                for="csv-upload"
+                class="primary-btn"
+                style="
+                  background: rgba(255, 255, 255, 0.08);
+                  color: #fff;
+                  border: 1px solid rgba(255, 255, 255, 0.18);
+                  box-shadow: none;
+                  cursor: pointer;
+                "
+                title="Import school roster CSV"
+              >
                 ⚡ Import CSV
               </label>
-              <button class="primary-btn" onclick="toggleAddTeacherForm()">＋ Add Teacher</button>
+              <button class="primary-btn" onclick="toggleAddTeacherForm()">
+                ＋ Add Teacher
+              </button>
             </div>
           </div>
 
           <!-- Add Teacher Drawer -->
-          <div id="add-teacher-drawer" style="display:none;background:rgba(0,229,255,0.04);border:1px solid rgba(0,229,255,0.15);border-radius:14px;padding:20px;margin-bottom:18px;flex-shrink:0;">
-            <h3 style="font-size:13px;font-weight:700;margin-bottom:14px;color:#00E5FF;">👩‍🏫 New Teacher Profile
-              <span style="font-size:11px;color:#555;font-weight:400;margin-left:8px;">ID auto-generated</span>
+          <div
+            id="add-teacher-drawer"
+            style="
+              display: none;
+              background: rgba(0, 229, 255, 0.04);
+              border: 1px solid rgba(0, 229, 255, 0.15);
+              border-radius: 14px;
+              padding: 20px;
+              margin-bottom: 18px;
+              flex-shrink: 0;
+            "
+          >
+            <h3
+              style="
+                font-size: 13px;
+                font-weight: 700;
+                margin-bottom: 14px;
+                color: #00e5ff;
+              "
+            >
+              👩‍🏫 New Teacher Profile
+              <span
+                style="
+                  font-size: 11px;
+                  color: #555;
+                  font-weight: 400;
+                  margin-left: 8px;
+                "
+                >ID auto-generated</span
+              >
             </h3>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px;">
-              <input id="wiz-tch-name"  class="modern-input" placeholder="Full Name *" />
-              <input id="wiz-tch-phone" class="modern-input" placeholder="Phone Number" />
-              <input id="wiz-tch-email" class="modern-input" placeholder="Email (optional)" />
+            <div
+              style="
+                display: grid;
+                grid-template-columns: 1fr 1fr 1fr;
+                gap: 10px;
+                margin-bottom: 14px;
+              "
+            >
+              <input
+                id="wiz-tch-name"
+                class="modern-input"
+                placeholder="Full Name *"
+              />
+              <input
+                id="wiz-tch-phone"
+                class="modern-input"
+                placeholder="Phone Number"
+              />
+              <input
+                id="wiz-tch-email"
+                class="modern-input"
+                placeholder="Email (optional)"
+              />
             </div>
-            <p style="font-size:11px;color:#00E5FF;margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Class Allocations *</p>
-            <div id="wiz-alloc-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
-            <div style="display:flex;gap:8px;margin-bottom:14px;">
-              <input id="wiz-alloc-class"    class="modern-input" placeholder="Class (e.g. JSS2)"       style="flex:1;" />
-              <input id="wiz-alloc-subjects" class="modern-input" placeholder="Subjects (Maths|English)" style="flex:2;" />
-              <button onclick="wizAddAllocation()" style="background:rgba(0,229,255,0.14);border:1px solid #00E5FF;color:#00E5FF;border-radius:8px;padding:0 14px;cursor:pointer;font-size:20px;flex-shrink:0;line-height:1;" title="Add class allocation">+</button>
+            <p
+              style="
+                font-size: 11px;
+                color: #00e5ff;
+                margin-bottom: 8px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+              "
+            >
+              Class Allocations *
+            </p>
+            <div
+              id="wiz-alloc-list"
+              style="
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                margin-bottom: 8px;
+              "
+            ></div>
+
+            <!-- Dynamic Subject Picker (Teacher) -->
+            <div
+              style="
+                background: rgba(0, 0, 0, 0.15);
+                border: 1px solid rgba(255, 255, 255, 0.05);
+                border-radius: 10px;
+                padding: 12px;
+                margin-bottom: 14px;
+              "
+            >
+              <input
+                id="wiz-alloc-class"
+                class="modern-input"
+                placeholder="Class Names (comma separated: JSS1 Gold, JSS2 Silver) *"
+                style="width: 100%; margin-bottom: 10px"
+              />
+              <div class="subject-preset-pills" id="tch-preset-pills">
+                <span
+                  class="subject-pill"
+                  onclick="renderSubjectsPicker('tch', 'pri_lower')"
+                  >Primary 1-3</span
+                >
+                <span
+                  class="subject-pill"
+                  onclick="renderSubjectsPicker('tch', 'pri_upper')"
+                  >Primary 4-6</span
+                >
+                <span
+                  class="subject-pill active"
+                  onclick="renderSubjectsPicker('tch', 'jss')"
+                  >JSS</span
+                >
+                <span
+                  class="subject-pill"
+                  onclick="renderSubjectsPicker('tch', 'sss')"
+                  >SSS</span
+                >
+              </div>
+              <div class="subject-grid" id="tch-subject-grid"></div>
+              <div class="custom-subj-row">
+                <input
+                  id="tch-custom-subj"
+                  class="modern-input"
+                  placeholder="Add custom subject"
+                  style="flex: 1; height: 30px; font-size: 11px"
+                />
+                <button
+                  class="primary-btn"
+                  style="padding: 0 12px; height: 30px; font-size: 11px"
+                  onclick="addCustomSubject('tch')"
+                >
+                  Add +
+                </button>
+              </div>
+              <div style="margin-top: 12px; text-align: right">
+                <button
+                  onclick="wizAddAllocation()"
+                  style="
+                    background: rgba(0, 229, 255, 0.14);
+                    border: 1px solid #00e5ff;
+                    color: #00e5ff;
+                    border-radius: 8px;
+                    padding: 6px 14px;
+                    cursor: pointer;
+                    font-size: 12px;
+                    font-weight: 600;
+                  "
+                >
+                  ＋ Append Allocation
+                </button>
+              </div>
             </div>
-            <div style="display:flex;gap:10px;align-items:center;">
-              <button onclick="wizSaveTeacher()" class="primary-btn" style="padding:9px 22px;font-size:13px;">Save Teacher</button>
-              <button onclick="toggleAddTeacherForm()" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:13px;">Cancel</button>
-              <span id="wiz-tch-log" style="font-size:12px;margin-left:6px;"></span>
+
+            <div style="display: flex; gap: 10px; align-items: center">
+              <button
+                onclick="wizSaveTeacher()"
+                class="primary-btn"
+                style="padding: 9px 22px; font-size: 13px"
+              >
+                Save Teacher
+              </button>
+              <button
+                onclick="toggleAddTeacherForm()"
+                style="
+                  background: none;
+                  border: none;
+                  color: var(--text-dim);
+                  cursor: pointer;
+                  font-size: 13px;
+                "
+              >
+                Cancel
+              </button>
+              <span
+                id="wiz-tch-log"
+                style="font-size: 12px; margin-left: 6px"
+              ></span>
             </div>
           </div>
 
@@ -197,13 +518,21 @@
                   <th>Name</th>
                   <th>Phone</th>
                   <th>Class Allocations</th>
-                  <th style="text-align:right;">Actions</th>
+                  <th style="text-align: right">Actions</th>
                 </tr>
               </thead>
               <tbody id="teachers-tbody">
                 <tr id="teachers-empty-row">
-                  <td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim);">
-                    No teachers yet. Click <strong>＋ Add Teacher</strong> or <strong>Import CSV</strong> to get started.
+                  <td
+                    colspan="5"
+                    style="
+                      text-align: center;
+                      padding: 40px;
+                      color: var(--text-dim);
+                    "
+                  >
+                    No teachers yet. Click <strong>＋ Add Teacher</strong> or
+                    <strong>Import CSV</strong> to get started.
                   </td>
                 </tr>
               </tbody>
@@ -218,30 +547,184 @@
               <h2 class="view-title">Student Directory</h2>
               <p class="view-sub">View and manage all enrolled students.</p>
             </div>
-            <div style="display:flex;gap:10px;align-items:center;">
-              <select id="student-class-filter" class="modern-input" style="min-width:140px;" onchange="renderStudentsTable()">
+            <div style="display: flex; gap: 10px; align-items: center">
+              <select
+                id="student-class-filter"
+                class="modern-input"
+                style="min-width: 140px"
+                onchange="renderStudentsTable()"
+              >
                 <option value="">All Classes</option>
               </select>
-              <label for="csv-upload" class="primary-btn" style="background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.18);box-shadow:none;cursor:pointer;" title="Import school roster CSV">
+              <label
+                for="csv-upload"
+                class="primary-btn"
+                style="
+                  background: rgba(255, 255, 255, 0.08);
+                  color: #fff;
+                  border: 1px solid rgba(255, 255, 255, 0.18);
+                  box-shadow: none;
+                  cursor: pointer;
+                "
+                title="Import school roster CSV"
+              >
                 ⚡ Import CSV
               </label>
-              <button class="primary-btn" onclick="toggleAddStudentForm()">＋ Add Student</button>
+              <button class="primary-btn" onclick="toggleAddStudentForm()">
+                ＋ Add Student
+              </button>
             </div>
           </div>
 
           <!-- Add Student Drawer -->
-          <div id="add-student-drawer" style="display:none;background:rgba(255,215,0,0.04);border:1px solid rgba(255,215,0,0.15);border-radius:14px;padding:20px;margin-bottom:18px;flex-shrink:0;">
-            <h3 style="font-size:13px;font-weight:700;margin-bottom:14px;color:#FFD700;">👥 New Student
-              <span style="font-size:11px;color:#555;font-weight:400;margin-left:8px;">ID auto-generated</span>
+          <div
+            id="add-student-drawer"
+            style="
+              display: none;
+              background: rgba(255, 215, 0, 0.04);
+              border: 1px solid rgba(255, 215, 0, 0.15);
+              border-radius: 14px;
+              padding: 20px;
+              margin-bottom: 18px;
+              flex-shrink: 0;
+            "
+          >
+            <h3
+              style="
+                font-size: 13px;
+                font-weight: 700;
+                margin-bottom: 14px;
+                color: #ffd700;
+              "
+            >
+              👥 New Student
+              <span
+                style="
+                  font-size: 11px;
+                  color: #555;
+                  font-weight: 400;
+                  margin-left: 8px;
+                "
+                >ID auto-generated</span
+              >
             </h3>
-            <div style="display:flex;gap:10px;margin-bottom:14px;">
-              <input id="stu-add-name"  class="modern-input" placeholder="Full Name *"          style="flex:2;" />
-              <input id="stu-add-class" class="modern-input" placeholder="Class (e.g. JSS1) *"  style="flex:1;" />
+            <div
+              style="
+                display: grid;
+                grid-template-columns: 2fr 1fr;
+                gap: 10px;
+                margin-bottom: 14px;
+              "
+            >
+              <input
+                id="stu-add-name"
+                class="modern-input"
+                placeholder="Full Name *"
+              />
+              <div style="display:flex; flex-direction:column; gap:0;">
+                <input
+                  id="stu-add-class"
+                  class="modern-input"
+                  placeholder="Class (e.g. JSS1 Gold) *"
+                  list="stu-class-datalist"
+                  style="width: 100%;"
+                />
+                <datalist id="stu-class-datalist"></datalist>
+              </div>
             </div>
-            <div style="display:flex;gap:10px;align-items:center;">
-              <button onclick="addStudentFromDirectory()" class="primary-btn" style="padding:9px 22px;font-size:13px;background:linear-gradient(135deg,#b8860b,#FFD700);color:#000;box-shadow:none;">Save Student</button>
-              <button onclick="toggleAddStudentForm()" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:13px;">Cancel</button>
-              <span id="stu-add-log" style="font-size:12px;margin-left:6px;"></span>
+
+            <p
+              style="
+                font-size: 11px;
+                color: #ffd700;
+                margin-bottom: 8px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+              "
+            >
+              Student Enrolled Subjects
+            </p>
+            <!-- Dynamic Subject Picker (Student) -->
+            <div
+              style="
+                background: rgba(0, 0, 0, 0.15);
+                border: 1px solid rgba(255, 255, 255, 0.05);
+                border-radius: 10px;
+                padding: 12px;
+                margin-bottom: 14px;
+              "
+            >
+              <div class="subject-preset-pills" id="stu-preset-pills">
+                <span
+                  class="subject-pill"
+                  onclick="renderSubjectsPicker('stu', 'pri_lower')"
+                  >Primary 1-3</span
+                >
+                <span
+                  class="subject-pill"
+                  onclick="renderSubjectsPicker('stu', 'pri_upper')"
+                  >Primary 4-6</span
+                >
+                <span
+                  class="subject-pill active"
+                  onclick="renderSubjectsPicker('stu', 'jss')"
+                  >JSS</span
+                >
+                <span
+                  class="subject-pill"
+                  onclick="renderSubjectsPicker('stu', 'sss')"
+                  >SSS</span
+                >
+              </div>
+              <div class="subject-grid" id="stu-subject-grid"></div>
+              <div class="custom-subj-row">
+                <input
+                  id="stu-custom-subj"
+                  class="modern-input"
+                  placeholder="Add custom subject"
+                  style="flex: 1; height: 30px; font-size: 11px"
+                />
+                <button
+                  class="primary-btn"
+                  style="padding: 0 12px; height: 30px; font-size: 11px"
+                  onclick="addCustomSubject('stu')"
+                >
+                  Add +
+                </button>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 10px; align-items: center">
+              <button
+                onclick="addStudentFromDirectory()"
+                class="primary-btn"
+                style="
+                  padding: 9px 22px;
+                  font-size: 13px;
+                  background: linear-gradient(135deg, #b8860b, #ffd700);
+                  color: #000;
+                  box-shadow: none;
+                "
+              >
+                Save Student
+              </button>
+              <button
+                onclick="toggleAddStudentForm()"
+                style="
+                  background: none;
+                  border: none;
+                  color: var(--text-dim);
+                  cursor: pointer;
+                  font-size: 13px;
+                "
+              >
+                Cancel
+              </button>
+              <span
+                id="stu-add-log"
+                style="font-size: 12px; margin-left: 6px"
+              ></span>
             </div>
           </div>
 
@@ -254,12 +737,19 @@
                   <th>ID</th>
                   <th>Full Name</th>
                   <th>Class</th>
-                  <th style="text-align:right;">Actions</th>
+                  <th style="text-align: right">Actions</th>
                 </tr>
               </thead>
               <tbody id="students-tbody">
                 <tr>
-                  <td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim);">
+                  <td
+                    colspan="5"
+                    style="
+                      text-align: center;
+                      padding: 40px;
+                      color: var(--text-dim);
+                    "
+                  >
                     No students loaded. Import a CSV or add manually.
                   </td>
                 </tr>
@@ -268,25 +758,426 @@
           </div>
         </div>
 
-        <!-- ─────────────────── VIEW: SYNC HUB ──────────────────────────── -->
+        <!-- ─────────────────── VIEW: PRINT HUB ───────────────────────────── -->
+        <div class="view" id="view-printhub">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">🖨️ Print Hub</h2>
+              <p class="view-sub">
+                Generate Terminal Report Cards &amp; Master Broadsheets.
+              </p>
+            </div>
+          </div>
+
+          <!-- Term Config Strip -->
+          <!-- Term Config Strip -->
+          <div class="ph-config-strip" id="ph-config-strip" style="align-items: flex-start; gap: 0;">
+            <div style="display:flex; flex-direction:column; gap: 16px; flex: 1;">
+              <div class="ph-config-row" style="flex-wrap: wrap; align-items: flex-end;">
+                <div class="ph-config-group">
+                  <label class="ph-label">Academic Session</label>
+                  <input
+                    id="ph-session"
+                    class="modern-input"
+                    value="2024/2025"
+                    style="width: 130px"
+                  />
+                </div>
+                <div class="ph-config-group">
+                  <label class="ph-label">Term</label>
+                  <select id="ph-term" class="modern-input" style="width: 150px">
+                    <option>First Term</option>
+                    <option>Second Term</option>
+                    <option>Third Term</option>
+                  </select>
+                </div>
+                <div class="ph-config-group">
+                  <label class="ph-label">Resumption Date</label>
+                  <input
+                    id="ph-resumption"
+                    type="date"
+                    class="modern-input"
+                    style="width: 160px"
+                  />
+                </div>
+              </div>
+              <div class="ph-config-row">
+                <div class="ph-config-group" style="flex-direction: row; gap: 14px; align-items: center">
+                  <label class="ph-toggle"
+                    ><input type="checkbox" id="ph-show-position" checked /> Show
+                    Position</label
+                  >
+                  <label class="ph-toggle"
+                    ><input type="checkbox" id="ph-show-domains" checked /> Show
+                    Domains</label
+                  >
+                </div>
+              </div>
+              <!-- Score Breakdown Configurator -->
+              <div class="ph-config-row">
+                <div class="ph-config-group" style="flex-direction:column;align-items:flex-start;min-width:260px; width:100%;">
+                  <label class="ph-label" style="margin-bottom:6px;">Score Components</label>
+                  <div id="ph-components-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:6px;width:100%;"></div>
+                  <div style="display:flex;gap:6px;align-items:center;">
+                    <input id="ph-comp-label" class="modern-input" placeholder="Label (e.g. CA1)" style="width:110px;height:28px;font-size:11px;" />
+                    <input id="ph-comp-max" class="modern-input" type="number" placeholder="Max" style="width:60px;height:28px;font-size:11px;" min="1" max="100" />
+                    <button onclick="phAddComponent()" style="height:28px;padding:0 10px;font-size:11px;background:rgba(0,229,255,0.12);color:#00e5ff;border:1px solid rgba(0,229,255,0.3);border-radius:6px;cursor:pointer;">＋ Add</button>
+                  </div>
+                  <div id="ph-comp-total" style="font-size:10px;margin-top:4px;color:var(--text-dim);"></div>
+                </div>
+              </div>
+              
+              <!-- Template Selector and Actions -->
+              <div class="ph-config-row" style="align-items: flex-end; margin-top: 8px;">
+                <div class="ph-config-group" style="flex-direction:column;align-items:flex-start;min-width:200px;">
+                  <label class="ph-label" style="margin-bottom:6px;">Report Template</label>
+                  <select id="ph-template" class="modern-input" style="width:100%;font-size:11px;" onchange="updateTemplatePreview(this.value, 'ph-template-preview')">
+                    <option value="clean_slate">🎨 Classic (Free)</option>
+                    <option value="prestige">⭐ Prestige (Silver)</option>
+                    <option value="azure">⭐ Azure Edge (Silver)</option>
+                    <option value="royal">⭐⭐ Royal (Gold)</option>
+                    <option value="monarch">⭐⭐ Monarch (Gold)</option>
+                    <option value="sovereign">💎 Sovereign (Diamond)</option>
+                    <option value="sterling">💎 Sterling (Diamond)</option>
+                    <option value="apex">💎 Apex (Diamond)</option>
+                  </select>
+                </div>
+                <div style="display:flex;gap:8px;align-items:flex-end;">
+                  <button
+                    class="primary-btn"
+                    style="padding: 8px 18px; font-size: 12px"
+                    onclick="phSaveConfig()"
+                  >
+                    💾 Save Config
+                  </button>
+                  <button
+                    class="primary-btn"
+                    style="padding: 8px 18px; font-size: 12px; background: linear-gradient(135deg, rgba(0,229,255,0.15), rgba(100,50,255,0.15)); border: 1px solid rgba(0,229,255,0.4); color: #00e5ff;"
+                    onclick="showView('result-studio'); rsInit();"
+                  >
+                    📊 Open Result Studio →
+                  </button>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Template Preview Box -->
+            <div style="display:flex; flex-direction:column; align-items:center; gap: 8px; padding-left:20px; border-left: 1px solid rgba(255,255,255,0.06);">
+              <span class="ph-label" style="font-size: 10px; text-transform: uppercase; letter-spacing:1px;">📋 Preview</span>
+              <div id="ph-template-preview" style="width: 210px; height: 297px; background: rgba(255,255,255,0.04); border-radius: 4px; border: 1px dashed rgba(255,255,255,0.12); overflow: hidden; position: relative; display:flex; align-items:center; justify-content:center;">
+                <span style="color:rgba(255,255,255,0.2);font-size:11px;">Select template</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ↑ Print Hub ends here. Generate Reports moved to Result Studio. -->
+          <div style="display: flex; gap: 12px; margin: 16px 0; flex-shrink: 0">
+            <button
+              id="ph-type-terminal"
+              class="ph-type-btn active"
+              onclick="phSetType('terminal')"
+            >
+              📄 Terminal Report Cards
+            </button>
+            <button
+              id="ph-type-broadsheet"
+              class="ph-type-btn"
+              onclick="phSetType('broadsheet')"
+            >
+              📋 Master Broadsheet
+            </button>
+          </div>
+
+          <!-- Scope Selector -->
+          <div class="ph-scope-row" id="ph-scope-row">
+            <div class="ph-config-group">
+              <label class="ph-label">Scope</label>
+              <select
+                id="ph-scope"
+                class="modern-input"
+                style="width: 160px"
+                onchange="phOnScopeChange()"
+              >
+                <option value="all">🏫 Entire School</option>
+                <option value="class">🏷️ By Class</option>
+                <option value="teacher">👩‍🏫 By Teacher</option>
+                <option value="subject">📚 By Subject</option>
+                <option value="student">👤 Single Student</option>
+              </select>
+            </div>
+            <div
+              class="ph-config-group"
+              id="ph-scope-class"
+              style="display: none"
+            >
+              <label class="ph-label">Class</label>
+              <select
+                id="ph-class-pick"
+                class="modern-input"
+                style="width: 140px"
+              ></select>
+            </div>
+            <div
+              class="ph-config-group"
+              id="ph-scope-teacher"
+              style="display: none"
+            >
+              <label class="ph-label">Teacher</label>
+              <select
+                id="ph-teacher-pick"
+                class="modern-input"
+                style="width: 200px"
+              ></select>
+            </div>
+            <div
+              class="ph-config-group"
+              id="ph-scope-subject"
+              style="display: none"
+            >
+              <label class="ph-label">Subject</label>
+              <input
+                id="ph-subject-input"
+                class="modern-input"
+                placeholder="e.g. Mathematics"
+                style="width: 190px"
+              />
+            </div>
+            <div
+              class="ph-config-group"
+              id="ph-scope-student"
+              style="display: none"
+            >
+              <label class="ph-label">Student</label>
+              <select
+                id="ph-student-pick"
+                class="modern-input"
+                style="width: 220px"
+              ></select>
+            </div>
+            <button
+              class="primary-btn"
+              style="
+                padding: 8px 18px;
+                font-size: 12px;
+                background: rgba(0, 229, 255, 0.12);
+                color: #00e5ff;
+                border: 1px solid rgba(0, 229, 255, 0.3);
+                box-shadow: none;
+              "
+              onclick="phPreview()"
+            >
+              🔍 Preview
+            </button>
+          </div>
+
+          <!-- Preview Table -->
+          <div
+            class="table-container"
+            id="ph-preview-container"
+            style="display: none"
+          >
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 12px;
+              "
+            >
+              <span
+                id="ph-preview-label"
+                style="font-size: 12px; color: var(--text-dim)"
+              ></span>
+              <button
+                id="ph-generate-btn"
+                class="primary-btn"
+                style="padding: 9px 24px"
+                onclick="phGenerate()"
+              >
+                📄 Generate PDF
+              </button>
+            </div>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Student Name</th>
+                  <th>Class</th>
+                  <th>Subjects Recorded</th>
+                  <th>Total Score</th>
+                  <th>Average</th>
+                </tr>
+              </thead>
+              <tbody id="ph-preview-tbody"></tbody>
+            </table>
+          </div>
+          <div
+            id="ph-status"
+            style="font-size: 12px; margin-top: 12px; color: var(--text-dim)"
+          ></div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             RESULT STUDIO VIEW
+        ═══════════════════════════════════════════════════════════════════ -->
+        <div class="view" id="view-result-studio">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">📊 Result Studio</h2>
+              <p class="view-sub">Generate, preview and export result cards in any format.</p>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;">
+              <span id="rs-status" style="font-size:12px;color:var(--text-dim);"></span>
+            </div>
+          </div>
+
+          <div class="ph-config-strip" id="rs-config-strip" style="align-items:flex-start; gap:0;">
+            <!-- Controls: flex-wrap so selectors flow to next row when needed -->
+            <div style="flex:1; display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; min-width:0; padding-right:20px;">
+              <!-- Template -->
+              <div class="ph-config-group">
+                <label class="ph-label">Template</label>
+                <select id="rs-template" class="modern-input" style="width:200px;font-size:11px;" onchange="updateTemplatePreview(this.value, 'rs-template-preview')">
+                  <option value="clean_slate">🎨 Classic (Free)</option>
+                  <option value="prestige">⭐ Prestige (Silver)</option>
+                  <option value="azure">⭐ Azure Edge (Silver)</option>
+                  <option value="royal">⭐⭐ Royal (Gold)</option>
+                  <option value="monarch">⭐⭐ Monarch (Gold)</option>
+                  <option value="sovereign">💎 Sovereign (Diamond)</option>
+                  <option value="sterling">💎 Sterling (Diamond)</option>
+                  <option value="apex">💎 Apex (Diamond)</option>
+                </select>
+              </div>
+              <!-- Format -->
+              <div class="ph-config-group">
+                <label class="ph-label">Output Format</label>
+                <select id="rs-format" class="modern-input" style="width:130px;" onchange="rsOnFormatChange()">
+                  <option value="pdf">📄 PDF</option>
+                  <option value="html">🌐 HTML File</option>
+                  <option value="image">🖼️ Image (PNG)</option>
+                </select>
+              </div>
+              <!-- Report type -->
+              <div class="ph-config-group">
+                <label class="ph-label">Report Type</label>
+                <select id="rs-type" class="modern-input" style="width:180px;">
+                  <option value="terminal">📄 Terminal Report Cards</option>
+                  <option value="broadsheet">📋 Master Broadsheet</option>
+                </select>
+              </div>
+              <!-- Scope -->
+              <div class="ph-config-group">
+                <label class="ph-label">Scope</label>
+                <select id="rs-scope" class="modern-input" style="width:160px;" onchange="rsOnScopeChange()">
+                  <option value="all">🏫 Entire School</option>
+                  <option value="class">🏷️ By Class</option>
+                  <option value="teacher">👩‍🏫 By Teacher</option>
+                  <option value="subject">📚 By Subject</option>
+                  <option value="student">👤 Single Student</option>
+                </select>
+              </div>
+              <div class="ph-config-group" id="rs-scope-class" style="display:none">
+                <label class="ph-label">Class</label>
+                <select id="rs-class-pick" class="modern-input" style="width:140px;"></select>
+              </div>
+              <div class="ph-config-group" id="rs-scope-teacher" style="display:none">
+                <label class="ph-label">Teacher</label>
+                <select id="rs-teacher-pick" class="modern-input" style="width:200px;"></select>
+              </div>
+              <div class="ph-config-group" id="rs-scope-subject" style="display:none">
+                <label class="ph-label">Subject</label>
+                <input id="rs-subject-input" class="modern-input" placeholder="e.g. Mathematics" style="width:190px;"/>
+              </div>
+              <div class="ph-config-group" id="rs-scope-student" style="display:none">
+                <label class="ph-label">Student</label>
+                <select id="rs-student-pick" class="modern-input" style="width:220px;"></select>
+              </div>
+            </div>
+            <!-- Right: Template preview INSIDE the config card -->
+            <div style="display:flex;flex-direction:column;align-items:center;gap:8px;flex-shrink:0;padding-left:4px;border-left:1px solid rgba(255,255,255,0.06);">
+              <span class="ph-label" style="font-size:10px;text-transform:uppercase;letter-spacing:1px;">📋 Preview</span>
+              <div id="rs-template-preview" style="width:210px;height:297px;background:rgba(255,255,255,0.04);border-radius:4px;border:1px dashed rgba(255,255,255,0.12);overflow:hidden;position:relative;display:flex;align-items:center;justify-content:center;">
+                <span style="color:rgba(255,255,255,0.2);font-size:11px;">Select template</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Action buttons -->
+          <div style="display:flex;gap:10px;margin:14px 0;flex-shrink:0;flex-wrap:wrap;align-items:center;">
+            <button class="ph-type-btn active" onclick="rsPreview()" id="rs-preview-btn">🔍 Preview</button>
+            <button class="primary-btn" style="padding:9px 24px;" id="rs-generate-btn" onclick="rsGenerate()">📄 Generate &amp; Save</button>
+            <button id="rs-copy-btn" onclick="rsCopyImage()" style="display:none;padding:9px 18px;font-size:12px;background:rgba(0,229,255,0.1);color:#00e5ff;border:1px solid rgba(0,229,255,0.3);border-radius:8px;cursor:pointer;">📋 Copy Image to Clipboard</button>
+            <span id="rs-result-path" style="font-size:11px;color:var(--text-dim);"></span>
+          </div>
+
+          <!-- Preview table -->
+          <div class="table-container" id="rs-preview-container" style="display:none;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+              <span id="rs-preview-label" style="font-size:12px;color:var(--text-dim);"></span>
+            </div>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Student Name</th>
+                  <th>Class</th>
+                  <th>Subjects Recorded</th>
+                  <th>Total Score</th>
+                  <th>Average</th>
+                </tr>
+              </thead>
+              <tbody id="rs-preview-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="view" id="view-sync">
           <div class="view-header">
             <div>
               <h2 class="view-title">Sync Hub</h2>
-              <p class="view-sub">Select a teacher, then scan the QR with the Nexus tablet app.</p>
+              <p class="view-sub">
+                Select a teacher, then scan the QR with the Nexus tablet app.
+              </p>
             </div>
-            <span id="upload-status-tooltip" style="font-size:13px;color:#4CAF50;"></span>
+            <span
+              id="upload-status-tooltip"
+              style="font-size: 13px; color: #4caf50"
+            ></span>
           </div>
 
           <div class="sync-layout">
             <!-- QR Panel -->
             <div class="sync-qr-panel">
               <div class="qr-wrapper">
-                <div id="qr-skeleton" style="width:264px;height:264px;border-radius:16px;background:rgba(255,255,255,0.04);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;border:1px dashed rgba(255,255,255,0.1);">
-                  <div style="font-size:40px;opacity:0.3;">⬛</div>
-                  <span style="font-size:12px;color:#444;">Select a teacher to generate QR</span>
+                <div
+                  id="qr-skeleton"
+                  style="
+                    width: 264px;
+                    height: 264px;
+                    border-radius: 16px;
+                    background: rgba(255, 255, 255, 0.04);
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 12px;
+                    border: 1px dashed rgba(255, 255, 255, 0.1);
+                  "
+                >
+                  <div style="font-size: 40px; opacity: 0.3">⬛</div>
+                  <span style="font-size: 12px; color: #444"
+                    >Select a teacher to generate QR</span
+                  >
                 </div>
-                <div id="qr-code" style="background:white;padding:12px;border-radius:16px;display:none;"></div>
+                <div
+                  id="qr-code"
+                  style="
+                    background: white;
+                    padding: 12px;
+                    border-radius: 16px;
+                    display: none;
+                  "
+                ></div>
                 <div class="qr-ring"></div>
                 <div class="qr-ring-outer"></div>
               </div>
@@ -294,21 +1185,70 @@
 
             <!-- Controls Panel -->
             <div class="sync-controls-panel">
-              <div style="margin-bottom:20px;">
-                <label style="font-size:11px;color:var(--text-dim);margin-bottom:8px;display:block;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Select Teacher</label>
-                <select id="teacher-picker" class="modern-input" style="font-size:14px;">
-                  <option value="" disabled selected>Select teacher to generate QR…</option>
+              <div style="margin-bottom: 20px">
+                <label
+                  style="
+                    font-size: 11px;
+                    color: var(--text-dim);
+                    margin-bottom: 8px;
+                    display: block;
+                    font-weight: 700;
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
+                  "
+                  >Select Teacher</label
+                >
+                <select
+                  id="teacher-picker"
+                  class="modern-input"
+                  style="font-size: 14px"
+                >
+                  <option value="" disabled selected>
+                    Select teacher to generate QR…
+                  </option>
                 </select>
               </div>
-              <div style="margin-bottom:20px;">
-                <label style="font-size:11px;color:var(--text-dim);margin-bottom:8px;display:block;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Server Address</label>
-                <div style="display:flex;align-items:center;gap:6px;background:rgba(0,0,0,0.2);border:1px solid var(--glass-border);border-radius:8px;padding:10px 14px;">
+              <div style="margin-bottom: 20px">
+                <label
+                  style="
+                    font-size: 11px;
+                    color: var(--text-dim);
+                    margin-bottom: 8px;
+                    display: block;
+                    font-weight: 700;
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
+                  "
+                  >Server Address</label
+                >
+                <div
+                  style="
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    background: rgba(0, 0, 0, 0.2);
+                    border: 1px solid var(--glass-border);
+                    border-radius: 8px;
+                    padding: 10px 14px;
+                  "
+                >
                   <code id="server-ip">0.0.0.0</code>
-                  <span style="color:var(--text-dim);">:</span>
+                  <span style="color: var(--text-dim)">:</span>
                   <code id="server-port">3000</code>
                 </div>
               </div>
-              <button id="copy-payload-btn" class="primary-btn" style="width:100%;background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.18);box-shadow:none;justify-content:center;">
+              <button
+                id="copy-payload-btn"
+                class="primary-btn"
+                style="
+                  width: 100%;
+                  background: rgba(255, 255, 255, 0.08);
+                  color: #fff;
+                  border: 1px solid rgba(255, 255, 255, 0.18);
+                  box-shadow: none;
+                  justify-content: center;
+                "
+              >
                 <span id="copy-btn-text">Copy Manual Sync Code</span>
               </button>
             </div>
@@ -320,9 +1260,25 @@
           <div class="view-header">
             <div>
               <h2 class="view-title">School Identity Forge</h2>
-              <p class="view-sub">Customize your school's branding and report card metadata.</p>
+              <p class="view-sub">
+                Customize your school's branding and report card metadata.
+              </p>
             </div>
-            <button id="reset-btn" style="background:transparent;border:1px solid #ff4444;color:#ff4444;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;">🗑 Reset All Data</button>
+            <button
+              id="reset-btn"
+              style="
+                background: transparent;
+                border: 1px solid #ff4444;
+                color: #ff4444;
+                padding: 8px 16px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 12px;
+                font-weight: 600;
+              "
+            >
+              🗑 Reset All Data
+            </button>
           </div>
 
           <div class="settings-content">
@@ -336,8 +1292,18 @@
                     <p>Drag &amp; Drop PNG/JPEG</p>
                     <span class="upload-hint">or click to browse</span>
                   </div>
-                  <img id="logo-preview" src="" alt="Logo Preview" style="display:none;" />
-                  <input type="file" id="logo-upload" accept="image/png, image/jpeg" style="display:none;" />
+                  <img
+                    id="logo-preview"
+                    src=""
+                    alt="Logo Preview"
+                    style="display: none"
+                  />
+                  <input
+                    type="file"
+                    id="logo-upload"
+                    accept="image/png, image/jpeg"
+                    style="display: none"
+                  />
                 </div>
               </div>
               <div class="color-pickers-group">
@@ -362,28 +1328,75 @@
               <h3>School Metadata</h3>
               <div class="form-group">
                 <label>School Name</label>
-                <input type="text" id="school-name-input" class="modern-input" placeholder="e.g. Nexus Academy" />
+                <input
+                  type="text"
+                  id="school-name-input"
+                  class="modern-input"
+                  placeholder="e.g. Nexus Academy"
+                />
               </div>
               <div class="form-group">
                 <label>School Address</label>
-                <input type="text" id="school-address-input" class="modern-input" placeholder="e.g. 123 Education Way" />
+                <input
+                  type="text"
+                  id="school-address-input"
+                  class="modern-input"
+                  placeholder="e.g. 123 Education Way"
+                />
               </div>
               <div class="form-group">
                 <label>Motto</label>
-                <input type="text" id="school-motto-input" class="modern-input" placeholder="e.g. Excellence in all things" />
+                <input
+                  type="text"
+                  id="school-motto-input"
+                  class="modern-input"
+                  placeholder="e.g. Excellence in all things"
+                />
               </div>
               <div class="form-group">
                 <label>Principal's Name (Digital Signature)</label>
-                <input type="text" id="school-signature-input" class="modern-input" placeholder="Full Name" />
+                <input
+                  type="text"
+                  id="school-signature-input"
+                  class="modern-input"
+                  placeholder="Full Name"
+                />
               </div>
-              <div class="form-group" style="background:rgba(255,215,0,0.05);padding:12px;border-radius:8px;border:1px dashed rgba(255,215,0,0.3);">
-                <label style="color:#FFD700;">⭐ Nexus Premium Plan</label>
-                <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
-                  <input type="checkbox" id="premium-plan-toggle" style="width:16px;height:16px;accent-color:#FFD700;" />
-                  <span style="font-size:12px;color:#ccc;">Enable 'Digital Envelope' HTML Exports for WhatsApp</span>
+              <div
+                class="form-group"
+                style="
+                  background: rgba(255, 215, 0, 0.05);
+                  padding: 12px;
+                  border-radius: 8px;
+                  border: 1px dashed rgba(255, 215, 0, 0.3);
+                "
+              >
+                <label style="color: #ffd700">⭐ Nexus Premium Plan</label>
+                <div
+                  style="
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    margin-top: 6px;
+                  "
+                >
+                  <input
+                    type="checkbox"
+                    id="premium-plan-toggle"
+                    style="width: 16px; height: 16px; accent-color: #ffd700"
+                  />
+                  <span style="font-size: 12px; color: #ccc"
+                    >Enable 'Digital Envelope' HTML Exports for WhatsApp</span
+                  >
                 </div>
               </div>
-              <button id="save-identity-btn" class="primary-btn" style="margin-top:auto;">Save Identity Shard</button>
+              <button
+                id="save-identity-btn"
+                class="primary-btn"
+                style="margin-top: auto"
+              >
+                Save Identity Shard
+              </button>
             </div>
           </div>
         </div>
@@ -393,838 +1406,2156 @@
           <div class="view-header">
             <div>
               <h2 class="view-title">About Nexus School OS</h2>
-              <p class="view-sub">Application information, license and upgrade options.</p>
+              <p class="view-sub">
+                Application information, license and upgrade options.
+              </p>
             </div>
           </div>
 
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px;">
-            <div style="background:var(--glass);border:1px solid var(--glass-border);border-radius:16px;padding:24px;">
-              <div style="font-size:44px;margin-bottom:14px;">🏫</div>
-              <h3 style="font-size:17px;margin-bottom:8px;">Nexus School OS</h3>
-              <p style="color:var(--text-dim);font-size:12px;line-height:1.7;margin-bottom:16px;">A secure, offline-first school management system with Ed25519 cryptographic QR handshake and Android tablet integration for grade collection.</p>
-              <div style="font-size:12px;color:#666;font-family:monospace;display:flex;flex-direction:column;gap:5px;">
-                <div>Version: <span style="color:var(--accent);">1.0.0</span></div>
-                <div>Engine: <span style="color:var(--accent);">Electron + SQLite (better-sqlite3)</span></div>
-                <div>Protocol: <span style="color:var(--accent);">Ed25519 Secure Handshake</span></div>
+          <div
+            style="
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 18px;
+              margin-bottom: 18px;
+            "
+          >
+            <div
+              style="
+                background: var(--glass);
+                border: 1px solid var(--glass-border);
+                border-radius: 16px;
+                padding: 24px;
+              "
+            >
+              <div style="font-size: 44px; margin-bottom: 14px">🏫</div>
+              <h3 style="font-size: 17px; margin-bottom: 8px">
+                Nexus School OS
+              </h3>
+              <p
+                style="
+                  color: var(--text-dim);
+                  font-size: 12px;
+                  line-height: 1.7;
+                  margin-bottom: 16px;
+                "
+              >
+                A secure, offline-first school management system with Ed25519
+                cryptographic QR handshake and Android tablet integration for
+                grade collection.
+              </p>
+              <div
+                style="
+                  font-size: 12px;
+                  color: #666;
+                  font-family: monospace;
+                  display: flex;
+                  flex-direction: column;
+                  gap: 5px;
+                "
+              >
+                <div>
+                  Version: <span style="color: var(--accent)">1.0.0</span>
+                </div>
+                <div>
+                  Engine:
+                  <span style="color: var(--accent)"
+                    >Electron + SQLite (better-sqlite3)</span
+                  >
+                </div>
+                <div>
+                  Protocol:
+                  <span style="color: var(--accent)"
+                    >Ed25519 Secure Handshake</span
+                  >
+                </div>
               </div>
             </div>
 
-            <div style="background:rgba(255,215,0,0.05);border:1px solid rgba(255,215,0,0.2);border-radius:16px;padding:24px;display:flex;flex-direction:column;">
-              <div style="font-size:44px;margin-bottom:14px;">⭐</div>
-              <h3 style="font-size:17px;margin-bottom:8px;color:#FFD700;">Current Plan</h3>
-              <div id="about-plan-info" style="color:var(--text-dim);font-size:12px;line-height:1.7;flex:1;">Loading plan info…</div>
-              <button onclick="showView('settings')" class="primary-btn" style="margin-top:16px;background:linear-gradient(135deg,#b8860b,#FFD700);color:#000;box-shadow:none;justify-content:center;">⚙️ Manage Plan</button>
+            <div
+              style="
+                background: rgba(255, 215, 0, 0.05);
+                border: 1px solid rgba(255, 215, 0, 0.2);
+                border-radius: 16px;
+                padding: 24px;
+                display: flex;
+                flex-direction: column;
+              "
+            >
+              <div style="font-size: 44px; margin-bottom: 14px">⭐</div>
+              <h3 style="font-size: 17px; margin-bottom: 8px; color: #ffd700">
+                Current Plan
+              </h3>
+              <div
+                id="about-plan-info"
+                style="
+                  color: var(--text-dim);
+                  font-size: 12px;
+                  line-height: 1.7;
+                  flex: 1;
+                "
+              >
+                Loading plan info…
+              </div>
+              <button
+                onclick="showView('settings')"
+                class="primary-btn"
+                style="
+                  margin-top: 16px;
+                  background: linear-gradient(135deg, #b8860b, #ffd700);
+                  color: #000;
+                  box-shadow: none;
+                  justify-content: center;
+                "
+              >
+                ⚙️ Manage Plan
+              </button>
             </div>
           </div>
 
-          <div style="background:var(--glass);border:1px solid var(--glass-border);border-radius:16px;padding:22px;">
-            <h3 style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:14px;">Security &amp; Architecture</h3>
-            <div style="display:flex;gap:24px;flex-wrap:wrap;">
-              <div style="font-size:12px;color:#4CAF50;">✅ Ed25519 Signature Active</div>
-              <div style="font-size:12px;color:#4CAF50;">✅ Local-Only Network (No Internet Required)</div>
-              <div style="font-size:12px;color:#4CAF50;">✅ SQLite Encrypted Vault</div>
-              <div style="font-size:12px;color:#4CAF50;">✅ Biometric Lock on Android Tablet</div>
-              <div style="font-size:12px;color:#4CAF50;">✅ Admin-Dictated Device Identity</div>
+          <div
+            style="
+              background: var(--glass);
+              border: 1px solid var(--glass-border);
+              border-radius: 16px;
+              padding: 22px;
+            "
+          >
+            <h3
+              style="
+                font-size: 11px;
+                color: var(--text-dim);
+                text-transform: uppercase;
+                letter-spacing: 1px;
+                margin-bottom: 14px;
+              "
+            >
+              Security &amp; Architecture
+            </h3>
+            <div style="display: flex; gap: 24px; flex-wrap: wrap">
+              <div style="font-size: 12px; color: #4caf50">
+                ✅ Ed25519 Signature Active
+              </div>
+              <div style="font-size: 12px; color: #4caf50">
+                ✅ Local-Only Network (No Internet Required)
+              </div>
+              <div style="font-size: 12px; color: #4caf50">
+                ✅ SQLite Encrypted Vault
+              </div>
+              <div style="font-size: 12px; color: #4caf50">
+                ✅ Biometric Lock on Android Tablet
+              </div>
+              <div style="font-size: 12px; color: #4caf50">
+                ✅ Admin-Dictated Device Identity
+              </div>
             </div>
           </div>
         </div>
-
       </main>
-    </div><!-- end .app-shell -->
+    </div>
+    <!-- end .app-shell -->
 
     <script src="libs/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script>
-    'use strict';
+      "use strict";
 
-    // ══════════════════════════════════════════════════════════════════════════
-    // State
-    // ══════════════════════════════════════════════════════════════════════════
-    let cachedPayload    = null;
-    let _wizAllocations  = [];       // staged allocations in teacher form
-    let _allTeachers     = [];       // live teacher cache
-    let _allStudents     = [];       // live student cache
-    let devicesMarried   = 0;
-    let totalGradeEvents = 0;
-    const allGradeEvents = [];
+      // ══════════════════════════════════════════════════════════════════════════
+      // State
+      // ══════════════════════════════════════════════════════════════════════════
+      let cachedPayload = null;
+      let _wizAllocations = []; // staged allocations in teacher form
+      let _allTeachers = []; // live teacher cache
+      let _allStudents = []; // live student cache
+      let devicesMarried = 0;
+      let totalGradeEvents = 0;
+      const allGradeEvents = [];
+      let _phComponents = [
+        { key: "CA1", label: "C.A. 1", max: 10 },
+        { key: "CA2", label: "C.A. 2", max: 10 },
+        { key: "Exam", label: "Exam", max: 80 },
+      ];
 
-    // ══════════════════════════════════════════════════════════════════════════
-    // Sidebar Collapse / Expand
-    // ══════════════════════════════════════════════════════════════════════════
-    let _sidebarCollapsed = false;
+      // ══════════════════════════════════════════════════════════════════════════
+      // Sidebar Collapse / Expand
+      // ══════════════════════════════════════════════════════════════════════════
+      let _sidebarCollapsed = false;
 
-    function toggleSidebar() {
-      _sidebarCollapsed = !_sidebarCollapsed;
-      const shell   = document.getElementById('app-shell');
-      const sidebar = document.getElementById('app-sidebar');
-      if (_sidebarCollapsed) {
-        shell.classList.add('sidebar-collapsed');
-        sidebar.classList.add('collapsed');
-        // Flip the icon to a right-pointing chevron
-        document.getElementById('sidebar-toggle-btn').innerHTML = `
+      function toggleSidebar() {
+        _sidebarCollapsed = !_sidebarCollapsed;
+        const shell = document.getElementById("app-shell");
+        const sidebar = document.getElementById("app-sidebar");
+        if (_sidebarCollapsed) {
+          shell.classList.add("sidebar-collapsed");
+          sidebar.classList.add("collapsed");
+          // Flip the icon to a right-pointing chevron
+          document.getElementById("sidebar-toggle-btn").innerHTML = `
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.8"
                   fill="none" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>`;
-      } else {
-        shell.classList.remove('sidebar-collapsed');
-        sidebar.classList.remove('collapsed');
-        document.getElementById('sidebar-toggle-btn').innerHTML = `
+        } else {
+          shell.classList.remove("sidebar-collapsed");
+          sidebar.classList.remove("collapsed");
+          document.getElementById("sidebar-toggle-btn").innerHTML = `
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <rect x="1" y="3"    width="14" height="1.5" rx="0.75"/>
             <rect x="1" y="7.25" width="14" height="1.5" rx="0.75"/>
             <rect x="1" y="11.5" width="14" height="1.5" rx="0.75"/>
           </svg>`;
-      }
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // Back / Forward History
-    // ══════════════════════════════════════════════════════════════════════════
-    const _viewHistory = [];
-    let   _historyIdx  = -1;
-
-    function _historyPush(viewId) {
-      // Truncate forward stack on new navigation
-      if (_historyIdx < _viewHistory.length - 1) {
-        _viewHistory.splice(_historyIdx + 1);
-      }
-      _viewHistory.push(viewId);
-      _historyIdx = _viewHistory.length - 1;
-      _updateHistoryBtns();
-    }
-
-    function _updateHistoryBtns() {
-      const back    = document.getElementById('btn-back');
-      const forward = document.getElementById('btn-forward');
-      if (back)    back.disabled    = _historyIdx <= 0;
-      if (forward) forward.disabled = _historyIdx >= _viewHistory.length - 1;
-    }
-
-    function historyBack() {
-      if (_historyIdx <= 0) return;
-      _historyIdx--;
-      _navToView(_viewHistory[_historyIdx]);
-      _updateHistoryBtns();
-    }
-
-    function historyForward() {
-      if (_historyIdx >= _viewHistory.length - 1) return;
-      _historyIdx++;
-      _navToView(_viewHistory[_historyIdx]);
-      _updateHistoryBtns();
-    }
-
-    // Internal: navigate without pushing to history
-    function _navToView(viewId) {
-      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-      document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
-      const navEl  = document.querySelector(`.nav-item[data-view="${viewId}"]`);
-      const viewEl = document.getElementById(`view-${viewId}`);
-      if (navEl)  navEl.classList.add('active');
-      if (viewEl) viewEl.classList.add('active');
-      if (viewId === 'teachers') refreshTeachersTable();
-      if (viewId === 'students') refreshStudentsTable();
-      if (viewId === 'sync')     loadTeacherDropdown();
-      if (viewId === 'settings') hydrateSettingsForm();
-      if (viewId === 'about')    hydrateAboutView();
-      if (viewId === 'dashboard') refreshDashboardStats();
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // Sidebar Navigation (public — pushes to history)
-    // ══════════════════════════════════════════════════════════════════════════
-    function showView(viewId) {
-      // Deactivate all nav items
-      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-      // Deactivate all views
-      document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
-
-      // Activate target nav item
-      const navEl = document.querySelector(`.nav-item[data-view="${viewId}"]`);
-      if (navEl) navEl.classList.add('active');
-
-      // Activate target view
-      const viewEl = document.getElementById(`view-${viewId}`);
-      if (viewEl) viewEl.classList.add('active');
-
-      // On-enter side effects
-      if (viewId === 'teachers') refreshTeachersTable();
-      if (viewId === 'students') refreshStudentsTable();
-      if (viewId === 'sync')     loadTeacherDropdown();
-      if (viewId === 'settings') hydrateSettingsForm();
-      if (viewId === 'about')    hydrateAboutView();
-      if (viewId === 'dashboard') refreshDashboardStats();
-      _historyPush(viewId);
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // QR Code Renderer
-    // ══════════════════════════════════════════════════════════════════════════
-    function renderQR(payload) {
-      const qrContainer = document.getElementById('qr-code');
-      const skeleton    = document.getElementById('qr-skeleton');
-      if (!qrContainer || typeof QRCode === 'undefined') {
-        cachedPayload = payload; return;
-      }
-      if (!payload.teacher_id) {
-        cachedPayload = payload; return;
+        }
       }
 
-      qrContainer.innerHTML = '';
-      const qrData = JSON.parse(JSON.stringify(payload));
-      if (qrData.config && qrData.config.logoBase64) qrData.config.logoBase64 = null;
+      // ══════════════════════════════════════════════════════════════════════════
+      // Back / Forward History
+      // ══════════════════════════════════════════════════════════════════════════
+      const _viewHistory = [];
+      let _historyIdx = -1;
 
-      new QRCode(qrContainer, {
-        text: JSON.stringify(qrData),
-        width: 240, height: 240,
-        colorDark: '#000000', colorLight: '#FFFFFF',
-        correctLevel: QRCode.CorrectLevel.H,
-      });
-
-      if (skeleton)     skeleton.style.display     = 'none';
-      qrContainer.style.display = 'block';
-
-      const ipEl   = document.getElementById('server-ip');
-      const portEl = document.getElementById('server-port');
-      if (ipEl)   ipEl.textContent   = payload.ip   || '0.0.0.0';
-      if (portEl) portEl.textContent = payload.port || '3000';
-
-      if (payload.config) applyIdentityToUI(payload.config);
-
-      const copyBtn = document.getElementById('copy-payload-btn');
-      if (copyBtn) {
-        copyBtn.onclick = () => {
-          navigator.clipboard.writeText(JSON.stringify(qrData));
-          const span = document.getElementById('copy-btn-text');
-          span.textContent = 'Copied!';
-          setTimeout(() => { span.textContent = 'Copy Manual Sync Code'; }, 2000);
-        };
+      function _historyPush(viewId) {
+        // Truncate forward stack on new navigation
+        if (_historyIdx < _viewHistory.length - 1) {
+          _viewHistory.splice(_historyIdx + 1);
+        }
+        _viewHistory.push(viewId);
+        _historyIdx = _viewHistory.length - 1;
+        _updateHistoryBtns();
       }
-    }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    // Teacher Dropdown (Sync Hub)
-    // ══════════════════════════════════════════════════════════════════════════
-    async function loadTeacherDropdown() {
-      if (!window.electronAPI?.getTeachers) return;
-      const teachers = await window.electronAPI.getTeachers();
-      const picker = document.getElementById('teacher-picker');
-      picker.innerHTML = '<option value="" disabled selected>Select teacher to generate QR…</option>';
+      function _updateHistoryBtns() {
+        const back = document.getElementById("btn-back");
+        const forward = document.getElementById("btn-forward");
+        if (back) back.disabled = _historyIdx <= 0;
+        if (forward) forward.disabled = _historyIdx >= _viewHistory.length - 1;
+      }
 
-      if (teachers && teachers.length > 0) {
-        teachers.forEach(t => {
-          const opt = document.createElement('option');
-          opt.value = t.id;
-          opt.textContent = t.name;
-          opt.dataset.name = t.name;
-          picker.appendChild(opt);
+      function historyBack() {
+        if (_historyIdx <= 0) return;
+        _historyIdx--;
+        _navToView(_viewHistory[_historyIdx]);
+        _updateHistoryBtns();
+      }
+
+      function historyForward() {
+        if (_historyIdx >= _viewHistory.length - 1) return;
+        _historyIdx++;
+        _navToView(_viewHistory[_historyIdx]);
+        _updateHistoryBtns();
+      }
+
+      // Internal: navigate without pushing to history
+      function _navToView(viewId) {
+        document
+          .querySelectorAll(".nav-item")
+          .forEach((el) => el.classList.remove("active"));
+        document
+          .querySelectorAll(".view")
+          .forEach((el) => el.classList.remove("active"));
+        const navEl = document.querySelector(
+          `.nav-item[data-view="${viewId}"]`,
+        );
+        const viewEl = document.getElementById(`view-${viewId}`);
+        if (navEl) navEl.classList.add("active");
+        if (viewEl) viewEl.classList.add("active");
+        if (viewId === "teachers") refreshTeachersTable();
+        if (viewId === "students") refreshStudentsTable();
+        if (viewId === "sync") loadTeacherDropdown();
+        if (viewId === "settings") hydrateSettingsForm();
+        if (viewId === "about") hydrateAboutView();
+        if (viewId === "dashboard") refreshDashboardStats();
+      }
+
+      // ══════════════════════════════════════════════════════════════════════════
+      // Sidebar Navigation (public — pushes to history)
+      // ══════════════════════════════════════════════════════════════════════════
+      function showView(viewId) {
+        // Deactivate all nav items
+        document
+          .querySelectorAll(".nav-item")
+          .forEach((el) => el.classList.remove("active"));
+        // Deactivate all views
+        document
+          .querySelectorAll(".view")
+          .forEach((el) => el.classList.remove("active"));
+
+        // Activate target nav item
+        const navEl = document.querySelector(
+          `.nav-item[data-view="${viewId}"]`,
+        );
+        if (navEl) navEl.classList.add("active");
+
+        // Activate target view
+        const viewEl = document.getElementById(`view-${viewId}`);
+        if (viewEl) viewEl.classList.add("active");
+
+        // On-enter side effects
+        if (viewId === "teachers") refreshTeachersTable();
+        if (viewId === "students") refreshStudentsTable();
+        if (viewId === "sync") loadTeacherDropdown();
+        if (viewId === "settings") hydrateSettingsForm();
+        if (viewId === "about") hydrateAboutView();
+        if (viewId === "dashboard") refreshDashboardStats();
+        if (viewId === "printhub") phInit();
+        if (viewId === "result-studio") rsInit();
+        _historyPush(viewId);
+
+      }
+
+      // ══════════════════════════════════════════════════════════════════════════
+      // QR Code Renderer
+      // ══════════════════════════════════════════════════════════════════════════
+      function renderQR(payload) {
+        const qrContainer = document.getElementById("qr-code");
+        const skeleton = document.getElementById("qr-skeleton");
+        if (!qrContainer || typeof QRCode === "undefined") {
+          cachedPayload = payload;
+          return;
+        }
+        if (!payload.teacher_id) {
+          cachedPayload = payload;
+          return;
+        }
+
+        qrContainer.innerHTML = "";
+        const qrData = JSON.parse(JSON.stringify(payload));
+        if (qrData.config && qrData.config.logoBase64)
+          qrData.config.logoBase64 = null;
+
+        new QRCode(qrContainer, {
+          text: JSON.stringify(qrData),
+          width: 240,
+          height: 240,
+          colorDark: "#000000",
+          colorLight: "#FFFFFF",
+          correctLevel: QRCode.CorrectLevel.H,
         });
-      }
-    }
 
-    document.getElementById('teacher-picker').addEventListener('change', async (e) => {
-      const sel = e.target.options[e.target.selectedIndex];
-      if (sel.value && window.electronAPI?.setTeacher) {
-        // Reset QR skeleton while waiting for new payload
-        document.getElementById('qr-code').style.display = 'none';
-        document.getElementById('qr-skeleton').style.display = 'flex';
-        await window.electronAPI.setTeacher({ id: sel.value, name: sel.dataset.name });
-      }
-    });
+        if (skeleton) skeleton.style.display = "none";
+        qrContainer.style.display = "block";
 
-    // ══════════════════════════════════════════════════════════════════════════
-    // Teachers Directory
-    // ══════════════════════════════════════════════════════════════════════════
-    function toggleAddTeacherForm() {
-      const drawer = document.getElementById('add-teacher-drawer');
-      drawer.style.display = drawer.style.display === 'none' ? 'block' : 'none';
-      if (drawer.style.display === 'block') {
-        _wizAllocations = [];
-        renderAllocations();
-        ['wiz-tch-name','wiz-tch-phone','wiz-tch-email'].forEach(id => {
-          const el = document.getElementById(id); if (el) el.value = '';
+        const ipEl = document.getElementById("server-ip");
+        const portEl = document.getElementById("server-port");
+        if (ipEl) ipEl.textContent = payload.ip || "0.0.0.0";
+        if (portEl) portEl.textContent = payload.port || "3000";
+
+        if (payload.config) applyIdentityToUI(payload.config);
+
+        const copyBtn = document.getElementById("copy-payload-btn");
+        if (copyBtn) {
+          copyBtn.onclick = () => {
+            navigator.clipboard.writeText(JSON.stringify(qrData));
+            const span = document.getElementById("copy-btn-text");
+            span.textContent = "Copied!";
+            setTimeout(() => {
+              span.textContent = "Copy Manual Sync Code";
+            }, 2000);
+          };
+        }
+      }
+
+      // ══════════════════════════════════════════════════════════════════════════
+      // Teacher Dropdown (Sync Hub)
+      // ══════════════════════════════════════════════════════════════════════════
+      async function loadTeacherDropdown() {
+        if (!window.electronAPI?.getTeachers) return;
+        const teachers = await window.electronAPI.getTeachers();
+        const picker = document.getElementById("teacher-picker");
+        picker.innerHTML =
+          '<option value="" disabled selected>Select teacher to generate QR…</option>';
+
+        if (teachers && teachers.length > 0) {
+          teachers.forEach((t) => {
+            const opt = document.createElement("option");
+            opt.value = t.id;
+            opt.textContent = t.name;
+            opt.dataset.name = t.name;
+            picker.appendChild(opt);
+          });
+        }
+      }
+
+      document
+        .getElementById("teacher-picker")
+        .addEventListener("change", async (e) => {
+          const sel = e.target.options[e.target.selectedIndex];
+          if (sel.value && window.electronAPI?.setTeacher) {
+            // Reset QR skeleton while waiting for new payload
+            document.getElementById("qr-code").style.display = "none";
+            document.getElementById("qr-skeleton").style.display = "flex";
+            await window.electronAPI.setTeacher({
+              id: sel.value,
+              name: sel.dataset.name,
+            });
+          }
         });
-        document.getElementById('wiz-tch-log').textContent = '';
+
+      // ══════════════════════════════════════════════════════════════════════════
+      // Teachers Directory
+      // ══════════════════════════════════════════════════════════════════════════
+      function toggleAddTeacherForm() {
+        const drawer = document.getElementById("add-teacher-drawer");
+        drawer.style.display =
+          drawer.style.display === "none" ? "block" : "none";
+        if (drawer.style.display === "block") {
+          _wizAllocations = [];
+          renderAllocations();
+          ["wiz-tch-name", "wiz-tch-phone", "wiz-tch-email"].forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.value = "";
+          });
+          document.getElementById("wiz-tch-log").textContent = "";
+          renderSubjectsPicker("tch", "jss");
+        }
       }
-    }
 
-    function wizAddAllocation() {
-      const classInp = document.getElementById('wiz-alloc-class');
-      const subjInp  = document.getElementById('wiz-alloc-subjects');
-      const class_name = classInp.value.trim();
-      const subjects   = subjInp.value.trim().split('|').map(s => s.trim()).filter(Boolean);
+      // ══════════════════════════════════════════════════════════════════════════
+      // Curriculum Subjects Engine
+      // ══════════════════════════════════════════════════════════════════════════
+      const CurriculumPresets = {
+        pri_lower: [
+          {
+            cat: "Core",
+            subjects: [
+              "Mathematics",
+              "Nigerian Languages",
+              "Basic Science",
+              "Physical & Health Education",
+              "CRS",
+              "IS",
+              "Nigerian History",
+              "Social & Citizenship Studies",
+              "Cultural & Creative Arts (CCA)",
+              "Arabic Language",
+            ],
+          },
+        ],
+        pri_upper: [
+          {
+            cat: "Core",
+            subjects: [
+              "English Studies",
+              "Mathematics",
+              "Nigerian Languages",
+              "Basic Science & Technology",
+              "Physical & Health Education",
+              "Basic Digital Literacy",
+              "CRS",
+              "IS",
+              "Nigerian History",
+              "Social & Citizenship Studies",
+              "Cultural & Creative Arts (CCA)",
+              "Pre-vocational studies",
+              "French",
+              "Arabic Language",
+            ],
+          },
+        ],
+        jss: [
+          {
+            cat: "Core",
+            subjects: [
+              "English Studies",
+              "Mathematics",
+              "Nigerian Languages",
+              "Intermediate Science",
+              "Physical & Health Education",
+              "Digital Technologies",
+              "CRS",
+              "IS",
+              "Nigerian History",
+              "Social & Citizenship Studies",
+              "Cultural & Creative Arts (CCA)",
+            ],
+          },
+          {
+            cat: "Trade / Optional",
+            subjects: [
+              "French",
+              "Arabic Language",
+              "Solar Photovoltaic installation and Maintenance",
+              "Fashion design and garment making",
+              "Livestock farming",
+              "Beauty and cosmetology",
+              "Computer hardware and GSM repairs",
+              "Horticulture and crop production",
+            ],
+          },
+        ],
+        sss: [
+          {
+            cat: "Core & Compulsory",
+            subjects: [
+              "English Language",
+              "General Mathematics",
+              "Citizenship and Heritage Studies",
+              "Digital Technologies",
+            ],
+          },
+          {
+            cat: "Science",
+            subjects: [
+              "Biology",
+              "Chemistry",
+              "Physics",
+              "Agriculture",
+              "Further Mathematics",
+              "Physical Education",
+              "Health Education",
+              "Food & Nutrition",
+              "Geography",
+              "Technical Drawing",
+            ],
+          },
+          {
+            cat: "Humanities",
+            subjects: [
+              "Nigerian History",
+              "Government",
+              "Christian Religious Studies",
+              "Islamic Studies",
+              "Hausa",
+              "Igbo",
+              "Yoruba",
+              "French",
+              "Arabic",
+              "Visual Arts",
+              "Music",
+              "Literature in English",
+              "Home Management",
+              "Catering Craft",
+            ],
+          },
+          {
+            cat: "Business",
+            subjects: ["Accounting", "Commerce", "Marketing", "Economics"],
+          },
+          {
+            cat: "Trade",
+            subjects: [
+              "Solar PV Installation and Maintenance",
+              "Fashion Design and Garment Making",
+              "Livestock Farming",
+              "Beauty and Cosmetology",
+              "Computer Hardware and GSM Repairs",
+              "Horticulture and Crop Production",
+            ],
+          },
+        ],
+      };
 
-      if (!class_name)       { alert('Please enter a class name.'); return; }
-      if (!subjects.length)  { alert('Please enter at least one subject.'); return; }
-      if (_wizAllocations.find(a => a.class_name.toLowerCase() === class_name.toLowerCase())) {
-        alert(`Allocation for ${class_name} already added. Remove it first.`); return;
+      let _customSubjects = { tch: [], stu: [], edit_stu: [], edit_tch: [] };
+
+      function renderSubjectsPicker(prefix, level) {
+        // Update active pill
+        document
+          .querySelectorAll(`#${prefix}-preset-pills .subject-pill`)
+          .forEach((el) => el.classList.remove("active"));
+        const activePill = Array.from(
+          document.querySelectorAll(`#${prefix}-preset-pills .subject-pill`),
+        ).find((el) => el.getAttribute("onclick").includes(level));
+        if (activePill) activePill.classList.add("active");
+
+        const grid = document.getElementById(`${prefix}-subject-grid`);
+
+        // Bug #6 fix: snapshot which subjects are currently checked BEFORE
+        // clearing the grid, so we can restore them after re-rendering.
+        const previouslyChecked = getCheckedSubjects(prefix);
+
+        grid.innerHTML = "";
+        // NOTE: do NOT reset _customSubjects[prefix] here — users may have
+        // added custom subjects and then switched tabs to compare presets.
+
+        const preset = CurriculumPresets[level] || [];
+        preset.forEach((group) => {
+          if (group.cat) {
+            const title = document.createElement("div");
+            title.className = "subject-group-title";
+            title.textContent = group.cat;
+            grid.appendChild(title);
+          }
+          group.subjects.forEach((subj) => {
+            // Restore checked state if this subject was already selected
+            renderCheckbox(prefix, grid, subj, previouslyChecked.includes(subj));
+          });
+        });
+
+        // Re-render custom subjects so they are not lost on tab switch
+        if (_customSubjects[prefix] && _customSubjects[prefix].length > 0) {
+          const customTitle = document.createElement("div");
+          customTitle.className = "subject-group-title";
+          customTitle.textContent = "Custom";
+          grid.appendChild(customTitle);
+          _customSubjects[prefix].forEach((subj) => {
+            renderCheckbox(prefix, grid, subj, previouslyChecked.includes(subj));
+          });
+        }
       }
 
-      _wizAllocations.push({ class_name, subjects });
-      renderAllocations();
-      classInp.value = '';
-      subjInp.value  = '';
-    }
+      function renderCheckbox(prefix, grid, subj, isChecked) {
+        const id = `${prefix}-subj-${subj
+          .replace(/\\s+/g, "-")
+          .replace(/[^a-zA-Z0-9-]/g, "")
+          .toLowerCase()}`;
+        const lbl = document.createElement("label");
+        lbl.className = "subject-checkbox" + (isChecked ? " checked" : "");
+        lbl.innerHTML = `<input type="checkbox" value="${subj}" ${isChecked ? "checked" : ""} onchange="this.parentElement.classList.toggle('checked', this.checked)"> <span>${subj}</span>`;
+        grid.appendChild(lbl);
+      }
 
-    function renderAllocations() {
-      const list = document.getElementById('wiz-alloc-list');
-      list.innerHTML = '';
-      _wizAllocations.forEach((alloc, idx) => {
-        const row = document.createElement('div');
-        row.style.cssText = 'display:flex;align-items:center;gap:8px;background:rgba(0,229,255,0.07);border:1px solid rgba(0,229,255,0.18);border-radius:7px;padding:6px 10px;font-size:12px;';
-        row.innerHTML = `
+      function addCustomSubject(prefix) {
+        const inp = document.getElementById(`${prefix}-custom-subj`);
+        const val = inp.value.trim();
+        if (!val) return;
+
+        const grid = document.getElementById(`${prefix}-subject-grid`);
+        renderCheckbox(prefix, grid, val, true);
+        _customSubjects[prefix].push(val);
+        inp.value = "";
+      }
+
+      function getCheckedSubjects(prefix) {
+        const grid = document.getElementById(`${prefix}-subject-grid`);
+        const inputs = grid.querySelectorAll('input[type="checkbox"]:checked');
+        return Array.from(inputs).map((cb) => cb.value);
+      }
+
+      function wizAddAllocation() {
+        const classInp = document.getElementById("wiz-alloc-class");
+        const rawClasses = classInp.value
+          .split(",")
+          .map((c) => c.trim())
+          .filter(Boolean);
+        const subjects = getCheckedSubjects("tch");
+
+        if (!rawClasses.length) {
+          alert("Please enter at least one class name.");
+          return;
+        }
+        if (!subjects.length) {
+          alert("Please select at least one subject.");
+          return;
+        }
+
+        let addedCount = 0;
+        for (const cls of rawClasses) {
+          if (
+            _wizAllocations.find(
+              (a) => a.class_name.toLowerCase() === cls.toLowerCase(),
+            )
+          ) {
+            alert(
+              `Allocation for ${cls} already added. Remove it first to update.`,
+            );
+            continue;
+          }
+          _wizAllocations.push({ class_name: cls, subjects });
+          addedCount++;
+        }
+
+        if (addedCount > 0) {
+          renderAllocations();
+          classInp.value = "";
+          // Retain the checkboxes in case they are allocating the exact same subjects to another set of classes
+        }
+      }
+
+      function renderAllocations() {
+        const list = document.getElementById("wiz-alloc-list");
+        list.innerHTML = "";
+        _wizAllocations.forEach((alloc, idx) => {
+          const row = document.createElement("div");
+          row.style.cssText =
+            "display:flex;align-items:center;gap:8px;background:rgba(0,229,255,0.07);border:1px solid rgba(0,229,255,0.18);border-radius:7px;padding:6px 10px;font-size:12px;";
+          row.innerHTML = `
           <span style="color:#00E5FF;font-weight:600;">${alloc.class_name}</span>
           <span style="color:#555;">—</span>
-          <span style="color:#ccc;flex:1;">${alloc.subjects.join(', ')}</span>
+          <span style="color:#ccc;flex:1;">${alloc.subjects.join(", ")}</span>
           <button onclick="wizRemoveAllocation(${idx})" style="background:none;border:none;color:#ff6666;cursor:pointer;font-size:15px;padding:0;line-height:1;" title="Remove">×</button>
         `;
-        list.appendChild(row);
-      });
-    }
-
-    function wizRemoveAllocation(idx) {
-      _wizAllocations.splice(idx, 1);
-      renderAllocations();
-    }
-
-    async function wizSaveTeacher() {
-      const name  = document.getElementById('wiz-tch-name').value.trim();
-      const phone = document.getElementById('wiz-tch-phone').value.trim();
-      const email = document.getElementById('wiz-tch-email').value.trim();
-      const log   = document.getElementById('wiz-tch-log');
-
-      if (!name)                  { log.style.color='#ff4444'; log.textContent='⚠ Full Name is required.'; return; }
-      if (!_wizAllocations.length){ log.style.color='#ff4444'; log.textContent='⚠ Add at least one class allocation.'; return; }
-
-      const id = 'TCH-' + crypto.randomUUID().split('-')[0].toUpperCase();
-      const res = await window.electronAPI.addTeacherForm({ id, name, phone, email, allocations: _wizAllocations });
-
-      if (res.ok) {
-        log.style.color = '#4CAF50';
-        log.textContent = `✅ ${name} saved! (${id})`;
-        ['wiz-tch-name','wiz-tch-phone','wiz-tch-email'].forEach(f => { document.getElementById(f).value = ''; });
-        _wizAllocations = [];
-        renderAllocations();
-        await refreshTeachersTable();
-        setTimeout(() => toggleAddTeacherForm(), 1400);
-      } else {
-        log.style.color = '#ff4444';
-        log.textContent = `❌ ${res.error}`;
-      }
-    }
-
-    async function refreshTeachersTable() {
-      if (!window.electronAPI?.getAllTeachers) return;
-      _allTeachers = await window.electronAPI.getAllTeachers();
-      const tbody  = document.getElementById('teachers-tbody');
-      tbody.innerHTML = '';
-
-      // Update badge
-      const badge = document.getElementById('badge-teachers');
-      if (badge) badge.textContent = _allTeachers.length;
-      const dashCount = document.getElementById('dash-teachers-count');
-      if (dashCount) dashCount.textContent = _allTeachers.length;
-
-      if (!_allTeachers.length) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim);">No teachers yet. Click <strong>＋ Add Teacher</strong> or <strong>Import CSV</strong>.</td></tr>';
-        return;
-      }
-
-      _allTeachers.forEach(t => {
-        const row = document.createElement('tr');
-
-        // Build allocation tags grouped by class
-        const classMap = {};
-        (t.allocations || []).forEach(a => {
-          if (!classMap[a.class_name]) classMap[a.class_name] = [];
-          classMap[a.class_name].push(a.subject);
+          list.appendChild(row);
         });
-        const allocHTML = Object.entries(classMap).map(([cls, subjs]) =>
-          `<span class="alloc-tag"><span class="tag-class">${cls}</span><span class="tag-subj">· ${subjs.join(', ')}</span></span>`
-        ).join('') || '<span style="color:#444;font-size:11px;">No allocations</span>';
+      }
 
-        row.innerHTML = `
+      function wizRemoveAllocation(idx) {
+        _wizAllocations.splice(idx, 1);
+        renderAllocations();
+      }
+
+      async function wizSaveTeacher() {
+        const name = document.getElementById("wiz-tch-name").value.trim();
+        const phone = document.getElementById("wiz-tch-phone").value.trim();
+        const email = document.getElementById("wiz-tch-email").value.trim();
+        const log = document.getElementById("wiz-tch-log");
+
+        if (!name) {
+          log.style.color = "#ff4444";
+          log.textContent = "⚠ Full Name is required.";
+          return;
+        }
+        if (!_wizAllocations.length) {
+          log.style.color = "#ff4444";
+          log.textContent = "⚠ Add at least one class allocation.";
+          return;
+        }
+
+        const id = "TCH-" + crypto.randomUUID().split("-")[0].toUpperCase();
+        const res = await window.electronAPI.addTeacherForm({
+          id,
+          name,
+          phone,
+          email,
+          allocations: _wizAllocations,
+        });
+
+        if (res.ok) {
+          log.style.color = "#4CAF50";
+          log.textContent = `✅ ${name} saved! (${id})`;
+          ["wiz-tch-name", "wiz-tch-phone", "wiz-tch-email"].forEach((f) => {
+            document.getElementById(f).value = "";
+          });
+          _wizAllocations = [];
+          renderAllocations();
+          await refreshTeachersTable();
+          setTimeout(() => toggleAddTeacherForm(), 1400);
+        } else {
+          log.style.color = "#ff4444";
+          log.textContent = `❌ ${res.error}`;
+        }
+      }
+
+      async function refreshTeachersTable() {
+        if (!window.electronAPI?.getAllTeachers) return;
+        _allTeachers = await window.electronAPI.getAllTeachers();
+        const tbody = document.getElementById("teachers-tbody");
+        tbody.innerHTML = "";
+
+        // Update badge
+        const badge = document.getElementById("badge-teachers");
+        if (badge) badge.textContent = _allTeachers.length;
+        const dashCount = document.getElementById("dash-teachers-count");
+        if (dashCount) dashCount.textContent = _allTeachers.length;
+
+        if (!_allTeachers.length) {
+          tbody.innerHTML =
+            '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim);">No teachers yet. Click <strong>＋ Add Teacher</strong> or <strong>Import CSV</strong>.</td></tr>';
+          return;
+        }
+
+        _allTeachers.forEach((t) => {
+          const row = document.createElement("tr");
+
+          // Build allocation tags grouped by class
+          const classMap = {};
+          (t.allocations || []).forEach((a) => {
+            if (!classMap[a.class_name]) classMap[a.class_name] = [];
+            classMap[a.class_name].push(a.subject);
+          });
+          const allocHTML =
+            Object.entries(classMap)
+              .map(
+                ([cls, subjs]) =>
+                  `<span class="alloc-tag"><span class="tag-class">${cls}</span><span class="tag-subj">· ${subjs.join(", ")}</span></span>`,
+              )
+              .join("") ||
+            '<span style="color:#444;font-size:11px;">No allocations</span>';
+
+          row.innerHTML = `
           <td style="font-family:monospace;font-size:11px;color:var(--text-dim);">${t.id}</td>
           <td style="font-weight:600;">${t.name}</td>
-          <td style="color:var(--text-dim);">${t.phone || '—'}</td>
+          <td style="color:var(--text-dim);">${t.phone || "—"}</td>
           <td><div style="display:flex;flex-wrap:wrap;gap:2px;">${allocHTML}</div></td>
-          <td style="text-align:right;">
-            <button class="tbl-action-btn" onclick="deleteTeacher('${t.id}', '${t.name.replace(/'/g,' ')}')">🗑 Remove</button>
+          <td style="text-align:right;display:flex;gap:6px;justify-content:flex-end;">
+            <button class="tbl-action-btn" style="color:#00e5ff;border-color:rgba(0,229,255,0.3);" onclick="openEditTeacher('${t.id}')">✏️ Edit</button>
+            <button class="tbl-action-btn" onclick="deleteTeacher('${t.id}', '${t.name.replace(/'/g, " ")}')" >🗑 Remove</button>
           </td>
         `;
-        tbody.appendChild(row);
-      });
-    }
-
-    async function deleteTeacher(id, name) {
-      const { isConfirmed } = await Swal.fire({
-        title: `Remove ${name}?`,
-        text: 'This will delete the teacher and all their class allocations. Grade records are unaffected.',
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#ff4444',
-        confirmButtonText: 'Yes, remove',
-        background: '#0A0E2E', color: '#fff', backdrop: false,
-      });
-      if (isConfirmed && window.electronAPI?.deleteTeacher) {
-        await window.electronAPI.deleteTeacher({ id });
-        await refreshTeachersTable();
-        await loadTeacherDropdown();
-      }
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // Students Directory
-    // ══════════════════════════════════════════════════════════════════════════
-    function toggleAddStudentForm() {
-      const drawer = document.getElementById('add-student-drawer');
-      drawer.style.display = drawer.style.display === 'none' ? 'block' : 'none';
-      if (drawer.style.display === 'block') {
-        ['stu-add-name','stu-add-class'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
-        document.getElementById('stu-add-log').textContent = '';
-      }
-    }
-
-    async function addStudentFromDirectory() {
-      const name       = document.getElementById('stu-add-name').value.trim();
-      const class_name = document.getElementById('stu-add-class').value.trim();
-      const log        = document.getElementById('stu-add-log');
-
-      if (!name || !class_name) { log.style.color='#ff4444'; log.textContent='⚠ Name and Class are required.'; return; }
-
-      const id  = 'STU-' + crypto.randomUUID().split('-')[0].toUpperCase();
-      const res = await window.electronAPI.addStudentForm({ id, name, class_name });
-
-      if (res.ok) {
-        log.style.color = '#4CAF50';
-        log.textContent = `✅ ${name} added (${id}).`;
-        ['stu-add-name','stu-add-class'].forEach(f => { document.getElementById(f).value=''; });
-        await refreshStudentsTable();
-        setTimeout(() => toggleAddStudentForm(), 1400);
-      } else {
-        log.style.color = '#ff4444';
-        log.textContent = `❌ ${res.error}`;
-      }
-    }
-
-    async function refreshStudentsTable() {
-      if (!window.electronAPI?.getAllStudents) return;
-      _allStudents = await window.electronAPI.getAllStudents();
-
-      // Update badge
-      const badge = document.getElementById('badge-students');
-      if (badge) badge.textContent = _allStudents.length;
-      const dashCount = document.getElementById('dash-students-count');
-      if (dashCount) dashCount.textContent = _allStudents.length;
-
-      // Rebuild class filter dropdown
-      const filter = document.getElementById('student-class-filter');
-      const currentFilter = filter.value;
-      const classes = [...new Set(_allStudents.map(s => s.class_name))].sort();
-      filter.innerHTML = '<option value="">All Classes</option>';
-      classes.forEach(cls => {
-        const opt = document.createElement('option');
-        opt.value = cls; opt.textContent = cls;
-        filter.appendChild(opt);
-      });
-      filter.value = currentFilter;
-
-      renderStudentsTable();
-    }
-
-    function renderStudentsTable() {
-      const filter = document.getElementById('student-class-filter').value;
-      const tbody  = document.getElementById('students-tbody');
-      tbody.innerHTML = '';
-
-      const filtered = filter ? _allStudents.filter(s => s.class_name === filter) : _allStudents;
-
-      if (!filtered.length) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim);">${_allStudents.length ? 'No students in this class.' : 'No students loaded. Import a CSV or add manually.'}</td></tr>`;
-        return;
+          tbody.appendChild(row);
+        });
       }
 
-      filtered.forEach((s, idx) => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
+      async function deleteTeacher(id, name) {
+        const { isConfirmed } = await Swal.fire({
+          title: `Remove ${name}?`,
+          text: "This will delete the teacher and all their class allocations. Grade records are unaffected.",
+          icon: "warning",
+          showCancelButton: true,
+          confirmButtonColor: "#ff4444",
+          confirmButtonText: "Yes, remove",
+          background: "#0A0E2E",
+          color: "#fff",
+          backdrop: false,
+        });
+        if (isConfirmed && window.electronAPI?.deleteTeacher) {
+          await window.electronAPI.deleteTeacher({ id });
+          await refreshTeachersTable();
+          await loadTeacherDropdown();
+        }
+      }
+
+      // ══════════════════════════════════════════════════════════════════════════
+      // Students Directory
+      // ══════════════════════════════════════════════════════════════════════════
+      function toggleAddStudentForm() {
+        const drawer = document.getElementById("add-student-drawer");
+        drawer.style.display =
+          drawer.style.display === "none" ? "block" : "none";
+        if (drawer.style.display === "block") {
+          ["stu-add-name", "stu-add-class"].forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.value = "";
+          });
+          document.getElementById("stu-add-log").textContent = "";
+          renderSubjectsPicker("stu", "jss");
+
+          // Extract all known classes for autocomplete
+          const allClassesSet = new Set();
+          _allStudents.forEach(s => { if(s.class_name) allClassesSet.add(s.class_name); });
+          _allTeachers.forEach(t => { 
+            (t.allocations || []).forEach(a => { if(a.class_name) allClassesSet.add(a.class_name); });
+          });
+          const datalist = document.getElementById("stu-class-datalist");
+          if (datalist) {
+            datalist.innerHTML = [...allClassesSet].sort().map(c => `<option value="${c}">`).join('');
+          }
+        }
+      }
+
+      async function addStudentFromDirectory() {
+        const name = document.getElementById("stu-add-name").value.trim();
+        const class_name = document
+          .getElementById("stu-add-class")
+          .value.trim();
+        const log = document.getElementById("stu-add-log");
+        const subjects = getCheckedSubjects("stu");
+
+        if (!name || !class_name) {
+          log.style.color = "#ff4444";
+          log.textContent = "⚠ Name and Class are required.";
+          return;
+        }
+        if (!subjects.length) {
+          log.style.color = "#ff4444";
+          log.textContent = "⚠ Please select at least one enrolled subject.";
+          return;
+        }
+
+        const id = "STU-" + crypto.randomUUID().split("-")[0].toUpperCase();
+        const res = await window.electronAPI.addStudentForm({
+          id,
+          name,
+          class_name,
+          subjects,
+        });
+
+        if (res.ok) {
+          log.style.color = "#4CAF50";
+          log.textContent = `✅ ${name} added (${id}).`;
+          ["stu-add-name", "stu-add-class"].forEach((f) => {
+            document.getElementById(f).value = "";
+          });
+          renderSubjectsPicker("stu", "jss"); // Reset checkboxes to a default view
+          await refreshStudentsTable();
+          setTimeout(() => toggleAddStudentForm(), 1400);
+        } else {
+          log.style.color = "#ff4444";
+          log.textContent = `❌ ${res.error}`;
+        }
+      }
+
+      async function refreshStudentsTable() {
+        if (!window.electronAPI?.getAllStudents) return;
+        _allStudents = await window.electronAPI.getAllStudents();
+
+        // Update badge
+        const badge = document.getElementById("badge-students");
+        if (badge) badge.textContent = _allStudents.length;
+        const dashCount = document.getElementById("dash-students-count");
+        if (dashCount) dashCount.textContent = _allStudents.length;
+
+        // Rebuild class filter dropdown
+        const filter = document.getElementById("student-class-filter");
+        const currentFilter = filter.value;
+        const classes = [
+          ...new Set(_allStudents.map((s) => s.class_name)),
+        ].sort();
+        filter.innerHTML = '<option value="">All Classes</option>';
+        classes.forEach((cls) => {
+          const opt = document.createElement("option");
+          opt.value = cls;
+          opt.textContent = cls;
+          filter.appendChild(opt);
+        });
+        filter.value = currentFilter;
+
+        renderStudentsTable();
+      }
+
+      function renderStudentsTable() {
+        const filter = document.getElementById("student-class-filter").value;
+        const tbody = document.getElementById("students-tbody");
+        tbody.innerHTML = "";
+
+        const filtered = filter
+          ? _allStudents.filter((s) => s.class_name === filter)
+          : _allStudents;
+
+        if (!filtered.length) {
+          tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim);">${_allStudents.length ? "No students in this class." : "No students loaded. Import a CSV or add manually."}</td></tr>`;
+          return;
+        }
+
+        filtered.forEach((s, idx) => {
+          const row = document.createElement("tr");
+          const subjectsList =
+            s.subjects && s.subjects.length > 0
+              ? s.subjects
+                  .map(
+                    (subj) =>
+                      `<span style="background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;font-size:10px;margin-right:2px;display:inline-block;white-space:nowrap;margin-bottom:2px;">${subj}</span>`,
+                  )
+                  .join("")
+              : '<span style="color:#666;font-style:italic;font-size:11px;">No explicitly enrolled subjects</span>';
+
+          row.innerHTML = `
           <td style="color:var(--text-dim);font-size:12px;">${idx + 1}</td>
           <td style="font-family:monospace;font-size:11px;color:var(--text-dim);">${s.id}</td>
           <td style="font-weight:600;">${s.name}</td>
-          <td><span style="background:rgba(0,229,255,0.08);border:1px solid rgba(0,229,255,0.15);padding:2px 10px;border-radius:5px;font-size:11px;color:var(--accent);">${s.class_name}</span></td>
-          <td style="text-align:right;">
-            <button class="tbl-action-btn" onclick="deleteStudent('${s.id}', '${s.name.replace(/'/g,' ')}')">🗑 Remove</button>
+          <td>
+            <div style="margin-bottom:6px;"><span style="background:rgba(0,229,255,0.08);border:1px solid rgba(0,229,255,0.15);padding:2px 10px;border-radius:5px;font-size:11px;color:var(--accent);">${s.class_name}</span></div>
+            <div style="max-width:300px;line-height:1.4;">${subjectsList}</div>
+          </td>
+          <td style="text-align:right;display:flex;gap:6px;justify-content:flex-end;">
+            <button class="tbl-action-btn" style="color:#00e5ff;border-color:rgba(0,229,255,0.3);" onclick="openEditStudent('${s.id}')">✏️ Edit</button>
+            <button class="tbl-action-btn" onclick="deleteStudent('${s.id}', '${s.name.replace(/'/g, " ")}')">🗑 Remove</button>
           </td>
         `;
-        tbody.appendChild(row);
-      });
-    }
-
-    async function deleteStudent(id, name) {
-      const { isConfirmed } = await Swal.fire({
-        title: `Remove ${name}?`,
-        text: 'This will delete the student record from this device.',
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#ff4444',
-        confirmButtonText: 'Yes, remove',
-        background: '#0A0E2E', color: '#fff', backdrop: false,
-      });
-      if (isConfirmed && window.electronAPI?.deleteStudent) {
-        await window.electronAPI.deleteStudent({ id });
-        await refreshStudentsTable();
-      }
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // Dashboard Stats
-    // ══════════════════════════════════════════════════════════════════════════
-    async function refreshDashboardStats() {
-      if (!window.electronAPI?.getDbStats) return;
-      const stats = await window.electronAPI.getDbStats();
-      const tc = document.getElementById('dash-teachers-count');
-      const sc = document.getElementById('dash-students-count');
-      const bt = document.getElementById('badge-teachers');
-      const bs = document.getElementById('badge-students');
-      if (tc) tc.textContent = stats.teachers;
-      if (sc) sc.textContent = stats.students;
-      if (bt) bt.textContent = stats.teachers;
-      if (bs) bs.textContent = stats.students;
-    }
-
-    // CSV download shortcut
-    function downloadSampleCSV() {
-      const csv = `Student_ID,First_Name,Last_Name,Class,Teacher_ID,Teacher_Name,Teacher_Phone,Subjects\nA-001,Obi,Ndidi,JSS1,TCH-001,Mr. Example,08012345678,Mathematics|English\n`;
-      const a = Object.assign(document.createElement('a'), {
-        href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })),
-        download: 'nexus_sample_roster.csv',
-      });
-      a.click();
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // Settings Form
-    // ══════════════════════════════════════════════════════════════════════════
-    let currentLogoBase64 = null;
-
-    async function hydrateSettingsForm() {
-      if (!window.electronAPI?.getIdentity) return;
-      const identity = await window.electronAPI.getIdentity();
-      if (!identity) return;
-      document.getElementById('school-name-input').value     = identity.name      || '';
-      document.getElementById('school-address-input').value  = identity.address   || '';
-      document.getElementById('school-motto-input').value    = identity.motto     || '';
-      document.getElementById('school-signature-input').value= identity.signature || '';
-      document.getElementById('premium-plan-toggle').checked = !!identity.premiumPlan;
-      const tp = document.getElementById('theme-primary');
-      const ts = document.getElementById('theme-secondary');
-      tp.value = identity.themePrimary   || '#1A237E';
-      ts.value = identity.themeSecondary || '#00E5FF';
-      document.getElementById('primary-hex').textContent   = tp.value.toUpperCase();
-      document.getElementById('secondary-hex').textContent = ts.value.toUpperCase();
-      if (identity.logoBase64) {
-        currentLogoBase64 = identity.logoBase64;
-        const prev = document.getElementById('logo-preview');
-        prev.src = identity.logoBase64; prev.style.display = 'block';
-        document.getElementById('uploader-content').style.display = 'none';
-      }
-    }
-
-    async function hydrateAboutView() {
-      const planEl = document.getElementById('about-plan-info');
-      if (!window.electronAPI?.getIdentity) { planEl.textContent = 'Could not load plan info.'; return; }
-      const identity = await window.electronAPI.getIdentity();
-      if (identity?.premiumPlan) {
-        planEl.innerHTML = `<strong style="color:#FFD700;">⭐ Nexus Premium</strong><br><span style="font-size:12px;color:var(--text-dim);">Digital Envelope (WhatsApp HTML) exports enabled.</span>`;
-      } else {
-        planEl.innerHTML = `<strong>Nexus Standard</strong><br><span style="font-size:12px;color:var(--text-dim);">Upgrade to Premium to unlock Digital Envelope WhatsApp exports and priority support.</span>`;
-      }
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // Identity / Branding
-    // ══════════════════════════════════════════════════════════════════════════
-    function applyIdentityToUI(identity) {
-      if (!identity) return;
-      const sn = document.getElementById('school-name');
-      if (sn) sn.textContent = identity.name || 'Nexus School';
-      const tsn = document.getElementById('titlebar-school-name');
-      if (tsn) tsn.textContent = identity.name || 'Nexus School OS';
-
-
-      document.documentElement.style.setProperty('--primary', identity.themePrimary   || '#1A237E');
-      document.documentElement.style.setProperty('--accent',  identity.themeSecondary || '#00E5FF');
-
-      const hex = identity.themePrimary || '#1A237E';
-      let r=26, g=35, b=126;
-      if (/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)) {
-        let c = hex.substring(1).split('');
-        if (c.length === 3) c = [c[0],c[0],c[1],c[1],c[2],c[2]];
-        c = '0x' + c.join('');
-        r=(c>>16)&255; g=(c>>8)&255; b=c&255;
-      }
-      const glow = document.querySelector('.background-glow');
-      if (glow) glow.style.background = `radial-gradient(ellipse at 20% 50%, rgba(${r},${g},${b},0.35) 0%, transparent 60%)`;
-
-      const logo = document.getElementById('sidebar-logo');
-      if (logo) {
-        if (identity.logoBase64) {
-          logo.innerHTML = `<img src="${identity.logoBase64}" style="width:100%;height:100%;object-fit:contain;border-radius:10px;">`;
-        } else {
-          logo.innerHTML = identity.name ? identity.name.charAt(0).toUpperCase() : 'N';
-        }
-      }
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // Boot sequence (runs when electronAPI is available)
-    // ══════════════════════════════════════════════════════════════════════════
-    if (window.electronAPI) {
-
-      // ── License Guard ─────────────────────────────────────────────────────
-      if (window.electronAPI.onLicenseStatus) {
-        window.electronAPI.onLicenseStatus((status) => {
-          if (status?.locked) {
-            document.getElementById('license-lock-overlay').style.display = 'flex';
-            if (status.message) document.getElementById('license-lock-message').textContent = status.message;
-          }
+          tbody.appendChild(row);
         });
       }
 
-      // ── QR Payload ────────────────────────────────────────────────────────
-      window.electronAPI.onQrPayload((payload) => { renderQR(payload); });
+      async function deleteStudent(id, name) {
+        const { isConfirmed } = await Swal.fire({
+          title: `Remove ${name}?`,
+          text: "This will delete the student record from this device.",
+          icon: "warning",
+          showCancelButton: true,
+          confirmButtonColor: "#ff4444",
+          confirmButtonText: "Yes, remove",
+          background: "#0A0E2E",
+          color: "#fff",
+          backdrop: false,
+        });
+        if (isConfirmed && window.electronAPI?.deleteStudent) {
+          await window.electronAPI.deleteStudent({ id });
+          await refreshStudentsTable();
+        }
+      }
 
-      // ── Handshake Complete ────────────────────────────────────────────────
-      window.electronAPI.onHandshakeComplete((data) => {
-        devicesMarried++;
-        const badge = document.getElementById('thermal-badge');
-        if (badge) { badge.innerHTML = '<span class="dot"></span> Synced: Active'; badge.style.color = '#4CAF50'; }
+      // ══════════════════════════════════════════════════════════════════════════
+      // Dashboard Stats
+      // ══════════════════════════════════════════════════════════════════════════
+      async function refreshDashboardStats() {
+        if (!window.electronAPI?.getDbStats) return;
+        const stats = await window.electronAPI.getDbStats();
+        const tc = document.getElementById("dash-teachers-count");
+        const sc = document.getElementById("dash-students-count");
+        const bt = document.getElementById("badge-teachers");
+        const bs = document.getElementById("badge-students");
+        if (tc) tc.textContent = stats.teachers;
+        if (sc) sc.textContent = stats.students;
+        if (bt) bt.textContent = stats.teachers;
+        if (bs) bs.textContent = stats.students;
+      }
 
-        const devEl = document.getElementById('stat-devices-count');
-        if (devEl) devEl.textContent = devicesMarried;
+      // CSV download shortcut
+      // ══════════════════════════════════════════════════════════════════════════
+      // Print Hub Controller
+      // ══════════════════════════════════════════════════════════════════════════
+      let _phType = "terminal";
+      let _phResults = [];
 
-        const pulse = document.getElementById('pulse-label');
-        if (pulse) pulse.textContent = `📱 ${data.teacher_name} tablet is now married.`;
+      async function phInit() {
+        if (!window.electronAPI?.getTermConfig) return;
+        const cfg = await window.electronAPI.getTermConfig();
+        if (cfg.academic_session)
+          document.getElementById("ph-session").value = cfg.academic_session;
+        if (cfg.term) {
+          const sel = document.getElementById("ph-term");
+          for (const opt of sel.options)
+            if (opt.value === cfg.term) {
+              opt.selected = true;
+              break;
+            }
+        }
+        if (cfg.resumption_date)
+          document.getElementById("ph-resumption").value = cfg.resumption_date;
+        document.getElementById("ph-show-position").checked =
+          cfg.show_position !== 0;
+        document.getElementById("ph-show-domains").checked =
+          cfg.show_domains !== 0;
+        // Hydrate template picker and trigger preview
+        if (cfg.template) {
+          const tplEl = document.getElementById("ph-template");
+          if (tplEl) tplEl.value = cfg.template;
+          updateTemplatePreview(cfg.template, 'ph-template-preview');
+        } else {
+          updateTemplatePreview('clean_slate', 'ph-template-preview');
+        }
+        // Populate class list from students
 
-        const pi = document.getElementById('pulse-indicator');
-        if (pi) { pi.classList.add('active-sync'); setTimeout(() => pi.classList.remove('active-sync'), 4000); }
+        const students = await window.electronAPI.getAllStudents();
+        const classes = [...new Set(students.map((s) => s.class_name))].sort();
+        const classPick = document.getElementById("ph-class-pick");
+        classPick.innerHTML = classes
+          .map((c) => `<option>${c}</option>`)
+          .join("");
+        const studentPick = document.getElementById("ph-student-pick");
+        studentPick.innerHTML = students
+          .map(
+            (s) =>
+              `<option value="${s.id}">${s.name} (${s.class_name})</option>`,
+          )
+          .join("");
+        // Populate teachers
+        const teachers = await window.electronAPI.getAllTeachers();
+        const teacherPick = document.getElementById("ph-teacher-pick");
+        teacherPick.innerHTML = teachers
+          .map((t) => `<option value="${t.id}">${t.name}</option>`)
+          .join("");
+        // Load saved score breakdown components from grading_scale
+        try {
+          if (cfg.grading_scale) {
+            const raw = JSON.parse(cfg.grading_scale);
+            if (raw && !Array.isArray(raw) && raw.components && raw.components.length) {
+              _phComponents = raw.components;
+            }
+          }
+        } catch(e) {}
+        // Render the score components panel
+        phRenderComponents();
+      }
 
-        // Auto-navigate to dashboard on first successful handshake
-        if (devicesMarried === 1) showView('dashboard');
-      });
+      async function phSaveConfig() {
+        if (!window.electronAPI?.saveTermConfig) return;
+        let existingScale = [];
+        try {
+          const existing = await window.electronAPI.getTermConfig();
+          if (existing?.grading_scale) {
+            const raw = JSON.parse(existing.grading_scale);
+            if (raw && !Array.isArray(raw) && raw.scale) existingScale = raw.scale;
+            else if (Array.isArray(raw)) existingScale = raw;
+          }
+        } catch(e) {}
+        const templateEl = document.getElementById("ph-template");
+        const config = {
+          academic_session: document.getElementById("ph-session").value.trim() || "2024/2025",
+          term:             document.getElementById("ph-term").value,
+          resumption_date:  document.getElementById("ph-resumption").value,
+          show_position:    document.getElementById("ph-show-position").checked,
+          show_domains:     document.getElementById("ph-show-domains").checked,
+          grading_scale:    JSON.stringify({ scale: existingScale, components: _phComponents || [] }),
+          template:         templateEl ? templateEl.value : "clean_slate",
+        };
+        const r = await window.electronAPI.saveTermConfig(config);
+        // Sync template picker in Result Studio
+        const rsTemplateEl = document.getElementById("rs-template");
+        if (rsTemplateEl && templateEl) rsTemplateEl.value = templateEl.value;
+        const statusEl = document.getElementById("ph-status");
+        if (statusEl) statusEl.textContent = r.ok ? "✅ Config saved." : "❌ Save failed: " + r.error;
+        if (r.ok && typeof Swal !== "undefined") {
+          Swal.fire({ title: "Config Saved", icon: "success", background: "#0A0E2E", color: "#fff", timer: 1500, showConfirmButton: false, backdrop: false });
+        }
+      }
 
-      // ── Sync Events (Grade Pulse) ─────────────────────────────────────────
-      window.electronAPI.onSyncUpdate((payload) => {
-        const events     = Array.isArray(payload) ? payload : (payload.events || []);
-        const syncCount  = payload.count || events.length || 0;
-        const teacherName= payload.teacher_name || 'A Teacher';
+      function updateTemplatePreview(templateId, targetId = 'ph-template-preview') {
+        const container = document.getElementById(targetId);
+        if (!container) return;
 
-        totalGradeEvents += syncCount;
-        const evEl = document.getElementById('stat-events-count');
-        if (evEl) evEl.textContent = totalGradeEvents;
+        // Map template IDs to PNG filenames in assets/templates/
+        const imgMap = {
+          'clean_slate': 'classic',
+          'prestige':    'prestige',
+          'azure':       'azure',
+          'royal':       'royal',
+          'monarch':     'monarch',
+          'sovereign':   'sovereign',
+          'sterling':    'sterling',
+          'apex':        'apex'
+        };
 
-        const pi = document.getElementById('pulse-indicator');
-        if (pi) { pi.classList.add('active-sync'); setTimeout(() => pi.classList.remove('active-sync'), 3000); }
+        const imgName = imgMap[templateId] || 'classic';
+        const src = `assets/templates/${imgName}.png`;
 
-        const pulse = document.getElementById('pulse-label');
-        if (pulse) pulse.textContent = `⚡ ${teacherName} just synced ${syncCount} scores!`;
+        container.innerHTML = `
+          <img
+            src="${src}"
+            alt="${templateId} template preview"
+            style="width:100%;height:100%;object-fit:cover;object-position:top center;display:block;border-radius:3px;"
+            onerror="this.style.display='none';
+                     this.insertAdjacentHTML('afterend',
+                       '<div style=\\'display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;color:rgba(255,255,255,0.3);\\'>' +
+                       '<span style=\\'font-size:28px;\\'>🖼️</span>' +
+                       '<span style=\\'font-size:10px;text-align:center;line-height:1.4;\\'>Preview image<br>not yet available</span>' +
+                       '</div>'
+                     );"
+          />`;
+      }
 
-        const container = document.getElementById('events-container');
-        events.forEach(event => {
-          let p = {};
-          try { p = JSON.parse(event.payload); } catch(e) {}
-          let scoreDisplay = `Score: ${p.score ?? 'N/A'}`;
-          if (p.breakdown) scoreDisplay += ` <span style="font-size:10px;opacity:0.6;">(CA1:${p.breakdown.CA1} CA2:${p.breakdown.CA2} Ex:${p.breakdown.Exam})</span>`;
 
-          const card = document.createElement('div');
-          card.className = 'event-card slide-in';
-          card.innerHTML = `
-            <div class="event-type">${event.event_type || 'UPDATE'}</div>
+      function phRenderComponents() {
+        const list = document.getElementById("ph-components-list");
+        if (!list) return;
+        list.innerHTML = "";
+        (_phComponents || []).forEach((c, i) => {
+          const row = document.createElement("div");
+          row.style.cssText =
+            "display:flex;align-items:center;gap:6px;margin-bottom:4px;";
+          // Editable label input
+          const labelInp = document.createElement("input");
+          labelInp.value = c.label;
+          labelInp.placeholder = "Label";
+          labelInp.style.cssText =
+            "flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:5px;" +
+            "color:#ccc;font-size:11px;padding:3px 7px;height:26px;min-width:0;outline:none;";
+          labelInp.addEventListener("change", () => phUpdateComponent(i, "label", labelInp.value.trim()));
+          labelInp.addEventListener("focus", () => labelInp.style.borderColor = "rgba(0,229,255,0.5)");
+          labelInp.addEventListener("blur",  () => labelInp.style.borderColor = "rgba(255,255,255,0.12)");
+
+          // Editable max score input
+          const maxInp = document.createElement("input");
+          maxInp.type = "number";
+          maxInp.value = c.max;
+          maxInp.min = 1;
+          maxInp.max = 100;
+          maxInp.placeholder = "Max";
+          maxInp.style.cssText =
+            "width:52px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:5px;" +
+            "color:var(--text-dim);font-size:11px;padding:3px 5px;height:26px;text-align:center;outline:none;";
+          maxInp.addEventListener("change", () => phUpdateComponent(i, "max", parseInt(maxInp.value, 10) || 0));
+          maxInp.addEventListener("focus", () => maxInp.style.borderColor = "rgba(0,229,255,0.5)");
+          maxInp.addEventListener("blur",  () => maxInp.style.borderColor = "rgba(255,255,255,0.12)");
+
+          const ptsLabel = document.createElement("span");
+          ptsLabel.textContent = "pts";
+          ptsLabel.style.cssText = "font-size:10px;color:var(--text-dim);flex-shrink:0;";
+
+          // Remove button
+          const rmBtn = document.createElement("button");
+          rmBtn.innerHTML = "×";
+          rmBtn.title = "Remove";
+          rmBtn.style.cssText =
+            "background:none;border:none;color:#ff6666;cursor:pointer;font-size:14px;padding:0 2px;line-height:1;flex-shrink:0;";
+          rmBtn.addEventListener("click", () => phRemoveComponent(i));
+
+          row.appendChild(labelInp);
+          row.appendChild(maxInp);
+          row.appendChild(ptsLabel);
+          row.appendChild(rmBtn);
+          list.appendChild(row);
+        });
+        _phRefreshTotal();
+      }
+
+      function phUpdateComponent(idx, field, value) {
+        if (!_phComponents || !_phComponents[idx]) return;
+        if (field === "label" && value) {
+          _phComponents[idx].label = value;
+          _phComponents[idx].key = value.replace(/[^a-zA-Z0-9]/g, "_");
+        } else if (field === "max" && value > 0) {
+          _phComponents[idx].max = value;
+        }
+        _phRefreshTotal();
+      }
+
+      function _phRefreshTotal() {
+        const total = (_phComponents || []).reduce(
+          (s, c) => s + (Number(c.max) || 0),
+          0,
+        );
+        const el = document.getElementById("ph-comp-total");
+        if (el) {
+          el.textContent = "Total: " + total + "/100";
+          el.style.color =
+            total === 100 ? "#4CAF50" : total > 100 ? "#ff4444" : "#ffd700";
+        }
+      }
+
+      function phAddComponent() {
+        const labelEl = document.getElementById("ph-comp-label");
+        const maxEl = document.getElementById("ph-comp-max");
+        const label = (labelEl?.value || "").trim();
+        const max = parseInt(maxEl?.value || "0", 10);
+        if (!label || !max || max <= 0) {
+          alert("Enter a label and a positive max score.");
+          return;
+        }
+        const key = label.replace(/[^a-zA-Z0-9]/g, "_");
+        if (
+          (_phComponents || []).find(
+            (c) => c.key.toLowerCase() === key.toLowerCase(),
+          )
+        ) {
+          alert("A component with a similar key already exists.");
+          return;
+        }
+        if (!_phComponents) _phComponents = [];
+        _phComponents.unshift({ key, label, max });
+        phRenderComponents();
+        if (labelEl) labelEl.value = "";
+        if (maxEl) maxEl.value = "";
+      }
+
+      function phRemoveComponent(idx) {
+        if (_phComponents && _phComponents[idx] !== undefined) {
+          _phComponents.splice(idx, 1);
+          phRenderComponents();
+        }
+      }
+
+      function phSetType(type) {
+        _phType = type;
+        document
+          .getElementById("ph-type-terminal")
+          .classList.toggle("active", type === "terminal");
+        document
+          .getElementById("ph-type-broadsheet")
+          .classList.toggle("active", type === "broadsheet");
+        // Show subject field only for broadsheet
+        const show = type === "broadsheet";
+        const subjectRow = document.getElementById("ph-scope-subject");
+        if (show) subjectRow.style.display = "flex";
+      }
+
+      function phOnScopeChange() {
+        const scope = document.getElementById("ph-scope").value;
+        ["class", "teacher", "subject", "student"].forEach((s) => {
+          document.getElementById("ph-scope-" + s).style.display =
+            scope === s ? "flex" : "none";
+        });
+      }
+
+      async function phPreview() {
+        const status = document.getElementById("ph-status");
+        status.textContent = "⏳ Querying results…";
+        const scope = document.getElementById("ph-scope").value;
+        const session =
+          document.getElementById("ph-session").value.trim() || "2024/2025";
+        const term = document.getElementById("ph-term").value;
+        const class_name = document.getElementById("ph-class-pick").value;
+        const teacher_id = document.getElementById("ph-teacher-pick").value;
+        const subject = document
+          .getElementById("ph-subject-input")
+          .value.trim();
+        const student_id = document.getElementById("ph-student-pick").value;
+
+        const resp = await window.electronAPI.queryResults({
+          scope,
+          session,
+          term,
+          class_name,
+          teacher_id,
+          subject,
+          student_id,
+        });
+        if (!resp.ok) {
+          status.textContent = "❌ Query failed: " + resp.error;
+          return;
+        }
+
+        _phResults = resp.results;
+        const tbody = document.getElementById("ph-preview-tbody");
+        if (!_phResults.length) {
+          tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-dim);">No results found for this filter. Try a different scope or ensure grades have been synced.</td></tr>`;
+        } else {
+          tbody.innerHTML = _phResults
+            .map(
+              (s, i) => `
+          <tr>
+            <td>${i + 1}</td>
+            <td><strong>${s.name}</strong></td>
+            <td>${s.class_name}</td>
+            <td>${s.subjects?.length || 0} subject(s)</td>
+            <td>${s.total_score || "—"}</td>
+            <td>${s.average || "—"}</td>
+          </tr>`,
+            )
+            .join("");
+        }
+
+        document.getElementById("ph-preview-label").textContent =
+          `${_phResults.length} student(s) ready · ${session}, ${term}`;
+        document.getElementById("ph-preview-container").style.display = "block";
+        status.textContent = "";
+      }
+
+      // phGenerate redirects to Result Studio
+      function phGenerate() { showView('result-studio'); rsInit(); }
+
+      // ══════════════════════════════════════════════════════════════════════════
+      // Result Studio Controller
+      // ══════════════════════════════════════════════════════════════════════════
+      let _rsResults = [];
+      let _rsLastImagePath = null;
+
+      async function rsInit() {
+        if (!window.electronAPI?.getTermConfig) return;
+        const cfg = await window.electronAPI.getTermConfig();
+        // Sync template from saved config and trigger preview
+        if (cfg.template) {
+          const el = document.getElementById("rs-template");
+          if (el) el.value = cfg.template;
+          updateTemplatePreview(cfg.template, 'rs-template-preview');
+        } else {
+          updateTemplatePreview('clean_slate', 'rs-template-preview');
+        }
+        // Populate dropdowns
+        const students = await window.electronAPI.getAllStudents();
+        const classes  = [...new Set(students.map(s => s.class_name))].sort();
+        document.getElementById("rs-class-pick").innerHTML = classes.map(c => `<option>${c}</option>`).join("");
+        document.getElementById("rs-student-pick").innerHTML = students.map(s => `<option value="${s.id}">${s.name} (${s.class_name})</option>`).join("");
+        const teachers = await window.electronAPI.getAllTeachers();
+        document.getElementById("rs-teacher-pick").innerHTML = teachers.map(t => `<option value="${t.id}">${t.name}</option>`).join("");
+      }
+
+      function rsOnScopeChange() {
+        const scope = document.getElementById("rs-scope").value;
+        ["class","teacher","subject","student"].forEach(s => {
+          document.getElementById("rs-scope-" + s).style.display = scope === s ? "flex" : "none";
+        });
+      }
+
+      function rsOnFormatChange() {
+        const fmt = document.getElementById("rs-format").value;
+        const copyBtn = document.getElementById("rs-copy-btn");
+        if (copyBtn) copyBtn.style.display = fmt === "image" ? "inline-flex" : "none";
+      }
+
+      async function rsPreview() {
+        const status = document.getElementById("rs-status");
+        status.textContent = "⏳ Querying results…";
+        const cfg = await window.electronAPI.getTermConfig();
+        const scope      = document.getElementById("rs-scope").value;
+        const session    = cfg.academic_session || "2024/2025";
+        const term       = cfg.term || "First Term";
+        const class_name = document.getElementById("rs-class-pick").value;
+        const teacher_id = document.getElementById("rs-teacher-pick").value;
+        const subject    = document.getElementById("rs-subject-input").value.trim();
+        const student_id = document.getElementById("rs-student-pick").value;
+
+        const resp = await window.electronAPI.queryResults({ scope, session, term, class_name, teacher_id, subject, student_id });
+        if (!resp.ok) { status.textContent = "❌ Query failed: " + resp.error; return; }
+
+        _rsResults = resp.results;
+        const tbody = document.getElementById("rs-preview-tbody");
+        if (!_rsResults.length) {
+          tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-dim);">No results found. Ensure grades have been synced for this term.</td></tr>`;
+        } else {
+          tbody.innerHTML = _rsResults.map((s, i) => `
+            <tr>
+              <td>${i+1}</td><td><strong>${s.name}</strong></td><td>${s.class_name}</td>
+              <td>${s.subjects?.filter(x=>x.score!==null).length || 0} graded</td>
+              <td>${s.total_score || "—"}</td><td>${s.average || "—"}</td>
+            </tr>`).join("");
+        }
+        document.getElementById("rs-preview-label").textContent = `${_rsResults.length} student(s) · ${session}, ${term}`;
+        document.getElementById("rs-preview-container").style.display = "block";
+        status.textContent = "";
+      }
+
+      async function rsGenerate() {
+        if (!_rsResults.length) { alert("Click Preview first to load results."); return; }
+        const status  = document.getElementById("rs-status");
+        const btn     = document.getElementById("rs-generate-btn");
+        const pathEl  = document.getElementById("rs-result-path");
+        btn.disabled  = true;
+        btn.textContent = "⏳ Generating…";
+        status.textContent = "";
+        pathEl.textContent = "";
+
+        const identity   = await window.electronAPI.getIdentity();
+        const cfg        = await window.electronAPI.getTermConfig();
+        const templateId = document.getElementById("rs-template").value;
+        const format     = document.getElementById("rs-format").value;
+        const reportType = document.getElementById("rs-type").value;
+        const subject    = document.getElementById("rs-subject-input").value.trim();
+
+        try {
+          const result = await window.electronAPI.generateReports({
+            identity, students: _rsResults, termConfig: cfg,
+            reportType, templateId, format, subject,
+          });
+          if (result.success) {
+            const fmtLabel = { pdf: "PDF", html: "HTML file", image: "PNG image" }[format] || format;
+            status.textContent = `✅ ${fmtLabel} saved to Desktop/NexusReports/`;
+            pathEl.textContent = result.path || "";
+            _rsLastImagePath = result.format === "image" ? result.path : null;
+            const copyBtn = document.getElementById("rs-copy-btn");
+            if (copyBtn && format === "image") {
+              copyBtn.style.display = "inline-flex";
+              copyBtn.style.animation = "none";
+              copyBtn.style.background = "rgba(0,229,255,0.2)";
+            }
+          } else {
+            status.textContent = "❌ Generation failed.";
+          }
+        } catch(e) {
+          status.textContent = "❌ Error: " + e.message;
+        }
+        btn.disabled = false;
+        btn.textContent = "📄 Generate & Save";
+      }
+
+      async function rsCopyImage() {
+        const status = document.getElementById("rs-status");
+        try {
+          const r = await window.electronAPI.copyResultImage({ imagePath: _rsLastImagePath });
+          status.textContent = r.ok ? "📋 Image copied to clipboard!" : "❌ Copy failed: " + r.error;
+        } catch(e) {
+          status.textContent = "❌ Copy error: " + e.message;
+        }
+      }
+
+      function downloadSampleCSV() {
+        const csv = `Student_ID,First_Name,Last_Name,Class,Teacher_ID,Teacher_Name,Teacher_Phone,Subjects\nA-001,Obi,Ndidi,JSS1,TCH-001,Mr. Example,08012345678,Mathematics|English\n`;
+        const a = Object.assign(document.createElement("a"), {
+          href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })),
+          download: "nexus_sample_roster.csv",
+        });
+        a.click();
+      }
+
+      // ══════════════════════════════════════════════════════════════════════════
+      // Settings Form
+      // ══════════════════════════════════════════════════════════════════════════
+      let currentLogoBase64 = null;
+
+      async function hydrateSettingsForm() {
+        if (!window.electronAPI?.getIdentity) return;
+        const identity = await window.electronAPI.getIdentity();
+        if (!identity) return;
+        document.getElementById("school-name-input").value =
+          identity.name || "";
+        document.getElementById("school-address-input").value =
+          identity.address || "";
+        document.getElementById("school-motto-input").value =
+          identity.motto || "";
+        document.getElementById("school-signature-input").value =
+          identity.signature || "";
+        document.getElementById("premium-plan-toggle").checked =
+          !!identity.premiumPlan;
+        const tp = document.getElementById("theme-primary");
+        const ts = document.getElementById("theme-secondary");
+        tp.value = identity.themePrimary || "#1A237E";
+        ts.value = identity.themeSecondary || "#00E5FF";
+        document.getElementById("primary-hex").textContent =
+          tp.value.toUpperCase();
+        document.getElementById("secondary-hex").textContent =
+          ts.value.toUpperCase();
+        if (identity.logoBase64) {
+          currentLogoBase64 = identity.logoBase64;
+          const prev = document.getElementById("logo-preview");
+          prev.src = identity.logoBase64;
+          prev.style.display = "block";
+          document.getElementById("uploader-content").style.display = "none";
+        }
+      }
+
+      async function hydrateAboutView() {
+        const planEl = document.getElementById("about-plan-info");
+        if (!window.electronAPI?.getIdentity) {
+          planEl.textContent = "Could not load plan info.";
+          return;
+        }
+        const identity = await window.electronAPI.getIdentity();
+        if (identity?.premiumPlan) {
+          planEl.innerHTML = `<strong style="color:#FFD700;">⭐ Nexus Premium</strong><br><span style="font-size:12px;color:var(--text-dim);">Digital Envelope (WhatsApp HTML) exports enabled.</span>`;
+        } else {
+          planEl.innerHTML = `<strong>Nexus Standard</strong><br><span style="font-size:12px;color:var(--text-dim);">Upgrade to Premium to unlock Digital Envelope WhatsApp exports and priority support.</span>`;
+        }
+      }
+
+      // ══════════════════════════════════════════════════════════════════════════
+      // Identity / Branding
+      // ══════════════════════════════════════════════════════════════════════════
+      function applyIdentityToUI(identity) {
+        if (!identity) return;
+        const sn = document.getElementById("school-name");
+        if (sn) sn.textContent = identity.name || "Nexus School";
+        const tsn = document.getElementById("titlebar-school-name");
+        if (tsn) tsn.textContent = identity.name || "Nexus School OS";
+
+        document.documentElement.style.setProperty(
+          "--primary",
+          identity.themePrimary || "#1A237E",
+        );
+        document.documentElement.style.setProperty(
+          "--accent",
+          identity.themeSecondary || "#00E5FF",
+        );
+
+        const hex = identity.themePrimary || "#1A237E";
+        let r = 26,
+          g = 35,
+          b = 126;
+        if (/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)) {
+          let c = hex.substring(1).split("");
+          if (c.length === 3) c = [c[0], c[0], c[1], c[1], c[2], c[2]];
+          c = "0x" + c.join("");
+          r = (c >> 16) & 255;
+          g = (c >> 8) & 255;
+          b = c & 255;
+        }
+        const glow = document.querySelector(".background-glow");
+        if (glow)
+          glow.style.background = `radial-gradient(ellipse at 20% 50%, rgba(${r},${g},${b},0.35) 0%, transparent 60%)`;
+
+        const logo = document.getElementById("sidebar-logo");
+        if (logo) {
+          if (identity.logoBase64) {
+            logo.innerHTML = `<img src="${identity.logoBase64}" style="width:100%;height:100%;object-fit:contain;border-radius:10px;">`;
+          } else {
+            logo.innerHTML = identity.name
+              ? identity.name.charAt(0).toUpperCase()
+              : "N";
+          }
+        }
+      }
+
+      // ══════════════════════════════════════════════════════════════════════════
+      // Boot sequence (runs when electronAPI is available)
+      // ══════════════════════════════════════════════════════════════════════════
+      if (window.electronAPI) {
+        // ── License Guard ─────────────────────────────────────────────────────
+        if (window.electronAPI.onLicenseStatus) {
+          window.electronAPI.onLicenseStatus((status) => {
+            if (status?.locked) {
+              document.getElementById("license-lock-overlay").style.display =
+                "flex";
+              if (status.message)
+                document.getElementById("license-lock-message").textContent =
+                  status.message;
+            }
+          });
+        }
+
+        // ── QR Payload ────────────────────────────────────────────────────────
+        window.electronAPI.onQrPayload((payload) => {
+          renderQR(payload);
+        });
+
+        // ── Handshake Complete ────────────────────────────────────────────────
+        window.electronAPI.onHandshakeComplete((data) => {
+          devicesMarried++;
+          const badge = document.getElementById("thermal-badge");
+          if (badge) {
+            badge.innerHTML = '<span class="dot"></span> Synced: Active';
+            badge.style.color = "#4CAF50";
+          }
+
+          const devEl = document.getElementById("stat-devices-count");
+          if (devEl) devEl.textContent = devicesMarried;
+
+          const pulse = document.getElementById("pulse-label");
+          if (pulse)
+            pulse.textContent = `📱 ${data.teacher_name} tablet is now married.`;
+
+          const pi = document.getElementById("pulse-indicator");
+          if (pi) {
+            pi.classList.add("active-sync");
+            setTimeout(() => pi.classList.remove("active-sync"), 4000);
+          }
+
+          // Auto-navigate to dashboard on first successful handshake
+          if (devicesMarried === 1) showView("dashboard");
+        });
+
+        // ── Sync Events (Grade Pulse) ─────────────────────────────────────────
+        window.electronAPI.onSyncUpdate((payload) => {
+          const events = Array.isArray(payload)
+            ? payload
+            : payload.events || [];
+          const syncCount = payload.count || events.length || 0;
+          const teacherName = payload.teacher_name || "A Teacher";
+
+          totalGradeEvents += syncCount;
+          const evEl = document.getElementById("stat-events-count");
+          if (evEl) evEl.textContent = totalGradeEvents;
+
+          const pi = document.getElementById("pulse-indicator");
+          if (pi) {
+            pi.classList.add("active-sync");
+            setTimeout(() => pi.classList.remove("active-sync"), 3000);
+          }
+
+          const pulse = document.getElementById("pulse-label");
+          if (pulse)
+            pulse.textContent = `⚡ ${teacherName} just synced ${syncCount} scores!`;
+
+          const container = document.getElementById("events-container");
+          events.forEach((event) => {
+            let p = {};
+            try {
+              p = JSON.parse(event.payload);
+            } catch (e) {}
+            let scoreDisplay = `Score: ${p.score ?? "N/A"}`;
+            if (p.breakdown)
+              scoreDisplay += ` <span style="font-size:10px;opacity:0.6;">(CA1:${p.breakdown.CA1} CA2:${p.breakdown.CA2} Ex:${p.breakdown.Exam})</span>`;
+
+            const card = document.createElement("div");
+            card.className = "event-card slide-in";
+            card.innerHTML = `
+            <div class="event-type">${event.event_type || "UPDATE"}</div>
             <div class="event-details">
-              <span class="student-id">${p.student_id || 'Unknown'} · ${p.subject || ''}</span>
+              <span class="student-id">${p.student_id || "Unknown"} · ${p.subject || ""}</span>
               <span class="score-pill">${scoreDisplay}</span>
             </div>
             <div class="event-time">${new Date(event.created_at).toLocaleTimeString()}</div>
           `;
-          container.prepend(card);
-          if (container.children.length > 20) container.lastElementChild.remove();
+            container.prepend(card);
+            if (container.children.length > 20)
+              container.lastElementChild.remove();
+          });
+
+          // Track for PDF generation
+          allGradeEvents.push(...events);
+          const genBtn = document.getElementById("generate-pdf-btn");
+          if (genBtn && allGradeEvents.length)
+            genBtn.style.display = "inline-flex";
         });
 
-        // Track for PDF generation
-        allGradeEvents.push(...events);
-        const genBtn = document.getElementById('generate-pdf-btn');
-        if (genBtn && allGradeEvents.length) genBtn.style.display = 'inline-flex';
-      });
+        // (Duplicate onSyncUpdate listener removed — events already collected in main listener above)
 
-      // Second listener to collect events for PDFs
-      window.electronAPI.onSyncUpdate((payload) => {
-        const eventsList = Array.isArray(payload) ? payload : (payload.events || []);
-        if (eventsList.length) allGradeEvents.push(...eventsList);
-      });
+        // ── CSV Upload ────────────────────────────────────────────────────────
+        document
+          .getElementById("csv-upload")
+          .addEventListener("change", async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const tooltip = document.getElementById("upload-status-tooltip");
+            if (tooltip) {
+              tooltip.style.color = "#00E5FF";
+              tooltip.textContent = "⏳ Processing CSV…";
+            }
+            if (window.electronAPI.processCSV)
+              window.electronAPI.processCSV(file.path);
+          });
 
-      // ── CSV Upload ────────────────────────────────────────────────────────
-      document.getElementById('csv-upload').addEventListener('change', async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const tooltip = document.getElementById('upload-status-tooltip');
-        if (tooltip) { tooltip.style.color = '#00E5FF'; tooltip.textContent = '⏳ Processing CSV…'; }
-        if (window.electronAPI.processCSV) window.electronAPI.processCSV(file.path);
-      });
+        window.electronAPI.onCSVLoaded(async (count) => {
+          const tooltip = document.getElementById("upload-status-tooltip");
+          if (tooltip) {
+            tooltip.style.color = "#4CAF50";
+            tooltip.textContent = `✅ ${count} Students Ready`;
+          }
 
-      window.electronAPI.onCSVLoaded(async (count) => {
-        const tooltip = document.getElementById('upload-status-tooltip');
-        if (tooltip) { tooltip.style.color = '#4CAF50'; tooltip.textContent = `✅ ${count} Students Ready`; }
+          await refreshTeachersTable();
+          await refreshStudentsTable();
+          await loadTeacherDropdown();
+          await refreshDashboardStats();
 
-        await refreshTeachersTable();
-        await refreshStudentsTable();
-        await loadTeacherDropdown();
-        await refreshDashboardStats();
+          if (count > 0 && typeof Swal !== "undefined") {
+            Swal.fire({
+              title: "Import Successful",
+              text: `${count} students have been ingested.`,
+              icon: "success",
+              background: "#0A0E2E",
+              color: "#fff",
+              confirmButtonColor: "#1A237E",
+              backdrop: false,
+              heightAuto: false,
+            });
+          }
+        });
 
-        if (count > 0 && typeof Swal !== 'undefined') {
-          Swal.fire({
-            title: 'Import Successful', text: `${count} students have been ingested.`,
-            icon: 'success', background: '#0A0E2E', color: '#fff',
-            confirmButtonColor: '#1A237E', backdrop: false, heightAuto: false,
+        // ── PDF Report Generation ─────────────────────────────────────────────
+        document
+          .getElementById("generate-pdf-btn")
+          .addEventListener("click", async () => {
+            if (!allGradeEvents.length) {
+              Swal.fire({
+                title: "No Grade Data",
+                text: "Sync grade events from the Android device first.",
+                icon: "warning",
+                background: "#0A0E2E",
+                color: "#fff",
+                backdrop: false,
+              });
+              return;
+            }
+            Swal.fire({
+              title: "Generating PDF Reports",
+              html: `<div style="margin:10px 0 20px;font-size:14px;opacity:0.8;">Nexus Engine is rendering A4 layouts…</div><div style="display:flex;justify-content:center;"><div class="bar-container" style="width:200px;"><div class="bar-fill"></div></div></div>`,
+              allowOutsideClick: false,
+              showConfirmButton: false,
+              background: "#0A0E2E",
+              color: "#fff",
+              backdrop: false,
+            });
+
+            const gradeMap = {};
+            allGradeEvents.forEach((evt) => {
+              try {
+                const p = JSON.parse(evt.payload);
+                gradeMap[p.student_id] = {
+                  total: p.score,
+                  breakdown: p.breakdown || {},
+                };
+              } catch (e) {}
+            });
+
+            const identity = await window.electronAPI.getIdentity();
+            const studentsForPdf = Object.entries(gradeMap).map(([id, g]) => ({
+              id,
+              name: id,
+              class_name: "",
+              ...g,
+            }));
+
+            try {
+              const result = await window.electronAPI.generateReports({
+                identity,
+                students: studentsForPdf,
+              });
+              let msg = `Saved to: <code style="font-size:11px;">${result.folder}</code>`;
+              if (identity.premiumPlan)
+                msg += `<br><br><span style="color:#FFD700;font-size:12px;">⭐ Digital Envelopes generated!</span>`;
+              Swal.fire({
+                title: "✅ Reports Done!",
+                html: msg,
+                icon: "success",
+                background: "#0A0E2E",
+                color: "#fff",
+                confirmButtonColor: "#1A237E",
+                backdrop: false,
+              });
+            } catch (err) {
+              Swal.fire({
+                title: "Error",
+                text: "PDF generation failed.",
+                icon: "error",
+                background: "#0A0E2E",
+                color: "#fff",
+                backdrop: false,
+              });
+            }
+          });
+
+        // ── Settings Persistence ──────────────────────────────────────────────
+        document
+          .getElementById("theme-primary")
+          .addEventListener("input", (e) => {
+            document.getElementById("primary-hex").textContent =
+              e.target.value.toUpperCase();
+          });
+        document
+          .getElementById("theme-secondary")
+          .addEventListener("input", (e) => {
+            document.getElementById("secondary-hex").textContent =
+              e.target.value.toUpperCase();
+          });
+
+        const logoDropzone = document.getElementById("logo-dropzone");
+        const logoUpload = document.getElementById("logo-upload");
+        const logoPreview = document.getElementById("logo-preview");
+        const uploaderContent = document.getElementById("uploader-content");
+
+        logoDropzone.addEventListener("click", () => logoUpload.click());
+        logoUpload.addEventListener("change", (e) => {
+          if (e.target.files?.[0]) handleLogoFile(e.target.files[0]);
+        });
+        logoDropzone.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          logoDropzone.style.borderColor = "var(--accent)";
+        });
+        logoDropzone.addEventListener("dragleave", () => {
+          logoDropzone.style.borderColor = "var(--glass-border)";
+        });
+        logoDropzone.addEventListener("drop", (e) => {
+          e.preventDefault();
+          logoDropzone.style.borderColor = "var(--glass-border)";
+          if (e.dataTransfer.files?.[0])
+            handleLogoFile(e.dataTransfer.files[0]);
+        });
+
+        function handleLogoFile(file) {
+          if (file.type !== "image/png" && file.type !== "image/jpeg") {
+            alert("PNG or JPEG only.");
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            currentLogoBase64 = e.target.result;
+            logoPreview.src = currentLogoBase64;
+            logoPreview.style.display = "block";
+            uploaderContent.style.display = "none";
+          };
+          reader.readAsDataURL(file);
+        }
+
+        document
+          .getElementById("save-identity-btn")
+          .addEventListener("click", async () => {
+            const btn = document.getElementById("save-identity-btn");
+            btn.textContent = "Saving…";
+            const identity = {
+              name: document.getElementById("school-name-input").value.trim(),
+              address: document
+                .getElementById("school-address-input")
+                .value.trim(),
+              motto: document.getElementById("school-motto-input").value.trim(),
+              signature: document
+                .getElementById("school-signature-input")
+                .value.trim(),
+              themePrimary: document.getElementById("theme-primary").value,
+              themeSecondary: document.getElementById("theme-secondary").value,
+              logoBase64: currentLogoBase64,
+              premiumPlan: document.getElementById("premium-plan-toggle")
+                .checked,
+            };
+            if (window.electronAPI.saveIdentity) {
+              await window.electronAPI.saveIdentity(identity);
+              applyIdentityToUI(identity);
+              btn.textContent = "✅ Saved!";
+              setTimeout(() => {
+                btn.textContent = "Save Identity Shard";
+              }, 1500);
+            }
+          });
+
+        // ── Reset ─────────────────────────────────────────────────────────────
+        document
+          .getElementById("reset-btn")
+          .addEventListener("click", async () => {
+            const { isConfirmed } = await Swal.fire({
+              title: "Reset All Data?",
+              text: "This will clear school identity and all student/teacher records. This cannot be undone.",
+              icon: "warning",
+              showCancelButton: true,
+              confirmButtonColor: "#ff4444",
+              cancelButtonColor: "#3085d6",
+              confirmButtonText: "Yes, reset everything!",
+              background: "#0A0E2E",
+              color: "#fff",
+              backdrop: false,
+            });
+            if (isConfirmed && window.electronAPI.resetAppData) {
+              await window.electronAPI.resetAppData();
+              Swal.fire({
+                title: "System Reset",
+                text: "Reloading…",
+                icon: "success",
+                background: "#0A0E2E",
+                color: "#fff",
+                showConfirmButton: false,
+                timer: 1800,
+                backdrop: false,
+              });
+              setTimeout(() => window.location.reload(), 1800);
+            }
+          });
+
+        // ── Boot: load identity + stats ───────────────────────────────────────
+        if (window.electronAPI.getIdentity) {
+          window.electronAPI.getIdentity().then((id) => {
+            if (id) applyIdentityToUI(id);
           });
         }
-      });
+        refreshDashboardStats();
 
-      // ── PDF Report Generation ─────────────────────────────────────────────
-      document.getElementById('generate-pdf-btn').addEventListener('click', async () => {
-        if (!allGradeEvents.length) {
-          Swal.fire({ title: 'No Grade Data', text: 'Sync grade events from the Android device first.',
-            icon: 'warning', background: '#0A0E2E', color: '#fff', backdrop: false }); return;
-        }
-        Swal.fire({ title: 'Generating PDF Reports',
-          html: `<div style="margin:10px 0 20px;font-size:14px;opacity:0.8;">Nexus Engine is rendering A4 layouts…</div><div style="display:flex;justify-content:center;"><div class="bar-container" style="width:200px;"><div class="bar-fill"></div></div></div>`,
-          allowOutsideClick: false, showConfirmButton: false,
-          background: '#0A0E2E', color: '#fff', backdrop: false });
+        // Robustness: retry renderQR until QRCode library is ready
+        const readyInterval = setInterval(() => {
+          if (typeof QRCode !== "undefined" && cachedPayload) {
+            renderQR(cachedPayload);
+            cachedPayload = null;
+            clearInterval(readyInterval);
+          }
+        }, 500);
 
-        const gradeMap = {};
-        allGradeEvents.forEach(evt => {
-          try { const p = JSON.parse(evt.payload); gradeMap[p.student_id] = { total: p.score, breakdown: p.breakdown || {} }; } catch(e) {}
+        if (window.electronAPI.uiReady) window.electronAPI.uiReady();
+
+        // ── Platform Detection: show custom win controls on non-macOS ─────────
+        window.electronAPI.getPlatform().then((platform) => {
+          if (platform !== "darwin") {
+            // Show custom ×  □  − buttons in the titlebar
+            const wc = document.getElementById("win-controls");
+            if (wc) wc.style.display = "flex";
+            // On Win/Linux, no native inset — remove the traffic light placeholder
+            const tls = document.getElementById("traffic-light-space");
+            if (tls) tls.style.display = "none";
+          }
         });
 
-        const identity = await window.electronAPI.getIdentity();
-        const studentsForPdf = Object.entries(gradeMap).map(([id, g]) => ({ id, name: id, class_name: '', ...g }));
-
-        try {
-          const result = await window.electronAPI.generateReports({ identity, students: studentsForPdf });
-          let msg = `Saved to: <code style="font-size:11px;">${result.folder}</code>`;
-          if (identity.premiumPlan) msg += `<br><br><span style="color:#FFD700;font-size:12px;">⭐ Digital Envelopes generated!</span>`;
-          Swal.fire({ title: '✅ Reports Done!', html: msg, icon: 'success',
-            background: '#0A0E2E', color: '#fff', confirmButtonColor: '#1A237E', backdrop: false });
-        } catch(err) {
-          Swal.fire({ title: 'Error', text: 'PDF generation failed.', icon: 'error', background: '#0A0E2E', color: '#fff', backdrop: false });
-        }
-      });
-
-      // ── Settings Persistence ──────────────────────────────────────────────
-      document.getElementById('theme-primary').addEventListener('input', (e) => {
-        document.getElementById('primary-hex').textContent = e.target.value.toUpperCase();
-      });
-      document.getElementById('theme-secondary').addEventListener('input', (e) => {
-        document.getElementById('secondary-hex').textContent = e.target.value.toUpperCase();
-      });
-
-      const logoDropzone   = document.getElementById('logo-dropzone');
-      const logoUpload     = document.getElementById('logo-upload');
-      const logoPreview    = document.getElementById('logo-preview');
-      const uploaderContent= document.getElementById('uploader-content');
-
-      logoDropzone.addEventListener('click', () => logoUpload.click());
-      logoUpload.addEventListener('change', (e) => { if (e.target.files?.[0]) handleLogoFile(e.target.files[0]); });
-      logoDropzone.addEventListener('dragover', (e) => { e.preventDefault(); logoDropzone.style.borderColor = 'var(--accent)'; });
-      logoDropzone.addEventListener('dragleave', () => { logoDropzone.style.borderColor = 'var(--glass-border)'; });
-      logoDropzone.addEventListener('drop', (e) => {
-        e.preventDefault(); logoDropzone.style.borderColor = 'var(--glass-border)';
-        if (e.dataTransfer.files?.[0]) handleLogoFile(e.dataTransfer.files[0]);
-      });
-
-      function handleLogoFile(file) {
-        if (file.type !== 'image/png' && file.type !== 'image/jpeg') { alert('PNG or JPEG only.'); return; }
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          currentLogoBase64 = e.target.result;
-          logoPreview.src = currentLogoBase64; logoPreview.style.display = 'block';
-          uploaderContent.style.display = 'none';
-        };
-        reader.readAsDataURL(file);
+        // Seed the history with the starting view so the back button is disabled correctly
+        _historyPush("dashboard");
       }
 
-      document.getElementById('save-identity-btn').addEventListener('click', async () => {
-        const btn = document.getElementById('save-identity-btn');
-        btn.textContent = 'Saving…';
-        const identity = {
-          name:          document.getElementById('school-name-input').value.trim(),
-          address:       document.getElementById('school-address-input').value.trim(),
-          motto:         document.getElementById('school-motto-input').value.trim(),
-          signature:     document.getElementById('school-signature-input').value.trim(),
-          themePrimary:  document.getElementById('theme-primary').value,
-          themeSecondary:document.getElementById('theme-secondary').value,
-          logoBase64:    currentLogoBase64,
-          premiumPlan:   document.getElementById('premium-plan-toggle').checked,
-        };
-        if (window.electronAPI.saveIdentity) {
-          await window.electronAPI.saveIdentity(identity);
-          applyIdentityToUI(identity);
-          btn.textContent = '✅ Saved!';
-          setTimeout(() => { btn.textContent = 'Save Identity Shard'; }, 1500);
-        }
-      });
+    // ══════════════════════════════════════════════════════════════════════════
+    // Edit Student Logic
+    // ══════════════════════════════════════════════════════════════════════════
+    function openEditStudent(id) {
+      const stu = _allStudents.find(s => s.id === id);
+      if (!stu) return;
 
-      // ── Reset ─────────────────────────────────────────────────────────────
-      document.getElementById('reset-btn').addEventListener('click', async () => {
-        const { isConfirmed } = await Swal.fire({
-          title: 'Reset All Data?',
-          text: 'This will clear school identity and all student/teacher records. This cannot be undone.',
-          icon: 'warning', showCancelButton: true,
-          confirmButtonColor: '#ff4444', cancelButtonColor: '#3085d6',
-          confirmButtonText: 'Yes, reset everything!',
-          background: '#0A0E2E', color: '#fff', backdrop: false,
+      document.getElementById('edit-stu-id').value = stu.id;
+      document.getElementById('edit-stu-name').value = stu.name;
+      document.getElementById('edit-stu-class').value = stu.class_name;
+      document.getElementById('edit-stu-log').textContent = '';
+
+      // Populate class datalist
+      const dl = document.getElementById('edit-stu-class-datalist');
+      const allClasses = new Set();
+      _allStudents.forEach(s => { if(s.class_name) allClasses.add(s.class_name); });
+      _allTeachers.forEach(t => { (t.allocations||[]).forEach(a => { if(a.class_name) allClasses.add(a.class_name); }); });
+      dl.innerHTML = [...allClasses].sort().map(c => '<option value="' + c + '">').join('');
+
+      // Pre-tick the student's current subjects
+      const currentSubjects = stu.subjects || [];
+      _customSubjects['edit_stu'] = currentSubjects.filter(sub =>
+        !Object.values(CurriculumPresets).flat().flatMap(g => g.subjects || []).includes(sub)
+      );
+      renderSubjectsPicker('edit_stu', 'jss');
+      // After render, check the current subjects
+      setTimeout(() => {
+        const grid = document.getElementById('edit_stu-subject-grid');
+        grid.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+          if (currentSubjects.includes(cb.value)) {
+            cb.checked = true;
+            cb.parentElement.classList.add('checked');
+          }
         });
-        if (isConfirmed && window.electronAPI.resetAppData) {
-          await window.electronAPI.resetAppData();
-          Swal.fire({ title: 'System Reset', text: 'Reloading…', icon: 'success',
-            background: '#0A0E2E', color: '#fff', showConfirmButton: false, timer: 1800, backdrop: false });
-          setTimeout(() => window.location.reload(), 1800);
-        }
-      });
+      }, 0);
 
-      // ── Boot: load identity + stats ───────────────────────────────────────
-      if (window.electronAPI.getIdentity) {
-        window.electronAPI.getIdentity().then(id => { if (id) applyIdentityToUI(id); });
-      }
-      refreshDashboardStats();
-
-      // Robustness: retry renderQR until QRCode library is ready
-      const readyInterval = setInterval(() => {
-        if (typeof QRCode !== 'undefined' && cachedPayload) {
-          renderQR(cachedPayload);
-          cachedPayload = null;
-          clearInterval(readyInterval);
-        }
-      }, 500);
-
-      if (window.electronAPI.uiReady) window.electronAPI.uiReady();
-
-      // ── Platform Detection: show custom win controls on non-macOS ─────────
-      window.electronAPI.getPlatform().then(platform => {
-        if (platform !== 'darwin') {
-          // Show custom ×  □  − buttons in the titlebar
-          const wc = document.getElementById('win-controls');
-          if (wc) wc.style.display = 'flex';
-          // On Win/Linux, no native inset — remove the traffic light placeholder
-          const tls = document.getElementById('traffic-light-space');
-          if (tls) tls.style.display = 'none';
-        }
-      });
-
-      // Seed the history with the starting view so the back button is disabled correctly
-      _historyPush('dashboard');
+      const overlay = document.getElementById('edit-student-overlay');
+      overlay.style.display = 'flex';
     }
+
+    function closeEditStudent() {
+      document.getElementById('edit-student-overlay').style.display = 'none';
+    }
+
+    async function saveEditStudent() {
+      const id        = document.getElementById('edit-stu-id').value;
+      const name      = document.getElementById('edit-stu-name').value.trim();
+      const class_name = document.getElementById('edit-stu-class').value.trim();
+      const log       = document.getElementById('edit-stu-log');
+      const subjects  = getCheckedSubjects('edit_stu');
+
+      if (!name || !class_name) {
+        log.style.color = '#ff4444';
+        log.textContent = '⚠ Name and Class are required.';
+        return;
+      }
+      if (!subjects.length) {
+        log.style.color = '#ff4444';
+        log.textContent = '⚠ Select at least one subject.';
+        return;
+      }
+
+      log.style.color = 'var(--text-dim)';
+      log.textContent = 'Saving…';
+      const res = await window.electronAPI.updateStudent({ id, name, class_name, subjects });
+      if (res.ok) {
+        log.style.color = '#4CAF50';
+        log.textContent = '✅ Saved!';
+        await refreshStudentsTable();
+        setTimeout(() => closeEditStudent(), 1000);
+      } else {
+        log.style.color = '#ff4444';
+        log.textContent = '❌ ' + res.error;
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Edit Teacher Logic
+    // ══════════════════════════════════════════════════════════════════════════
+    let _editTchAllocations = [];
+
+    function openEditTeacher(id) {
+      const tch = _allTeachers.find(t => t.id === id);
+      if (!tch) return;
+
+      document.getElementById('edit-tch-id').value = tch.id;
+      document.getElementById('edit-tch-name').value = tch.name;
+      document.getElementById('edit-tch-phone').value = tch.phone || '';
+      document.getElementById('edit-tch-email').value = tch.email || '';
+      document.getElementById('edit-tch-log').textContent = '';
+
+      // Reconstruct allocation groups from teacher's flat allocation list
+      const classMap = {};
+      (tch.allocations || []).forEach(a => {
+        if (!classMap[a.class_name]) classMap[a.class_name] = [];
+        classMap[a.class_name].push(a.subject);
+      });
+      _editTchAllocations = Object.entries(classMap).map(([class_name, subjects]) => ({ class_name, subjects }));
+      renderEditTchAllocations();
+
+      _customSubjects['edit_tch'] = [];
+      renderSubjectsPicker('edit_tch', 'jss');
+
+      const overlay = document.getElementById('edit-teacher-overlay');
+      overlay.style.display = 'flex';
+    }
+
+    function closeEditTeacher() {
+      document.getElementById('edit-teacher-overlay').style.display = 'none';
+    }
+
+    function renderEditTchAllocations() {
+      const list = document.getElementById('edit-tch-alloc-list');
+      list.innerHTML = '';
+      _editTchAllocations.forEach((alloc, idx) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;background:rgba(0,229,255,0.07);border:1px solid rgba(0,229,255,0.18);border-radius:7px;padding:6px 10px;font-size:12px;';
+        row.innerHTML =
+          '<span style="color:#00E5FF;font-weight:600;">' + alloc.class_name + '</span>' +
+          '<span style="color:#555;">—</span>' +
+          '<span style="color:#ccc;flex:1;">' + alloc.subjects.join(', ') + '</span>' +
+          '<button onclick="editTchRemoveAlloc(' + idx + ')" style="background:none;border:none;color:#ff6666;cursor:pointer;font-size:15px;padding:0;line-height:1;" title="Remove">×</button>';
+        list.appendChild(row);
+      });
+    }
+
+    function editTchRemoveAlloc(idx) {
+      _editTchAllocations.splice(idx, 1);
+      renderEditTchAllocations();
+    }
+
+    function editTchWizAddAllocation() {
+      const classInp = document.getElementById('edit-tch-alloc-class');
+      const rawClasses = classInp.value.split(',').map(c => c.trim()).filter(Boolean);
+      const subjects = getCheckedSubjects('edit_tch');
+      if (!rawClasses.length) { alert('Enter at least one class name.'); return; }
+      if (!subjects.length)   { alert('Select at least one subject.');   return; }
+      for (const cls of rawClasses) {
+        const existing = _editTchAllocations.findIndex(a => a.class_name.toLowerCase() === cls.toLowerCase());
+        if (existing !== -1) {
+          // Merge subjects into existing allocation
+          const merged = [...new Set([..._editTchAllocations[existing].subjects, ...subjects])];
+          _editTchAllocations[existing] = { class_name: cls, subjects: merged };
+        } else {
+          _editTchAllocations.push({ class_name: cls, subjects });
+        }
+      }
+      renderEditTchAllocations();
+      classInp.value = '';
+    }
+
+    async function saveEditTeacher() {
+      const id    = document.getElementById('edit-tch-id').value;
+      const name  = document.getElementById('edit-tch-name').value.trim();
+      const phone = document.getElementById('edit-tch-phone').value.trim();
+      const email = document.getElementById('edit-tch-email').value.trim();
+      const log   = document.getElementById('edit-tch-log');
+
+      if (!name) {
+        log.style.color = '#ff4444';
+        log.textContent = '⚠ Name is required.';
+        return;
+      }
+      if (!_editTchAllocations.length) {
+        log.style.color = '#ff4444';
+        log.textContent = '⚠ Add at least one class allocation.';
+        return;
+      }
+
+      log.style.color = 'var(--text-dim)';
+      log.textContent = 'Saving…';
+      const res = await window.electronAPI.updateTeacherFull({
+        id, name, phone, email,
+        allocations: _editTchAllocations
+      });
+      if (res.ok) {
+        log.style.color = '#4CAF50';
+        log.textContent = '✅ Saved!';
+        await refreshTeachersTable();
+        await loadTeacherDropdown();
+        setTimeout(() => closeEditTeacher(), 1000);
+      } else {
+        log.style.color = '#ff4444';
+        log.textContent = '❌ ' + res.error;
+      }
+    }
+
+    // Note: phInit and phSaveConfig handle components directly.
     </script>
     <!-- Global Hidden Inputs -->
-    <input type="file" id="csv-upload" accept=".csv" style="display:none;" />
-  </body>
+    <input type="file" id="csv-upload" accept=".csv" style="display: none" />
+  
+    <!-- ═══ Edit Student Modal ════════════════════════════════════════════════ -->
+    <div id="edit-student-overlay" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.7);backdrop-filter:blur(6px);justify-content:center;align-items:center;">
+      <div style="background:#0d1235;border:1px solid rgba(255,215,0,0.25);border-radius:18px;padding:28px;width:780px;max-width:95vw;max-height:88vh;overflow-y:auto;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+          <h3 style="color:#ffd700;font-size:14px;font-weight:700;">✏️ Edit Student</h3>
+          <button onclick="closeEditStudent()" style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;line-height:1;">×</button>
+        </div>
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-bottom:14px;">
+          <input id="edit-stu-name" class="modern-input" placeholder="Full Name *" />
+          <div style="display:flex;flex-direction:column;gap:0;">
+            <input id="edit-stu-class" class="modern-input" placeholder="Class *" list="edit-stu-class-datalist" />
+            <datalist id="edit-stu-class-datalist"></datalist>
+          </div>
+        </div>
+        <p style="font-size:11px;color:#ffd700;margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Enrolled Subjects</p>
+        <div style="background:rgba(0,0,0,0.15);border:1px solid rgba(255,255,255,0.05);border-radius:10px;padding:12px;margin-bottom:14px;">
+          <div class="subject-preset-pills" id="edit-stu-preset-pills">
+            <span class="subject-pill" onclick="renderSubjectsPicker('edit_stu','pri_lower')">Primary 1-3</span>
+            <span class="subject-pill" onclick="renderSubjectsPicker('edit_stu','pri_upper')">Primary 4-6</span>
+            <span class="subject-pill active" onclick="renderSubjectsPicker('edit_stu','jss')">JSS</span>
+            <span class="subject-pill" onclick="renderSubjectsPicker('edit_stu','sss')">SSS</span>
+          </div>
+          <div class="subject-grid" id="edit_stu-subject-grid"></div>
+          <div class="custom-subj-row">
+            <input id="edit_stu-custom-subj" class="modern-input" placeholder="Add custom subject" style="flex:1;height:30px;font-size:11px;" />
+            <button class="primary-btn" style="padding:0 12px;height:30px;font-size:11px;" onclick="addCustomSubject('edit_stu')">Add +</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <input id="edit-stu-id" type="hidden" />
+          <button onclick="saveEditStudent()" class="primary-btn" style="padding:9px 22px;font-size:13px;background:linear-gradient(135deg,#b8860b,#ffd700);color:#000;box-shadow:none;">💾 Save Changes</button>
+          <button onclick="closeEditStudent()" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:13px;">Cancel</button>
+          <span id="edit-stu-log" style="font-size:12px;margin-left:6px;"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Edit Teacher Modal ════════════════════════════════════════════════ -->
+    <div id="edit-teacher-overlay" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.7);backdrop-filter:blur(6px);justify-content:center;align-items:center;">
+      <div style="background:#0d1235;border:1px solid rgba(0,229,255,0.2);border-radius:18px;padding:28px;width:820px;max-width:95vw;max-height:88vh;overflow-y:auto;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+          <h3 style="color:#00e5ff;font-size:14px;font-weight:700;">✏️ Edit Teacher</h3>
+          <button onclick="closeEditTeacher()" style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;line-height:1;">×</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px;">
+          <input id="edit-tch-name" class="modern-input" placeholder="Full Name *" />
+          <input id="edit-tch-phone" class="modern-input" placeholder="Phone Number" />
+          <input id="edit-tch-email" class="modern-input" placeholder="Email (optional)" />
+        </div>
+        <p style="font-size:11px;color:#00e5ff;margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Class Allocations</p>
+        <div id="edit-tch-alloc-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
+        <div style="background:rgba(0,0,0,0.15);border:1px solid rgba(255,255,255,0.05);border-radius:10px;padding:12px;margin-bottom:14px;">
+          <input id="edit-tch-alloc-class" class="modern-input" placeholder="Class Names (comma separated) *" style="width:100%;margin-bottom:10px;" />
+          <div class="subject-preset-pills" id="edit-tch-preset-pills">
+            <span class="subject-pill" onclick="renderSubjectsPicker('edit_tch','pri_lower')">Primary 1-3</span>
+            <span class="subject-pill" onclick="renderSubjectsPicker('edit_tch','pri_upper')">Primary 4-6</span>
+            <span class="subject-pill active" onclick="renderSubjectsPicker('edit_tch','jss')">JSS</span>
+            <span class="subject-pill" onclick="renderSubjectsPicker('edit_tch','sss')">SSS</span>
+          </div>
+          <div class="subject-grid" id="edit_tch-subject-grid"></div>
+          <div class="custom-subj-row">
+            <input id="edit_tch-custom-subj" class="modern-input" placeholder="Add custom subject" style="flex:1;height:30px;font-size:11px;" />
+            <button class="primary-btn" style="padding:0 12px;height:30px;font-size:11px;" onclick="addCustomSubject('edit_tch')">Add +</button>
+          </div>
+          <div style="margin-top:10px;text-align:right;">
+            <button onclick="editTchWizAddAllocation()" style="background:rgba(0,229,255,0.14);border:1px solid #00e5ff;color:#00e5ff;border-radius:8px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:600;">＋ Append Allocation</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <input id="edit-tch-id" type="hidden" />
+          <button onclick="saveEditTeacher()" class="primary-btn" style="padding:9px 22px;font-size:13px;">💾 Save Changes</button>
+          <button onclick="closeEditTeacher()" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:13px;">Cancel</button>
+          <span id="edit-tch-log" style="font-size:12px;margin-left:6px;"></span>
+        </div>
+      </div>
+    </div>
+
+    </body>
 </html>

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,11 +41,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexus.school.data.Student
 import com.nexus.school.data.SyncDatabase
+import com.nexus.school.data.SyncEvent
+import com.nexus.school.network.ScoreComponent
+import com.nexus.school.security.IdentityManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import kotlinx.coroutines.delay
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
@@ -52,6 +59,51 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.platform.LocalLifecycleOwner
+
+// ─── Score Component Helpers ──────────────────────────────────────────────────
+fun defaultScoreComponents() = listOf(
+    ScoreComponent(key = "CA1",  label = "C.A. 1", max = 10),
+    ScoreComponent(key = "CA2",  label = "C.A. 2", max = 10),
+    ScoreComponent(key = "Exam", label = "Exam",   max = 80)
+)
+
+fun parseScoreComponents(json: String): List<ScoreComponent> {
+    if (json.isBlank()) return defaultScoreComponents()
+    return try {
+        val arr = org.json.JSONArray(json)
+        val list = (0 until arr.length()).map { i ->
+            val obj = arr.getJSONObject(i)
+            ScoreComponent(
+                key   = obj.getString("key"),
+                label = obj.getString("label"),
+                max   = obj.getInt("max")
+            )
+        }
+        list.ifEmpty { defaultScoreComponents() }
+    } catch (e: Exception) {
+        defaultScoreComponents()
+    }
+}
+
+// Top-level suspend helper — builds and upserts a grade event in Room
+suspend fun saveGradeEvent(
+    context: android.content.Context,
+    studentId: String,
+    subject: String,
+    compValues: Map<String, String>,
+    components: List<ScoreComponent>
+) {
+    val db    = SyncDatabase.getDatabase(context)
+    val total = components.sumOf { compValues[it.key]?.toIntOrNull() ?: 0 }
+    val bdParts = components.joinToString(", ") { comp ->
+        "\"${comp.key}\": ${compValues[comp.key]?.toIntOrNull() ?: 0}"
+    }
+    val payload = """{"student_id": "$studentId", "score": $total, "subject": "$subject", "assessment": "${components.firstOrNull()?.key ?: "CA1"}", "breakdown": {$bdParts}}"""
+    val eventId = "GRADE_${studentId}_$subject"
+    db.syncDao().insertEvent(
+        SyncEvent(event_id = eventId, event_type = "UPDATE_GRADE", payload = payload, is_synced = 0)
+    )
+}
 
 // ─── Naija-Futurism Color Tokens ─────────────────────────────────────────────
 private val DeepNavy    = Color(0xFF0A0E2E)
@@ -104,6 +156,11 @@ class StudentRosterActivity : AppCompatActivity() {
         val primaryColor = try {
             Color(android.graphics.Color.parseColor(primaryColorHex))
         } catch (e: Exception) { Color(0xFF1A237E) }
+
+        // Score components: prefer fresh intent data, fall back to persisted value from last handshake
+        val scoreComponentsJson = intent.getStringExtra("score_components_json")
+            ?: IdentityManager(this).getScoreComponentsJson()
+        val scoreComponents = parseScoreComponents(scoreComponentsJson)
 
         setContent {
             val lifecycleOwner = LocalLifecycleOwner.current
@@ -200,11 +257,12 @@ class StudentRosterActivity : AppCompatActivity() {
 
                     if (showFocusMode && filteredStudents.isNotEmpty()) {
                         FocusModePager(
-                            students = filteredStudents,
-                            selectedTab = selectedTab,
-                            primaryColor = primaryColor,
-                            onClose = { showFocusMode = false },
-                            onLogSave = { studentId, subject, isSaved -> studentSyncStatus[studentId + "_" + subject] = isSaved }
+                            students       = filteredStudents,
+                            selectedTab    = selectedTab,
+                            primaryColor   = primaryColor,
+                            scoreComponents = scoreComponents,
+                            onClose        = { showFocusMode = false },
+                            onLogSave      = { studentId, subject, isSaved -> studentSyncStatus[studentId + "_" + subject] = isSaved }
                         )
                     } else {
                         Column(modifier = Modifier.fillMaxSize()) {
@@ -485,37 +543,32 @@ fun FocusModePager(
     students: List<Student>,
     selectedTab: Pair<String, String>?,
     primaryColor: Color,
+    scoreComponents: List<ScoreComponent>,
     onClose: () -> Unit,
     onLogSave: (String, String, Boolean) -> Unit
 ) {
     val pagerState = rememberPagerState(pageCount = { students.size })
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
+    val scope      = rememberCoroutineScope()
+    val context    = LocalContext.current
 
-    val ca1State = remember { mutableStateMapOf<String, String>() }
-    val ca2State = remember { mutableStateMapOf<String, String>() }
-    val examState = remember { mutableStateMapOf<String, String>() }
+    // Flat state map: "studentId_subject_componentKey" -> value string
+    val gradeState = remember { mutableStateMapOf<String, String>() }
 
+    // Pre-load values from already-saved pending events
     LaunchedEffect(Unit) {
         val db = SyncDatabase.getDatabase(context)
-        val events = db.syncDao().getPendingEvents()
-        events.forEach { event ->
+        db.syncDao().getPendingEvents().forEach { event ->
             try {
-                val obj = org.json.JSONObject(event.payload)
-                if (obj.has("student_id") && obj.has("subject") && obj.has("breakdown")) {
-                    val key = obj.getString("student_id") + "_" + obj.getString("subject")
-                    val breakdown = obj.getJSONObject("breakdown")
-                    ca1State[key]  = breakdown.getInt("CA1").toString()
-                    ca2State[key]  = breakdown.getInt("CA2").toString()
-                    examState[key] = breakdown.getInt("Exam").toString()
-                } else if (obj.has("student_id") && obj.has("breakdown")) {
-                    val studentId = obj.getString("student_id")
-                    val breakdown = obj.getJSONObject("breakdown")
-                    ca1State[studentId]  = breakdown.getInt("CA1").toString()
-                    ca2State[studentId]  = breakdown.getInt("CA2").toString()
-                    examState[studentId] = breakdown.getInt("Exam").toString()
+                val obj     = org.json.JSONObject(event.payload)
+                val sid     = obj.getString("student_id")
+                val subj    = obj.optString("subject", "")
+                val prefix  = if (subj.isNotEmpty()) "${sid}_${subj}" else sid
+                val bd      = obj.optJSONObject("breakdown") ?: return@forEach
+                scoreComponents.forEach { comp ->
+                    val v = bd.optInt(comp.key, -1)
+                    if (v >= 0) gradeState["${prefix}_${comp.key}"] = v.toString()
                 }
-            } catch (e: Exception) {}
+            } catch (_: Exception) {}
         }
     }
 
@@ -557,61 +610,46 @@ fun FocusModePager(
         }
 
         HorizontalPager(state = pagerState, modifier = Modifier.weight(1f)) { page ->
-            val student = students[page]
-            val studentId = student.id
-            val subjectKey = studentId + "_" + student.subject
-            
+            val student    = students[page]
+            val studentId  = student.id
+            val subjectKey = "${studentId}_${student.subject}"
+
+            // Per-student values: component.key -> current string value
+            val compValues: Map<String, String> = scoreComponents.associate { comp ->
+                comp.key to (gradeState["${subjectKey}_${comp.key}"] ?: "")
+            }
+
             StudentFocusCard(
-                student = student,
-                selectedTab = selectedTab,
-                primaryColor = primaryColor,
-                initialCa1 = ca1State[subjectKey] ?: ca1State[studentId] ?: "",
-                initialCa2 = ca2State[subjectKey] ?: ca2State[studentId] ?: "",
-                initialExam = examState[subjectKey] ?: examState[studentId] ?: "",
-                onInputsChanged = { ca1, ca2, exam ->
-                    ca1State[subjectKey]  = ca1
-                    ca2State[subjectKey]  = ca2
-                    examState[subjectKey] = exam
+                student         = student,
+                selectedTab     = selectedTab,
+                primaryColor    = primaryColor,
+                scoreComponents = scoreComponents,
+                compValues      = compValues,
+                onValueChange   = { compKey, value ->
+                    gradeState["${subjectKey}_${compKey}"] = value
                 },
-                onAutoSave = { ca1, ca2, exam ->
+                onAutoSave = {
                     scope.launch(Dispatchers.IO) {
-                        try {
-                            val db = SyncDatabase.getDatabase(context)
-                            val total = (ca1.toIntOrNull() ?: 0) + (ca2.toIntOrNull() ?: 0) + (exam.toIntOrNull() ?: 0)
-                            val breakdown = """{"CA1": ${ca1.toIntOrNull() ?: 0}, "CA2": ${ca2.toIntOrNull() ?: 0}, "Exam": ${exam.toIntOrNull() ?: 0}}"""
-                            val subject = students[page].subject
-                            val payload = """{"student_id": "$studentId", "score": $total, "subject": "$subject", "assessment": "CA1", "breakdown": $breakdown}"""
-                            
-                            val explicitEventId = "GRADE_${studentId}_$subject"
-                            db.syncDao().insertEvent(
-                                com.nexus.school.data.SyncEvent(event_id = explicitEventId, event_type = "UPDATE_GRADE", payload = payload, is_synced = 0)
-                            )
-                            launch(Dispatchers.Main) {
-                                onLogSave(studentId, subject, true)
-                            }
-                        } catch (e: Exception) {}
+                        saveGradeEvent(
+                            context, studentId, student.subject,
+                            scoreComponents.associate { it.key to (gradeState["${subjectKey}_${it.key}"] ?: "") },
+                            scoreComponents
+                        )
+                        launch(Dispatchers.Main) { onLogSave(studentId, student.subject, true) }
                     }
                 },
-                onSave = { ca1, ca2, exam ->
+                onSave = {
                     scope.launch(Dispatchers.IO) {
-                        try {
-                            val db = SyncDatabase.getDatabase(context)
-                            val total = (ca1.toIntOrNull() ?: 0) + (ca2.toIntOrNull() ?: 0) + (exam.toIntOrNull() ?: 0)
-                            val breakdown = """{"CA1": ${ca1.toIntOrNull() ?: 0}, "CA2": ${ca2.toIntOrNull() ?: 0}, "Exam": ${exam.toIntOrNull() ?: 0}}"""
-                            // ─── Prompt 4: Subject is now embedded in every grade event ───
-                            val subject = students[page].subject
-                            val payload = """{"student_id": "$studentId", "score": $total, "subject": "$subject", "assessment": "CA1", "breakdown": $breakdown}"""
-                            
-                            val explicitEventId = "GRADE_${studentId}_$subject"
-                            db.syncDao().insertEvent(
-                                com.nexus.school.data.SyncEvent(event_id = explicitEventId, event_type = "UPDATE_GRADE", payload = payload, is_synced = 0)
-                            )
-                            launch(Dispatchers.Main) {
-                                onLogSave(studentId, subject, true)
-                                if (page < students.size - 1) pagerState.animateScrollToPage(page + 1)
-                                else onClose()
-                            }
-                        } catch (e: Exception) {}
+                        saveGradeEvent(
+                            context, studentId, student.subject,
+                            scoreComponents.associate { it.key to (gradeState["${subjectKey}_${it.key}"] ?: "") },
+                            scoreComponents
+                        )
+                        launch(Dispatchers.Main) {
+                            onLogSave(studentId, student.subject, true)
+                            if (page < students.size - 1) pagerState.animateScrollToPage(page + 1)
+                            else onClose()
+                        }
                     }
                 },
                 onSkip = {
@@ -626,135 +664,270 @@ fun FocusModePager(
 }
 
 // ─── Student Focus Card ───────────────────────────────────────────────────────
+// Full-screen layout: compact header │ scrollable 2-col input grid │ fixed footer
+// Designed to handle 1–10 score components on any phone screen size.
 @Composable
 fun StudentFocusCard(
     student: Student,
     selectedTab: Pair<String, String>?,
     primaryColor: Color,
-    initialCa1: String,
-    initialCa2: String,
-    initialExam: String,
-    onInputsChanged: (String, String, String) -> Unit,
-    onAutoSave: (String, String, String) -> Unit,
-    onSave: (String, String, String) -> Unit,
+    scoreComponents: List<ScoreComponent>,
+    compValues: Map<String, String>,
+    onValueChange: (String, String) -> Unit,
+    onAutoSave: () -> Unit,
+    onSave: () -> Unit,
     onSkip: () -> Unit
 ) {
-    var ca1  by remember(initialCa1)   { mutableStateOf(initialCa1) }
-    var ca2  by remember(initialCa2)   { mutableStateOf(initialCa2) }
-    var exam by remember(initialExam)  { mutableStateOf(initialExam) }
-    val total = (ca1.toIntOrNull() ?: 0) + (ca2.toIntOrNull() ?: 0) + (exam.toIntOrNull() ?: 0)
+    val total    = scoreComponents.sumOf { compValues[it.key]?.toIntOrNull() ?: 0 }
+    val maxTotal = scoreComponents.sumOf { it.max }
 
-    // Detached auto-save with a 650ms debounce
-    LaunchedEffect(ca1, ca2, exam) {
-        if (ca1 == initialCa1 && ca2 == initialCa2 && exam == initialExam) return@LaunchedEffect
+    // Debounced auto-save: skips initial composition, fires 650 ms after last keystroke
+    var initialized by remember { mutableStateOf(false) }
+    val valueSnapshot = scoreComponents.map { it.key to (compValues[it.key] ?: "") }
+    LaunchedEffect(valueSnapshot) {
+        if (!initialized) { initialized = true; return@LaunchedEffect }
         delay(650)
-        onAutoSave(ca1, ca2, exam)
+        onAutoSave()
     }
 
-    Box(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-        Card(
-            modifier = Modifier.fillMaxWidth().align(Alignment.Center),
-            shape = RoundedCornerShape(28.dp),
-            colors = CardDefaults.cardColors(containerColor = GlassWhite),
-            border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp)
+    ) {
+        Spacer(Modifier.height(12.dp))
+
+        // ── Compact student identity chip ────────────────────────────────────
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            color = GlassWhite,
+            border = BorderStroke(1.dp, GlassBorder)
         ) {
-            Column(
-                modifier = Modifier.padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Avatar
-                Box(
-                    modifier = Modifier.size(88.dp).clip(CircleShape)
-                        .background(Brush.verticalGradient(listOf(primaryColor, primaryColor.copy(alpha = 0.7f)))),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(student.name.take(1).uppercase(), color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
-                }
-                Spacer(Modifier.height(16.dp))
-                Text(student.name, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text(student.id, color = TextMuted, fontSize = 13.sp)
-
-                // Subject badge
-                selectedTab?.let {
-                    Spacer(Modifier.height(8.dp))
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = primaryColor.copy(alpha = 0.25f)
-                    ) {
-                        Text(
-                            "${it.first}  ·  ${it.second}",
-                            color = primaryColor,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(32.dp))
-
-                // Grade Inputs
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    GradeInputColumn("1st CA", "/ 10", ca1) {
-                        if (it.isEmpty() || (it.toIntOrNull() != null && it.toInt() <= 10)) {
-                            ca1 = it; onInputsChanged(ca1, ca2, exam)
-                        }
-                    }
-                    GradeInputColumn("2nd CA", "/ 10", ca2) {
-                        if (it.isEmpty() || (it.toIntOrNull() != null && it.toInt() <= 10)) {
-                            ca2 = it; onInputsChanged(ca1, ca2, exam)
-                        }
-                    }
-                    GradeInputColumn("Exam", "/ 80", exam) {
-                        if (it.isEmpty() || (it.toIntOrNull() != null && it.toInt() <= 80)) {
-                            exam = it; onInputsChanged(ca1, ca2, exam)
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(28.dp))
-
-                // Total Bar
+                // Mini avatar
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
+                        .size(48.dp)
+                        .clip(CircleShape)
                         .background(
-                            if (total >= 70) Color(0xFF1B4332).copy(alpha = 0.6f)
-                            else if (total >= 40) primaryColor.copy(alpha = 0.15f)
-                            else Color(0xFF7F1D1D).copy(alpha = 0.5f),
-                            RoundedCornerShape(14.dp)
-                        )
-                        .padding(vertical = 16.dp),
+                            Brush.verticalGradient(
+                                listOf(primaryColor, primaryColor.copy(alpha = 0.65f))
+                            )
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "Total: $total / 100",
+                        text = student.name.take(1).uppercase(),
                         color = Color.White,
-                        fontSize = 24.sp,
+                        fontSize = 20.sp,
                         fontWeight = FontWeight.ExtraBold
                     )
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = student.name,
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(student.id, color = TextMuted, fontSize = 11.sp)
+                    selectedTab?.let {
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            "${it.first} · ${it.second}",
+                            color = primaryColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
         }
 
-        // Navigation Controls
+        Spacer(Modifier.height(12.dp))
+
+        // ── Scrollable 2-column grade input grid ───────────────────────────
+        // Chunks components into rows of 2; odd last component spans its slot only.
+        // With 10 components (worst case) → 5 rows × ~80dp → 400dp, scrollable.
+        val rows = scoreComponents.chunked(2)
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            rows.forEach { rowComps ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    rowComps.forEach { comp ->
+                        CompactGradeInputCard(
+                            modifier    = Modifier.weight(1f),
+                            label       = comp.label,
+                            maxScore    = comp.max,
+                            value       = compValues[comp.key] ?: "",
+                            primaryColor = primaryColor,
+                            onValueChange = { v ->
+                                if (v.isEmpty() || (v.toIntOrNull() != null && v.toInt() <= comp.max)) {
+                                    onValueChange(comp.key, v)
+                                }
+                            }
+                        )
+                    }
+                    // Balance last row when component count is odd
+                    if (rowComps.size < 2) Spacer(Modifier.weight(1f))
+                }
+            }
+            Spacer(Modifier.height(4.dp)) // breathing room at scroll bottom
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        // ── Dynamic total bar ────────────────────────────────────────────────
+        val pct = if (maxTotal > 0) total.toFloat() / maxTotal else 0f
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    color = when {
+                        pct >= 0.7f -> Color(0xFF1B4332).copy(alpha = 0.7f)
+                        pct >  0f   -> primaryColor.copy(alpha = 0.18f)
+                        else        -> Color(0xFF7F1D1D).copy(alpha = 0.5f)
+                    },
+                    shape = RoundedCornerShape(14.dp)
+                )
+                .padding(vertical = 14.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                "Total: $total / $maxTotal",
+                color = Color.White,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+        }
+
+        Spacer(Modifier.height(6.dp))
+
+        // ── Navigation row ───────────────────────────────────────────────────
         Row(
-            modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(bottom = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             TextButton(onClick = onSkip) {
                 Text("Skip", color = TextMuted, fontSize = 16.sp)
             }
             Button(
-                onClick = { onSave(ca1, ca2, exam) },
-                colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
-                shape = RoundedCornerShape(50),
-                contentPadding = PaddingValues(horizontal = 28.dp, vertical = 14.dp)
+                onClick      = onSave,
+                colors       = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                shape        = RoundedCornerShape(50),
+                contentPadding = PaddingValues(horizontal = 26.dp, vertical = 13.dp)
             ) {
                 Text("Save & Next", fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(6.dp))
                 Icon(Icons.Default.ArrowForward, contentDescription = null)
             }
+        }
+    }
+}
+
+// ─── Compact Grade Input Card ─────────────────────────────────────────────────
+// Self-contained glass card: label + max badge on top, large numeric input below.
+// Fixed ~80 dp height per card, works inside any scrollable column.
+@Composable
+fun CompactGradeInputCard(
+    modifier: Modifier = Modifier,
+    label: String,
+    maxScore: Int,
+    value: String,
+    primaryColor: Color,
+    onValueChange: (String) -> Unit
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = Color(0x0CFFFFFF),
+        border = BorderStroke(1.dp, GlassBorder)
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(start = 10.dp, top = 8.dp, end = 10.dp, bottom = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Label row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = label,
+                    color = TextMuted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = primaryColor.copy(alpha = 0.18f)
+                ) {
+                    Text(
+                        "/$maxScore",
+                        color = primaryColor,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                    )
+                }
+            }
+            // Number input
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                textStyle = TextStyle(
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    textAlign = TextAlign.Center,
+                    fontWeight = FontWeight.ExtraBold
+                ),
+                placeholder = {
+                    Text(
+                        "—",
+                        color = Color.White.copy(alpha = 0.12f),
+                        fontSize = 20.sp,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center
+                    )
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(10.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor   = primaryColor,
+                    unfocusedBorderColor = Color.Transparent,
+                    focusedTextColor     = Color.White,
+                    unfocusedTextColor   = Color.White,
+                    cursorColor          = primaryColor,
+                    focusedContainerColor   = Color(0x10FFFFFF),
+                    unfocusedContainerColor = Color.Transparent
+                )
+            )
         }
     }
 }
