@@ -141,6 +141,14 @@ class IdentityManager(context: Context) {
         return prefs.getString("primary_color", "#1A237E") ?: "#1A237E"
     }
 
+    fun saveScoreComponents(json: String) {
+        prefs.edit().putString("score_components_json", json).apply()
+    }
+
+    fun getScoreComponentsJson(): String {
+        return prefs.getString("score_components_json", "") ?: ""
+    }
+
     fun clearData() {
         prefs.edit().clear().apply()
     }
