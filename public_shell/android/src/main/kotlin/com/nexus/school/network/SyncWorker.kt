@@ -69,10 +69,49 @@ class SyncWorker(private val context: Context) {
             }
 
             if (response.status == HttpStatusCode.OK) {
-                val eventIds = pendingEvents.map { it.event_id }
-                db.syncDao().markEventsSynced(eventIds)
-                Log.d("SyncWorker", "Successfully synced ${pendingEvents.size} events.")
+                val responseText = response.bodyAsText()
+                Log.d("SyncWorker", "Server Response: $responseText")
+                
+                // Native lightweight JSON parsing
+                val jsonObject = org.json.JSONObject(responseText)
+                val status = jsonObject.optString("status", "ACK")
+                val message = jsonObject.optString("message", "")
+                val failedArr = jsonObject.optJSONArray("failed_events")
+                
+                val failedEvents = mutableListOf<String>()
+                if (failedArr != null) {
+                    for (i in 0 until failedArr.length()) {
+                        failedEvents.add(failedArr.getString(i))
+                    }
+                }
+
+                val successfulEvents = pendingEvents.filter { it.event_id !in failedEvents }.map { it.event_id }
+                if (successfulEvents.isNotEmpty()) {
+                    db.syncDao().markEventsSynced(successfulEvents)
+                }
+
+                if (status == "PARTIAL_LIMIT") {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        android.widget.Toast.makeText(context, "Sync partial: ${failedEvents.size} students not added. School plan limit reached. Contact Admin.", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+
+                Log.d("SyncWorker", "Successfully synced ${successfulEvents.size} events. Failed: ${failedEvents.size}")
                 true
+            } else if (response.status.value == 403) {
+                // If it's a hard revoke
+                val respText = response.bodyAsText()
+                if (respText.contains("REVOKED")) {
+                    db.clearAllTables()
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        android.widget.Toast.makeText(context, "Device Revoked. Local data wiped.", android.widget.Toast.LENGTH_LONG).show()
+                        val intent = android.content.Intent(context, com.nexus.school.ui.HandshakeActivity::class.java).apply {
+                            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
+                        }
+                        context.startActivity(intent)
+                    }
+                }
+                false
             } else {
                 Log.e("SyncWorker", "Sync failed with status: ${response.status}")
                 false

@@ -1037,7 +1037,7 @@
               <!-- Template -->
               <div class="ph-config-group">
                 <label class="ph-label">Template</label>
-                <select id="rs-template" class="modern-input" style="width:200px;font-size:11px;" onchange="updateTemplatePreview(this.value, 'rs-template-preview')">
+                <select id="rs-template" class="modern-input" style="width:200px;font-size:11px;" onchange="updateTemplatePreview(this.value, 'rs-template-preview'); toggleBrandColorOption(this.value)">
                   <option value="clean_slate">🎨 Classic (Free)</option>
                   <option value="prestige">⭐ Prestige (Silver)</option>
                   <option value="azure">⭐ Azure Edge (Silver)</option>
@@ -1047,6 +1047,19 @@
                   <option value="sterling">💎 Sterling (Diamond)</option>
                   <option value="apex">💎 Apex (Diamond)</option>
                 </select>
+              </div>
+              <!-- Brand Color Customization — Silver+ only -->
+              <div class="ph-config-group" id="brand-color-group" style="display:none; align-items:center; gap:8px; background:rgba(0,229,255,0.06); border:1px solid rgba(0,229,255,0.18); border-radius:8px; padding:7px 12px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:11.5px;color:var(--text-dim);">
+                  <input type="checkbox" id="rs-use-brand-colors" style="width:14px;height:14px;accent-color:var(--accent);"
+                    onchange="rsOnBrandColorChange(this.checked)"/>
+                  <span>Use school brand colors on this template</span>
+                </label>
+                <div id="brand-color-preview" style="display:none; gap:6px; margin-top:4px; align-items:center;">
+                  <span style="font-size:10px; color:var(--text-dim);">Preview:</span>
+                  <div id="bcp-primary" style="width:20px;height:20px;border-radius:4px;border:1px solid rgba(255,255,255,0.15)"></div>
+                  <div id="bcp-secondary" style="width:20px;height:20px;border-radius:4px;border:1px solid rgba(255,255,255,0.15)"></div>
+                </div>
               </div>
               <!-- Format -->
               <div class="ph-config-group">
@@ -1251,6 +1264,15 @@
               >
                 <span id="copy-btn-text">Copy Manual Sync Code</span>
               </button>
+
+              <div style="margin-top: 30px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 20px;">
+                <h4 style="color: #ff4444; font-size: 13px; margin-bottom: 8px;">Revoke Compromised Device</h4>
+                <p style="font-size: 11px; color: var(--text-dim); margin-bottom: 12px; line-height: 1.4;">Stop a lost or stolen tablet from synchronizing data. <b style="color: #ffaaaa;">WARNING: Wipes local offline data on the device!</b></p>
+                <div style="display: flex; gap: 8px;">
+                  <input type="text" id="revoke-device-id" class="modern-input" placeholder="Device ID" style="flex: 1; font-size: 12px; height: 32px;" />
+                  <button id="revoke-device-btn" class="primary-btn" style="background: rgba(255,0,0,0.1); color: #ff4444; border: 1px solid rgba(255,0,0,0.3); padding: 0 16px; height: 32px; font-size: 12px; box-shadow: none;">Revoke</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -2484,7 +2506,7 @@
         };
 
         const imgName = imgMap[templateId] || 'classic';
-        const src = `assets/templates/${imgName}.png`;
+        const src = `node_modules/@nexus/engine/assets/templates/${imgName}.png`;
 
         container.innerHTML = `
           <img
@@ -2730,6 +2752,35 @@
         if (copyBtn) copyBtn.style.display = fmt === "image" ? "inline-flex" : "none";
       }
 
+      // Brand color customization — Silver, Gold & Diamond templates only
+      const PAID_TEMPLATES = ['prestige','azure','royal','monarch','sovereign','sterling','apex'];
+      function toggleBrandColorOption(templateId) {
+        const grp = document.getElementById('brand-color-group');
+        if (!grp) return;
+        if (PAID_TEMPLATES.includes(templateId)) {
+          grp.style.display = 'flex';
+          // Show live swatch preview using identity colors stored in DOM (if available)
+          const primary   = getComputedStyle(document.documentElement).getPropertyValue('--school-primary').trim();
+          const secondary = getComputedStyle(document.documentElement).getPropertyValue('--school-secondary').trim();
+          const priBox = document.getElementById('bcp-primary');
+          const secBox = document.getElementById('bcp-secondary');
+          if (priBox && primary)   priBox.style.background   = primary;
+          if (secBox && secondary) secBox.style.background   = secondary;
+          const checked = document.getElementById('rs-use-brand-colors')?.checked;
+          const previewRow = document.getElementById('brand-color-preview');
+          if (previewRow) previewRow.style.display = (checked && (primary || secondary)) ? 'flex' : 'none';
+        } else {
+          grp.style.display = 'none';
+        }
+      }
+
+      function rsOnBrandColorChange(checked) {
+        const previewRow = document.getElementById('brand-color-preview');
+        if (!previewRow) return;
+        const primary = getComputedStyle(document.documentElement).getPropertyValue('--school-primary').trim();
+        previewRow.style.display = (checked && primary) ? 'flex' : 'none';
+      }
+
       async function rsPreview() {
         const status = document.getElementById("rs-status");
         status.textContent = "⏳ Querying results…";
@@ -2780,9 +2831,10 @@
         const subject    = document.getElementById("rs-subject-input").value.trim();
 
         try {
+          const useSchoolColors = document.getElementById('rs-use-brand-colors')?.checked || false;
           const result = await window.electronAPI.generateReports({
             identity, students: _rsResults, termConfig: cfg,
-            reportType, templateId, format, subject,
+            reportType, templateId, format, subject, useSchoolColors,
           });
           if (result.success) {
             const fmtLabel = { pdf: "PDF", html: "HTML file", image: "PNG image" }[format] || format;
@@ -2891,6 +2943,15 @@
         document.documentElement.style.setProperty(
           "--accent",
           identity.themeSecondary || "#00E5FF",
+        );
+        // Store raw brand colors so the Print Hub brand-color swatch can read them
+        document.documentElement.style.setProperty(
+          "--school-primary",
+          identity.themePrimary || "",
+        );
+        document.documentElement.style.setProperty(
+          "--school-secondary",
+          identity.themeSecondary || "",
         );
 
         const hex = identity.themePrimary || "#1A237E";
