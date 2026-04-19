@@ -86,57 +86,8 @@ fun parseScoreComponents(json: String): List<ScoreComponent> {
 }
 
 // Top-level suspend helper — builds and upserts a grade event in Room
-suspend fun saveGradeEvent(
-    context: android.content.Context,
-    studentId: String,
-    subject: String,
-    compValues: Map<String, String>,
-    components: List<ScoreComponent>
-) {
-    val db    = SyncDatabase.getDatabase(context)
-    val total = components.sumOf { compValues[it.key]?.toIntOrNull() ?: 0 }
-    
-    // Save to local offline persistence first
-    components.forEach { comp ->
-        val scoreVal = compValues[comp.key]?.toIntOrNull() ?: 0
-        db.studentDao().insertScore(com.nexus.school.data.StudentScore(
-            student_id = studentId,
-            subject = subject,
-            component_key = comp.key,
-            score = scoreVal
-        ))
-    }
-
-    // Build the sync_queue payload for pushing to the Hub
-    val bdParts = components.joinToString(", ") { comp ->
-        "\"${comp.key}\": ${compValues[comp.key]?.toIntOrNull() ?: 0}"
-    }
-    val payload = """{"student_id": "$studentId", "score": $total, "subject": "$subject", "assessment": "${components.firstOrNull()?.key ?: "CA1"}", "breakdown": {$bdParts}}"""
-    val eventId = "GRADE_${studentId}_$subject"
-    db.syncDao().insertEvent(
-        SyncEvent(event_id = eventId, event_type = "UPDATE_GRADE", payload = payload, is_synced = 0)
-    )
-
-    // The Pulse: Fire a silent UDP heartbeat to The Hub for the Real-Time Activity Log
-    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        try {
-            val serverInfo = IdentityManager(context).getServerInfo()
-            if (serverInfo != null) {
-                val ip = serverInfo.first
-                val teacherName = IdentityManager(context).getTeacherName()
-                val msg = """{"teacher": "$teacherName", "action": "Graded $subject", "event": "UPDATE_GRADE"}"""
-                java.net.DatagramSocket().use { socket ->
-                    val bytes = msg.toByteArray()
-                    val packet = java.net.DatagramPacket(bytes, bytes.size, java.net.InetAddress.getByName(ip), 3001)
-                    socket.send(packet)
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("NexusPulse", "Failed to burst UDP heartbeat.", e)
-        }
-    }
-}
-
+import com.nexus.school.network.saveGradeEvent
+import com.nexus.school.network.saveAddStudentEvent
 // ─── Naija-Futurism Color Tokens ─────────────────────────────────────────────
 private val DeepNavy    = Color(0xFF0A0E2E)
 private val GlassWhite  = Color(0x0FFFFFFF)
@@ -211,6 +162,9 @@ class StudentRosterActivity : AppCompatActivity() {
 
             val scope = rememberCoroutineScope()
             var students by remember { mutableStateOf<List<Student>>(emptyList()) }
+            var dbStateRef by remember { mutableStateOf(0) }
+            var showHonorRoll by remember { mutableStateOf(false) }
+            var showAddStudentDialog by remember { mutableStateOf(false) }
             var isLoading by remember { mutableStateOf(true) }
             var showFocusMode by remember { mutableStateOf(false) }
             var showSyncWarning by remember { mutableStateOf(false) }
@@ -223,7 +177,7 @@ class StudentRosterActivity : AppCompatActivity() {
             var tabs by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
             var selectedTab by remember { mutableStateOf<Pair<String, String>?>(null) }
 
-            LaunchedEffect(Unit) {
+            LaunchedEffect(dbStateRef) {
                 scope.launch {
                     val db = SyncDatabase.getDatabase(this@StudentRosterActivity)
                     students = db.studentDao().getAllStudents()
@@ -233,7 +187,7 @@ class StudentRosterActivity : AppCompatActivity() {
                         .map { Pair(it.class_name, it.subject) }
                         .distinct()
                         .sortedWith(compareBy({ it.first }, { it.second }))
-                    selectedTab = tabs.firstOrNull()
+                    if (selectedTab == null) selectedTab = tabs.firstOrNull()
 
                     // Pre-fill sync status from pending events
                     val events = db.syncDao().getPendingEvents()
@@ -258,8 +212,6 @@ class StudentRosterActivity : AppCompatActivity() {
                     students.filter { it.class_name == cls && it.subject == subj }
                 } ?: emptyList()
             }
-
-            var showAddStudentDialog by remember { mutableStateOf(false) }
 
             MaterialTheme {
                 Scaffold(
@@ -290,9 +242,11 @@ class StudentRosterActivity : AppCompatActivity() {
                             FloatingActionButton(
                                 onClick = { showAddStudentDialog = true },
                                 containerColor = primaryColor,
-                                contentColor = Color.White
+                                contentColor = Color.White,
+                                modifier = Modifier
+                                    .padding(bottom = 24.dp)
                             ) {
-                                Text("+", fontSize = 24.sp)
+                                Icon(Icons.Default.Person, contentDescription = "Add Student")
                             }
                         }
                     }
@@ -301,58 +255,16 @@ class StudentRosterActivity : AppCompatActivity() {
 
                         // ── Add Student Dialog ────────────────────────────────────
                         if (showAddStudentDialog) {
-                            var newStudentName by remember { mutableStateOf("") }
-                            AlertDialog(
-                                onDismissRequest = { showAddStudentDialog = false },
-                                containerColor = Color(0xFF1A1A2E),
-                                title = { Text("Register Offline Student", color = Color.White) },
-                                text = {
-                                    Column {
-                                        Text("This student will be queued for the server.", color = Color.Gray, fontSize = 12.sp)
-                                        Spacer(Modifier.height(8.dp))
-                                        OutlinedTextField(
-                                            value = newStudentName,
-                                            onValueChange = { newStudentName = it },
-                                            placeholder = { Text("Student Name") },
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                focusedTextColor = Color.White,
-                                                unfocusedTextColor = Color.White
-                                            )
-                                        )
+                            AddStudentDialog(
+                                primaryColor = primaryColor,
+                                selectedTab = selectedTab,
+                                onDismiss = { showAddStudentDialog = false },
+                                onSave = { name, className, subject ->
+                                    scope.launch {
+                                        saveAddStudentEvent(this@StudentRosterActivity, name, className, subject)
+                                        dbStateRef++
+                                        showAddStudentDialog = false
                                     }
-                                },
-                                confirmButton = {
-                                    Button(
-                                        onClick = {
-                                            if (newStudentName.isNotBlank() && selectedTab != null) {
-                                                val newStudent = com.nexus.school.data.Student(
-                                                    id = "NEW_" + java.util.UUID.randomUUID().toString().take(8),
-                                                    name = newStudentName,
-                                                    class_name = selectedTab!!.first,
-                                                    subject = selectedTab!!.second
-                                                )
-                                                scope.launch(Dispatchers.IO) {
-                                                    val db = SyncDatabase.getDatabase(this@StudentRosterActivity)
-                                                    db.studentDao().insertAll(listOf(newStudent))
-                                                    // Add to SyncQueue for The Hawk to validate!
-                                                    val payload = """{"student_id":"${newStudent.id}","name":"${newStudent.name}","class_name":"${newStudent.class_name}","subject":"${newStudent.subject}"}"""
-                                                    db.syncDao().insertEvent(
-                                                        com.nexus.school.data.SyncEvent(
-                                                            event_type = "ADD_STUDENT",
-                                                            payload = payload,
-                                                            is_synced = 0
-                                                        )
-                                                    )
-                                                    students = db.studentDao().getAllStudents()
-                                                    launch(Dispatchers.Main) { showAddStudentDialog = false }
-                                                }
-                                            }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
-                                    ) { Text("Register") }
-                                },
-                                dismissButton = {
-                                    TextButton(onClick = { showAddStudentDialog = false }) { Text("Cancel", color = Color.Gray) }
                                 }
                             )
                         }
@@ -1273,4 +1185,61 @@ fun ClassGroupHeader(className: String, studentCount: Int, students: List<Studen
             }
         }
     }
+}
+
+// ─── Add Student Dialog (Teacher-Initiated Registration) ───────────────────
+@Composable
+fun AddStudentDialog(
+    primaryColor: Color,
+    selectedTab: Pair<String, String>?,
+    onDismiss: () -> Unit,
+    onSave: (name: String, className: String, subject: String) -> Unit
+) {
+    var newStudentName by remember { mutableStateOf("") }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF1A1A2E), // Match DeepNavy-ish
+        title = { Text("Register Offline Student", color = Color.White) },
+        text = {
+            Column {
+                Text(
+                    "This student will be queued locally. If the Hub's capacity limit is reached at sync, they will be rejected.",
+                    color = Color.Gray,
+                    fontSize = 12.sp
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = newStudentName,
+                    onValueChange = { newStudentName = it },
+                    placeholder = { Text("Student Name") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = primaryColor,
+                        cursorColor = primaryColor
+                    ),
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (newStudentName.isNotBlank() && selectedTab != null) {
+                        onSave(newStudentName.trim(), selectedTab.first, selectedTab.second)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                enabled = newStudentName.isNotBlank() && selectedTab != null
+            ) {
+                Text("Register Locally")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Color.Gray)
+            }
+        }
+    )
 }
