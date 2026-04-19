@@ -17,6 +17,15 @@ data class Student(
     val subject: String = "General"
 )
 
+@Serializable
+@Entity(tableName = "local_scores", primaryKeys = ["student_id", "subject", "component_key"])
+data class StudentScore(
+    val student_id: String,
+    val subject: String,
+    val component_key: String, // e.g. "CA1", "CA2", "Exam"
+    val score: Int
+)
+
 @Dao
 interface StudentDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -30,5 +39,17 @@ interface StudentDao {
 
     @Query("SELECT COUNT(*) FROM students")
     suspend fun getStudentCount(): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertScore(score: StudentScore)
+
+    @Query("SELECT * FROM local_scores WHERE student_id = :studentId AND subject = :subject")
+    suspend fun getScoresForStudent(studentId: String, subject: String): List<StudentScore>
+
+    @Query("SELECT * FROM local_scores")
+    suspend fun getAllScores(): List<StudentScore>
+
+    @Query("DELETE FROM local_scores")
+    suspend fun clearAllScores()
 }
 

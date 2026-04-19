@@ -5,7 +5,7 @@ const fs = require("fs");
 const crypto = require("crypto");
 const Handlebars = require("handlebars");
 const { database, server, reports } = require("@nexus/engine");
-const { startServer, setSchoolConfig, handleCSVUpload, clearData } = server;
+const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, handleCSVUpload, clearData } = server;
 const address = require("address");
 
 // Set app name BEFORE createWindow so Menu.buildFromTemplate picks it up correctly
@@ -577,6 +577,15 @@ ipcMain.on("win-close", () => {
 });
 ipcMain.handle("get-platform", () => process.platform);
 
+ipcMain.handle("revoke-device", async (event, deviceId) => {
+  console.log(`[License] Revoking device: ${deviceId}`);
+  revokeDevice(deviceId);
+  if (mainWindow) {
+    mainWindow.webContents.send("revoke-broadcast", deviceId);
+  }
+  return { ok: true };
+});
+
 ipcMain.handle("reset-app-data", async () => {
   console.log("[Electron] Resetting app data...");
 
@@ -790,7 +799,14 @@ function createWindow() {
 
   // Start the Handshake Server
   const port = 3000;
-  const server = startServer(port);
+  const serverInstance = startServer(port); // Returns the event emitter
+
+  serverInstance.on('capacity-alert', (data) => {
+    console.warn(`[License] Capacity Limit Breached during sync! ${data.totalFailed} students rejected.`);
+    if (mainWindow) {
+      mainWindow.webContents.send("show-upgrade-modal", { reason: "capacity_reached", detail: data });
+    }
+  });
 
   // ── License Enforcement Engine ─────────────────────────────────────
   let licenseStatus = { locked: false, message: "" };
@@ -826,6 +842,7 @@ function createWindow() {
       const payload = {
         tier: "Gold",
         school_id: "PREMIUM_ACADEMY_001",
+        student_count: 50, // Added token limit for The Hawk Phase 0
         expires_at: expiresAt,
       };
       const payloadStr = JSON.stringify(payload);
@@ -865,8 +882,11 @@ function createWindow() {
         };
       } else {
         console.log(
-          `[License Engine] Valid ${payloadDecoded.tier} License. Access Granted.`,
+          `[License Engine] Valid ${payloadDecoded.tier} License. Access Granted. Limit: ${payloadDecoded.student_count} students.`,
         );
+        licenseStatus = { locked: false, message: "VALID" };
+        // Tell the Hub Engine the active max limit
+        setSchoolLicense(licenseDisk);
       }
     }
   } catch (e) {

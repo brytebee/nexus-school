@@ -35,7 +35,7 @@ interface SyncDao {
     suspend fun markEventsSynced(eventIds: List<String>)
 }
 
-@Database(entities = [SyncEvent::class, Student::class], version = 3, exportSchema = false)
+@Database(entities = [SyncEvent::class, Student::class, StudentScore::class], version = 4, exportSchema = false)
 abstract class SyncDatabase : RoomDatabase() {
     abstract fun syncDao(): SyncDao
     abstract fun studentDao(): StudentDao
@@ -54,6 +54,12 @@ abstract class SyncDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("CREATE TABLE local_scores (student_id TEXT NOT NULL, subject TEXT NOT NULL, component_key TEXT NOT NULL, score INTEGER NOT NULL, PRIMARY KEY(student_id, subject, component_key))")
+            }
+        }
+
         fun getDatabase(context: Context): SyncDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -61,7 +67,7 @@ abstract class SyncDatabase : RoomDatabase() {
                     SyncDatabase::class.java,
                     "nexus_sync_database"
                 )
-                .addMigrations(MIGRATION_2_3)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance

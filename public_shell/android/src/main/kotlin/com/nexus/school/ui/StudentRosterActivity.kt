@@ -95,6 +95,19 @@ suspend fun saveGradeEvent(
 ) {
     val db    = SyncDatabase.getDatabase(context)
     val total = components.sumOf { compValues[it.key]?.toIntOrNull() ?: 0 }
+    
+    // Save to local offline persistence first
+    components.forEach { comp ->
+        val scoreVal = compValues[comp.key]?.toIntOrNull() ?: 0
+        db.studentDao().insertScore(com.nexus.school.data.StudentScore(
+            student_id = studentId,
+            subject = subject,
+            component_key = comp.key,
+            score = scoreVal
+        ))
+    }
+
+    // Build the sync_queue payload for pushing to the Hub
     val bdParts = components.joinToString(", ") { comp ->
         "\"${comp.key}\": ${compValues[comp.key]?.toIntOrNull() ?: 0}"
     }
@@ -226,99 +239,195 @@ class StudentRosterActivity : AppCompatActivity() {
                 } ?: emptyList()
             }
 
+            var showAddStudentDialog by remember { mutableStateOf(false) }
+
             MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = DeepNavy) {
-
-                    // ── Sync Warning Dialog ───────────────────────────────────
-                    if (showSyncWarning) {
-                        val missingCount = filteredStudents.size - filteredStudents.count { 
-                            studentSyncStatus[it.id + "_" + it.subject] == true || studentSyncStatus[it.id] == true 
+                Scaffold(
+                    bottomBar = {
+                        NavigationBar(containerColor = Color(0xFF131735), contentColor = Color.White) {
+                            NavigationBarItem(
+                                selected = false,
+                                onClick = { /* TODO: Navigate to Home */ },
+                                icon = { Text("🏠") },
+                                label = { Text("Home") }
+                            )
+                            NavigationBarItem(
+                                selected = true,
+                                onClick = { },
+                                icon = { Text("📋") },
+                                label = { Text("Roster") }
+                            )
+                            NavigationBarItem(
+                                selected = false,
+                                onClick = { /* TODO: Navigate to Settings */ },
+                                icon = { Text("⚙️") },
+                                label = { Text("Settings") }
+                            )
                         }
-                        AlertDialog(
-                            onDismissRequest = { showSyncWarning = false },
-                            containerColor = Color(0xFF1A1A2E),
-                            titleContentColor = Color.White,
-                            textContentColor = TextMuted,
-                            icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = WarnAmber) },
-                            title = { Text("Missing Grades") },
-                            text = { Text("$missingCount students in this class/subject do not have grades yet. Sync partial list?") },
-                            confirmButton = {
-                                TextButton(onClick = { showSyncWarning = false; triggerSync(primaryColor) }) {
-                                    Text("Sync Anyway", color = primaryColor)
-                                }
-                            },
-                            dismissButton = {
-                                TextButton(onClick = { showSyncWarning = false }) {
-                                    Text("Cancel", color = TextMuted)
-                                }
+                    },
+                    floatingActionButton = {
+                        if (!showFocusMode) {
+                            FloatingActionButton(
+                                onClick = { showAddStudentDialog = true },
+                                containerColor = primaryColor,
+                                contentColor = Color.White
+                            ) {
+                                Text("+", fontSize = 24.sp)
                             }
-                        )
+                        }
                     }
+                ) { innerPadding ->
+                    Surface(modifier = Modifier.fillMaxSize().padding(innerPadding), color = DeepNavy) {
 
-                    if (showFocusMode && filteredStudents.isNotEmpty()) {
-                        FocusModePager(
-                            students       = filteredStudents,
-                            selectedTab    = selectedTab,
-                            primaryColor   = primaryColor,
-                            scoreComponents = scoreComponents,
-                            onClose        = { showFocusMode = false },
-                            onLogSave      = { studentId, subject, isSaved -> studentSyncStatus[studentId + "_" + subject] = isSaved }
-                        )
-                    } else {
-                        Column(modifier = Modifier.fillMaxSize()) {
-
-                            // ── Premium Header ────────────────────────────────
-                            RosterHeader(
-                                schoolName = schoolName,
-                                primaryColor = primaryColor,
-                                totalCount = students.size,
-                                filteredCount = filteredStudents.size,
-                                onSync = {
-                                    val missing = filteredStudents.count { 
-                                        studentSyncStatus[it.id + "_" + it.subject] != true && studentSyncStatus[it.id] != true 
+                        // ── Add Student Dialog ────────────────────────────────────
+                        if (showAddStudentDialog) {
+                            var newStudentName by remember { mutableStateOf("") }
+                            AlertDialog(
+                                onDismissRequest = { showAddStudentDialog = false },
+                                containerColor = Color(0xFF1A1A2E),
+                                title = { Text("Register Offline Student", color = Color.White) },
+                                text = {
+                                    Column {
+                                        Text("This student will be queued for the server.", color = Color.Gray, fontSize = 12.sp)
+                                        Spacer(Modifier.height(8.dp))
+                                        OutlinedTextField(
+                                            value = newStudentName,
+                                            onValueChange = { newStudentName = it },
+                                            placeholder = { Text("Student Name") },
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedTextColor = Color.White,
+                                                unfocusedTextColor = Color.White
+                                            )
+                                        )
                                     }
-                                    if (missing > 0) showSyncWarning = true else triggerSync(primaryColor)
+                                },
+                                confirmButton = {
+                                    Button(
+                                        onClick = {
+                                            if (newStudentName.isNotBlank() && selectedTab != null) {
+                                                val newStudent = com.nexus.school.data.Student(
+                                                    id = "NEW_" + java.util.UUID.randomUUID().toString().take(8),
+                                                    name = newStudentName,
+                                                    class_name = selectedTab!!.first,
+                                                    subject = selectedTab!!.second
+                                                )
+                                                scope.launch(Dispatchers.IO) {
+                                                    val db = SyncDatabase.getDatabase(this@StudentRosterActivity)
+                                                    db.studentDao().insertAll(listOf(newStudent))
+                                                    // Add to SyncQueue for The Hawk to validate!
+                                                    val payload = """{"student_id":"${newStudent.id}","name":"${newStudent.name}","class_name":"${newStudent.class_name}","subject":"${newStudent.subject}"}"""
+                                                    db.syncDao().insertEvent(
+                                                        com.nexus.school.data.SyncEvent(
+                                                            event_type = "ADD_STUDENT",
+                                                            payload = payload,
+                                                            is_synced = 0
+                                                        )
+                                                    )
+                                                    students = db.studentDao().getAllStudents()
+                                                    launch(Dispatchers.Main) { showAddStudentDialog = false }
+                                                }
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
+                                    ) { Text("Register") }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showAddStudentDialog = false }) { Text("Cancel", color = Color.Gray) }
                                 }
                             )
+                        }
 
-                            // ── Subject×Class Tab Bar ─────────────────────────
-                            if (tabs.isNotEmpty()) {
-                                SubjectClassTabBar(
-                                    tabs = tabs,
-                                    selectedTab = selectedTab,
-                                    primaryColor = primaryColor,
-                                    onTabSelected = { selectedTab = it }
-                                )
+                        // ── Sync Warning Dialog ───────────────────────────────────
+                        if (showSyncWarning) {
+                            val missingCount = filteredStudents.size - filteredStudents.count { 
+                                studentSyncStatus[it.id + "_" + it.subject] == true || studentSyncStatus[it.id] == true 
                             }
+                            AlertDialog(
+                                onDismissRequest = { showSyncWarning = false },
+                                containerColor = Color(0xFF1A1A2E),
+                                titleContentColor = Color.White,
+                                textContentColor = TextMuted,
+                                icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = WarnAmber) },
+                                title = { Text("Missing Grades") },
+                                text = { Text("$missingCount students in this class/subject do not have grades yet. Sync partial list?") },
+                                confirmButton = {
+                                    TextButton(onClick = { showSyncWarning = false; triggerSync(primaryColor) }) {
+                                        Text("Sync Anyway", color = primaryColor)
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showSyncWarning = false }) {
+                                        Text("Cancel", color = TextMuted)
+                                    }
+                                }
+                            )
+                        }
 
-                            // ── Body ──────────────────────────────────────────
-                            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                                when {
-                                    isLoading -> LoadingState()
-                                    students.isEmpty() -> EmptyState()
-                                    filteredStudents.isEmpty() -> EmptyTabState(selectedTab)
-                                    else -> Column(Modifier.fillMaxSize()) {
-                                        Button(
-                                            onClick = { showFocusMode = true },
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 16.dp, vertical = 12.dp)
-                                                .height(52.dp),
-                                            colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
-                                            shape = RoundedCornerShape(14.dp)
-                                        ) {
-                                            Text(
-                                                "Grade Class – Focus Mode",
-                                                fontSize = 15.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                letterSpacing = 0.5.sp
+                        if (showFocusMode && filteredStudents.isNotEmpty()) {
+                            FocusModePager(
+                                students       = filteredStudents,
+                                selectedTab    = selectedTab,
+                                primaryColor   = primaryColor,
+                                scoreComponents = scoreComponents,
+                                onClose        = { showFocusMode = false },
+                                onLogSave      = { studentId, subject, isSaved -> studentSyncStatus[studentId + "_" + subject] = isSaved }
+                            )
+                        } else {
+                            Column(modifier = Modifier.fillMaxSize()) {
+
+                                // ── Premium Header ────────────────────────────────
+                                RosterHeader(
+                                    schoolName = schoolName,
+                                    primaryColor = primaryColor,
+                                    totalCount = students.size,
+                                    filteredCount = filteredStudents.size,
+                                    onSync = {
+                                        val missing = filteredStudents.count { 
+                                            studentSyncStatus[it.id + "_" + it.subject] != true && studentSyncStatus[it.id] != true 
+                                        }
+                                        if (missing > 0) showSyncWarning = true else triggerSync(primaryColor)
+                                    }
+                                )
+
+                                // ── Subject×Class Tab Bar ─────────────────────────
+                                if (tabs.isNotEmpty()) {
+                                    SubjectClassTabBar(
+                                        tabs = tabs,
+                                        selectedTab = selectedTab,
+                                        primaryColor = primaryColor,
+                                        onTabSelected = { selectedTab = it }
+                                    )
+                                }
+
+                                // ── Body ──────────────────────────────────────────
+                                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                    when {
+                                        isLoading -> LoadingState()
+                                        students.isEmpty() -> EmptyState()
+                                        filteredStudents.isEmpty() -> EmptyTabState(selectedTab)
+                                        else -> Column(Modifier.fillMaxSize()) {
+                                            Button(
+                                                onClick = { showFocusMode = true },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                                                    .height(52.dp),
+                                                colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                                                shape = RoundedCornerShape(14.dp)
+                                            ) {
+                                                Text(
+                                                    "Grade Class – Focus Mode",
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    letterSpacing = 0.5.sp
+                                                )
+                                            }
+                                            StudentList(
+                                                students = filteredStudents,
+                                                primaryColor = primaryColor,
+                                                statusMap = studentSyncStatus
                                             )
                                         }
-                                        StudentList(
-                                            students = filteredStudents,
-                                            primaryColor = primaryColor,
-                                            statusMap = studentSyncStatus
-                                        )
                                     }
                                 }
                             }
@@ -354,6 +463,11 @@ fun RosterHeader(
     filteredCount: Int,
     onSync: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // Connection State: 0 = Unknown, 1 = Pinging, 2 = Online (Green), 3 = Offline (Red)
+    var connectionState by remember { mutableStateOf(0) }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -365,13 +479,59 @@ fun RosterHeader(
             .padding(horizontal = 20.dp, vertical = 20.dp)
     ) {
         Column {
-            Text(
-                text = schoolName.uppercase(),
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 2.sp
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = schoolName.uppercase(),
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 2.sp
+                )
+                Spacer(Modifier.weight(1f))
+                // Visual Ping Dot indicator
+                val dotColor = when (connectionState) {
+                    0 -> Color.Gray
+                    1 -> WarnAmber
+                    2 -> GreenDone
+                    else -> Color.Red
+                }
+                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(dotColor))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = when(connectionState) {
+                        0, 1 -> "Ping Hub"
+                        2 -> "Hub Online"
+                        else -> "Hub Offline"
+                    },
+                    color = Color.White,
+                    fontSize = 10.sp,
+                    modifier = Modifier.clickable {
+                        if (connectionState == 1) return@clickable
+                        connectionState = 1
+                        scope.launch(Dispatchers.IO) {
+                            val serverInfo = IdentityManager(context).getServerInfo()
+                            if (serverInfo == null) {
+                                connectionState = 3
+                                return@launch
+                            }
+                            val ip = serverInfo.first
+                            val port = serverInfo.second
+                            try {
+                                val url = java.net.URL("http://$ip:$port/handshake") // Simple reachability
+                                val connection = url.openConnection() as java.net.HttpURLConnection
+                                connection.connectTimeout = 2000
+                                connection.readTimeout = 2000
+                                connection.requestMethod = "OPTIONS"
+                                val code = connection.responseCode
+                                connectionState = 2
+                            } catch (e: Exception) {
+                                connectionState = 3
+                            }
+                        }
+                    }
+                )
+                Spacer(Modifier.width(16.dp)) // Eco shield padding
+            }
             Spacer(Modifier.height(4.dp))
             Text(
                 text = "Class Roster",
@@ -554,21 +714,12 @@ fun FocusModePager(
     // Flat state map: "studentId_subject_componentKey" -> value string
     val gradeState = remember { mutableStateMapOf<String, String>() }
 
-    // Pre-load values from already-saved pending events
+    // Pre-load values from permanent local offline persistence
     LaunchedEffect(Unit) {
         val db = SyncDatabase.getDatabase(context)
-        db.syncDao().getPendingEvents().forEach { event ->
-            try {
-                val obj     = org.json.JSONObject(event.payload)
-                val sid     = obj.getString("student_id")
-                val subj    = obj.optString("subject", "")
-                val prefix  = if (subj.isNotEmpty()) "${sid}_${subj}" else sid
-                val bd      = obj.optJSONObject("breakdown") ?: return@forEach
-                scoreComponents.forEach { comp ->
-                    val v = bd.optInt(comp.key, -1)
-                    if (v >= 0) gradeState["${prefix}_${comp.key}"] = v.toString()
-                }
-            } catch (_: Exception) {}
+        db.studentDao().getAllScores().forEach { score ->
+            val prefix = if (score.subject.isNotEmpty() && score.subject != "General") "${score.student_id}_${score.subject}" else score.student_id
+            gradeState["${prefix}_${score.component_key}"] = score.score.toString()
         }
     }
 
