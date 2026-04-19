@@ -319,6 +319,10 @@ class HandshakeActivity : AppCompatActivity() {
                                                             config.name ?: "Nexus School",
                                                             config.themePrimary ?: "#1A237E"
                                                         )
+                                                        // Persist the tier modules so FeatureGate can gate UI
+                                                        if (config.modules.isNotEmpty()) {
+                                                            identityManager.saveTierModules(config.modules)
+                                                        }
                                                         // Serialize score_components to JSON and persist
                                                         val scoreJson = buildString {
                                                             append("[")
@@ -329,12 +333,8 @@ class HandshakeActivity : AppCompatActivity() {
                                                             append("]")
                                                         }
                                                         identityManager.saveScoreComponents(scoreJson)
-                                                        val intent = android.content.Intent(this@HandshakeActivity, StudentRosterActivity::class.java)
-                                                        intent.putExtra("school_name", config.name ?: "Nexus School")
-                                                        intent.putExtra("primary_color", config.themePrimary ?: "#1A237E")
-                                                        intent.putExtra("student_count", students.size)
-                                                        intent.putExtra("score_components_json", scoreJson)
-                                                        startActivity(intent)
+                                                        // Route to AppLaunchActivity — it reads everything from IdentityManager
+                                                        startActivity(android.content.Intent(this@HandshakeActivity, AppLaunchActivity::class.java))
                                                         finish()
                                                     },
                                                     colors = ButtonDefaults.buttonColors(

@@ -9,6 +9,13 @@ import androidx.room.Query
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class HonorRollItem(
+    val name: String,
+    val subject: String,
+    val score: Int
+)
+
+@Serializable
 @Entity(tableName = "students", primaryKeys = ["id", "subject"])
 data class Student(
     val id: String,
@@ -51,5 +58,8 @@ interface StudentDao {
 
     @Query("DELETE FROM local_scores")
     suspend fun clearAllScores()
+
+    @Query("SELECT students.name, local_scores.subject, local_scores.score FROM local_scores INNER JOIN students ON local_scores.student_id = students.id ORDER BY local_scores.score DESC LIMIT 3")
+    suspend fun getHonorRoll(): List<HonorRollItem>
 }
 

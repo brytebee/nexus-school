@@ -149,6 +149,37 @@ class IdentityManager(context: Context) {
         return prefs.getString("score_components_json", "") ?: ""
     }
 
+    /**
+     * Persists the list of modules enabled for this school's license tier.
+     * Example: ["grading", "attendance", "assignments"]
+     * Stored as a comma-separated string so no JSON dependency is needed.
+     */
+    fun saveTierModules(modules: List<String>) {
+        prefs.edit().putString("tier_modules", modules.joinToString(",")).apply()
+    }
+
+    fun getTierModules(): List<String> {
+        val raw = prefs.getString("tier_modules", "") ?: ""
+        return if (raw.isEmpty()) emptyList() else raw.split(",")
+    }
+
+    /** Returns true if the school's license includes this module key. */
+    fun isModuleEnabled(moduleKey: String): Boolean {
+        return getTierModules().any { it.trim().equals(moduleKey, ignoreCase = true) }
+    }
+
+    /**
+     * Persists the license expiry epoch millis received from the Hub,
+     * so the app can show an expiry countdown even when offline.
+     */
+    fun saveLicenseExpiry(epochMillis: Long) {
+        prefs.edit().putLong("license_expires_at", epochMillis).apply()
+    }
+
+    fun getLicenseExpiresAt(): Long {
+        return prefs.getLong("license_expires_at", Long.MAX_VALUE)
+    }
+
     fun clearData() {
         prefs.edit().clear().apply()
     }

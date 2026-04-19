@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // V4 (Phase 0): Limit Engine
     revokeDevice:       (id)     => ipcRenderer.invoke('revoke-device', id),
     onShowUpgradeModal: (callback) => ipcRenderer.on('show-upgrade-modal', (_event, value) => callback(value)),
+    // Phase 3.1: The Wow Factor (UDP Heartbeats)
+    onPulseHeartbeat:   (callback) => ipcRenderer.on('pulse-heartbeat', (_event, value) => callback(value)),
 });
 
 

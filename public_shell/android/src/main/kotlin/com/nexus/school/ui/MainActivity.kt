@@ -22,9 +22,7 @@ class MainActivity : AppCompatActivity() {
         // Check if married, if not, go to Handshake
         val identityManager = com.nexus.school.security.IdentityManager(this)
         if (identityManager.isMarried()) {
-            val intent = Intent(this, DemoResetActivity::class.java)
-            intent.putExtra("school_name", identityManager.getSchoolName())
-            intent.putExtra("primary_color", identityManager.getPrimaryColor())
+            val intent = Intent(this, AppLaunchActivity::class.java)
             startActivity(intent)
         } else {
             val intent = Intent(this, HandshakeActivity::class.java)
