@@ -3,6 +3,8 @@ const { app, BrowserWindow, ipcMain, shell, Menu, dialog, nativeImage, clipboard
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const os = require("os");
+const dgram = require("dgram");
 const Handlebars = require("handlebars");
 const { database, server, reports } = require("@nexus/engine");
 const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, handleCSVUpload, clearData } = server;
@@ -586,6 +588,12 @@ ipcMain.handle("revoke-device", async (event, deviceId) => {
   return { ok: true };
 });
 
+// Pulse heartbeat bridge for Phase 3.1 UDP packets
+ipcMain.handle('pulse-bridge-ready', () => {
+    // This is just to acknowledge UI is ready to receive
+    return true;
+});
+
 ipcMain.handle("reset-app-data", async () => {
   console.log("[Electron] Resetting app data...");
 
@@ -808,12 +816,62 @@ function createWindow() {
     }
   });
 
-  // ── License Enforcement Engine ─────────────────────────────────────
+  // ── Phase 3.1: The Pulse (UDP Listener) ────────────────────────────
+  const udpServer = dgram.createSocket('udp4');
+  udpServer.on('error', (err) => {
+    console.warn(`[Pulse] UDP server error:\n${err.stack}`);
+    udpServer.close();
+  });
+  udpServer.on('message', (msg, rinfo) => {
+    try {
+      const payload = JSON.parse(msg.toString());
+      if (mainWindow) {
+        mainWindow.webContents.send("pulse-heartbeat", payload);
+      }
+    } catch (e) { /* ignore invalid JSON */ }
+  });
+  udpServer.on('listening', () => {
+    const address = udpServer.address();
+    console.log(`[Pulse] Heartbeat server listening on ${address.address}:${address.port}`);
+  });
+  udpServer.bind(3001);
+
+
+  // ── Phase 4: License Enforcement Engine & Security Lock ────────────
   let licenseStatus = { locked: false, message: "" };
+
+  function getHardwareFingerprint() {
+    const cpus = os.cpus();
+    const macs = Object.values(os.networkInterfaces())
+      .flat()
+      .filter(i => i.mac && i.mac !== '00:00:00:00:00:00')
+      .map(i => i.mac)
+      .sort()
+      .join('-');
+    return crypto.createHash('sha256').update((cpus[0]?.model || "") + macs).digest('hex');
+  }
+
+  const hardwareId = getHardwareFingerprint();
+  console.log(`[Security] Derived Motherboard Fingerprint: ${hardwareId.substring(0, 8)}...`);
 
   try {
     const userDataPath = app.getPath("userData");
     const licensePath = path.join(userDataPath, "license.nexus");
+    const sysConfPath = path.join(userDataPath, "nexus_sys.json");
+    
+    // Time-Drift Guard (Anti-Rollback)
+    let lastRunTimestamp = 0;
+    if (fs.existsSync(sysConfPath)) {
+      const sysConf = JSON.parse(fs.readFileSync(sysConfPath, "utf-8"));
+      lastRunTimestamp = sysConf.last_run_timestamp || 0;
+    }
+
+    if (Date.now() < (lastRunTimestamp - 60000)) { // 1 min buffer for marginal OS sync
+        console.error("[Security] FATAL: System Clock Rollback Detected!");
+        licenseStatus = { locked: true, message: "System Clock Tampering Detected. Access Blocked." };
+    } else {
+        fs.writeFileSync(sysConfPath, JSON.stringify({ last_run_timestamp: Date.now() }));
+    }
 
     // 1. Hardcoded Nexus Public Key (In reality, Public Key only ships with app)
     // For demonstration, we persist a keypair dynamically to sign a dummy token.
@@ -842,6 +900,7 @@ function createWindow() {
       const payload = {
         tier: "Gold",
         school_id: "PREMIUM_ACADEMY_001",
+        hardware_id: hardwareId,
         student_count: 50, // Added token limit for The Hawk Phase 0
         expires_at: expiresAt,
       };
@@ -875,18 +934,23 @@ function createWindow() {
       };
     } else {
       const payloadDecoded = JSON.parse(licenseDisk.payload);
-      if (Date.now() > payloadDecoded.expires_at) {
+      
+      // Hardware Check
+      if (payloadDecoded.hardware_id && payloadDecoded.hardware_id !== hardwareId) {
+         licenseStatus = { locked: true, message: "License Device Mismatch. Token bound to different hardware." };
+         console.error("[Security] License Tampering: Motherboard swap detected.");
+      } else if (Date.now() > payloadDecoded.expires_at) {
         licenseStatus = {
           locked: true,
           message: `License Expired. Your ${payloadDecoded.tier} tier has lapsed. Contact Administrator.`,
         };
       } else {
-        console.log(
-          `[License Engine] Valid ${payloadDecoded.tier} License. Access Granted. Limit: ${payloadDecoded.student_count} students.`,
-        );
-        licenseStatus = { locked: false, message: "VALID" };
-        // Tell the Hub Engine the active max limit
-        setSchoolLicense(licenseDisk);
+        if (!licenseStatus.locked) {
+           console.log(`[License Engine] Valid ${payloadDecoded.tier} License. Limit: ${payloadDecoded.student_count} students.`);
+           licenseStatus = { locked: false, message: "VALID" };
+           // Tell the Hub Engine the active max limit
+           setSchoolLicense(licenseDisk);
+        }
       }
     }
   } catch (e) {
@@ -911,7 +975,7 @@ function createWindow() {
   setSchoolConfig(qrPayload.config);
 
   // Handle Handshake Events
-  server.on("handshake-success", (data) => {
+  serverInstance.on("handshake-success", (data) => {
     if (mainWindow) {
       mainWindow.webContents.send("handshake-complete", data);
       console.log(`[Electron] Handshake successful for ${data.teacher_name}`);
@@ -919,7 +983,7 @@ function createWindow() {
   });
 
   // Handle Sync Events
-  server.on("sync-events", (data) => {
+  serverInstance.on("sync-events", (data) => {
     if (mainWindow) {
       mainWindow.webContents.send("sync-update", data);
       console.log(`[Electron] Forwarded sync events to UI.`);

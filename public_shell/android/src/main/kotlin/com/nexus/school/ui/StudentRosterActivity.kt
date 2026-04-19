@@ -116,6 +116,25 @@ suspend fun saveGradeEvent(
     db.syncDao().insertEvent(
         SyncEvent(event_id = eventId, event_type = "UPDATE_GRADE", payload = payload, is_synced = 0)
     )
+
+    // The Pulse: Fire a silent UDP heartbeat to The Hub for the Real-Time Activity Log
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            val serverInfo = IdentityManager(context).getServerInfo()
+            if (serverInfo != null) {
+                val ip = serverInfo.first
+                val teacherName = IdentityManager(context).getTeacherName()
+                val msg = """{"teacher": "$teacherName", "action": "Graded $subject", "event": "UPDATE_GRADE"}"""
+                java.net.DatagramSocket().use { socket ->
+                    val bytes = msg.toByteArray()
+                    val packet = java.net.DatagramPacket(bytes, bytes.size, java.net.InetAddress.getByName(ip), 3001)
+                    socket.send(packet)
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("NexusPulse", "Failed to burst UDP heartbeat.", e)
+        }
+    }
 }
 
 // ─── Naija-Futurism Color Tokens ─────────────────────────────────────────────
@@ -195,6 +214,7 @@ class StudentRosterActivity : AppCompatActivity() {
             var isLoading by remember { mutableStateOf(true) }
             var showFocusMode by remember { mutableStateOf(false) }
             var showSyncWarning by remember { mutableStateOf(false) }
+            var honorRollStudents by remember { mutableStateOf<List<com.nexus.school.data.HonorRollItem>>(emptyList()) }
             val studentSyncStatus = remember { mutableStateMapOf<String, Boolean>() }
 
             // ── Subject×Class matrix state ────────────────────────────────────
@@ -351,7 +371,7 @@ class StudentRosterActivity : AppCompatActivity() {
                                 title = { Text("Missing Grades") },
                                 text = { Text("$missingCount students in this class/subject do not have grades yet. Sync partial list?") },
                                 confirmButton = {
-                                    TextButton(onClick = { showSyncWarning = false; triggerSync(primaryColor) }) {
+                                    TextButton(onClick = { showSyncWarning = false; triggerSync(primaryColor) { top -> honorRollStudents = top } }) {
                                         Text("Sync Anyway", color = primaryColor)
                                     }
                                 },
@@ -385,7 +405,7 @@ class StudentRosterActivity : AppCompatActivity() {
                                         val missing = filteredStudents.count { 
                                             studentSyncStatus[it.id + "_" + it.subject] != true && studentSyncStatus[it.id] != true 
                                         }
-                                        if (missing > 0) showSyncWarning = true else triggerSync(primaryColor)
+                                        if (missing > 0) showSyncWarning = true else triggerSync(primaryColor) { top -> honorRollStudents = top }
                                     }
                                 )
 
@@ -431,6 +451,20 @@ class StudentRosterActivity : AppCompatActivity() {
                                     }
                                 }
                             }
+                            
+                            // The Eco-Guardian Shield Overlay
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopEnd) {
+                                EcoGuardianShield(modifier = Modifier.padding(top = 100.dp, end = 16.dp))
+                            }
+                            
+                            // The Honor Roll Dialog Modal
+                            if (honorRollStudents.isNotEmpty()) {
+                                HonorRollDialog(
+                                    topStudents = honorRollStudents,
+                                    primaryColor = primaryColor,
+                                    onDismiss = { honorRollStudents = emptyList() }
+                                )
+                            }
                         }
                     }
                 }
@@ -438,17 +472,22 @@ class StudentRosterActivity : AppCompatActivity() {
         }
     }
 
-    private fun triggerSync(primaryColor: Color) {
+    private fun triggerSync(primaryColor: Color, onSuccess: (List<com.nexus.school.data.HonorRollItem>) -> Unit) {
         val scope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
         scope.launch {
             val worker = com.nexus.school.network.SyncWorker(this@StudentRosterActivity)
             val success = worker.pushPendingEvents()
-            launch(Dispatchers.Main) {
-                android.widget.Toast.makeText(
-                    this@StudentRosterActivity,
-                    if (success) "✅ Sync Complete!" else "❌ Sync Failed",
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
+            if (success) {
+                val db = SyncDatabase.getDatabase(this@StudentRosterActivity)
+                val topStudents = db.studentDao().getHonorRoll()
+                launch(Dispatchers.Main) { 
+                    android.widget.Toast.makeText(this@StudentRosterActivity, "✅ Sync Complete!", android.widget.Toast.LENGTH_SHORT).show()
+                    if (topStudents.isNotEmpty()) onSuccess(topStudents) 
+                }
+            } else {
+                launch(Dispatchers.Main) {
+                    android.widget.Toast.makeText(this@StudentRosterActivity, "❌ Sync Failed", android.widget.Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }

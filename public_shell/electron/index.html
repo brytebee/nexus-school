@@ -3073,9 +3073,47 @@
             <div class="event-time">${new Date(event.created_at).toLocaleTimeString()}</div>
           `;
             container.prepend(card);
-            if (container.children.length > 20)
-              container.lastElementChild.remove();
+            if (container.children.length > 50) {
+              container.removeChild(container.lastChild);
+            }
           });
+        });
+
+        // ── Phase 3.1: Live Pulse Heartbeat ──────────────────────────────────
+        if (window.electronAPI.onPulseHeartbeat) {
+          window.electronAPI.onPulseHeartbeat((payload) => {
+            const container = document.getElementById("events-container");
+            const card = document.createElement("div");
+            card.className = "event-card slide-in";
+            // Flash color for live UDP pulses
+            card.style.borderLeft = "4px solid #b8860b";
+            card.innerHTML = `
+              <div class="event-type" style="color: #b8860b;">LIVE PULSE</div>
+              <div class="event-details">
+                <span class="student-id">${payload.teacher || "Teacher"}</span>
+                <span class="score-pill" style="background: rgba(184, 134, 11, 0.2);">${payload.action || "Grading active..."}</span>
+              </div>
+              <div class="event-time">${new Date().toLocaleTimeString()}</div>
+            `;
+            container.prepend(card);
+            if (container.children.length > 50) {
+              container.removeChild(container.lastChild);
+            }
+            
+            // Flash the top indicator
+            const pi = document.getElementById("pulse-indicator");
+            if (pi) {
+              pi.classList.add("active-sync");
+              setTimeout(() => pi.classList.remove("active-sync"), 1000);
+            }
+            const pulseLabel = document.getElementById("pulse-label");
+            if (pulseLabel) {
+               pulseLabel.textContent = `📡 ${payload.teacher} is live typing...`;
+            }
+          });
+          // Acknowledge bridge ready
+          if (window.electronAPI.invoke) window.electronAPI.invoke('pulse-bridge-ready');
+        }
 
           // Track for PDF generation
           allGradeEvents.push(...events);

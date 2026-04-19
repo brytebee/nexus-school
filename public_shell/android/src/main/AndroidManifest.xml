@@ -22,6 +22,8 @@
         <activity android:name=".ui.LockActivity" />
         <activity android:name=".ui.HandshakeActivity" />
         <activity android:name=".ui.StudentRosterActivity" />
+        <activity android:name=".ui.AppLaunchActivity" />
+        <!-- DemoResetActivity retained for historical reference — no longer routed to -->
         <activity android:name=".ui.DemoResetActivity" />
     </application>
 
