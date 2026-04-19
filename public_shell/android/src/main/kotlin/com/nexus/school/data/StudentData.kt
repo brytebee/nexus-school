@@ -38,6 +38,9 @@ interface StudentDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(students: List<Student>)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertStudent(student: Student)
+
     @Query("SELECT * FROM students ORDER BY class_name ASC, subject ASC, name ASC")
     suspend fun getAllStudents(): List<Student>
 
