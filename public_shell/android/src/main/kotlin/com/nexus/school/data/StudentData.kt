@@ -21,7 +21,18 @@ data class Student(
     val id: String,
     val name: String,
     val class_name: String,
-    val subject: String = "General"
+    val subject: String = "General",
+    // ── Optional fields — plan-gated on Android, persisted locally ────────────
+    val photo_base64: String? = null,
+    val parent_email: String? = null,
+    val parent_phone: String? = null,
+    
+    // ── V2 Schema core fields ────────────
+    val reg_no: String? = null,
+    val admission_no: String? = null,
+    val gender: String? = null,
+    val dob: String? = null,
+    val fee_status: String = "cleared"
 )
 
 @Serializable
@@ -49,6 +60,10 @@ interface StudentDao {
 
     @Query("SELECT COUNT(*) FROM students")
     suspend fun getStudentCount(): Int
+
+    /** Removes all subject-rows for a given student ID (used only for TEMP_ local students). */
+    @Query("DELETE FROM students WHERE id = :studentId")
+    suspend fun deleteStudentById(studentId: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertScore(score: StudentScore)
