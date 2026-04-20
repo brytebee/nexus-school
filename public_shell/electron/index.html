@@ -769,23 +769,20 @@
             </div>
           </div>
 
-          <!-- Term Config Strip -->
-          <!-- Term Config Strip -->
-          <div class="ph-config-strip" id="ph-config-strip" style="align-items: flex-start; gap: 0;">
-            <div style="display:flex; flex-direction:column; gap: 16px; flex: 1;">
-              <div class="ph-config-row" style="flex-wrap: wrap; align-items: flex-end;">
+          <!-- Print Hub: 35/65 grid — Config (left) | Template Preview (right) -->
+          <div class="ph-config-strip" style="display:grid; grid-template-columns:35% 65%; gap:0; align-items:start; padding:0; overflow:visible; background:rgba(255,255,255,0.03); flex-shrink:0;">
+
+            <!-- LEFT: All config controls -->
+            <div style="display:flex; flex-direction:column; gap:16px; padding:20px;">
+              <!-- Session / Term / Resumption -->
+              <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
                 <div class="ph-config-group">
                   <label class="ph-label">Academic Session</label>
-                  <input
-                    id="ph-session"
-                    class="modern-input"
-                    value="2024/2025"
-                    style="width: 130px"
-                  />
+                  <input id="ph-session" class="modern-input" value="2024/2025" style="width:130px" />
                 </div>
                 <div class="ph-config-group">
                   <label class="ph-label">Term</label>
-                  <select id="ph-term" class="modern-input" style="width: 150px">
+                  <select id="ph-term" class="modern-input" style="width:150px">
                     <option>First Term</option>
                     <option>Second Term</option>
                     <option>Third Term</option>
@@ -793,42 +790,27 @@
                 </div>
                 <div class="ph-config-group">
                   <label class="ph-label">Resumption Date</label>
-                  <input
-                    id="ph-resumption"
-                    type="date"
-                    class="modern-input"
-                    style="width: 160px"
-                  />
+                  <input id="ph-resumption" type="date" class="modern-input" style="width:160px" />
                 </div>
               </div>
-              <div class="ph-config-row">
-                <div class="ph-config-group" style="flex-direction: row; gap: 14px; align-items: center">
-                  <label class="ph-toggle"
-                    ><input type="checkbox" id="ph-show-position" checked /> Show
-                    Position</label
-                  >
-                  <label class="ph-toggle"
-                    ><input type="checkbox" id="ph-show-domains" checked /> Show
-                    Domains</label
-                  >
-                </div>
+              <!-- Toggles -->
+              <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
+                <label class="ph-toggle"><input type="checkbox" id="ph-show-position" checked /> Show Position</label>
+                <label class="ph-toggle"><input type="checkbox" id="ph-show-domains" checked /> Show Domains</label>
               </div>
               <!-- Score Breakdown Configurator -->
-              <div class="ph-config-row">
-                <div class="ph-config-group" style="flex-direction:column;align-items:flex-start;min-width:260px; width:100%;">
-                  <label class="ph-label" style="margin-bottom:6px;">Score Components</label>
-                  <div id="ph-components-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:6px;width:100%;"></div>
-                  <div style="display:flex;gap:6px;align-items:center;">
-                    <input id="ph-comp-label" class="modern-input" placeholder="Label (e.g. CA1)" style="width:110px;height:28px;font-size:11px;" />
-                    <input id="ph-comp-max" class="modern-input" type="number" placeholder="Max" style="width:60px;height:28px;font-size:11px;" min="1" max="100" />
-                    <button onclick="phAddComponent()" style="height:28px;padding:0 10px;font-size:11px;background:rgba(0,229,255,0.12);color:#00e5ff;border:1px solid rgba(0,229,255,0.3);border-radius:6px;cursor:pointer;">＋ Add</button>
-                  </div>
-                  <div id="ph-comp-total" style="font-size:10px;margin-top:4px;color:var(--text-dim);"></div>
+              <div class="ph-config-group" style="flex-direction:column;align-items:flex-start;width:100%;">
+                <label class="ph-label" style="margin-bottom:6px;">Score Components</label>
+                <div id="ph-components-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:6px;width:100%;"></div>
+                <div style="display:flex;gap:6px;align-items:center;">
+                  <input id="ph-comp-label" class="modern-input" placeholder="Label (e.g. CA1)" style="width:110px;height:28px;font-size:11px;" />
+                  <input id="ph-comp-max" class="modern-input" type="number" placeholder="Max" style="width:60px;height:28px;font-size:11px;" min="1" max="100" />
+                  <button onclick="phAddComponent()" style="height:28px;padding:0 10px;font-size:11px;background:rgba(0,229,255,0.12);color:#00e5ff;border:1px solid rgba(0,229,255,0.3);border-radius:6px;cursor:pointer;">＋ Add</button>
                 </div>
+                <div id="ph-comp-total" style="font-size:10px;margin-top:4px;color:var(--text-dim);"></div>
               </div>
-              
-              <!-- Template Selector and Actions -->
-              <div class="ph-config-row" style="align-items: flex-end; margin-top: 8px;">
+              <!-- Template Selector + Save -->
+              <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-top:4px;">
                 <div class="ph-config-group" style="flex-direction:column;align-items:flex-start;min-width:200px;">
                   <label class="ph-label" style="margin-bottom:6px;">Report Template</label>
                   <select id="ph-template" class="modern-input" style="width:100%;font-size:11px;" onchange="updateTemplatePreview(this.value, 'ph-template-preview')">
@@ -842,133 +824,47 @@
                     <option value="apex">💎 Apex (Diamond)</option>
                   </select>
                 </div>
-                <div style="display:flex;gap:8px;align-items:flex-end;">
-                  <button
-                    class="primary-btn"
-                    style="padding: 8px 18px; font-size: 12px"
-                    onclick="phSaveConfig()"
-                  >
-                    💾 Save Config
-                  </button>
-                  <button
-                    class="primary-btn"
-                    style="padding: 8px 18px; font-size: 12px; background: linear-gradient(135deg, rgba(0,229,255,0.15), rgba(100,50,255,0.15)); border: 1px solid rgba(0,229,255,0.4); color: #00e5ff;"
-                    onclick="showView('result-studio'); rsInit();"
-                  >
-                    📊 Open Result Studio →
-                  </button>
-                </div>
+                <button class="primary-btn" style="padding:8px 18px;font-size:12px;" onclick="phSaveConfig()">💾 Save Config</button>
               </div>
             </div>
-            
-            <!-- Template Preview Box -->
-            <div style="display:flex; flex-direction:column; align-items:center; gap: 8px; padding-left:20px; border-left: 1px solid rgba(255,255,255,0.06);">
-              <span class="ph-label" style="font-size: 10px; text-transform: uppercase; letter-spacing:1px;">📋 Preview</span>
-              <div id="ph-template-preview" style="width: 210px; height: 297px; background: rgba(255,255,255,0.04); border-radius: 4px; border: 1px dashed rgba(255,255,255,0.12); overflow: hidden; position: relative; display:flex; align-items:center; justify-content:center;">
-                <span style="color:rgba(255,255,255,0.2);font-size:11px;">Select template</span>
+
+            <!-- RIGHT: Scrollable A4 Template Preview (65%) -->
+            <div style="
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              gap: 12px;
+              padding: 24px 24px 32px;
+              background: rgba(0,0,0,0.22);
+              border-left: 1px solid rgba(255,255,255,0.06);
+              overflow-y: auto;
+              max-height: calc(100vh - 160px);
+            ">
+              <span class="ph-label" style="font-size:10px; text-transform:uppercase; letter-spacing:1.5px; opacity:0.55; flex-shrink:0;">📋 Template Preview</span>
+              <div id="ph-template-preview" style="
+                width: 100%;
+                aspect-ratio: 1 / 1.414;
+                background: rgba(255,255,255,0.04);
+                border-radius: 8px;
+                border: 1px dashed rgba(255,255,255,0.15);
+                overflow: hidden;
+                position: relative;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                box-shadow: 0 12px 48px rgba(0,0,0,0.55);
+                flex-shrink: 0;
+              ">
+                <span style="color:rgba(255,255,255,0.2);font-size:13px;">Select a template →</span>
               </div>
+              <span style="font-size:10px; color:var(--text-dim); text-align:center; line-height:1.6; opacity:0.7; flex-shrink:0;">
+                Preview updates instantly · Scroll to view details
+              </span>
             </div>
+
           </div>
 
-          <!-- ↑ Print Hub ends here. Generate Reports moved to Result Studio. -->
-          <div style="display: flex; gap: 12px; margin: 16px 0; flex-shrink: 0">
-            <button
-              id="ph-type-terminal"
-              class="ph-type-btn active"
-              onclick="phSetType('terminal')"
-            >
-              📄 Terminal Report Cards
-            </button>
-            <button
-              id="ph-type-broadsheet"
-              class="ph-type-btn"
-              onclick="phSetType('broadsheet')"
-            >
-              📋 Master Broadsheet
-            </button>
-          </div>
-
-          <!-- Scope Selector -->
-          <div class="ph-scope-row" id="ph-scope-row">
-            <div class="ph-config-group">
-              <label class="ph-label">Scope</label>
-              <select
-                id="ph-scope"
-                class="modern-input"
-                style="width: 160px"
-                onchange="phOnScopeChange()"
-              >
-                <option value="all">🏫 Entire School</option>
-                <option value="class">🏷️ By Class</option>
-                <option value="teacher">👩‍🏫 By Teacher</option>
-                <option value="subject">📚 By Subject</option>
-                <option value="student">👤 Single Student</option>
-              </select>
-            </div>
-            <div
-              class="ph-config-group"
-              id="ph-scope-class"
-              style="display: none"
-            >
-              <label class="ph-label">Class</label>
-              <select
-                id="ph-class-pick"
-                class="modern-input"
-                style="width: 140px"
-              ></select>
-            </div>
-            <div
-              class="ph-config-group"
-              id="ph-scope-teacher"
-              style="display: none"
-            >
-              <label class="ph-label">Teacher</label>
-              <select
-                id="ph-teacher-pick"
-                class="modern-input"
-                style="width: 200px"
-              ></select>
-            </div>
-            <div
-              class="ph-config-group"
-              id="ph-scope-subject"
-              style="display: none"
-            >
-              <label class="ph-label">Subject</label>
-              <input
-                id="ph-subject-input"
-                class="modern-input"
-                placeholder="e.g. Mathematics"
-                style="width: 190px"
-              />
-            </div>
-            <div
-              class="ph-config-group"
-              id="ph-scope-student"
-              style="display: none"
-            >
-              <label class="ph-label">Student</label>
-              <select
-                id="ph-student-pick"
-                class="modern-input"
-                style="width: 220px"
-              ></select>
-            </div>
-            <button
-              class="primary-btn"
-              style="
-                padding: 8px 18px;
-                font-size: 12px;
-                background: rgba(0, 229, 255, 0.12);
-                color: #00e5ff;
-                border: 1px solid rgba(0, 229, 255, 0.3);
-                box-shadow: none;
-              "
-              onclick="phPreview()"
-            >
-              🔍 Preview
-            </button>
-          </div>
+          <!-- ↑ Config ends. Report generation lives in Result Studio. -->
 
           <!-- Preview Table -->
           <div
@@ -1031,88 +927,125 @@
             </div>
           </div>
 
-          <div class="ph-config-strip" id="rs-config-strip" style="align-items:flex-start; gap:0;">
-            <!-- Controls: flex-wrap so selectors flow to next row when needed -->
-            <div style="flex:1; display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; min-width:0; padding-right:20px;">
-              <!-- Template -->
-              <div class="ph-config-group">
-                <label class="ph-label">Template</label>
-                <select id="rs-template" class="modern-input" style="width:200px;font-size:11px;" onchange="updateTemplatePreview(this.value, 'rs-template-preview'); toggleBrandColorOption(this.value)">
-                  <option value="clean_slate">🎨 Classic (Free)</option>
-                  <option value="prestige">⭐ Prestige (Silver)</option>
-                  <option value="azure">⭐ Azure Edge (Silver)</option>
-                  <option value="royal">⭐⭐ Royal (Gold)</option>
-                  <option value="monarch">⭐⭐ Monarch (Gold)</option>
-                  <option value="sovereign">💎 Sovereign (Diamond)</option>
-                  <option value="sterling">💎 Sterling (Diamond)</option>
-                  <option value="apex">💎 Apex (Diamond)</option>
-                </select>
-              </div>
-              <!-- Brand Color Customization — Silver+ only -->
-              <div class="ph-config-group" id="brand-color-group" style="display:none; align-items:center; gap:8px; background:rgba(0,229,255,0.06); border:1px solid rgba(0,229,255,0.18); border-radius:8px; padding:7px 12px;">
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:11.5px;color:var(--text-dim);">
-                  <input type="checkbox" id="rs-use-brand-colors" style="width:14px;height:14px;accent-color:var(--accent);"
-                    onchange="rsOnBrandColorChange(this.checked)"/>
-                  <span>Use school brand colors on this template</span>
-                </label>
-                <div id="brand-color-preview" style="display:none; gap:6px; margin-top:4px; align-items:center;">
-                  <span style="font-size:10px; color:var(--text-dim);">Preview:</span>
-                  <div id="bcp-primary" style="width:20px;height:20px;border-radius:4px;border:1px solid rgba(255,255,255,0.15)"></div>
-                  <div id="bcp-secondary" style="width:20px;height:20px;border-radius:4px;border:1px solid rgba(255,255,255,0.15)"></div>
+          <!-- Result Studio: 35/65 Layout — Controls (left) | Template Preview (right, sticky) -->
+          <div class="ph-config-strip" style="display:grid; grid-template-columns:35% 65%; gap:0; align-items:start; padding:0; overflow:visible; background:rgba(255,255,255,0.03); flex-shrink:0;">
+
+            <!-- LEFT COLUMN: All controls -->
+            <div style="padding:20px; display:flex; flex-direction:column; gap:14px;">
+              <!-- Row 1: Template + Brand Colors -->
+              <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+                <div class="ph-config-group">
+                  <label class="ph-label">Template</label>
+                  <select id="rs-template" class="modern-input" style="width:200px;font-size:11px;" onchange="updateTemplatePreview(this.value, 'rs-template-preview'); toggleBrandColorOption(this.value)">
+                    <option value="clean_slate">🎨 Classic (Free)</option>
+                    <option value="prestige">⭐ Prestige (Silver)</option>
+                    <option value="azure">⭐ Azure Edge (Silver)</option>
+                    <option value="royal">⭐⭐ Royal (Gold)</option>
+                    <option value="monarch">⭐⭐ Monarch (Gold)</option>
+                    <option value="sovereign">💎 Sovereign (Diamond)</option>
+                    <option value="sterling">💎 Sterling (Diamond)</option>
+                    <option value="apex">💎 Apex (Diamond)</option>
+                  </select>
+                </div>
+                <!-- Brand Color Customization — Silver+ only -->
+                <div class="ph-config-group" id="brand-color-group" style="display:none; align-items:center; gap:8px; background:rgba(0,229,255,0.06); border:1px solid rgba(0,229,255,0.18); border-radius:8px; padding:7px 12px;">
+                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:11.5px;color:var(--text-dim);">
+                    <input type="checkbox" id="rs-use-brand-colors" style="width:14px;height:14px;accent-color:var(--accent);" onchange="rsOnBrandColorChange(this.checked)"/>
+                    <span>Use school brand colors</span>
+                  </label>
+                  <div id="brand-color-preview" style="display:none; gap:6px; margin-top:4px; align-items:center;">
+                    <span style="font-size:10px; color:var(--text-dim);">Preview:</span>
+                    <div id="bcp-primary" style="width:20px;height:20px;border-radius:4px;border:1px solid rgba(255,255,255,0.15)"></div>
+                    <div id="bcp-secondary" style="width:20px;height:20px;border-radius:4px;border:1px solid rgba(255,255,255,0.15)"></div>
+                  </div>
                 </div>
               </div>
-              <!-- Format -->
-              <div class="ph-config-group">
-                <label class="ph-label">Output Format</label>
-                <select id="rs-format" class="modern-input" style="width:130px;" onchange="rsOnFormatChange()">
-                  <option value="pdf">📄 PDF</option>
-                  <option value="html">🌐 HTML File</option>
-                  <option value="image">🖼️ Image (PNG)</option>
-                </select>
+
+              <!-- Row 2: Output Format + Report Type -->
+              <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+                <div class="ph-config-group">
+                  <label class="ph-label">Output Format</label>
+                  <select id="rs-format" class="modern-input" style="width:140px;" onchange="rsOnFormatChange()">
+                    <option value="pdf">📄 PDF</option>
+                    <option value="html">🌐 HTML File</option>
+                    <option value="image">🖼️ Image (PNG)</option>
+                  </select>
+                </div>
+                <div class="ph-config-group">
+                  <label class="ph-label">Report Type</label>
+                  <select id="rs-type" class="modern-input" style="width:190px;">
+                    <option value="terminal">📄 Terminal Report Cards</option>
+                    <option value="broadsheet">📋 Master Broadsheet</option>
+                  </select>
+                </div>
               </div>
-              <!-- Report type -->
-              <div class="ph-config-group">
-                <label class="ph-label">Report Type</label>
-                <select id="rs-type" class="modern-input" style="width:180px;">
-                  <option value="terminal">📄 Terminal Report Cards</option>
-                  <option value="broadsheet">📋 Master Broadsheet</option>
-                </select>
-              </div>
-              <!-- Scope -->
-              <div class="ph-config-group">
-                <label class="ph-label">Scope</label>
-                <select id="rs-scope" class="modern-input" style="width:160px;" onchange="rsOnScopeChange()">
-                  <option value="all">🏫 Entire School</option>
-                  <option value="class">🏷️ By Class</option>
-                  <option value="teacher">👩‍🏫 By Teacher</option>
-                  <option value="subject">📚 By Subject</option>
-                  <option value="student">👤 Single Student</option>
-                </select>
-              </div>
-              <div class="ph-config-group" id="rs-scope-class" style="display:none">
-                <label class="ph-label">Class</label>
-                <select id="rs-class-pick" class="modern-input" style="width:140px;"></select>
-              </div>
-              <div class="ph-config-group" id="rs-scope-teacher" style="display:none">
-                <label class="ph-label">Teacher</label>
-                <select id="rs-teacher-pick" class="modern-input" style="width:200px;"></select>
-              </div>
-              <div class="ph-config-group" id="rs-scope-subject" style="display:none">
-                <label class="ph-label">Subject</label>
-                <input id="rs-subject-input" class="modern-input" placeholder="e.g. Mathematics" style="width:190px;"/>
-              </div>
-              <div class="ph-config-group" id="rs-scope-student" style="display:none">
-                <label class="ph-label">Student</label>
-                <select id="rs-student-pick" class="modern-input" style="width:220px;"></select>
-              </div>
-            </div>
-            <!-- Right: Template preview INSIDE the config card -->
-            <div style="display:flex;flex-direction:column;align-items:center;gap:8px;flex-shrink:0;padding-left:4px;border-left:1px solid rgba(255,255,255,0.06);">
-              <span class="ph-label" style="font-size:10px;text-transform:uppercase;letter-spacing:1px;">📋 Preview</span>
-              <div id="rs-template-preview" style="width:210px;height:297px;background:rgba(255,255,255,0.04);border-radius:4px;border:1px dashed rgba(255,255,255,0.12);overflow:hidden;position:relative;display:flex;align-items:center;justify-content:center;">
-                <span style="color:rgba(255,255,255,0.2);font-size:11px;">Select template</span>
+
+              <!-- Row 3: Scope Filters -->
+              <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+                <div class="ph-config-group">
+                  <label class="ph-label">Scope</label>
+                  <select id="rs-scope" class="modern-input" style="width:160px;" onchange="rsOnScopeChange()">
+                    <option value="all">🏫 Entire School</option>
+                    <option value="class">🏷️ By Class</option>
+                    <option value="teacher">👩‍🏫 By Teacher</option>
+                    <option value="subject">📚 By Subject</option>
+                    <option value="student">👤 Single Student</option>
+                  </select>
+                </div>
+                <div class="ph-config-group" id="rs-scope-class" style="display:none">
+                  <label class="ph-label">Class</label>
+                  <select id="rs-class-pick" class="modern-input" style="width:140px;"></select>
+                </div>
+                <div class="ph-config-group" id="rs-scope-teacher" style="display:none">
+                  <label class="ph-label">Teacher</label>
+                  <select id="rs-teacher-pick" class="modern-input" style="width:200px;"></select>
+                </div>
+                <div class="ph-config-group" id="rs-scope-subject" style="display:none">
+                  <label class="ph-label">Subject</label>
+                  <input id="rs-subject-input" class="modern-input" placeholder="e.g. Mathematics" style="width:190px;"/>
+                </div>
+                <div class="ph-config-group" id="rs-scope-student" style="display:none">
+                  <label class="ph-label">Student</label>
+                  <select id="rs-student-pick" class="modern-input" style="width:220px;"></select>
+                </div>
               </div>
             </div>
+
+            <!-- RIGHT COLUMN: Scrollable Template Preview (65%) -->
+            <div style="
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              gap: 12px;
+              padding: 24px 20px 32px;
+              background: rgba(0,0,0,0.22);
+              border-left: 1px solid rgba(255,255,255,0.06);
+              overflow-y: auto;
+              max-height: calc(100vh - 160px);
+            ">
+              <span class="ph-label" style="font-size:10px; text-transform:uppercase; letter-spacing:1.5px; opacity:0.55; flex-shrink:0;">📋 Template Preview</span>
+              <div id="rs-template-preview"
+                style="
+                  width: 100%;
+                  aspect-ratio: 1 / 1.414;
+                  background: rgba(255,255,255,0.04);
+                  border-radius: 8px;
+                  border: 1px dashed rgba(255,255,255,0.15);
+                  overflow: hidden;
+                  position: relative;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  box-shadow: 0 12px 48px rgba(0,0,0,0.55);
+                  flex-shrink: 0;
+                ">
+                <span style="color:rgba(255,255,255,0.2); font-size:13px;">Select a template →</span>
+              </div>
+              <span style="font-size:10px; color:var(--text-dim); text-align:center; line-height:1.6; flex-shrink:0; opacity:0.7;">
+                Preview updates instantly · Scroll to view details
+              </span>
+            </div>
+
           </div>
 
           <!-- Action buttons -->
@@ -2435,27 +2368,7 @@
         } else {
           updateTemplatePreview('clean_slate', 'ph-template-preview');
         }
-        // Populate class list from students
-
-        const students = await window.electronAPI.getAllStudents();
-        const classes = [...new Set(students.map((s) => s.class_name))].sort();
-        const classPick = document.getElementById("ph-class-pick");
-        classPick.innerHTML = classes
-          .map((c) => `<option>${c}</option>`)
-          .join("");
-        const studentPick = document.getElementById("ph-student-pick");
-        studentPick.innerHTML = students
-          .map(
-            (s) =>
-              `<option value="${s.id}">${s.name} (${s.class_name})</option>`,
-          )
-          .join("");
-        // Populate teachers
-        const teachers = await window.electronAPI.getAllTeachers();
-        const teacherPick = document.getElementById("ph-teacher-pick");
-        teacherPick.innerHTML = teachers
-          .map((t) => `<option value="${t.id}">${t.name}</option>`)
-          .join("");
+        // Populate teachers/classes moved to Result Studio.
         // Load saved score breakdown components from grading_scale
         try {
           if (cfg.grading_scale) {
@@ -2518,7 +2431,7 @@
         };
 
         const imgName = imgMap[templateId] || 'classic';
-        const src = `node_modules/@nexus/engine/assets/templates/${imgName}.png`;
+        const src = `../../private_engine/assets/templates/${imgName}.png`;
 
         container.innerHTML = `
           <img
@@ -2795,34 +2708,55 @@
 
       async function rsPreview() {
         const status = document.getElementById("rs-status");
-        status.textContent = "⏳ Querying results…";
-        const cfg = await window.electronAPI.getTermConfig();
-        const scope      = document.getElementById("rs-scope").value;
-        const session    = cfg.academic_session || "2024/2025";
-        const term       = cfg.term || "First Term";
-        const class_name = document.getElementById("rs-class-pick").value;
-        const teacher_id = document.getElementById("rs-teacher-pick").value;
-        const subject    = document.getElementById("rs-subject-input").value.trim();
-        const student_id = document.getElementById("rs-student-pick").value;
-
-        const resp = await window.electronAPI.queryResults({ scope, session, term, class_name, teacher_id, subject, student_id });
-        if (!resp.ok) { status.textContent = "❌ Query failed: " + resp.error; return; }
-
-        _rsResults = resp.results;
+        const previewContainer = document.getElementById("rs-preview-container");
         const tbody = document.getElementById("rs-preview-tbody");
-        if (!_rsResults.length) {
-          tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-dim);">No results found. Ensure grades have been synced for this term.</td></tr>`;
-        } else {
-          tbody.innerHTML = _rsResults.map((s, i) => `
-            <tr>
-              <td>${i+1}</td><td><strong>${s.name}</strong></td><td>${s.class_name}</td>
-              <td>${s.subjects?.filter(x=>x.score!==null).length || 0} graded</td>
-              <td>${s.total_score || "—"}</td><td>${s.average || "—"}</td>
-            </tr>`).join("");
+        if (!status || !previewContainer || !tbody) {
+          console.error("[rsPreview] Required DOM elements missing.");
+          return;
         }
-        document.getElementById("rs-preview-label").textContent = `${_rsResults.length} student(s) · ${session}, ${term}`;
-        document.getElementById("rs-preview-container").style.display = "block";
-        status.textContent = "";
+
+        // Show loading state immediately
+        status.textContent = "⏳ Querying results…";
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-dim);">⏳ Loading…</td></tr>`;
+        previewContainer.style.display = "block";
+
+        try {
+          const cfg = await window.electronAPI.getTermConfig();
+          const scope      = (document.getElementById("rs-scope")?.value)      || "all";
+          const session    = cfg.academic_session || "2024/2025";
+          const term       = cfg.term || "First Term";
+          const class_name = document.getElementById("rs-class-pick")?.value   || "";
+          const teacher_id = document.getElementById("rs-teacher-pick")?.value || "";
+          const subject    = (document.getElementById("rs-subject-input")?.value || "").trim();
+          const student_id = document.getElementById("rs-student-pick")?.value  || "";
+
+          const resp = await window.electronAPI.queryResults({ scope, session, term, class_name, teacher_id, subject, student_id });
+          if (!resp.ok) {
+            status.textContent = "❌ Query failed: " + resp.error;
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:30px;color:#ff6b6b;">❌ ${resp.error}</td></tr>`;
+            return;
+          }
+
+          _rsResults = resp.results;
+          if (!_rsResults.length) {
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-dim);">No results found for <strong>${session}, ${term}</strong>.<br>Ensure grades have been synced from teacher devices.</td></tr>`;
+          } else {
+            tbody.innerHTML = _rsResults.map((s, i) => `
+              <tr>
+                <td>${i+1}</td><td><strong>${s.name}</strong></td><td>${s.class_name}</td>
+                <td>${s.subjects?.filter(x=>x.score!==null).length || 0} graded</td>
+                <td>${s.total_score ?? "—"}</td><td>${s.average ?? "—"}</td>
+              </tr>`).join("");
+          }
+          document.getElementById("rs-preview-label").textContent = `${_rsResults.length} student(s) · ${session}, ${term}`;
+          status.textContent = "";
+          // Scroll preview into view
+          previewContainer.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        } catch(err) {
+          console.error("[rsPreview] Error:", err);
+          status.textContent = "❌ Error: " + err.message;
+          tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:30px;color:#ff6b6b;">❌ Unexpected error. Check console.</td></tr>`;
+        }
       }
 
       async function rsGenerate() {
