@@ -360,6 +360,7 @@ ipcMain.handle("save-term-config", (event, config) => {
 
 // ── V2: Query Results (dynamic scope filtering) ───────────────────────────────
 ipcMain.handle("query-results", (event, { scope, session, term, class_name, subject, teacher_id, student_id }) => {
+  console.log(`[Diagnostic] query-results: scope=${scope}, session=${session}, term=${term}`);
   try {
     const db = database.getDb();
 
