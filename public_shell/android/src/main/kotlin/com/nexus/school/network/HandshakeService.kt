@@ -59,7 +59,8 @@ data class HandshakeResponse(
     val school_config: SchoolConfig,
     val server_timestamp: String,
     val students: List<com.nexus.school.data.Student> = emptyList(),
-    val score_components: List<ScoreComponent> = emptyList()
+    val score_components: List<ScoreComponent> = emptyList(),
+    val all_subjects: List<String> = emptyList()
 )
 
 @Serializable

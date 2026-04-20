@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Covers externalCacheDir/images/ where camera temp files are written -->
+    <external-cache-path
+        name="camera_photos"
+        path="images/" />
+</paths>

@@ -2,7 +2,7 @@ package com.nexus.school.network
 
 import android.content.Context
 import android.util.Log
-import com.nexus.school.data.ScoreComponent
+import com.nexus.school.network.ScoreComponent
 import com.nexus.school.data.Student
 import com.nexus.school.data.SyncDatabase
 import com.nexus.school.data.SyncEvent
@@ -62,54 +62,100 @@ suspend fun saveGradeEvent(
         } catch (e: Exception) {
             Log.e("NexusPulse", "Failed to burst UDP heartbeat.", e)
         }
+        Unit
     }
 }
 
+/**
+ * Enqueues an ADD_STUDENT sync event for each enrolled [subjects] entry.
+ * A single [localId] is shared across all subject rows so the Hub can
+ * associate them as one logical student record.
+ *
+ * [photoBase64] is stored locally in Room only — not included in the sync
+ * payload to avoid large blobs in the queue. Hub photo sync is a Phase 5 concern.
+ */
 suspend fun saveAddStudentEvent(
     context: Context,
     studentName: String,
     className: String,
-    subject: String
+    subjects: List<String>,
+    photoBase64: String? = null,
+    parentEmail: String? = null,
+    parentPhone: String? = null,
+    regNo: String? = null,
+    admissionNo: String? = null,
+    gender: String? = null,
+    dob: String? = null
 ) {
-    val db = SyncDatabase.getDatabase(context)
-    
-    // Generate a temporary local ID. The Hub will either accept or reject.
-    val localId = "TEMP_${UUID.randomUUID().toString().substring(0, 8).uppercase()}"
-    
-    val student = Student(
-        id = localId,
-        name = studentName,
-        class_name = className,
-        subject = subject
-    )
-    
-    // Insert into local UI DB so the teacher sees them immediately
-    db.studentDao().insertStudent(student)
-    
-    // Queue for sync
-    val payload = """{"student_id": "$localId", "name": "$studentName", "class_name": "$className", "subject": "$subject"}"""
-    val eventId = "ADD_STUDENT_$localId"
-    
-    db.syncDao().insertEvent(
-        SyncEvent(event_id = eventId, event_type = "ADD_STUDENT", payload = payload, is_synced = 0)
-    )
-    
-    // UDP Pulse
+    val db       = SyncDatabase.getDatabase(context)
+    val localId  = "TEMP_${UUID.randomUUID().toString().substring(0, 8).uppercase()}"
+
+    subjects.forEach { subject ->
+        // Persist full record locally (photo + contact stored offline)
+        db.studentDao().insertStudent(
+            Student(
+                id           = localId,
+                name         = studentName,
+                class_name   = className,
+                subject      = subject,
+                photo_base64 = photoBase64,
+                parent_email = parentEmail,
+                parent_phone = parentPhone,
+                reg_no       = regNo,
+                admission_no = admissionNo,
+                gender       = gender,
+                dob          = dob
+            )
+        )
+
+        // Sync payload — photo omitted intentionally (see kdoc above)
+        val emailField = if (parentEmail != null) """, "parent_email": "$parentEmail"""" else ""
+        val phoneField = if (parentPhone != null) """, "parent_phone": "$parentPhone"""" else ""
+        val regNoField = if (regNo != null) """, "reg_no": "$regNo"""" else ""
+        val adminNoField = if (admissionNo != null) """, "admission_no": "$admissionNo"""" else ""
+        val genderField = if (gender != null) """, "gender": "$gender"""" else ""
+        val dobField    = if (dob != null) """, "dob": "$dob"""" else ""
+        
+        val payload    = """{"student_id": "$localId", "name": "$studentName", "class_name": "$className", "subject": "$subject"$emailField$phoneField$regNoField$adminNoField$genderField$dobField}"""
+
+        db.syncDao().insertEvent(
+            SyncEvent(
+                event_id   = "ADD_STUDENT_${localId}_${subject.replace(" ", "_")}",
+                event_type = "ADD_STUDENT",
+                payload    = payload,
+                is_synced  = 0
+            )
+        )
+    }
+
+    // UDP Pulse — single burst for the whole registration
     withContext(Dispatchers.IO) {
         try {
-            val serverInfo = IdentityManager(context).getServerInfo()
-            if (serverInfo != null) {
-                val ip = serverInfo.first
-                val teacherName = IdentityManager(context).getTeacherName()
-                val msg = """{"teacher": "$teacherName", "action": "Registered $studentName", "event": "ADD_STUDENT"}"""
-                DatagramSocket().use { socket ->
-                    val bytes = msg.toByteArray()
-                    val packet = DatagramPacket(bytes, bytes.size, InetAddress.getByName(ip), 3001)
-                    socket.send(packet)
-                }
+            val serverInfo = IdentityManager(context).getServerInfo() ?: return@withContext
+            val teacherName = IdentityManager(context).getTeacherName()
+            val msg = """{"teacher": "$teacherName", "action": "Registered $studentName (${subjects.size} subjects)", "event": "ADD_STUDENT"}"""
+            DatagramSocket().use { socket ->
+                val bytes = msg.toByteArray()
+                socket.send(DatagramPacket(bytes, bytes.size, InetAddress.getByName(serverInfo.first), 3001))
             }
         } catch (e: Exception) {
-            Log.e("NexusPulse", "Failed to burst UDP heartbeat.", e)
+            Log.e("NexusPulse", "UDP heartbeat failed.", e)
         }
     }
+}
+
+/**
+ * Cancels all pending ADD_STUDENT events for a locally-created (TEMP_) student
+ * and removes them from the local Room DB.
+ * Must only be called for students whose ID starts with "TEMP_".
+ */
+suspend fun saveDeleteStudentEvent(context: Context, studentId: String) {
+    require(studentId.startsWith("TEMP_")) { "Only TEMP_ students can be deleted from the device." }
+    val db = SyncDatabase.getDatabase(context)
+    db.studentDao().deleteStudentById(studentId)
+    // Cancel any queued ADD events so they are never pushed to the Hub
+    val toCancel = db.syncDao().getPendingEvents()
+        .filter { it.event_id.startsWith("ADD_STUDENT_$studentId") }
+        .map { it.event_id }
+    if (toCancel.isNotEmpty()) db.syncDao().deleteEvents(toCancel)
 }

@@ -1578,7 +1578,7 @@
     <!-- end .app-shell -->
 
     <script src="libs/qrcode.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="libs/sweetalert2.all.min.js"></script>
     <script>
       "use strict";
 
@@ -1691,36 +1691,48 @@
       // Sidebar Navigation (public — pushes to history)
       // ══════════════════════════════════════════════════════════════════════════
       function showView(viewId) {
-        // Deactivate all nav items
+        // ── Step 1: DOM transition (unconditional, never aborted) ──────────────
         document
           .querySelectorAll(".nav-item")
           .forEach((el) => el.classList.remove("active"));
-        // Deactivate all views
         document
           .querySelectorAll(".view")
           .forEach((el) => el.classList.remove("active"));
 
-        // Activate target nav item
         const navEl = document.querySelector(
           `.nav-item[data-view="${viewId}"]`,
         );
         if (navEl) navEl.classList.add("active");
 
-        // Activate target view
         const viewEl = document.getElementById(`view-${viewId}`);
         if (viewEl) viewEl.classList.add("active");
 
-        // On-enter side effects
-        if (viewId === "teachers") refreshTeachersTable();
-        if (viewId === "students") refreshStudentsTable();
-        if (viewId === "sync") loadTeacherDropdown();
-        if (viewId === "settings") hydrateSettingsForm();
-        if (viewId === "about") hydrateAboutView();
-        if (viewId === "dashboard") refreshDashboardStats();
-        if (viewId === "printhub") phInit();
-        if (viewId === "result-studio") rsInit();
+        // ── Step 2: History (unconditional) ────────────────────────────────────
         _historyPush(viewId);
 
+        // ── Step 3: Async side effects (isolated — a failure here never ────────
+        //            prevents the view from being shown)                         
+        const _safe = (fn) => {
+          try {
+            const result = fn();
+            if (result && typeof result.catch === "function") {
+              result.catch((err) =>
+                console.error(`[showView:${viewId}] side-effect error:`, err)
+              );
+            }
+          } catch (err) {
+            console.error(`[showView:${viewId}] side-effect error:`, err);
+          }
+        };
+
+        if (viewId === "teachers")       _safe(() => refreshTeachersTable());
+        if (viewId === "students")       _safe(() => refreshStudentsTable());
+        if (viewId === "sync")           _safe(() => loadTeacherDropdown());
+        if (viewId === "settings")       _safe(() => hydrateSettingsForm());
+        if (viewId === "about")          _safe(() => hydrateAboutView());
+        if (viewId === "dashboard")      _safe(() => refreshDashboardStats());
+        if (viewId === "printhub")       _safe(() => phInit());
+        if (viewId === "result-studio")  _safe(() => rsInit());
       }
 
       // ══════════════════════════════════════════════════════════════════════════
@@ -3076,7 +3088,13 @@
             if (container.children.length > 50) {
               container.removeChild(container.lastChild);
             }
-          });
+           });
+
+          // Track for PDF generation — show button once grades arrive
+          allGradeEvents.push(...events);
+          const genBtn = document.getElementById("generate-pdf-btn");
+          if (genBtn && allGradeEvents.length)
+            genBtn.style.display = "inline-flex";
         });
 
         // ── Phase 3.1: Live Pulse Heartbeat ──────────────────────────────────
@@ -3115,19 +3133,13 @@
           if (window.electronAPI.invoke) window.electronAPI.invoke('pulse-bridge-ready');
         }
 
-          // Track for PDF generation
-          allGradeEvents.push(...events);
-          const genBtn = document.getElementById("generate-pdf-btn");
-          if (genBtn && allGradeEvents.length)
-            genBtn.style.display = "inline-flex";
-        });
-
-        // (Duplicate onSyncUpdate listener removed — events already collected in main listener above)
+        // ── Track Grade Events for PDF generation ─────────────────────────────
+        // (already handled inside the main onSyncUpdate callback above)
 
         // ── CSV Upload ────────────────────────────────────────────────────────
-        document
-          .getElementById("csv-upload")
-          .addEventListener("change", async (e) => {
+        const csvUploadEl = document.getElementById("csv-upload");
+        if (csvUploadEl) {
+          csvUploadEl.addEventListener("change", async (e) => {
             const file = e.target.files[0];
             if (!file) return;
             const tooltip = document.getElementById("upload-status-tooltip");
@@ -3138,6 +3150,7 @@
             if (window.electronAPI.processCSV)
               window.electronAPI.processCSV(file.path);
           });
+        }
 
         window.electronAPI.onCSVLoaded(async (count) => {
           const tooltip = document.getElementById("upload-status-tooltip");
@@ -3166,9 +3179,8 @@
         });
 
         // ── PDF Report Generation ─────────────────────────────────────────────
-        document
-          .getElementById("generate-pdf-btn")
-          .addEventListener("click", async () => {
+        const pdfBtn = document.getElementById("generate-pdf-btn");
+        if (pdfBtn) pdfBtn.addEventListener("click", async () => {
             if (!allGradeEvents.length) {
               Swal.fire({
                 title: "No Grade Data",
@@ -3239,41 +3251,45 @@
           });
 
         // ── Settings Persistence ──────────────────────────────────────────────
-        document
-          .getElementById("theme-primary")
-          .addEventListener("input", (e) => {
-            document.getElementById("primary-hex").textContent =
-              e.target.value.toUpperCase();
+        const themePrimaryEl = document.getElementById("theme-primary");
+        if (themePrimaryEl) {
+          themePrimaryEl.addEventListener("input", (e) => {
+            const hex = document.getElementById("primary-hex");
+            if (hex) hex.textContent = e.target.value.toUpperCase();
           });
-        document
-          .getElementById("theme-secondary")
-          .addEventListener("input", (e) => {
-            document.getElementById("secondary-hex").textContent =
-              e.target.value.toUpperCase();
+        }
+        const themeSecondaryEl = document.getElementById("theme-secondary");
+        if (themeSecondaryEl) {
+          themeSecondaryEl.addEventListener("input", (e) => {
+            const hex = document.getElementById("secondary-hex");
+            if (hex) hex.textContent = e.target.value.toUpperCase();
           });
+        }
 
         const logoDropzone = document.getElementById("logo-dropzone");
         const logoUpload = document.getElementById("logo-upload");
         const logoPreview = document.getElementById("logo-preview");
         const uploaderContent = document.getElementById("uploader-content");
 
-        logoDropzone.addEventListener("click", () => logoUpload.click());
-        logoUpload.addEventListener("change", (e) => {
-          if (e.target.files?.[0]) handleLogoFile(e.target.files[0]);
-        });
-        logoDropzone.addEventListener("dragover", (e) => {
-          e.preventDefault();
-          logoDropzone.style.borderColor = "var(--accent)";
-        });
-        logoDropzone.addEventListener("dragleave", () => {
-          logoDropzone.style.borderColor = "var(--glass-border)";
-        });
-        logoDropzone.addEventListener("drop", (e) => {
-          e.preventDefault();
-          logoDropzone.style.borderColor = "var(--glass-border)";
-          if (e.dataTransfer.files?.[0])
-            handleLogoFile(e.dataTransfer.files[0]);
-        });
+        if (logoDropzone && logoUpload) {
+          logoDropzone.addEventListener("click", () => logoUpload.click());
+          logoUpload.addEventListener("change", (e) => {
+            if (e.target.files?.[0]) handleLogoFile(e.target.files[0]);
+          });
+          logoDropzone.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            logoDropzone.style.borderColor = "var(--accent)";
+          });
+          logoDropzone.addEventListener("dragleave", () => {
+            logoDropzone.style.borderColor = "var(--glass-border)";
+          });
+          logoDropzone.addEventListener("drop", (e) => {
+            e.preventDefault();
+            logoDropzone.style.borderColor = "var(--glass-border)";
+            if (e.dataTransfer.files?.[0])
+              handleLogoFile(e.dataTransfer.files[0]);
+          });
+        }
 
         function handleLogoFile(file) {
           if (file.type !== "image/png" && file.type !== "image/jpeg") {
@@ -3290,9 +3306,8 @@
           reader.readAsDataURL(file);
         }
 
-        document
-          .getElementById("save-identity-btn")
-          .addEventListener("click", async () => {
+        const saveIdentityBtn = document.getElementById("save-identity-btn");
+        if (saveIdentityBtn) saveIdentityBtn.addEventListener("click", async () => {
             const btn = document.getElementById("save-identity-btn");
             btn.textContent = "Saving…";
             const identity = {
@@ -3321,9 +3336,8 @@
           });
 
         // ── Reset ─────────────────────────────────────────────────────────────
-        document
-          .getElementById("reset-btn")
-          .addEventListener("click", async () => {
+        const resetBtn = document.getElementById("reset-btn");
+        if (resetBtn) resetBtn.addEventListener("click", async () => {
             const { isConfirmed } = await Swal.fire({
               title: "Reset All Data?",
               text: "This will clear school identity and all student/teacher records. This cannot be undone.",

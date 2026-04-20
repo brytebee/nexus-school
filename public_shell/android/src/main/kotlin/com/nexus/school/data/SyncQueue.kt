@@ -33,9 +33,13 @@ interface SyncDao {
 
     @Query("UPDATE sync_queue SET is_synced = 1 WHERE event_id IN (:eventIds)")
     suspend fun markEventsSynced(eventIds: List<String>)
+
+    /** Hard-deletes events (used to cancel pending ADD_STUDENT events on local delete). */
+    @Query("DELETE FROM sync_queue WHERE event_id IN (:eventIds)")
+    suspend fun deleteEvents(eventIds: List<String>)
 }
 
-@Database(entities = [SyncEvent::class, Student::class, StudentScore::class], version = 4, exportSchema = false)
+@Database(entities = [SyncEvent::class, Student::class, StudentScore::class], version = 6, exportSchema = false)
 abstract class SyncDatabase : RoomDatabase() {
     abstract fun syncDao(): SyncDao
     abstract fun studentDao(): StudentDao
@@ -45,18 +49,37 @@ abstract class SyncDatabase : RoomDatabase() {
         private var INSTANCE: SyncDatabase? = null
 
         private val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
-            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 // Change primary key to composite (id, subject)
-                database.execSQL("CREATE TABLE students_new (id TEXT NOT NULL, name TEXT NOT NULL, class_name TEXT NOT NULL, subject TEXT NOT NULL DEFAULT 'General', PRIMARY KEY(id, subject))")
-                database.execSQL("INSERT INTO students_new (id, name, class_name) SELECT id, name, class_name FROM students")
-                database.execSQL("DROP TABLE students")
-                database.execSQL("ALTER TABLE students_new RENAME TO students")
+                db.execSQL("CREATE TABLE students_new (id TEXT NOT NULL, name TEXT NOT NULL, class_name TEXT NOT NULL, subject TEXT NOT NULL DEFAULT 'General', PRIMARY KEY(id, subject))")
+                db.execSQL("INSERT INTO students_new (id, name, class_name) SELECT id, name, class_name FROM students")
+                db.execSQL("DROP TABLE students")
+                db.execSQL("ALTER TABLE students_new RENAME TO students")
             }
         }
 
         private val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
-            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
-                database.execSQL("CREATE TABLE local_scores (student_id TEXT NOT NULL, subject TEXT NOT NULL, component_key TEXT NOT NULL, score INTEGER NOT NULL, PRIMARY KEY(student_id, subject, component_key))")
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE local_scores (student_id TEXT NOT NULL, subject TEXT NOT NULL, component_key TEXT NOT NULL, score INTEGER NOT NULL, PRIMARY KEY(student_id, subject, component_key))")
+            }
+        }
+
+        private val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // Add optional plan-gated columns — nullable, no default required
+                db.execSQL("ALTER TABLE students ADD COLUMN photo_base64 TEXT")
+                db.execSQL("ALTER TABLE students ADD COLUMN parent_email TEXT")
+                db.execSQL("ALTER TABLE students ADD COLUMN parent_phone TEXT")
+            }
+        }
+
+        private val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE students ADD COLUMN reg_no TEXT")
+                db.execSQL("ALTER TABLE students ADD COLUMN admission_no TEXT")
+                db.execSQL("ALTER TABLE students ADD COLUMN gender TEXT")
+                db.execSQL("ALTER TABLE students ADD COLUMN dob TEXT")
+                db.execSQL("ALTER TABLE students ADD COLUMN fee_status TEXT NOT NULL DEFAULT 'cleared'")
             }
         }
 
@@ -67,7 +90,7 @@ abstract class SyncDatabase : RoomDatabase() {
                     SyncDatabase::class.java,
                     "nexus_sync_database"
                 )
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance

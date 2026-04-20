@@ -2,7 +2,7 @@ package com.nexus.school.security
 
 import android.content.Context
 import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKeys
+import androidx.security.crypto.MasterKey
 import com.nexus.school.utils.ThermalMonitor
 import java.util.UUID
 import android.security.keystore.KeyGenParameterSpec
@@ -14,23 +14,26 @@ import java.security.Signature
 import java.security.spec.ECGenParameterSpec
 
 class IdentityManager(context: Context) {
-    private val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+    private val masterKey = MasterKey.Builder(context)
+        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+        .build()
+        
     private val prefs = EncryptedSharedPreferences.create(
-        "nexus_identity",
-        masterKeyAlias,
         context,
+        "nexus_identity",
+        masterKey,
         EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
     )
     private val thermalMonitor = ThermalMonitor(context)
 
     fun getDeviceId(): String {
-        var deviceId = prefs.getString("device_id", null)
-        if (deviceId == null) {
-            deviceId = UUID.randomUUID().toString()
-            prefs.edit().putString("device_id", deviceId).apply()
-        }
-        return deviceId!!
+        val storedId = prefs.getString("device_id", null)
+        if (storedId != null) return storedId
+        
+        val newId = UUID.randomUUID().toString()
+        prefs.edit().putString("device_id", newId).apply()
+        return newId
     }
 
     private val keyStoreAlias = "nexus_device_key"
@@ -143,6 +146,40 @@ class IdentityManager(context: Context) {
 
     fun saveScoreComponents(json: String) {
         prefs.edit().putString("score_components_json", json).apply()
+    }
+
+    fun saveMasterSubjectList(subjects: List<String>) {
+        prefs.edit().putString("master_subject_list", subjects.joinToString("|")).apply()
+    }
+
+    fun getMasterSubjectList(): List<String> {
+        val str = prefs.getString("master_subject_list", "") ?: ""
+        return str.split("|").filter { it.isNotBlank() }
+    }
+
+    fun saveTeacherAssignedSubjects(subjects: List<String>) {
+        prefs.edit().putString("teacher_assigned_subjects", subjects.joinToString("|")).apply()
+    }
+
+    fun getTeacherAssignedSubjects(): List<String> {
+        val str = prefs.getString("teacher_assigned_subjects", "") ?: ""
+        return str.split("|").filter { it.isNotBlank() }
+    }
+
+    fun saveRegPrefix(prefix: String) {
+        prefs.edit().putString("reg_prefix", prefix).apply()
+    }
+
+    fun getRegPrefix(): String {
+        return prefs.getString("reg_prefix", "") ?: ""
+    }
+
+    fun saveAdminPrefix(prefix: String) {
+        prefs.edit().putString("admin_prefix", prefix).apply()
+    }
+
+    fun getAdminPrefix(): String {
+        return prefs.getString("admin_prefix", "") ?: ""
     }
 
     fun getScoreComponentsJson(): String {

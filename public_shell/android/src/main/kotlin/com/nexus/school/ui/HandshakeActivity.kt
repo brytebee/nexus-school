@@ -101,6 +101,7 @@ class HandshakeActivity : AppCompatActivity() {
 
     private var cameraProvider: ProcessCameraProvider? = null
 
+    @Suppress("DEPRECATION")
     private fun startScanning(previewView: PreviewView, identityManager: IdentityManager) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
 
@@ -244,6 +245,13 @@ class HandshakeActivity : AppCompatActivity() {
                             var isTorchEnabled by remember { mutableStateOf(false) }
 
                             LaunchedEffect(Unit) {
+                                // Save Master Subject List and Teacher's Assigned Subjects
+                                if (result.all_subjects.isNotEmpty()) {
+                                    identityManager.saveMasterSubjectList(result.all_subjects)
+                                }
+                                val assignedSubjects = students.map { it.subject }.distinct()
+                                identityManager.saveTeacherAssignedSubjects(assignedSubjects)
+
                                 if (students.isNotEmpty()) {
                                     val db = SyncDatabase.getDatabase(this@HandshakeActivity)
                                     for (i in 1..10) {
