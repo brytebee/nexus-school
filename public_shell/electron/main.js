@@ -679,9 +679,13 @@ ipcMain.handle("generate-reports", async (event, payload) => {
          return { success: true, path: outPath, folder: outFolder, format };
     }
 
+    // Write to a robust temp file to bypass Windows Chromium data:URL string length truncation
+    const tempHtmlPath = path.join(app.getPath("desktop"), `nexus_report_temp_${Date.now()}.html`);
+    fs.writeFileSync(tempHtmlPath, html, "utf8");
+
     await new Promise((resolve, reject) => {
         let hw = new BrowserWindow({ show: false, width: 794, height: 1123, webPreferences: { offscreen: true } });
-        hw.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+        hw.loadFile(tempHtmlPath);
         hw.webContents.on("did-finish-load", async () => {
           try {
             if (format === "image") {
@@ -691,7 +695,10 @@ ipcMain.handle("generate-reports", async (event, payload) => {
               const buf = await hw.webContents.printToPDF({ printBackground: true, pageSize: "A4", landscape: (reportType === "broadsheet") });
               fs.writeFileSync(outPath, buf);
             }
-            hw.close(); hw = null; resolve();
+            hw.close(); hw = null;
+            // Clean up temp file
+            if (fs.existsSync(tempHtmlPath)) fs.unlinkSync(tempHtmlPath);
+            resolve();
           } catch(e) { hw?.close(); reject(e); }
         });
     });
