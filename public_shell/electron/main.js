@@ -1,3 +1,7 @@
+console.log("\n\n*******************************************");
+console.log("*       NEXUS DEMO HUB - VERSION 2.3      *");
+console.log("*******************************************\n");
+
 const { app, BrowserWindow, ipcMain, shell, Menu, dialog, nativeImage, clipboard, globalShortcut } = require("electron");
 
 const path = require("path");
@@ -723,6 +727,15 @@ function createWindow() {
     }
     
     database.init(dbPath);
+    
+    // FINAL DEMO CHECK: Print the number of records found
+    try {
+        const db = database.getDb();
+        const count = db.prepare("SELECT COUNT(*) as c FROM student_records").get().c;
+        console.log(`\n[Database] HARDENED SYNC CHECK: FOUND ${count} GRADE RECORDS\n`);
+    } catch(e) {
+        console.warn("[Database] Sync Check Failed (Likely new DB):", e.message);
+    }
 
     if (fs.existsSync(identityFilePath)) {
       const data = fs.readFileSync(identityFilePath, "utf-8");
