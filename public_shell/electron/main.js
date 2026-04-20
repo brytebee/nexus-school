@@ -726,7 +726,8 @@ function createWindow() {
         dbPath = repoDbPath;
     }
     
-    database.init(dbPath);
+    const betterSqlite3 = require("better-sqlite3");
+    database.init(dbPath, betterSqlite3);
     
     // FINAL DEMO CHECK: Print the number of records found
     try {
