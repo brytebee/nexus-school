@@ -713,7 +713,14 @@ function createWindow() {
     identityFilePath = path.join(userDataPath, "identity.json");
 
     // Initialize SQLite Database
-    const dbPath = path.join(userDataPath, "nexus.sqlite");
+    let dbPath = path.join(userDataPath, "nexus.sqlite");
+    
+    // DEMO MODE: Prioritize the seeded DB in the project root if it exists
+    const repoDbPath = path.join(__dirname, "../../private_engine/nexus.sqlite");
+    if (fs.existsSync(repoDbPath)) {
+        dbPath = repoDbPath;
+    }
+    
     database.init(dbPath);
 
     if (fs.existsSync(identityFilePath)) {
