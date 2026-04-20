@@ -6,7 +6,7 @@ const crypto = require("crypto");
 const os = require("os");
 const dgram = require("dgram");
 const Handlebars = require("handlebars");
-const { database, server, reports } = require("@nexus/engine");
+const { database, server, reports } = require("../../private_engine");
 const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, handleCSVUpload, clearData } = server;
 const address = require("address");
 
