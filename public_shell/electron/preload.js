@@ -38,6 +38,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateTeacherFull:  (data)   => ipcRenderer.invoke('update-teacher-full', data),
     // V3: Result Studio
     copyResultImage:    (data)   => ipcRenderer.invoke('copy-result-image', data),
+    // Phase 2: Form Teachers & Remarks
+    getFormTeachers:    ()       => ipcRenderer.invoke('get-form-teachers'),
+    setFormTeacher:     (data)   => ipcRenderer.invoke('set-form-teacher', data),
+    saveBulkRemarks:    (data)   => ipcRenderer.invoke('save-bulk-remarks', data),
     // V4 (Phase 0): Limit Engine
     revokeDevice:       (id)     => ipcRenderer.invoke('revoke-device', id),
     onShowUpgradeModal: (callback) => ipcRenderer.on('show-upgrade-modal', (_event, value) => callback(value)),

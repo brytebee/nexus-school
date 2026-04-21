@@ -325,6 +325,10 @@
               >
                 ⚡ Import CSV
               </label>
+              </label>
+              <button class="primary-btn" style="background:rgba(0,229,255,0.1);color:#00e5ff;border:1px solid rgba(0,229,255,0.3);box-shadow:none;" onclick="openFormTeacherModal()">
+                🏠 Class Hosts
+              </button>
               <button class="primary-btn" onclick="toggleAddTeacherForm()">
                 ＋ Add Teacher
               </button>
@@ -386,6 +390,16 @@
                 class="modern-input"
                 placeholder="Email (optional)"
               />
+            </div>
+            <div style="margin-bottom:14px;">
+              <p style="font-size:11px;color:var(--accent);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Teacher Signature</p>
+              <div style="display:flex;gap:10px;align-items:center;">
+                <label for="tch-signature-upload" class="ph-type-btn" style="cursor:pointer;font-size:11px;padding:6px 12px;border:1px dashed var(--glass-border);">📁 Clear Sign (.png)</label>
+                <input type="file" id="tch-signature-upload" style="display:none;" accept="image/*" onchange="previewTchSign(this)" />
+                <div id="tch-sign-preview-wrap" style="display:none;background:rgba(255,255,255,0.05);border:1px solid var(--glass-border);border-radius:4px;padding:4px;">
+                  <img id="tch-sign-preview-img" style="height:32px; filter:brightness(0.9) contrast(1.1);" />
+                </div>
+              </div>
             </div>
             <p
               style="
@@ -2048,6 +2062,19 @@
         renderAllocations();
       }
 
+      let _wizTchSignBase64 = null;
+      function previewTchSign(input) {
+        if (input.files && input.files[0]) {
+          const reader = new FileReader();
+          reader.onload = function (e) {
+             _wizTchSignBase64 = e.target.result;
+             document.getElementById("tch-sign-preview-img").src = _wizTchSignBase64;
+             document.getElementById("tch-sign-preview-wrap").style.display = "block";
+          };
+          reader.readAsDataURL(input.files[0]);
+        }
+      }
+
       async function wizSaveTeacher() {
         const name = document.getElementById("wiz-tch-name").value.trim();
         const phone = document.getElementById("wiz-tch-phone").value.trim();
@@ -2072,6 +2099,7 @@
           phone,
           email,
           allocations: _wizAllocations,
+          signature: _wizTchSignBase64,
         });
 
         if (res.ok) {
@@ -2081,6 +2109,9 @@
             document.getElementById(f).value = "";
           });
           _wizAllocations = [];
+          _wizTchSignBase64 = null;
+          document.getElementById("tch-sign-preview-wrap").style.display = "none";
+          document.getElementById("tch-signature-upload").value = "";
           renderAllocations();
           await refreshTeachersTable();
           setTimeout(() => toggleAddTeacherForm(), 1400);
@@ -3572,9 +3603,19 @@
           <button onclick="closeEditTeacher()" style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;line-height:1;">×</button>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px;">
-          <input id="edit-tch-name" class="modern-input" placeholder="Full Name *" />
           <input id="edit-tch-phone" class="modern-input" placeholder="Phone Number" />
           <input id="edit-tch-email" class="modern-input" placeholder="Email (optional)" />
+        </div>
+        <div style="margin-bottom:14px;background:rgba(255,255,255,0.03);padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.05);">
+          <p style="font-size:11px;color:#00e5ff;margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Teacher Signature</p>
+          <div style="display:flex;gap:15px;align-items:center;">
+            <label for="edit-tch-signature-upload" class="ph-type-btn" style="cursor:pointer;font-size:11px;padding:6px 12px;border:1px dashed rgba(0,229,255,0.3);background:transparent;">📁 Change Sign (.png)</label>
+            <input type="file" id="edit-tch-signature-upload" style="display:none;" accept="image/*" onchange="previewEditTchSign(this)" />
+            <div id="edit-tch-sign-preview-wrap" style="background:rgba(255,255,255,0.05);border:1px solid rgba(0,229,255,0.1);border-radius:4px;padding:4px;">
+              <img id="edit-tch-sign-preview-img" style="height:35px; filter:brightness(0.9) contrast(1.1);" />
+            </div>
+            <button onclick="clearEditTchSign()" style="background:none;border:none;color:#ff6b6b;font-size:11px;cursor:pointer;">Remove</button>
+          </div>
         </div>
         <p style="font-size:11px;color:#00e5ff;margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Class Allocations</p>
         <div id="edit-tch-alloc-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
@@ -3601,6 +3642,62 @@
           <button onclick="closeEditTeacher()" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:13px;">Cancel</button>
           <span id="edit-tch-log" style="font-size:12px;margin-left:6px;"></span>
         </div>
+      </div>
+    </div>
+    <!-- ═══ Form Teacher (Class Hosts) Modal ══════════════════════════════════ -->
+    <div id="form-teacher-overlay" style="display:none;position:fixed;inset:0;z-index:9100;background:rgba(0,0,0,0.7);backdrop-filter:blur(10px);justify-content:center;align-items:center;">
+      <div style="background:#0d1235;border:1px solid rgba(0,229,255,0.3);border-radius:24px;padding:32px;width:600px;max-width:90vw;box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
+         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+            <h3 style="color:#00e5ff;font-size:16px;font-weight:700;">🏠 Assign Class Hosts (Form Teachers)</h3>
+            <button onclick="closeFormTeacherModal()" style="background:none;border:none;color:var(--text-dim);font-size:24px;cursor:pointer;">×</button>
+         </div>
+         <p style="font-size:12px;color:var(--text-dim);margin-bottom:20px;">Assign a primary teacher to each class. This teacher's name and signature will appear on the final report card as the 'Form Teacher'.</p>
+         
+         <div id="ft-mapping-container" style="max-height:400px;overflow-y:auto;padding-right:10px;margin-bottom:24px;">
+            <!-- Dynamic rows here -->
+            <div style="text-align:center;padding:40px;color:var(--text-dim);">Loading class list...</div>
+         </div>
+
+         <div style="display:flex;justify-content:flex-end;">
+            <button onclick="closeFormTeacherModal()" class="primary-btn" style="background:rgba(255,255,255,0.05);color:#fff;border:1px solid rgba(255,255,255,0.1);box-shadow:none;">Close</button>
+         </div>
+      </div>
+    </div>
+
+    <!-- ═══ Bulk Remarks Modal ═══════════════════════════════════════════════ -->
+    <div id="bulk-remarks-overlay" style="display:none;position:fixed;inset:0;z-index:9200;background:rgba(0,0,0,0.8);backdrop-filter:blur(12px);justify-content:center;align-items:center;">
+      <div style="background:#0a0e28;border:1px solid var(--accent);border-radius:24px;padding:32px;width:1100px;max-width:98vw;max-height:92vh;display:flex;flex-direction:column;box-shadow: 0 30px 80px rgba(0,0,0,0.6);">
+         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3 style="color:var(--accent);font-size:17px;font-weight:700;">📝 End-of-Term Endorsements</h3>
+            <div style="display:flex;gap:12px;align-items:center;">
+                <button onclick="autoFillRemarks()" class="primary-btn" style="font-size:11px;padding:6px 14px;background:rgba(0,229,255,0.1);border:1px solid var(--accent);color:var(--accent);box-shadow:none;">✨ Auto-Fill Empty</button>
+                <button onclick="closeBulkRemarksModal()" style="background:none;border:none;color:var(--text-dim);font-size:24px;cursor:pointer;">×</button>
+            </div>
+         </div>
+         <p style="font-size:12px;color:var(--text-dim);margin-bottom:18px;">Quickly enter Teacher and Principal remarks for all students currently in the Result Studio scope.</p>
+         
+         <div style="flex:1;overflow-y:auto;border:1px solid rgba(255,255,255,0.05);border-radius:12px;background:rgba(0,0,0,0.2);">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead style="position:sticky;top:0;background:#151b3d;z-index:10;box-shadow:0 2px 10px rgba(0,0,0,0.2);">
+                    <tr>
+                        <th style="padding:12px 16px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.1);">Student</th>
+                        <th style="padding:12px 16px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.1);">Teacher Remark</th>
+                        <th style="padding:12px 16px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.1);">Principal Remark</th>
+                    </tr>
+                </thead>
+                <tbody id="remarks-bulk-tbody">
+                    <!-- Dynamic rows here -->
+                </tbody>
+            </table>
+         </div>
+
+         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:24px;">
+            <div id="remarks-save-log" style="font-size:14px;color:var(--accent);"></div>
+            <div style="display:flex;gap:12px;">
+                <button onclick="closeBulkRemarksModal()" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:14px;">Cancel</button>
+                <button onclick="saveBulkRemarksData()" class="primary-btn" style="padding:10px 28px;font-size:14px;background:linear-gradient(135deg,var(--accent),#00838f);box-shadow:0 4px 15px rgba(0,0,0,0.3);">💾 Save All Remarks</button>
+            </div>
+         </div>
       </div>
     </div>
 

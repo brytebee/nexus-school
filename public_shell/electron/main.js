@@ -34,6 +34,7 @@ let identityPacket = {
   address: "",
   motto: "",
   signature: "",
+  stamp: "",
 };
 let identityFilePath = "";
 let qrPayload = null;
@@ -425,6 +426,15 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
 
     // Aggregate Explicit Subjects 
     const getExplicitSubjects = db.prepare("SELECT subject FROM student_subjects WHERE student_id = ?");
+    
+    // NEW: Fetch all form teachers into a map for fast lookup
+    const formTeachersList = db.prepare(`
+      SELECT f.class_name, t.name, t.signature 
+      FROM form_teachers f
+      JOIN teachers t ON f.teacher_id = t.id
+    `).all();
+    const formTeacherMap = new Map();
+    formTeachersList.forEach(ft => formTeacherMap.set(ft.class_name, ft));
 
     const results = students.map((stu) => {
       const records = getRecords.all(stu.id, session, term);
@@ -459,6 +469,9 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
       const domains = getDomains.all(stu.id, session, term);
       const remark = getRemark.get(stu.id, session, term) || {};
 
+      // NEW: Look up form teacher for this class
+      const ft = formTeacherMap.get(stu.class_name) || {};
+
       return {
         ...stu,
         subjects: allSubjectsArray,
@@ -467,6 +480,10 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
         domains,
         remark: remark.remark || "",
         principal_remark: remark.principal_remark || "",
+        form_teacher_name: ft.name || "",
+        form_teacher_signature: ft.signature || null,
+        principal_signature: identityPacket.signature || null,
+        principal_stamp: identityPacket.stamp || null,
       };
     });
 
@@ -545,6 +562,60 @@ ipcMain.handle("save-teacher-remark", (event, { student_id, teacher_id, session,
       ON CONFLICT(student_id, academic_session, term)
       DO UPDATE SET remark = excluded.remark, principal_remark = excluded.principal_remark
     `).run({ student_id, teacher_id: teacher_id || null, session, term, remark: remark || "", principal_remark: principal_remark || "" });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("save-bulk-remarks", (event, remarksArray) => {
+  try {
+    const db = database.getDb();
+    const insert = db.prepare(`
+      INSERT INTO teacher_remarks (student_id, teacher_id, academic_session, term, remark, principal_remark)
+      VALUES (@student_id, @teacher_id, @session, @term, @remark, @principal_remark)
+      ON CONFLICT(student_id, academic_session, term)
+      DO UPDATE SET remark = excluded.remark, principal_remark = excluded.principal_remark
+    `);
+    
+    const transaction = db.transaction((remarks) => {
+      for (const r of remarks) {
+        insert.run({
+          student_id: r.student_id,
+          teacher_id: r.teacher_id || null,
+          session: r.session,
+          term: r.term,
+          remark: r.remark || "",
+          principal_remark: r.principal_remark || ""
+        });
+      }
+    });
+
+    transaction(remarksArray);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("get-form-teachers", () => {
+  try {
+    const db = database.getDb();
+    const rows = db.prepare("SELECT * FROM form_teachers").all();
+    return { ok: true, data: rows };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("set-form-teacher", (event, { class_name, teacher_id }) => {
+  try {
+    const db = database.getDb();
+    db.prepare(`
+      INSERT INTO form_teachers (class_name, teacher_id)
+      VALUES (?, ?)
+      ON CONFLICT(class_name) DO UPDATE SET teacher_id = excluded.teacher_id
+    `).run(class_name, teacher_id);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
