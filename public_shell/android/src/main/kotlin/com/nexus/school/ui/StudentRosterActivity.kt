@@ -199,12 +199,14 @@ class StudentRosterActivity : AppCompatActivity() {
                     val teacherAssignedSubjects = IdentityManager(this@StudentRosterActivity).getTeacherAssignedSubjects()
                     
                     // Derive ordered unique (class, subject) tabs, exclusively for teacher's assigned subjects
-                    tabs = students
+                    val newTabs = students
                         .filter { teacherAssignedSubjects.isEmpty() || teacherAssignedSubjects.contains(it.subject) }
                         .map { Pair(it.class_name, it.subject) }
                         .distinct()
                         .sortedWith(compareBy({ it.first }, { it.second }))
-                    if (selectedTab == null) selectedTab = tabs.firstOrNull()
+                    tabs = newTabs
+                    // FIX: Validate selected tab still exists after reload; reset if not
+                    if (selectedTab == null || !newTabs.contains(selectedTab)) selectedTab = newTabs.firstOrNull()
 
                     // Pre-fill sync status from pending events
                     val events = db.syncDao().getPendingEvents()
@@ -517,6 +519,20 @@ fun RosterHeader(
     // Connection State: 0 = Unknown, 1 = Pinging, 2 = Online (Green), 3 = Offline (Red)
     var connectionState by remember { mutableStateOf(0) }
 
+    // FIX: Auto-ping Hub on first load so the indicator is meaningful immediately
+    LaunchedEffect(Unit) {
+        connectionState = 1
+        val serverInfo = IdentityManager(context).getServerInfo()
+        if (serverInfo == null) { connectionState = 3; return@LaunchedEffect }
+        val (ip, port) = serverInfo
+        connectionState = try {
+            java.net.Socket().use { socket ->
+                socket.connect(java.net.InetSocketAddress(ip, port), 2500)
+            }
+            2
+        } catch (e: Exception) { 3 }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -779,12 +795,13 @@ fun FocusModePager(
     // Flat state map: "studentId_subject_componentKey" -> value string
     val gradeState = remember { mutableStateMapOf<String, String>() }
 
-    // Pre-load values from permanent local offline persistence
-    LaunchedEffect(Unit) {
+    // FIX: Key on students list so scores reload whenever the class/subject tab changes
+    LaunchedEffect(students) {
         val db = SyncDatabase.getDatabase(context)
         db.studentDao().getAllScores().forEach { score ->
-            val prefix = if (score.subject.isNotEmpty() && score.subject != "General") "${score.student_id}_${score.subject}" else score.student_id
-            gradeState["${prefix}_${score.component_key}"] = score.score.toString()
+            // Always key as "studentId_subject_componentKey" for subject-specific grading
+            val key = "${score.student_id}_${score.subject}_${score.component_key}"
+            gradeState[key] = score.score.toString()
         }
     }
 

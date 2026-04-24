@@ -132,6 +132,12 @@ class IdentityManager(context: Context) {
             .apply()
     }
 
+    fun saveLogoBase64(logoBase64: String?) {
+        if (logoBase64 != null) prefs.edit().putString("school_logo_b64", logoBase64).apply()
+    }
+
+    fun getLogoBase64(): String? = prefs.getString("school_logo_b64", null)
+
     fun isMarried(): Boolean {
         return prefs.getBoolean("is_married", false)
     }
