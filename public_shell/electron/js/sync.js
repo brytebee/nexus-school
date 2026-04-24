@@ -24,8 +24,11 @@
 
         qrContainer.innerHTML = "";
         const qrData = JSON.parse(JSON.stringify(payload));
-        if (qrData.config && qrData.config.logoBase64)
+        if (qrData.config) {
           qrData.config.logoBase64 = null;
+          qrData.config.principalSignBase64 = null;
+          qrData.config.teacherSignBase64 = null;
+        }
 
         new QRCode(qrContainer, {
           text: JSON.stringify(qrData),
