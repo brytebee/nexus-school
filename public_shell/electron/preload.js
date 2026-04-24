@@ -47,6 +47,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onShowUpgradeModal: (callback) => ipcRenderer.on('show-upgrade-modal', (_event, value) => callback(value)),
     // Phase 3.1: The Wow Factor (UDP Heartbeats)
     onPulseHeartbeat:   (callback) => ipcRenderer.on('pulse-heartbeat', (_event, value) => callback(value)),
+    // V2.2: Dynamic Stamps & Metadata
+    getStampPreview:    (data)   => ipcRenderer.invoke('get-stamp-preview', data),
+    getUniqueMetadata:  ()       => ipcRenderer.invoke('get-unique-metadata'),
 });
 
 

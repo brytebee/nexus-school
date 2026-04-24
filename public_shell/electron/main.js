@@ -33,24 +33,60 @@ let identityPacket = {
   logoBase64: null,
   address: "",
   motto: "",
-  signature: "",
+  signature: "",           // Principal's name (text — used by calligraphy-style templates)
+  principalSignBase64: null, // Principal's image signature (uploaded via Settings)
   stamp: "",
+  stampStyle: "none",
+  stampCustomColor: null
 };
 let identityFilePath = "";
 let qrPayload = null;
+let licenseStatus = { locked: false, message: "" };
 
 // ── ALL ipcMain.handle registrations (ONCE at module scope) ──────────────────
 
 ipcMain.handle("get-identity", () => {
-  return identityPacket;
+  return { ...identityPacket, tier: licenseStatus?.tier || "Silver" };
+});
+
+ipcMain.handle("get-unique-metadata", () => {
+  try {
+    const db = database.getDb();
+    const classes = db.prepare("SELECT DISTINCT class_name FROM students WHERE class_name IS NOT NULL AND class_name != '' ORDER BY class_name ASC").all().map(r => r.class_name);
+    
+    const subjects = db.prepare(`
+      SELECT DISTINCT subject FROM student_subjects 
+      UNION 
+      SELECT DISTINCT subject FROM teacher_allocations
+      WHERE subject IS NOT NULL AND subject != ''
+      ORDER BY subject ASC
+    `).all().map(r => r.subject);
+    
+    return { classes, subjects };
+  } catch (err) {
+    console.error("Failed to fetch unique metadata:", err);
+    return { classes: [], subjects: [] };
+  }
 });
 
 ipcMain.handle("get-teachers", () => {
   try {
     const db = database.getDb();
-    return db
-      .prepare("SELECT id, name, phone, email FROM teachers ORDER BY name ASC")
+    const teachers = db
+      .prepare(`
+        SELECT t.id, t.name, t.phone, t.email, t.signature, f.class_name as host_class
+        FROM teachers t
+        LEFT JOIN form_teachers f ON t.id = f.teacher_id
+        ORDER BY t.name ASC
+      `)
       .all();
+    
+    // Enrich with subject allocations
+    for (const t of teachers) {
+      t.allocations = db.prepare("SELECT class_name, subject FROM teacher_allocations WHERE teacher_id = ?").all(t.id);
+    }
+    
+    return teachers;
   } catch (err) {
     console.error("Failed to fetch teachers:", err);
     return [];
@@ -134,13 +170,13 @@ ipcMain.handle("update-teacher", (event, { id, name, phone, email }) => {
 });
 
 // ── Full Teacher Update — profile + replace all allocations ────────────────────────────
-ipcMain.handle("update-teacher-full", (event, { id, name, phone, email, allocations }) => {
+ipcMain.handle("update-teacher-full", (event, { id, name, phone, email, signature, allocations, host_class }) => {
   try {
     const db = database.getDb();
     db.transaction(() => {
       db.prepare(
-        "UPDATE teachers SET name=@name, phone=@phone, email=@email WHERE id=@id",
-      ).run({ id, name: name || "", phone: phone || "", email: email || "" });
+        "UPDATE teachers SET name=@name, phone=@phone, email=@email, signature=@signature WHERE id=@id",
+      ).run({ id, name: name || "", phone: phone || "", email: email || "", signature: signature || null });
       db.prepare("DELETE FROM teacher_allocations WHERE teacher_id = ?").run(id);
       if (allocations && allocations.length > 0) {
         const ins = db.prepare(
@@ -154,8 +190,17 @@ ipcMain.handle("update-teacher-full", (event, { id, name, phone, email, allocati
           }
         }
       }
+      // Sync Form Teacher role
+      db.prepare("DELETE FROM form_teachers WHERE teacher_id = ?").run(id);
+      if (host_class) {
+        db.prepare(`
+          INSERT INTO form_teachers (class_name, teacher_id) 
+          VALUES (?, ?)
+          ON CONFLICT(class_name) DO UPDATE SET teacher_id = excluded.teacher_id
+        `).run(host_class, id);
+      }
     })();
-    console.log(`[Form] Teacher ${id} fully updated: ${name}, ${(allocations||[]).length} allocation group(s).`);
+    console.log(`[Form] Teacher ${id} fully updated (Host: ${host_class || 'None'}).`);
     return { ok: true };
   } catch (err) {
     console.error('[Form] update-teacher-full failed:', err);
@@ -427,14 +472,13 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
     // Aggregate Explicit Subjects 
     const getExplicitSubjects = db.prepare("SELECT subject FROM student_subjects WHERE student_id = ?");
     
-    // NEW: Fetch all form teachers into a map for fast lookup
-    const formTeachersList = db.prepare(`
+    // V2.1 Optimized: Fetch all form teachers into a map once per batch
+    const formTeacherMap = new Map();
+    db.prepare(`
       SELECT f.class_name, t.name, t.signature 
       FROM form_teachers f
       JOIN teachers t ON f.teacher_id = t.id
-    `).all();
-    const formTeacherMap = new Map();
-    formTeachersList.forEach(ft => formTeacherMap.set(ft.class_name, ft));
+    `).all().forEach(ft => formTeacherMap.set(ft.class_name, ft));
 
     const results = students.map((stu) => {
       const records = getRecords.all(stu.id, session, term);
@@ -472,6 +516,13 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
       // NEW: Look up form teacher for this class
       const ft = formTeacherMap.get(stu.class_name) || {};
 
+      // V2.2: Resolve official stamp
+      let schoolStamp = identityPacket.stamp || null;
+      if (identityPacket.stampStyle && identityPacket.stampStyle !== "none" && !schoolStamp) {
+        const stampColor = identityPacket.stampCustomColor || (identityPacket.tier === "Silver" ? "#0D47A1" : identityPacket.themePrimary);
+        schoolStamp = generateStampSVG(identityPacket.stampStyle, identityPacket.name, null, identityPacket.signature, stampColor);
+      }
+
       return {
         ...stu,
         subjects: allSubjectsArray,
@@ -482,8 +533,11 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
         principal_remark: remark.principal_remark || "",
         form_teacher_name: ft.name || "",
         form_teacher_signature: ft.signature || null,
+        // Text name (for calligraphy-style templates like Monarch, Sterling, Apex)
         principal_signature: identityPacket.signature || null,
-        principal_stamp: identityPacket.stamp || null,
+        // Image signature (for clean_slate, azure and any template using identity.principalSignatureBase64)
+        // This is forwarded to report-compiler via the identity object directly — not this per-student field
+        principal_stamp: schoolStamp,
       };
     });
 
@@ -558,9 +612,16 @@ ipcMain.handle("save-teacher-remark", (event, { student_id, teacher_id, session,
     const db = database.getDb();
     db.prepare(`
       INSERT INTO teacher_remarks (student_id, teacher_id, academic_session, term, remark, principal_remark)
-      VALUES (@student_id, @teacher_id, @session, @term, @remark, @principal_remark)
+      VALUES (
+        @student_id, 
+        COALESCE(@teacher_id, (SELECT teacher_id FROM form_teachers WHERE class_name = (SELECT class_name FROM students WHERE id = @student_id))),
+        @session, @term, @remark, @principal_remark
+      )
       ON CONFLICT(student_id, academic_session, term)
-      DO UPDATE SET remark = excluded.remark, principal_remark = excluded.principal_remark
+      DO UPDATE SET 
+        remark = excluded.remark, 
+        principal_remark = excluded.principal_remark,
+        teacher_id = COALESCE(excluded.teacher_id, teacher_remarks.teacher_id)
     `).run({ student_id, teacher_id: teacher_id || null, session, term, remark: remark || "", principal_remark: principal_remark || "" });
     return { ok: true };
   } catch (err) {
@@ -573,11 +634,25 @@ ipcMain.handle("save-bulk-remarks", (event, remarksArray) => {
     const db = database.getDb();
     const insert = db.prepare(`
       INSERT INTO teacher_remarks (student_id, teacher_id, academic_session, term, remark, principal_remark)
-      VALUES (@student_id, @teacher_id, @session, @term, @remark, @principal_remark)
+      VALUES (
+        @student_id, 
+        COALESCE(@teacher_id, (SELECT teacher_id FROM form_teachers WHERE class_name = (SELECT class_name FROM students WHERE id = @student_id))),
+        @session, @term, @remark, @principal_remark
+      )
       ON CONFLICT(student_id, academic_session, term)
-      DO UPDATE SET remark = excluded.remark, principal_remark = excluded.principal_remark
+      DO UPDATE SET 
+        remark = excluded.remark, 
+        principal_remark = excluded.principal_remark,
+        teacher_id = COALESCE(excluded.teacher_id, teacher_remarks.teacher_id)
     `);
     
+    const insertAtt = db.prepare(`
+      INSERT INTO student_attendance (student_id, academic_session, term, total_days, days_attended)
+      VALUES (@student_id, @session, @term, @total_days, @days_attended)
+      ON CONFLICT(student_id, academic_session, term)
+      DO UPDATE SET total_days=excluded.total_days, days_attended=excluded.days_attended
+    `);
+
     const transaction = db.transaction((remarks) => {
       for (const r of remarks) {
         insert.run({
@@ -588,8 +663,85 @@ ipcMain.handle("save-bulk-remarks", (event, remarksArray) => {
           remark: r.remark || "",
           principal_remark: r.principal_remark || ""
         });
+
+        // Also sync attendance if provided
+        if (r.total_days !== undefined) {
+          insertAtt.run({
+            student_id: r.student_id,
+            session: r.session,
+            term: r.term,
+            total_days: r.total_days || 0,
+            days_attended: r.days_attended || 0
+          });
+        }
       }
     });
+// ── V2.2: Dynamic Stamp Engine ──────────────────────────────────────────────
+function generateStampSVG(style, schoolName, date, principalName, color = "#0D47A1") {
+  const name = (schoolName || "NEXUS ACADEMY").toUpperCase();
+  const dateStr = date || new Date().toLocaleDateString("en-NG", { year: "numeric", month: "short", day: "numeric" });
+  const pName = (principalName || "").toUpperCase();
+  
+  if (style === "classic_round") {
+    return `data:image/svg+xml;base64,${Buffer.from(`
+      <svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="100" cy="100" r="95" fill="none" stroke="${color}" stroke-width="3" />
+        <circle cx="100" cy="100" r="80" fill="none" stroke="${color}" stroke-width="1.5" />
+        <path id="curve" d="M 30,100 A 70,70 0 1,1 170,100" fill="none" />
+        <text fill="${color}" font-family="Inter, sans-serif" font-weight="900" font-size="16">
+          <textPath href="#curve" startOffset="50%" text-anchor="middle">${name}</textPath>
+        </text>
+        <path id="curve-bottom" d="M 30,100 A 70,70 0 1,0 170,100" fill="none" />
+        <text fill="${color}" font-family="Inter, sans-serif" font-weight="700" font-size="12">
+          <textPath href="#curve-bottom" startOffset="50%" text-anchor="middle">OFFICIAL SEAL</textPath>
+        </text>
+        <text x="100" y="105" fill="${color}" font-family="Inter, sans-serif" font-weight="800" font-size="14" text-anchor="middle">${dateStr}</text>
+        <text x="100" y="125" fill="${color}" font-family="Inter, sans-serif" font-weight="600" font-size="9" text-anchor="middle">${pName}</text>
+      </svg>
+    `).toString("base64")}`;
+  }
+  
+  if (style === "modern_rect") {
+    return `data:image/svg+xml;base64,${Buffer.from(`
+      <svg width="240" height="100" viewBox="0 0 240 100" xmlns="http://www.w3.org/2000/svg">
+        <rect x="5" y="5" width="230" height="90" rx="8" fill="none" stroke="${color}" stroke-width="4" />
+        <line x1="5" y1="30" x2="235" y2="30" stroke="${color}" stroke-width="2" />
+        <text x="120" y="22" fill="${color}" font-family="Inter, sans-serif" font-weight="900" font-size="12" text-anchor="middle">${name}</text>
+        <text x="120" y="65" fill="${color}" font-family="Inter, sans-serif" font-weight="950" font-size="28" text-anchor="middle">APPROVED</text>
+        <text x="120" y="88" fill="${color}" font-family="Inter, sans-serif" font-weight="700" font-size="12" text-anchor="middle">${dateStr}</text>
+      </svg>
+    `).toString("base64")}`;
+  }
+
+  if (style === "ribbon_endorse") {
+    return `data:image/svg+xml;base64,${Buffer.from(`
+      <svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+        <path d="M100 10 L115 45 L150 45 L120 70 L135 105 L100 85 L65 105 L80 70 L50 45 L85 45 Z" fill="none" stroke="${color}" stroke-width="3" />
+        <circle cx="100" cy="55" r="40" fill="none" stroke="${color}" stroke-width="2" stroke-dasharray="4" />
+        <text x="100" y="140" fill="${color}" font-family="Inter, sans-serif" font-weight="900" font-size="14" text-anchor="middle">${name}</text>
+        <text x="100" y="160" fill="${color}" font-family="Inter, sans-serif" font-weight="700" font-size="16" text-anchor="middle">CERTIFIED</text>
+        <text x="100" y="180" fill="${color}" font-family="Inter, sans-serif" font-weight="600" font-size="12" text-anchor="middle">${dateStr}</text>
+      </svg>
+    `).toString("base64")}`;
+  }
+  
+  if (style === "minimal_sig") {
+    return `data:image/svg+xml;base64,${Buffer.from(`
+      <svg width="200" height="80" viewBox="0 0 200 80" xmlns="http://www.w3.org/2000/svg">
+        <line x1="20" y1="50" x2="180" y2="50" stroke="${color}" stroke-width="2" />
+        <text x="100" y="40" fill="${color}" font-family="Inter, sans-serif" font-weight="700" font-size="12" text-anchor="middle">OFFICIALLY SIGNED</text>
+        <text x="100" y="65" fill="${color}" font-family="Inter, sans-serif" font-weight="800" font-size="14" text-anchor="middle">${dateStr}</text>
+        <text x="100" y="75" fill="${color}" font-family="Inter, sans-serif" font-weight="500" font-size="8" text-anchor="middle">${name}</text>
+      </svg>
+    `).toString("base64")}`;
+  }
+
+  return null;
+}
+
+ipcMain.handle("get-stamp-preview", (event, { style, color }) => {
+  return generateStampSVG(style, identityPacket.name, null, identityPacket.signature, color);
+});
 
     transaction(remarksArray);
     return { ok: true };
@@ -601,7 +753,11 @@ ipcMain.handle("save-bulk-remarks", (event, remarksArray) => {
 ipcMain.handle("get-form-teachers", () => {
   try {
     const db = database.getDb();
-    const rows = db.prepare("SELECT * FROM form_teachers").all();
+    const rows = db.prepare(`
+      SELECT f.class_name, f.teacher_id, t.name as teacher_name 
+      FROM form_teachers f
+      JOIN teachers t ON f.teacher_id = t.id
+    `).all();
     return { ok: true, data: rows };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -623,21 +779,28 @@ ipcMain.handle("set-form-teacher", (event, { class_name, teacher_id }) => {
 });
 
 ipcMain.handle("save-identity", (event, newIdentity) => {
-  identityPacket = { ...identityPacket, ...newIdentity };
   try {
+    // Ensure identityFilePath is set
+    if (!identityFilePath) {
+      const userDataPath = require('electron').app.getPath("userData");
+      identityFilePath = require('path').join(userDataPath, "identity.json");
+    }
+    
+    identityPacket = { ...identityPacket, ...newIdentity };
     fs.writeFileSync(identityFilePath, JSON.stringify(identityPacket, null, 2));
     console.log("[Electron] Identity saved locally.");
+    
+    if (qrPayload) {
+      qrPayload.config = identityPacket;
+      setSchoolConfig(qrPayload.config);
+      if (mainWindow) mainWindow.webContents.send("qr-payload", qrPayload);
+    }
+    
+    return { ok: true, identity: { ...identityPacket, tier: licenseStatus?.tier || "Silver" } };
   } catch (err) {
-    console.error("Failed to save identity", err);
+    console.error("Failed to save identity:", err);
+    return { ok: false, error: err.message };
   }
-  if (qrPayload) {
-    qrPayload.config = identityPacket;
-    setSchoolConfig(qrPayload.config);
-  }
-  if (mainWindow) {
-    mainWindow.webContents.send("qr-payload", qrPayload);
-  }
-  return true;
 });
 
 console.log("[Electron] Registering generate-reports handler...");
@@ -938,7 +1101,7 @@ function createWindow() {
 
 
   // ── Phase 4: License Enforcement Engine & Security Lock ────────────
-  let licenseStatus = { locked: false, message: "" };
+  // licenseStatus already initialized at module scope (line 43)
 
   function getHardwareFingerprint() {
     const cpus = os.cpus();
@@ -1034,6 +1197,7 @@ function createWindow() {
       };
     } else {
       const payloadDecoded = JSON.parse(licenseDisk.payload);
+      licenseStatus.tier = payloadDecoded.tier || "Silver";
       
       // Hardware Check
       if (payloadDecoded.hardware_id && payloadDecoded.hardware_id !== hardwareId) {
