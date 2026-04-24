@@ -134,6 +134,26 @@
             <span class="nav-icon">📊</span>
             <span class="nav-label">Result Studio</span>
           </li>
+          <li
+            class="nav-item"
+            data-view="attendance"
+            data-tier="Gold"
+            onclick="showView('attendance')"
+          >
+            <span class="nav-icon">📅</span>
+            <span class="nav-label">Attendance</span>
+            <span class="nav-lock" style="display:none;margin-left:auto;font-size:12px;">🔒</span>
+          </li>
+          <li
+            class="nav-item"
+            data-view="fees"
+            data-tier="Diamond"
+            onclick="showView('fees')"
+          >
+            <span class="nav-icon">💳</span>
+            <span class="nav-label">Fee Engine</span>
+            <span class="nav-lock" style="display:none;margin-left:auto;font-size:12px;">🔒</span>
+          </li>
         </ul>
 
         <div class="sidebar-footer-nav">
@@ -1396,6 +1416,17 @@
                 <p style="font-size: 11px; color: #aaa; margin-bottom: 10px;">Includes columns for student ID, name, class, and subjects.</p>
                 <a href="data:text/csv;charset=utf-8,Student_ID,First_Name,Last_Name,Class,Subjects%0ASTU-001,Jane,Smith,JSS%201,Mathematics|English%20Language" download="Nexus_Students_Template.csv" class="secondary-btn" style="display:block; text-align:center; width: 100%; font-size: 12px; padding: 8px; text-decoration: none;">📥 Download Students.csv</a>
               </div>
+
+              <div class="form-group" style="background: rgba(255, 215, 0, 0.05); padding: 16px; border-radius: 8px; border: 1px dashed rgba(255, 215, 0, 0.3); margin-top: 18px;">
+                <label style="color: #ffd700; font-size: 13px; margin-bottom: 8px; display: block;">🖥️ Terminal Architecture</label>
+                <p style="font-size: 11px; color: #aaa; margin-bottom: 10px;">Select the role of this PC. Changes require a restart.</p>
+                <select class="modern-input" id="terminal-mode-select" style="font-size:12px; margin-bottom:8px;" onchange="document.getElementById('master-ip-input').style.display = this.value === 'client' ? 'block' : 'none';">
+                  <option value="master">Master Node (Runs Database)</option>
+                  <option value="client">Client Terminal (Connects via IP)</option>
+                </select>
+                <input type="text" id="master-ip-input" class="modern-input" placeholder="Master Node IP (e.g., 192.168.1.5)" style="display:none; font-size:12px; margin-bottom:8px;" />
+                <button class="primary-btn" style="width:100%; font-size:11px; padding:6px; background:linear-gradient(135deg, #b8860b, #ffd700); color:#000;">Apply Mode</button>
+              </div>
             </div>
           </div>
         </div>
@@ -1716,6 +1747,32 @@
                 <button onclick="saveBulkRemarksData()" class="primary-btn" style="padding:10px 28px;font-size:14px;background:linear-gradient(135deg,var(--accent),#00838f);box-shadow:0 4px 15px rgba(0,0,0,0.3);">💾 Save All Remarks</button>
             </div>
          </div>
+      </div>
+    </div>
+
+    <!-- ═══ License Lock Screen Modal ════════════════════════════════════════ -->
+    <div id="license-lock-screen" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(10,14,40,0.95);backdrop-filter:blur(20px);justify-content:center;align-items:center;flex-direction:column;">
+      <div style="background:#151b3d;border:1px solid #ff4444;border-radius:24px;padding:40px;width:600px;text-align:center;box-shadow: 0 40px 100px rgba(0,0,0,0.8);position:relative;">
+        <div style="font-size:48px;margin-bottom:20px;">🔒</div>
+        <h2 id="lock-title" style="color:#ff4444;font-size:24px;font-weight:800;margin-bottom:16px;">System Locked</h2>
+        <p id="lock-message" style="color:var(--text-dim);font-size:15px;margin-bottom:30px;line-height:1.6;">
+          Your Sovereign Shield license has expired or an anomaly was detected.
+        </p>
+        
+        <div style="background:rgba(0,0,0,0.3);border-radius:12px;padding:16px;margin-bottom:30px;text-align:left;">
+          <p style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Hardware Fingerprint</p>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <code id="lock-hardware-id" style="flex:1;background:rgba(255,255,255,0.05);padding:10px;border-radius:6px;color:#00e5ff;font-size:13px;word-break:break-all;">Loading...</code>
+            <button onclick="navigator.clipboard.writeText(document.getElementById('lock-hardware-id').textContent);this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',2000)" style="background:var(--accent);border:none;color:#000;padding:8px 12px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:12px;">Copy</button>
+          </div>
+        </div>
+
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:20px;">
+          Please send this fingerprint to your Nexus Support Partner to renew your license or resolve this issue.
+        </p>
+
+        <!-- Hidden Support Backdoor Trigger -->
+        <div id="support-backdoor-trigger" onclick="promptSupportPIN()" style="width:60px;height:60px;position:absolute;top:0;left:0;cursor:default;"></div>
       </div>
     </div>
 

@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // V2.2: Dynamic Stamps & Metadata
     getStampPreview:    (data)   => ipcRenderer.invoke('get-stamp-preview', data),
     getUniqueMetadata:  ()       => ipcRenderer.invoke('get-unique-metadata'),
+    getHardwareId:      ()       => ipcRenderer.invoke('get-hardware-id'),
 });
 
 

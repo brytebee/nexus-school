@@ -5,6 +5,7 @@ console.log("*******************************************\n");
 const { app, BrowserWindow, ipcMain, shell, Menu, dialog, nativeImage, clipboard, globalShortcut } = require("electron");
 
 const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 const fs = require("fs");
 const crypto = require("crypto");
 const os = require("os");
@@ -1117,103 +1118,78 @@ function createWindow() {
   const hardwareId = getHardwareFingerprint();
   console.log(`[Security] Derived Motherboard Fingerprint: ${hardwareId.substring(0, 8)}...`);
 
+  ipcMain.handle("get-hardware-id", () => hardwareId);
+
   try {
     const userDataPath = app.getPath("userData");
     const licensePath = path.join(userDataPath, "license.nexus");
     const sysConfPath = path.join(userDataPath, "nexus_sys.json");
     
-    // Time-Drift Guard (Anti-Rollback)
-    let lastRunTimestamp = 0;
-    if (fs.existsSync(sysConfPath)) {
-      const sysConf = JSON.parse(fs.readFileSync(sysConfPath, "utf-8"));
-      lastRunTimestamp = sysConf.last_run_timestamp || 0;
-    }
-
-    if (Date.now() < (lastRunTimestamp - 60000)) { // 1 min buffer for marginal OS sync
-        console.error("[Security] FATAL: System Clock Rollback Detected!");
-        licenseStatus = { locked: true, message: "System Clock Tampering Detected. Access Blocked." };
+    // Developer Override
+    if (process.env.DEV_MODE === "true") {
+      console.log("[Security] DEV_MODE active. Bypassing Hardware/Clock locks.");
+      licenseStatus = { locked: false, message: "DEV_MODE_ACTIVE" };
+      licenseStatus.tier = process.env.DEV_MOCK_TIER || "Diamond";
+      setSchoolLicense({ payload: JSON.stringify({ tier: licenseStatus.tier, student_count: 999999, expires_at: Date.now() + 10000000000 }) });
     } else {
-        fs.writeFileSync(sysConfPath, JSON.stringify({ last_run_timestamp: Date.now() }));
-    }
+      // 1. Time-Drift Guard (Anti-Rollback)
+      let lastRunTimestamp = 0;
+      if (fs.existsSync(sysConfPath)) {
+        const sysConf = JSON.parse(fs.readFileSync(sysConfPath, "utf-8"));
+        lastRunTimestamp = sysConf.last_run_timestamp || 0;
+      }
 
-    // 1. Hardcoded Nexus Public Key (In reality, Public Key only ships with app)
-    // For demonstration, we persist a keypair dynamically to sign a dummy token.
-    const keyPairPath = path.join(userDataPath, "demo_keypair.json");
-    let publicKey, privateKey;
-    if (fs.existsSync(keyPairPath)) {
-      const keys = JSON.parse(fs.readFileSync(keyPairPath, "utf-8"));
-      publicKey = crypto.createPublicKey(keys.publicKey);
-      privateKey = crypto.createPrivateKey(keys.privateKey);
-    } else {
-      const kp = crypto.generateKeyPairSync("ed25519");
-      publicKey = kp.publicKey;
-      privateKey = kp.privateKey;
-      fs.writeFileSync(
-        keyPairPath,
-        JSON.stringify({
-          publicKey: publicKey.export({ type: "spki", format: "pem" }),
-          privateKey: privateKey.export({ type: "pkcs8", format: "pem" }),
-        }),
-      );
-    }
-
-    if (!fs.existsSync(licensePath)) {
-      // Generate a dummy license expiring in 4 months (1 typical term)
-      const expiresAt = Date.now() + 4 * 30 * 24 * 60 * 60 * 1000;
-      const payload = {
-        tier: "Gold",
-        school_id: "PREMIUM_ACADEMY_001",
-        hardware_id: hardwareId,
-        student_count: 50, // Added token limit for The Hawk Phase 0
-        expires_at: expiresAt,
-      };
-      const payloadStr = JSON.stringify(payload);
-      const signature = crypto.sign(null, Buffer.from(payloadStr), privateKey);
-
-      const licenseFile = {
-        payload: payloadStr,
-        signature: signature.toString("hex"),
-      };
-      fs.writeFileSync(licensePath, JSON.stringify(licenseFile, null, 2));
-      console.log(
-        "[License Engine] Generated dummy terminal license ending in 4 months.",
-      );
-    }
-
-    // 2. Verify License
-    const licenseDisk = JSON.parse(fs.readFileSync(licensePath, "utf-8"));
-    const isValidSignature = crypto.verify(
-      null,
-      Buffer.from(licenseDisk.payload),
-      publicKey,
-      Buffer.from(licenseDisk.signature, "hex"),
-    );
-
-    if (!isValidSignature) {
-      licenseStatus = {
-        locked: true,
-        message:
-          "Tampering Detected. Cryptographic signature invalid. Contact Administrator.",
-      };
-    } else {
-      const payloadDecoded = JSON.parse(licenseDisk.payload);
-      licenseStatus.tier = payloadDecoded.tier || "Silver";
-      
-      // Hardware Check
-      if (payloadDecoded.hardware_id && payloadDecoded.hardware_id !== hardwareId) {
-         licenseStatus = { locked: true, message: "License Device Mismatch. Token bound to different hardware." };
-         console.error("[Security] License Tampering: Motherboard swap detected.");
-      } else if (Date.now() > payloadDecoded.expires_at) {
-        licenseStatus = {
-          locked: true,
-          message: `License Expired. Your ${payloadDecoded.tier} tier has lapsed. Contact Administrator.`,
-        };
+      if (Date.now() < (lastRunTimestamp - 60000)) { // 1 min buffer for marginal OS sync
+          console.error("[Security] FATAL: System Clock Rollback Detected!");
+          licenseStatus = { locked: true, message: "System Clock Tampering Detected. Access Blocked." };
       } else {
-        if (!licenseStatus.locked) {
-           console.log(`[License Engine] Valid ${payloadDecoded.tier} License. Limit: ${payloadDecoded.student_count} students.`);
-           licenseStatus = { locked: false, message: "VALID" };
-           // Tell the Hub Engine the active max limit
-           setSchoolLicense(licenseDisk);
+          fs.writeFileSync(sysConfPath, JSON.stringify({ last_run_timestamp: Date.now() }));
+      }
+
+      // 2. Load Nexus Public Key
+      const PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAU//Zax5arKg2zRA+d4F+kE6H19E977fhJrU/rNqcdw8=
+-----END PUBLIC KEY-----`;
+      const publicKey = crypto.createPublicKey(PUBLIC_KEY_PEM);
+
+      // 3. Verify License
+      if (!fs.existsSync(licensePath)) {
+        licenseStatus = { locked: true, message: "No Valid License Found. Please contact your Nexus Partner." };
+      } else {
+        const licenseDisk = JSON.parse(fs.readFileSync(licensePath, "utf-8"));
+        const isValidSignature = crypto.verify(
+          null,
+          Buffer.from(licenseDisk.payload),
+          publicKey,
+          Buffer.from(licenseDisk.signature, "hex"),
+        );
+
+        if (!isValidSignature) {
+          licenseStatus = {
+            locked: true,
+            message: "Tampering Detected. Cryptographic signature invalid. Contact Administrator.",
+          };
+        } else {
+          const payloadDecoded = JSON.parse(licenseDisk.payload);
+          licenseStatus.tier = payloadDecoded.tier || "Silver";
+          
+          // Hardware Check
+          if (payloadDecoded.hardware_id && payloadDecoded.hardware_id !== hardwareId) {
+             licenseStatus = { locked: true, message: "License Device Mismatch. Token bound to different hardware." };
+             console.error("[Security] License Tampering: Motherboard swap detected.");
+          } else if (Date.now() > payloadDecoded.expires_at) {
+            licenseStatus = {
+              locked: true,
+              message: `License Expired. Your ${payloadDecoded.tier} tier has lapsed. Contact Administrator.`,
+            };
+          } else {
+            if (!licenseStatus.locked) {
+               console.log(`[License Engine] Valid ${payloadDecoded.tier} License. Limit: ${payloadDecoded.student_count} students.`);
+               licenseStatus = { locked: false, message: "VALID" };
+               // Tell the Hub Engine the active max limit
+               setSchoolLicense(licenseDisk);
+            }
+          }
         }
       }
     }

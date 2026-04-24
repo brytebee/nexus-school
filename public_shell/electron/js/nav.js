@@ -81,7 +81,45 @@
         if (viewId === "dashboard") refreshDashboardStats();
       }
 
+      window.applyFeatureMasking = function() {
+        const tier = window.currentLicenseTier || "Silver";
+        const tiers = { "Silver": 1, "Gold": 2, "Diamond": 3 };
+        const currentLevel = tiers[tier] || 1;
+
+        document.querySelectorAll(".nav-item[data-tier]").forEach(item => {
+          const reqTier = item.getAttribute("data-tier");
+          const reqLevel = tiers[reqTier] || 1;
+          const lockIcon = item.querySelector(".nav-lock");
+          
+          if (currentLevel < reqLevel) {
+             item.classList.add("locked-feature");
+             item.style.opacity = "0.6";
+             item.style.filter = "grayscale(100%)";
+             if (lockIcon) lockIcon.style.display = "inline";
+          } else {
+             item.classList.remove("locked-feature");
+             item.style.opacity = "1";
+             item.style.filter = "none";
+             if (lockIcon) lockIcon.style.display = "none";
+          }
+        });
+      };
+
       function showView(viewId) {
+        const navEl = document.querySelector(`.nav-item[data-view="${viewId}"]`);
+        if (navEl && navEl.classList.contains("locked-feature")) {
+            const reqTier = navEl.getAttribute("data-tier");
+            Swal.fire({
+                title: 'Premium Feature Locked',
+                html: `<div style="font-size:40px;margin-bottom:10px;">🔒</div><p>This module requires the <b>Nexus ${reqTier} Tier</b>.</p>`,
+                background: '#0d1235',
+                color: '#fff',
+                confirmButtonColor: '#d4af37',
+                confirmButtonText: 'Contact Partner to Upgrade'
+            });
+            return;
+        }
+
         // ── Step 1: DOM transition (unconditional, never aborted) ──────────────
         document
           .querySelectorAll(".nav-item")
@@ -90,9 +128,6 @@
           .querySelectorAll(".view")
           .forEach((el) => el.classList.remove("active"));
 
-        const navEl = document.querySelector(
-          `.nav-item[data-view="${viewId}"]`,
-        );
         if (navEl) navEl.classList.add("active");
 
         const viewEl = document.getElementById(`view-${viewId}`);

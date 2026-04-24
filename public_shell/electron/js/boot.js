@@ -254,6 +254,23 @@
             }
           });
 
+        // ── License Status Enforcement ─────────────────────────────────────────
+        if (window.electronAPI.onLicenseStatus) {
+            window.electronAPI.onLicenseStatus(async (status) => {
+                window.currentLicenseTier = status.tier || "Silver";
+                if (typeof window.applyFeatureMasking === "function") window.applyFeatureMasking();
+                
+                if (status.locked) {
+                    document.getElementById("license-lock-screen").style.display = "flex";
+                    document.getElementById("lock-message").textContent = status.message || "Your Sovereign Shield license has expired.";
+                    const hwid = await window.electronAPI.getHardwareId();
+                    document.getElementById("lock-hardware-id").textContent = hwid;
+                } else {
+                    document.getElementById("license-lock-screen").style.display = "none";
+                }
+            });
+        }
+
         // ── Settings Persistence ──────────────────────────────────────────────
         // ── Boot: load identity + stats ───────────────────────────────────────
         if (window.electronAPI.getIdentity) {
@@ -293,3 +310,28 @@
         if (typeof initSettingsListeners === "function") initSettingsListeners();
         if (typeof initSyncListeners === "function") initSyncListeners();
       }
+      
+      // Global Support Backdoor
+      window.promptSupportPIN = function() {
+          const today = new Date();
+          const dateStr = today.getFullYear() + "-" + (today.getMonth()+1) + "-" + today.getDate();
+          let hash = 0;
+          for(let i=0; i<dateStr.length; i++) hash += dateStr.charCodeAt(i);
+          const expectedPin = ((hash * 1234) % 9000 + 1000).toString(); // 4 digit PIN
+          
+          Swal.fire({
+              title: 'Nexus Support Override',
+              input: 'password',
+              inputPlaceholder: 'Enter Daily Support PIN',
+              background: '#0d1235',
+              color: '#fff',
+              confirmButtonColor: '#00e5ff'
+          }).then(result => {
+              if (result.value === expectedPin) {
+                  document.getElementById("license-lock-screen").style.display = "none";
+                  Swal.fire({title: 'Unlocked', text: 'System unlocked for this session.', icon: 'success', background: '#0d1235', color: '#fff', timer: 2000, showConfirmButton: false});
+              } else if (result.value) {
+                  Swal.fire({title: 'Invalid PIN', icon: 'error', background: '#0d1235', color: '#fff'});
+              }
+          });
+      };
