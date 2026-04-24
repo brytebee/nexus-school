@@ -327,6 +327,8 @@ class HandshakeActivity : AppCompatActivity() {
                                                             config.name ?: "Nexus School",
                                                             config.themePrimary ?: "#1A237E"
                                                         )
+                                                        // Persist school logo for offline display on home screen
+                                                        identityManager.saveLogoBase64(config.logoBase64)
                                                         // Persist the tier modules so FeatureGate can gate UI
                                                         if (config.modules.isNotEmpty()) {
                                                             identityManager.saveTierModules(config.modules)
