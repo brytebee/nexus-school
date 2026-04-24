@@ -86,6 +86,7 @@
         const tiers = { "Silver": 1, "Gold": 2, "Diamond": 3 };
         const currentLevel = tiers[tier] || 1;
 
+        // Mask Sidebar Items
         document.querySelectorAll(".nav-item[data-tier]").forEach(item => {
           const reqTier = item.getAttribute("data-tier");
           const reqLevel = tiers[reqTier] || 1;
@@ -102,6 +103,36 @@
              item.style.filter = "none";
              if (lockIcon) lockIcon.style.display = "none";
           }
+        });
+
+        // Mask Select Options (Result Templates)
+        document.querySelectorAll("option[data-tier]").forEach(opt => {
+          const reqTier = opt.getAttribute("data-tier");
+          const reqLevel = tiers[reqTier] || 1;
+          
+          if (currentLevel < reqLevel) {
+             opt.disabled = true;
+             if (!opt.text.includes("🔒")) {
+                opt.dataset.originalText = opt.text;
+                opt.text = "🔒 " + opt.text + " (Locked)";
+             }
+          } else {
+             opt.disabled = false;
+             if (opt.dataset.originalText) {
+                opt.text = opt.dataset.originalText;
+             }
+          }
+        });
+
+        // Fallback for selects if current value is disabled
+        ['ph-template', 'rs-template'].forEach(id => {
+            const select = document.getElementById(id);
+            if (select && select.selectedOptions[0] && select.selectedOptions[0].disabled) {
+                select.value = "clean_slate"; // Fall back to classic free
+                if (typeof updateTemplatePreview === "function") {
+                    updateTemplatePreview(select.value, id + '-preview');
+                }
+            }
         });
       };
 

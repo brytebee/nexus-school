@@ -849,13 +849,13 @@
                   <label class="ph-label" style="margin-bottom:6px;">Report Template</label>
                   <select id="ph-template" class="modern-input" style="width:100%;font-size:11px;" onchange="updateTemplatePreview(this.value, 'ph-template-preview')">
                     <option value="clean_slate">🎨 Classic (Free)</option>
-                    <option value="prestige">⭐ Prestige (Silver)</option>
-                    <option value="azure">⭐ Azure Edge (Silver)</option>
-                    <option value="royal">⭐⭐ Royal (Gold)</option>
-                    <option value="monarch">⭐⭐ Monarch (Gold)</option>
-                    <option value="sovereign">💎 Sovereign (Diamond)</option>
-                    <option value="sterling">💎 Sterling (Diamond)</option>
-                    <option value="apex">💎 Apex (Diamond)</option>
+                    <option value="prestige" data-tier="Silver">⭐ Prestige (Silver)</option>
+                    <option value="azure" data-tier="Silver">⭐ Azure Edge (Silver)</option>
+                    <option value="royal" data-tier="Gold">⭐⭐ Royal (Gold)</option>
+                    <option value="monarch" data-tier="Gold">⭐⭐ Monarch (Gold)</option>
+                    <option value="sovereign" data-tier="Diamond">💎 Sovereign (Diamond)</option>
+                    <option value="sterling" data-tier="Diamond">💎 Sterling (Diamond)</option>
+                    <option value="apex" data-tier="Diamond">💎 Apex (Diamond)</option>
                   </select>
                 </div>
                 <button class="primary-btn" style="padding:8px 18px;font-size:12px;" onclick="phSaveConfig()">💾 Save Config</button>
@@ -972,13 +972,13 @@
                   <label class="ph-label">Template</label>
                   <select id="rs-template" class="modern-input" style="width:200px;font-size:11px;" onchange="updateTemplatePreview(this.value, 'rs-template-preview'); toggleBrandColorOption(this.value)">
                     <option value="clean_slate">🎨 Classic (Free)</option>
-                    <option value="prestige">⭐ Prestige (Silver)</option>
-                    <option value="azure">⭐ Azure Edge (Silver)</option>
-                    <option value="royal">⭐⭐ Royal (Gold)</option>
-                    <option value="monarch">⭐⭐ Monarch (Gold)</option>
-                    <option value="sovereign">💎 Sovereign (Diamond)</option>
-                    <option value="sterling">💎 Sterling (Diamond)</option>
-                    <option value="apex">💎 Apex (Diamond)</option>
+                    <option value="prestige" data-tier="Silver">⭐ Prestige (Silver)</option>
+                    <option value="azure" data-tier="Silver">⭐ Azure Edge (Silver)</option>
+                    <option value="royal" data-tier="Gold">⭐⭐ Royal (Gold)</option>
+                    <option value="monarch" data-tier="Gold">⭐⭐ Monarch (Gold)</option>
+                    <option value="sovereign" data-tier="Diamond">💎 Sovereign (Diamond)</option>
+                    <option value="sterling" data-tier="Diamond">💎 Sterling (Diamond)</option>
+                    <option value="apex" data-tier="Diamond">💎 Apex (Diamond)</option>
                   </select>
                 </div>
                 <!-- Brand Color Customization — Silver+ only -->
