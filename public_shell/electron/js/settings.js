@@ -40,9 +40,9 @@
         // Restore principal signature preview
         const _psImg  = document.getElementById("principal-sign-preview-img");
         const _psWrap = document.getElementById("principal-sign-preview-wrap");
-        if (identity.principalSignBase64) {
-          _principalSignBase64 = identity.principalSignBase64;
-          if (_psImg)  { _psImg.src = identity.principalSignBase64; }
+        if (identity.signature) {
+          _principalSignBase64 = identity.signature;
+          if (_psImg)  { _psImg.src = identity.signature; }
           if (_psWrap) { _psWrap.style.display = "flex"; }
         } else {
           _principalSignBase64 = null;

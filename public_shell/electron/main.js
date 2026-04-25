@@ -773,6 +773,10 @@ ipcMain.handle("get-form-teachers", () => {
 ipcMain.handle("set-form-teacher", (event, { class_name, teacher_id }) => {
   try {
     const db = database.getDb();
+    if (!teacher_id) {
+      db.prepare(`DELETE FROM form_teachers WHERE class_name = ?`).run(class_name);
+      return { ok: true };
+    }
     db.prepare(`
       INSERT INTO form_teachers (class_name, teacher_id)
       VALUES (?, ?)
