@@ -122,12 +122,16 @@ ipcMain.handle("get-db-stats", () => {
 // allocations: [{ class_name: 'JSS1', subjects: ['Mathematics', 'English'] }, ...]
 ipcMain.handle(
   "add-teacher-form",
-  (event, { id, name, phone, email, allocations }) => {
+  (event, { id, name, phone, email, signature, allocations }) => {
     try {
       const db = database.getDb();
       db.prepare(
-        "INSERT INTO teachers (id, name, phone, email) VALUES (@id, @name, @phone, @email) ON CONFLICT(id) DO UPDATE SET name=excluded.name, phone=excluded.phone, email=excluded.email",
-      ).run({ id, name, phone: phone || "", email: email || "" });
+        `INSERT INTO teachers (id, name, phone, email, signature)
+         VALUES (@id, @name, @phone, @email, @signature)
+         ON CONFLICT(id) DO UPDATE SET
+           name=excluded.name, phone=excluded.phone,
+           email=excluded.email, signature=excluded.signature`,
+      ).run({ id, name, phone: phone || "", email: email || "", signature: signature || null });
 
       if (allocations && allocations.length > 0) {
         const insertAlloc = db.prepare(

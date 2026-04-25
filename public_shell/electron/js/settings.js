@@ -38,12 +38,16 @@
           document.getElementById("stamp-preview-wrap").style.display = "none";
         }
         // Restore principal signature preview
+        const _psImg  = document.getElementById("principal-sign-preview-img");
+        const _psWrap = document.getElementById("principal-sign-preview-wrap");
         if (identity.principalSignBase64) {
           _principalSignBase64 = identity.principalSignBase64;
-          const img = document.getElementById("principal-sign-preview-img");
-          const wrap = document.getElementById("principal-sign-preview-wrap");
-          if (img) img.src = identity.principalSignBase64;
-          if (wrap) wrap.style.display = "flex";
+          if (_psImg)  { _psImg.src = identity.principalSignBase64; }
+          if (_psWrap) { _psWrap.style.display = "flex"; }
+        } else {
+          _principalSignBase64 = null;
+          if (_psImg)  { _psImg.src = ""; }
+          if (_psWrap) { _psWrap.style.display = "none"; }
         }
       }
 
