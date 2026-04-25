@@ -677,6 +677,14 @@ ipcMain.handle("save-bulk-remarks", (event, remarksArray) => {
         }
       }
     });
+
+    transaction(remarksArray);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 // ── V2.2: Dynamic Stamp Engine ──────────────────────────────────────────────
 function generateStampSVG(style, schoolName, date, principalName, color = "#0D47A1") {
   const name = (schoolName || "NEXUS ACADEMY").toUpperCase();
@@ -742,13 +750,6 @@ function generateStampSVG(style, schoolName, date, principalName, color = "#0D47
 
 ipcMain.handle("get-stamp-preview", (event, { style, color }) => {
   return generateStampSVG(style, identityPacket.name, null, identityPacket.signature, color);
-});
-
-    transaction(remarksArray);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
 });
 
 ipcMain.handle("get-form-teachers", () => {
@@ -1128,9 +1129,14 @@ function createWindow() {
     // Developer Override
     if (process.env.DEV_MODE === "true") {
       console.log("[Security] DEV_MODE active. Bypassing Hardware/Clock locks.");
-      licenseStatus = { locked: false, message: "DEV_MODE_ACTIVE" };
+      licenseStatus = { 
+        locked: false, 
+        message: "DEV_MODE_ACTIVE",
+        student_count: 999999,
+        expires_at: Date.now() + 10000000000
+      };
       licenseStatus.tier = process.env.DEV_MOCK_TIER || "Diamond";
-      setSchoolLicense({ payload: JSON.stringify({ tier: licenseStatus.tier, student_count: 999999, expires_at: Date.now() + 10000000000 }) });
+      setSchoolLicense({ payload: JSON.stringify({ tier: licenseStatus.tier, student_count: licenseStatus.student_count, expires_at: licenseStatus.expires_at }) });
     } else {
       // 1. Time-Drift Guard (Anti-Rollback)
       let lastRunTimestamp = 0;
@@ -1185,7 +1191,13 @@ MCowBQYDK2VwAyEAU//Zax5arKg2zRA+d4F+kE6H19E977fhJrU/rNqcdw8=
           } else {
             if (!licenseStatus.locked) {
                console.log(`[License Engine] Valid ${payloadDecoded.tier} License. Limit: ${payloadDecoded.student_count} students.`);
-               licenseStatus = { locked: false, message: "VALID" };
+               licenseStatus = { 
+                 locked: false, 
+                 message: "VALID",
+                 student_count: payloadDecoded.student_count,
+                 expires_at: payloadDecoded.expires_at 
+               };
+               licenseStatus.tier = payloadDecoded.tier || "Silver";
                // Tell the Hub Engine the active max limit
                setSchoolLicense(licenseDisk);
             }

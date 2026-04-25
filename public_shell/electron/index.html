@@ -1295,6 +1295,25 @@
                   />
                 </div>
               </div>
+
+              <!-- Stamp Studio Section -->
+              <div class="form-group" style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.05);">
+                <label style="display:flex; justify-content:space-between; align-items:center;">
+                  <span>Stamp Studio <span style="font-size:10px;color:var(--text-dim);font-weight:normal;margin-left:6px;">(Auto-generates SVG seals)</span></span>
+                  <span id="stamp-tier-badge" style="font-size:10px; background:rgba(255,255,255,0.1); padding:2px 8px; border-radius:10px; font-weight:bold;">Silver</span>
+                </label>
+                
+                <div style="margin-top:10px; margin-bottom:12px;">
+                  <p style="font-size:11px; color:var(--text-dim); margin-bottom:6px; text-transform:uppercase; letter-spacing:1px;">1. Select Style</p>
+                  <div id="stamp-gallery" style="display:flex; gap:10px; flex-wrap:wrap;"></div>
+                </div>
+
+                <div id="stamp-color-section">
+                  <p style="font-size:11px; color:var(--text-dim); margin-bottom:6px; text-transform:uppercase; letter-spacing:1px;">2. Select Ink Color</p>
+                  <div id="stamp-color-swatches" class="color-swatch-list" style="display:flex; gap:10px;"></div>
+                </div>
+              </div>
+
               <div class="color-pickers-group">
                 <div class="form-group">
                   <label>Primary Theme</label>

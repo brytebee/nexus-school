@@ -258,6 +258,7 @@
         if (window.electronAPI.onLicenseStatus) {
             window.electronAPI.onLicenseStatus(async (status) => {
                 window.currentLicenseTier = status.tier || "Silver";
+                window.currentLicenseData = status;
                 if (typeof window.applyFeatureMasking === "function") window.applyFeatureMasking();
                 
                 if (status.locked) {

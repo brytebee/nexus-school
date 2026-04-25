@@ -178,6 +178,9 @@
         const canColor = (_schoolTier === "Gold" || _schoolTier === "Diamond");
         colorList.className = `color-swatch-list ${!canColor ? 'tier-locked' : ''}`;
         
+        const colorSection = document.getElementById("stamp-color-section");
+        if (colorSection) colorSection.style.display = canColor ? "block" : "none";
+
         const colors = [
           { id: "red", color: "#D32F2F" },
           { id: "primary", color: _currentIdentity.themePrimary },

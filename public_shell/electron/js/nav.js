@@ -136,6 +136,39 @@
         });
       };
 
+      function hydrateAboutView() {
+          const planInfo = document.getElementById('about-plan-info');
+          if (!planInfo) return;
+
+          const data = window.currentLicenseData || { tier: "Silver", student_count: 0, expires_at: Date.now() };
+          const tier = window.currentLicenseTier || "Silver";
+          
+          let tierIcon = "🥈";
+          if (tier === "Gold") tierIcon = "🥇";
+          if (tier === "Diamond") tierIcon = "💎";
+
+          const expiryDate = new Date(data.expires_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+          const isExpired = Date.now() > data.expires_at;
+
+          // Note: In a real app we'd fetch actual student count from DB.
+          // For now we'll just show the limit.
+          planInfo.innerHTML = `
+              <div style="display:flex; justify-content:space-between; margin-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:12px;">
+                  <span>Active Tier</span>
+                  <span style="color:#fff; font-weight:bold;">${tierIcon} ${tier}</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:12px;">
+                  <span>Student Quota</span>
+                  <span style="color:#fff; font-weight:bold;">Up to ${data.student_count}</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+                  <span>Valid Until</span>
+                  <span style="${isExpired ? 'color:#ff4444' : 'color:#00e5ff'}; font-weight:bold;">${expiryDate}</span>
+              </div>
+              ${isExpired ? '<div style="color:#ff4444; margin-top:8px; font-weight:bold;">⚠️ License Expired</div>' : ''}
+          `;
+      }
+
       function showView(viewId) {
         const navEl = document.querySelector(`.nav-item[data-view="${viewId}"]`);
         if (navEl && navEl.classList.contains("locked-feature")) {
