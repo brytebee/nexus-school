@@ -30,6 +30,11 @@
         <!-- DemoResetActivity retained for historical reference — no longer routed to -->
         <activity android:name=".ui.DemoResetActivity" />
 
+        <!-- Gold Phase B: Daily Attendance Register -->
+        <activity
+            android:name=".ui.AttendanceActivity"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- FileProvider for camera capture intents (API 24+) -->
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -568,6 +568,27 @@ body {
 .primary-btn:hover  { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,229,255,0.35); background: #4affff; }
 .primary-btn:active { transform: translateY(0); }
 
+/* Outlined ghost button — used alongside primary-btn in action bars */
+.secondary-btn {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid rgba(0, 229, 255, 0.35);
+    padding: 10px 18px;
+    border-radius: var(--radius-sm);
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+.secondary-btn:hover  { background: rgba(0,229,255,0.08); border-color: var(--accent); transform: translateY(-1px); }
+.secondary-btn:active { transform: translateY(0); }
+.secondary-btn:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+
 /* ════════════════════════════════════════════════════════════
    Misc / Shared
    ════════════════════════════════════════════════════════════ */
@@ -1040,4 +1061,48 @@ code {
 .color-swatch.active {
   border-color: #fff;
   box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* ════════════════════════════════════════════════════════════
+   Print Styles (Attendance Report)
+   ════════════════════════════════════════════════════════════ */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  
+  /* Hide the background glow and scrollbars */
+  body { background: #fff !important; color: #000 !important; overflow: visible; }
+  .background-glow { display: none !important; }
+  
+  /* Show only the print area */
+  #attendance-print-area, #attendance-print-area * {
+    visibility: visible;
+  }
+  
+  #attendance-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    display: block !important;
+    background: #fff;
+    color: #000;
+  }
+  
+  /* Reset table borders for print */
+  #attendance-print-area table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+  #attendance-print-area th, #attendance-print-area td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    color: #000;
+  }
+  #attendance-print-area th {
+    background: #f4f4f4 !important;
+    font-weight: bold;
+    -webkit-print-color-adjust: exact;
+  }
 }

@@ -82,7 +82,7 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
 
     // Biometric & Lifecycle
-    implementation("androidx.biometric:biometric:1.2.0-alpha05")
+    implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.lifecycle:lifecycle-process:2.6.2")
 
     // ── Unit Tests ────────────────────────────────────────────────────────────

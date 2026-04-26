@@ -269,13 +269,37 @@ class StudentRosterActivity : AppCompatActivity() {
                     },
                     floatingActionButton = {
                         if (!showFocusMode && selectedScreen == AppScreen.ROSTER) {
-                            FloatingActionButton(
-                                onClick = { showAddStudentDialog = true },
-                                containerColor = primaryColor,
-                                contentColor = Color.White,
+                            Column(
+                                horizontalAlignment = Alignment.End,
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
                                 modifier = Modifier.padding(bottom = 24.dp)
                             ) {
-                                Icon(Icons.Default.PersonAdd, contentDescription = "Add Student")
+                                // Take Attendance FAB — only visible to the form teacher of this class
+                                if (selectedTab != null &&
+                                    IdentityManager(this@StudentRosterActivity).isFormTeacherOf(selectedTab?.first ?: "")) {
+                                    ExtendedFloatingActionButton(
+                                        onClick = {
+                                            val intent = Intent(this@StudentRosterActivity, AttendanceActivity::class.java).apply {
+                                                putExtra(AttendanceActivity.EXTRA_CLASS_NAME, selectedTab?.first ?: "")
+                                                putExtra(AttendanceActivity.EXTRA_SCHOOL_NAME, schoolName)
+                                                putExtra(AttendanceActivity.EXTRA_PRIMARY_COLOR, primaryColorHex)
+                                            }
+                                            startActivity(intent)
+                                        },
+                                        containerColor = Color(0xFF1B5E20),
+                                        contentColor = Color.White,
+                                        icon = { Icon(Icons.Default.Check, contentDescription = "Take Attendance") },
+                                        text = { Text("Attendance", fontWeight = FontWeight.Bold) }
+                                    )
+                                }
+                                // Add Student FAB
+                                FloatingActionButton(
+                                    onClick = { showAddStudentDialog = true },
+                                    containerColor = primaryColor,
+                                    contentColor = Color.White
+                                ) {
+                                    Icon(Icons.Default.PersonAdd, contentDescription = "Add Student")
+                                }
                             }
                         }
                     }

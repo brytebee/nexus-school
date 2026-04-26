@@ -44,6 +44,16 @@ data class StudentScore(
     val score: Int
 )
 
+@Serializable
+@Entity(tableName = "daily_attendance", primaryKeys = ["student_id", "date"])
+data class DailyAttendance(
+    val student_id: String,
+    val class_name: String,
+    val date: String, // format YYYY-MM-DD
+    val status: String, // "Present", "Absent", "Late"
+    val is_synced: Boolean = false
+)
+
 @Dao
 interface StudentDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -79,5 +89,18 @@ interface StudentDao {
 
     @Query("SELECT students.name, local_scores.subject, local_scores.score FROM local_scores INNER JOIN students ON local_scores.student_id = students.id ORDER BY local_scores.score DESC LIMIT 3")
     suspend fun getHonorRoll(): List<HonorRollItem>
+
+    // ── Gold Phase B: Attendance Methods ────────────
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAttendanceRecords(records: List<DailyAttendance>)
+
+    @Query("SELECT * FROM daily_attendance WHERE class_name = :className AND date = :date")
+    suspend fun getAttendanceByClassAndDate(className: String, date: String): List<DailyAttendance>
+
+    @Query("SELECT * FROM daily_attendance WHERE is_synced = 0")
+    suspend fun getUnsyncedAttendance(): List<DailyAttendance>
+
+    @Query("UPDATE daily_attendance SET is_synced = 1 WHERE student_id IN (:studentIds) AND date IN (:dates)")
+    suspend fun markAttendanceAsSynced(studentIds: List<String>, dates: List<String>)
 }
 

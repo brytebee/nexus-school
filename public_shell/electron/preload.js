@@ -51,6 +51,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getStampPreview:    (data)   => ipcRenderer.invoke('get-stamp-preview', data),
     getUniqueMetadata:  ()       => ipcRenderer.invoke('get-unique-metadata'),
     getHardwareId:      ()       => ipcRenderer.invoke('get-hardware-id'),
+    
+    // Gold Phase A: Attendance
+    getDailyAttendance: (data)   => ipcRenderer.invoke('get-daily-attendance', data),
+    saveDailyAttendance:(data)   => ipcRenderer.invoke('save-daily-attendance', data),
+    getStudentAttendanceReport: (data) => ipcRenderer.invoke('get-student-attendance-report', data),
 });
 
 

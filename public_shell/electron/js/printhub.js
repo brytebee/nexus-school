@@ -19,10 +19,36 @@
         }
         if (cfg.resumption_date)
           document.getElementById("ph-resumption").value = cfg.resumption_date;
+        if (cfg.term_start_date)
+          document.getElementById("ph-term-start").value = cfg.term_start_date;
+        if (cfg.term_end_date)
+          document.getElementById("ph-term-end").value = cfg.term_end_date;
         document.getElementById("ph-show-position").checked =
           cfg.show_position !== 0;
         document.getElementById("ph-show-domains").checked =
           cfg.show_domains !== 0;
+        const showAttEl = document.getElementById("ph-show-attendance");
+        const weightContEl = document.getElementById("ph-attendance-weight-container");
+        
+        if (showAttEl && weightContEl) {
+          showAttEl.checked = cfg.show_attendance !== 0;
+          weightContEl.style.display = showAttEl.checked ? "flex" : "none";
+          showAttEl.addEventListener("change", (e) => {
+            weightContEl.style.display = e.target.checked ? "flex" : "none";
+            _phRefreshTotal();
+          });
+        }
+        const weightInput = document.getElementById("ph-attendance-weight");
+        if (weightInput) {
+          if (cfg.attendance_score_weight !== undefined)
+            weightInput.value = cfg.attendance_score_weight;
+          weightInput.addEventListener("input", _phRefreshTotal);
+        }
+
+        if (window.currentLicenseTier === "Silver") {
+          const attWrapper = document.getElementById("ph-attendance-wrapper");
+          if (attWrapper) attWrapper.style.display = "none";
+        }
         // Hydrate template picker and trigger preview
         if (cfg.template) {
           const tplEl = document.getElementById("ph-template");
@@ -61,8 +87,12 @@
           academic_session: document.getElementById("ph-session").value.trim() || "2024/2025",
           term:             document.getElementById("ph-term").value,
           resumption_date:  document.getElementById("ph-resumption").value,
+          term_start_date:  document.getElementById("ph-term-start")?.value || "",
+          term_end_date:    document.getElementById("ph-term-end")?.value   || "",
           show_position:    document.getElementById("ph-show-position").checked,
           show_domains:     document.getElementById("ph-show-domains").checked,
+          show_attendance:  document.getElementById("ph-show-attendance").checked,
+          attendance_score_weight: document.getElementById("ph-attendance-weight").value,
           grading_scale:    JSON.stringify({ scale: existingScale, components: _phComponents || [] }),
           template:         templateEl ? templateEl.value : "clean_slate",
         };
@@ -177,10 +207,14 @@
       }
 
       function _phRefreshTotal() {
+        const showAttEl = document.getElementById("ph-show-attendance");
+        const weightInp = document.getElementById("ph-attendance-weight");
+        const attWeight = (showAttEl && showAttEl.checked && weightInp) ? (Number(weightInp.value) || 0) : 0;
+        
         const total = (_phComponents || []).reduce(
           (s, c) => s + (Number(c.max) || 0),
           0,
-        );
+        ) + attWeight;
         const el = document.getElementById("ph-comp-total");
         if (el) {
           el.textContent = "Total: " + total + "/100";

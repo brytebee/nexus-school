@@ -30,6 +30,16 @@
         android:layout_height="wrap_content"
         android:text="Authenticate to continue"
         android:textColor="#80FFFFFF"
+        android:layout_marginBottom="32dp"
         android:textSize="14sp" />
+
+    <Button
+        android:id="@+id/btnUnlock"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Tap to Unlock"
+        android:paddingHorizontal="24dp"
+        android:textColor="#FFFFFF"
+        android:backgroundTint="#1A237E" />
 
 </LinearLayout>

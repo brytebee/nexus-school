@@ -60,7 +60,8 @@ data class HandshakeResponse(
     val server_timestamp: String,
     val students: List<com.nexus.school.data.Student> = emptyList(),
     val score_components: List<ScoreComponent> = emptyList(),
-    val all_subjects: List<String> = emptyList()
+    val all_subjects: List<String> = emptyList(),
+    val form_class: String? = null   // null = subject teacher; class name = form/homeroom teacher
 )
 
 @Serializable
