@@ -212,6 +212,29 @@ class IdentityManager(context: Context) {
     }
 
     /**
+     * Persists the form/homeroom class assigned to this teacher.
+     * A null value (or empty string) means the teacher is NOT a form teacher —
+     * they should not be able to take the class register.
+     */
+    fun saveFormClass(className: String?) {
+        prefs.edit().putString("form_class", className ?: "").apply()
+    }
+
+    /**
+     * Returns the class name this teacher is the form teacher for,
+     * or null if they have no form class assignment.
+     */
+    fun getFormClass(): String? {
+        val v = prefs.getString("form_class", "") ?: ""
+        return v.ifBlank { null }
+    }
+
+    /** Convenience: returns true when this teacher is the form teacher of [className]. */
+    fun isFormTeacherOf(className: String): Boolean {
+        return getFormClass()?.equals(className, ignoreCase = true) == true
+    }
+
+    /**
      * Persists the license expiry epoch millis received from the Hub,
      * so the app can show an expiry countdown even when offline.
      */

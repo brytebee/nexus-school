@@ -343,6 +343,9 @@ class HandshakeActivity : AppCompatActivity() {
                                                             append("]")
                                                         }
                                                         identityManager.saveScoreComponents(scoreJson)
+                                                        // Persist form/homeroom class assignment
+                                                        // A null form_class means this teacher is a subject teacher only
+                                                        identityManager.saveFormClass(result.form_class)
                                                         // Route to AppLaunchActivity — it reads everything from IdentityManager
                                                         startActivity(android.content.Intent(this@HandshakeActivity, AppLaunchActivity::class.java))
                                                         finish()

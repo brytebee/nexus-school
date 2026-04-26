@@ -386,26 +386,38 @@ ipcMain.handle("save-term-config", (event, config) => {
   try {
     const db = database.getDb();
     db.prepare(`
-      INSERT INTO school_term_config (id, academic_session, term, resumption_date, grading_scale, show_position, show_domains, template)
-      VALUES (1, @academic_session, @term, @resumption_date, @grading_scale, @show_position, @show_domains, @template)
+      INSERT INTO school_term_config
+        (id, academic_session, term, resumption_date, term_start_date, term_end_date,
+         grading_scale, show_position, show_domains, show_attendance, attendance_score_weight, template)
+      VALUES
+        (1, @academic_session, @term, @resumption_date, @term_start_date, @term_end_date,
+         @grading_scale, @show_position, @show_domains, @show_attendance, @attendance_score_weight, @template)
       ON CONFLICT(id) DO UPDATE SET
         academic_session = excluded.academic_session,
-        term = excluded.term,
-        resumption_date = excluded.resumption_date,
-        grading_scale = excluded.grading_scale,
-        show_position = excluded.show_position,
-        show_domains = excluded.show_domains,
-        template = excluded.template
+        term             = excluded.term,
+        resumption_date  = excluded.resumption_date,
+        term_start_date  = excluded.term_start_date,
+        term_end_date    = excluded.term_end_date,
+        grading_scale    = excluded.grading_scale,
+        show_position    = excluded.show_position,
+        show_domains     = excluded.show_domains,
+        show_attendance  = excluded.show_attendance,
+        attendance_score_weight = excluded.attendance_score_weight,
+        template         = excluded.template
     `).run({
       academic_session: config.academic_session || "2024/2025",
-      term: config.term || "First Term",
-      resumption_date: config.resumption_date || "",
+      term:             config.term || "First Term",
+      resumption_date:  config.resumption_date  || "",
+      term_start_date:  config.term_start_date  || "",
+      term_end_date:    config.term_end_date    || "",
       grading_scale: typeof config.grading_scale === "string"
         ? config.grading_scale
         : JSON.stringify(config.grading_scale || []),
       show_position: config.show_position ? 1 : 0,
-      show_domains: config.show_domains ? 1 : 0,
-      template: config.template || "clean_slate",
+      show_domains:  config.show_domains  ? 1 : 0,
+      show_attendance: config.show_attendance ? 1 : 0,
+      attendance_score_weight: Number(config.attendance_score_weight) || 0,
+      template:      config.template || "clean_slate",
     });
     return { ok: true };
   } catch (err) {
@@ -485,6 +497,21 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
       JOIN teachers t ON f.teacher_id = t.id
     `).all().forEach(ft => formTeacherMap.set(ft.class_name, ft));
 
+    // Gold Phase A: Daily Attendance Aggregation
+    const classDaysMap = new Map();
+    db.prepare(`
+      SELECT class_name, count(DISTINCT date) as total_days 
+      FROM daily_attendance 
+      WHERE academic_session = ? AND term = ? 
+      GROUP BY class_name
+    `).all(session, term).forEach(r => classDaysMap.set(r.class_name, r.total_days));
+
+    const getStudentAttendanceCount = db.prepare(`
+      SELECT count(*) as days_attended 
+      FROM daily_attendance 
+      WHERE student_id = ? AND status IN ('Present', 'Late') AND academic_session = ? AND term = ?
+    `);
+
     const results = students.map((stu) => {
       const records = getRecords.all(stu.id, session, term);
       const explicitSubjs = getExplicitSubjects.all(stu.id).map(r => r.subject);
@@ -521,6 +548,11 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
       // NEW: Look up form teacher for this class
       const ft = formTeacherMap.get(stu.class_name) || {};
 
+      // NEW: Resolve attendance
+      const classTotalDays = classDaysMap.get(stu.class_name) || 0;
+      const attRow = getStudentAttendanceCount.get(stu.id, session, term) || { days_attended: 0 };
+      const daysAttended = attRow.days_attended;
+
       // V2.2: Resolve official stamp
       let schoolStamp = identityPacket.stamp || null;
       if (identityPacket.stampStyle && identityPacket.stampStyle !== "none" && !schoolStamp) {
@@ -534,6 +566,10 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
         total_score: totalScore,
         average: avg,
         domains,
+        attendance: {
+          total_days: classTotalDays,
+          days_attended: daysAttended
+        },
         remark: remark.remark || "",
         principal_remark: remark.principal_remark || "",
         form_teacher_name: ft.name || "",
@@ -783,6 +819,72 @@ ipcMain.handle("set-form-teacher", (event, { class_name, teacher_id }) => {
       ON CONFLICT(class_name) DO UPDATE SET teacher_id = excluded.teacher_id
     `).run(class_name, teacher_id);
     return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("get-daily-attendance", (event, { class_name, date }) => {
+  try {
+    const db = database.getDb();
+    const rows = db.prepare(`
+      SELECT student_id, status, source
+      FROM daily_attendance
+      WHERE class_name = ? AND date = ?
+    `).all(class_name, date);
+
+    // Return term dates alongside records so the renderer can validate
+    // the selected date without an extra IPC round-trip.
+    const cfg = db.prepare(`
+      SELECT term_start_date, term_end_date
+      FROM school_term_config WHERE id = 1
+    `).get() || {};
+
+    return {
+      ok: true,
+      data: rows,
+      term_start_date: cfg.term_start_date || null,
+      term_end_date:   cfg.term_end_date   || null,
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("save-daily-attendance", (event, { class_name, date, session, term, records }) => {
+  try {
+    const db = database.getDb();
+    const insert = db.prepare(`
+      INSERT INTO daily_attendance (student_id, class_name, date, status, academic_session, term, source)
+      VALUES (?, ?, ?, ?, ?, ?, 'admin')
+      ON CONFLICT(student_id, date) DO UPDATE SET 
+        status = excluded.status,
+        source = excluded.source
+    `);
+    
+    const transaction = db.transaction((recs) => {
+      for (const rec of recs) {
+        insert.run(rec.student_id, class_name, date, rec.status, session, term);
+      }
+    });
+    transaction(records);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("get-student-attendance-report", (event, { student_id }) => {
+  try {
+    const db = database.getDb();
+    // Fetch all attendance for the student
+    const rows = db.prepare(`
+      SELECT date, status, academic_session, term, class_name, source 
+      FROM daily_attendance 
+      WHERE student_id = ? 
+      ORDER BY date DESC
+    `).all(student_id);
+    return { ok: true, data: rows };
   } catch (err) {
     return { ok: false, error: err.message };
   }

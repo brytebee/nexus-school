@@ -159,3 +159,63 @@ suspend fun saveDeleteStudentEvent(context: Context, studentId: String) {
         .map { it.event_id }
     if (toCancel.isNotEmpty()) db.syncDao().deleteEvents(toCancel)
 }
+
+/**
+ * Persists a full class attendance register for a given [date] to Room and
+ * enqueues one [SyncEvent] per student so the Desktop Hub receives them on
+ * the next push cycle.
+ *
+ * Each event uses a deterministic [event_id] so re-saving the same date/student
+ * is idempotent — it simply replaces the earlier queued entry.
+ *
+ * @param records  A map of student_id → "Present" | "Absent" | "Late"
+ */
+suspend fun saveAttendanceEvents(
+    context: Context,
+    className: String,
+    date: String,
+    records: Map<String, String>   // student_id → status
+) {
+    val db = SyncDatabase.getDatabase(context)
+
+    val attendanceEntities = records.map { (studentId, status) ->
+        com.nexus.school.data.DailyAttendance(
+            student_id = studentId,
+            class_name = className,
+            date       = date,
+            status     = status,
+            is_synced  = false
+        )
+    }
+
+    // Batch-upsert the local attendance records (Room REPLACE handles conflicts)
+    db.studentDao().insertAttendanceRecords(attendanceEntities)
+
+    // Enqueue one ATTENDANCE_UPDATE sync event per student
+    records.forEach { (studentId, status) ->
+        val payload = """{"student_id": "$studentId", "class_name": "$className", "date": "$date", "status": "$status", "source": "teacher"}"""
+        db.syncDao().insertEvent(
+            SyncEvent(
+                event_id   = "ATTENDANCE_${studentId}_$date",   // deterministic — safe to re-save
+                event_type = "ATTENDANCE_UPDATE",
+                payload    = payload,
+                is_synced  = 0
+            )
+        )
+    }
+
+    // UDP Pulse — fire a single heartbeat so the Desktop Activity Log reflects the action
+    withContext(Dispatchers.IO) {
+        try {
+            val serverInfo  = IdentityManager(context).getServerInfo() ?: return@withContext
+            val teacherName = IdentityManager(context).getTeacherName()
+            val msg = """{"teacher": "$teacherName", "action": "Took Attendance for $className ($date)", "event": "ATTENDANCE_UPDATE"}"""
+            DatagramSocket().use { socket ->
+                val bytes = msg.toByteArray()
+                socket.send(DatagramPacket(bytes, bytes.size, InetAddress.getByName(serverInfo.first), 3001))
+            }
+        } catch (e: Exception) {
+            Log.e("NexusPulse", "Attendance UDP heartbeat failed.", e)
+        }
+    }
+}
