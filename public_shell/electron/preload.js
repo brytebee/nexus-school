@@ -56,6 +56,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getDailyAttendance: (data)   => ipcRenderer.invoke('get-daily-attendance', data),
     saveDailyAttendance:(data)   => ipcRenderer.invoke('save-daily-attendance', data),
     getStudentAttendanceReport: (data) => ipcRenderer.invoke('get-student-attendance-report', data),
+
+    // Gold Phase B: Nexus Pulse (WhatsApp Bot)
+    onPulseStatus:      (callback) => ipcRenderer.on('pulse-status', (_event, value) => callback(value)),
+    startPulse:         ()         => ipcRenderer.send('pulse:start'),
+    stopPulse:          ()         => ipcRenderer.send('pulse:stop'),
+    getPulseStatus:     ()         => ipcRenderer.invoke('pulse:status'),
 });
 
 

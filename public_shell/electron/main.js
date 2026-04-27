@@ -14,6 +14,7 @@ const Handlebars = require("handlebars");
 const { database, server, reports } = require("../../private_engine");
 const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, handleCSVUpload, clearData } = server;
 const address = require("address");
+const pulseBot = require('./pulse-bot.js');
 
 // Set app name BEFORE createWindow so Menu.buildFromTemplate picks it up correctly
 app.setName("NexusSchoolOS");
@@ -45,6 +46,10 @@ let qrPayload = null;
 let licenseStatus = { locked: false, message: "" };
 
 // ── ALL ipcMain.handle registrations (ONCE at module scope) ──────────────────
+
+ipcMain.on("pulse:start", () => pulseBot.startPulse());
+ipcMain.on("pulse:stop", () => pulseBot.destroyPulse());
+ipcMain.handle("pulse:status", () => pulseBot.getPulseStatus());
 
 ipcMain.handle("get-identity", () => {
   return { ...identityPacket, tier: licenseStatus?.tier || "Silver" };
@@ -1171,6 +1176,8 @@ function createWindow() {
 
   // (app name already set at module scope)
   mainWindow.loadFile("index.html");
+
+  pulseBot.initPulseBot(mainWindow);
 
   // ── Dev shortcuts: Cmd+R → reload, Cmd+Option+I → DevTools ───────────────
   globalShortcut.register("CommandOrControl+R", () => {
