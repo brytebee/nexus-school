@@ -146,6 +146,16 @@
           </li>
           <li
             class="nav-item"
+            data-view="pulse"
+            data-tier="Gold"
+            onclick="showView('pulse')"
+          >
+            <span class="nav-icon">🤖</span>
+            <span class="nav-label">Nexus Pulse</span>
+            <span class="nav-lock" style="display:none;margin-left:auto;font-size:12px;">🔒</span>
+          </li>
+          <li
+            class="nav-item"
             data-view="fees"
             data-tier="Diamond"
             onclick="showView('fees')"
@@ -1263,6 +1273,40 @@
           </div>
         </div>
 
+        <!-- ─────────────────── VIEW: NEXUS PULSE ────────────────────────── -->
+        <div class="view" id="view-pulse">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">Nexus Pulse</h2>
+              <p class="view-subtitle">
+                Automated WhatsApp Assistant for Parents (Gold Feature)
+              </p>
+            </div>
+            <div class="header-actions">
+              <button class="primary-btn" id="btn-start-pulse">
+                Start Bot
+              </button>
+              <button class="danger-btn" id="btn-stop-pulse" style="display: none;">
+                Stop Bot
+              </button>
+            </div>
+          </div>
+
+          <div class="content-panel" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 400px; text-align: center;">
+            <div id="pulse-status-container">
+              <div id="pulse-icon" style="font-size: 64px; margin-bottom: 20px;">🤖</div>
+              <h3 id="pulse-status-text" style="color: var(--text-bright); margin-bottom: 10px;">Bot is Disconnected</h3>
+              <p id="pulse-status-desc" style="color: var(--text-dim); max-width: 400px; margin: 0 auto 20px;">
+                Click "Start Bot" to initialize the WhatsApp engine. You will need to scan a QR code with the school's WhatsApp phone.
+              </p>
+              
+              <div id="pulse-qr-container" style="display: none; background: white; padding: 20px; border-radius: 12px; display: inline-block; margin-top: 20px;">
+                <canvas id="pulse-qr-canvas"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- ─────────────────── VIEW: ATTENDANCE ────────────────────────── -->
         <div class="view" id="view-attendance">
           <div class="view-header">
@@ -1677,6 +1721,7 @@
     <script src="js/settings.js"></script>
     <script src="js/sync.js"></script>
     <script src="js/attendance.js"></script>
+    <script src="js/pulse-ui.js"></script>
     <script src="js/boot.js"></script>
     <!-- Global Hidden Inputs -->
     <input type="file" id="csv-upload" accept=".csv" style="display: none" />
