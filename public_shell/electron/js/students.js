@@ -9,10 +9,11 @@
         drawer.style.display =
           drawer.style.display === "none" ? "block" : "none";
         if (drawer.style.display === "block") {
-          ["stu-add-name", "stu-add-class"].forEach((id) => {
+          ["stu-add-name", "stu-add-class", "stu-add-regno", "stu-add-gender", "stu-add-dob", "stu-add-pemail", "stu-add-pphone", "stu-add-fee"].forEach((id) => {
             const el = document.getElementById(id);
             if (el) el.value = "";
           });
+          document.getElementById("stu-add-fee").value = "cleared";
           document.getElementById("stu-add-log").textContent = "";
           renderSubjectsPicker("stu", "jss");
 
@@ -31,9 +32,13 @@
 
       async function addStudentFromDirectory() {
         const name = document.getElementById("stu-add-name").value.trim();
-        const class_name = document
-          .getElementById("stu-add-class")
-          .value.trim();
+        const class_name = document.getElementById("stu-add-class").value.trim();
+        const reg_no = document.getElementById("stu-add-regno").value.trim();
+        const gender = document.getElementById("stu-add-gender").value.trim();
+        const dob = document.getElementById("stu-add-dob").value.trim();
+        const parent_email = document.getElementById("stu-add-pemail").value.trim();
+        const parent_phone = document.getElementById("stu-add-pphone").value.trim();
+        const fee_status = document.getElementById("stu-add-fee").value.trim() || 'cleared';
         const log = document.getElementById("stu-add-log");
         const subjects = getCheckedSubjects("stu");
 
@@ -54,14 +59,22 @@
           name,
           class_name,
           subjects,
+          reg_no,
+          gender,
+          dob,
+          parent_email,
+          parent_phone,
+          fee_status
         });
 
         if (res.ok) {
           log.style.color = "#4CAF50";
           log.textContent = `✅ ${name} added (${id}).`;
-          ["stu-add-name", "stu-add-class"].forEach((f) => {
-            document.getElementById(f).value = "";
+          ["stu-add-name", "stu-add-class", "stu-add-regno", "stu-add-gender", "stu-add-dob", "stu-add-pemail", "stu-add-pphone"].forEach((f) => {
+            const el = document.getElementById(f);
+            if(el) el.value = "";
           });
+          document.getElementById("stu-add-fee").value = "cleared";
           renderSubjectsPicker("stu", "jss"); // Reset checkboxes to a default view
           await refreshStudentsTable();
           setTimeout(() => toggleAddStudentForm(), 1400);
@@ -167,6 +180,12 @@
       document.getElementById('edit-stu-id').value = stu.id;
       document.getElementById('edit-stu-name').value = stu.name;
       document.getElementById('edit-stu-class').value = stu.class_name;
+      document.getElementById('edit-stu-regno').value = stu.reg_no || '';
+      document.getElementById('edit-stu-gender').value = stu.gender || '';
+      document.getElementById('edit-stu-dob').value = stu.dob || '';
+      document.getElementById('edit-stu-pemail').value = stu.parent_email || '';
+      document.getElementById('edit-stu-pphone').value = stu.parent_phone || '';
+      document.getElementById('edit-stu-fee').value = stu.fee_status || 'cleared';
       document.getElementById('edit-stu-log').textContent = '';
 
       // Populate class datalist
@@ -202,10 +221,16 @@
     }
 
     async function saveEditStudent() {
-      const id        = document.getElementById('edit-stu-id').value;
-      const name      = document.getElementById('edit-stu-name').value.trim();
+      const id         = document.getElementById('edit-stu-id').value;
+      const name       = document.getElementById('edit-stu-name').value.trim();
       const class_name = document.getElementById('edit-stu-class').value.trim();
-      const log       = document.getElementById('edit-stu-log');
+      const reg_no     = document.getElementById('edit-stu-regno').value.trim();
+      const gender     = document.getElementById('edit-stu-gender').value.trim();
+      const dob        = document.getElementById('edit-stu-dob').value.trim();
+      const parent_email = document.getElementById('edit-stu-pemail').value.trim();
+      const parent_phone = document.getElementById('edit-stu-pphone').value.trim();
+      const fee_status = document.getElementById('edit-stu-fee').value.trim();
+      const log        = document.getElementById('edit-stu-log');
       const subjects  = getCheckedSubjects('edit_stu');
 
       if (!name || !class_name) {
@@ -221,7 +246,9 @@
 
       log.style.color = 'var(--text-dim)';
       log.textContent = 'Saving…';
-      const res = await window.electronAPI.updateStudent({ id, name, class_name, subjects });
+      const res = await window.electronAPI.updateStudent({ 
+        id, name, class_name, subjects, reg_no, gender, dob, parent_email, parent_phone, fee_status 
+      });
       if (res.ok) {
         log.style.color = '#4CAF50';
         log.textContent = '✅ Saved!';

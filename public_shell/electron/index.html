@@ -657,7 +657,7 @@
                 display: grid;
                 grid-template-columns: 2fr 1fr;
                 gap: 10px;
-                margin-bottom: 14px;
+                margin-bottom: 10px;
               "
             >
               <input
@@ -675,6 +675,39 @@
                 />
                 <datalist id="stu-class-datalist"></datalist>
               </div>
+            </div>
+
+            <div
+              style="
+                display: grid;
+                grid-template-columns: 1fr 1fr 1fr;
+                gap: 10px;
+                margin-bottom: 10px;
+              "
+            >
+              <input id="stu-add-regno" class="modern-input" placeholder="Reg Number" />
+              <select id="stu-add-gender" class="modern-input">
+                <option value="">Gender</option>
+                <option value="M">Male</option>
+                <option value="F">Female</option>
+              </select>
+              <input id="stu-add-dob" type="date" class="modern-input" title="Date of Birth" style="font-family: var(--font-mono);" />
+            </div>
+
+            <div
+              style="
+                display: grid;
+                grid-template-columns: 1fr 1fr 1fr;
+                gap: 10px;
+                margin-bottom: 14px;
+              "
+            >
+              <input id="stu-add-pemail" class="modern-input" placeholder="Parent Email" />
+              <input id="stu-add-pphone" class="modern-input" placeholder="Parent Phone (e.g. 23480...)" />
+              <select id="stu-add-fee" class="modern-input">
+                <option value="cleared">Fee Status: Cleared</option>
+                <option value="debtor">Fee Status: Debtor</option>
+              </select>
             </div>
 
             <p
@@ -1733,12 +1766,31 @@
           <h3 style="color:#ffd700;font-size:14px;font-weight:700;">✏️ Edit Student</h3>
           <button onclick="closeEditStudent()" style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;line-height:1;">×</button>
         </div>
-        <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-bottom:14px;">
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-bottom:10px;">
           <input id="edit-stu-name" class="modern-input" placeholder="Full Name *" />
           <div style="display:flex;flex-direction:column;gap:0;">
             <input id="edit-stu-class" class="modern-input" placeholder="Class *" list="edit-stu-class-datalist" />
             <datalist id="edit-stu-class-datalist"></datalist>
           </div>
+        </div>
+        
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
+          <input id="edit-stu-regno" class="modern-input" placeholder="Reg Number" />
+          <select id="edit-stu-gender" class="modern-input">
+            <option value="">Gender</option>
+            <option value="M">Male</option>
+            <option value="F">Female</option>
+          </select>
+          <input id="edit-stu-dob" type="date" class="modern-input" title="Date of Birth" style="font-family: var(--font-mono);" />
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px;">
+          <input id="edit-stu-pemail" class="modern-input" placeholder="Parent Email" />
+          <input id="edit-stu-pphone" class="modern-input" placeholder="Parent Phone (e.g. 23480...)" />
+          <select id="edit-stu-fee" class="modern-input">
+            <option value="cleared">Fee Status: Cleared</option>
+            <option value="debtor">Fee Status: Debtor</option>
+          </select>
         </div>
         <p style="font-size:11px;color:#ffd700;margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Enrolled Subjects</p>
         <div style="background:rgba(0,0,0,0.15);border:1px solid rgba(255,255,255,0.05);border-radius:10px;padding:12px;margin-bottom:14px;">
