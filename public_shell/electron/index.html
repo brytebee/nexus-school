@@ -1336,6 +1336,39 @@
               <div id="pulse-qr-container" style="display: none; background: white; padding: 20px; border-radius: 12px; display: inline-block; margin-top: 20px;">
                 <canvas id="pulse-qr-canvas"></canvas>
               </div>
+
+              <!-- 💎 Always-On Cloud Bridge (Turn 2) -->
+              <div id="pulse-cloud-bridge" style="margin-top: 40px; border-top: 1px solid var(--border); padding-top: 20px; width: 100%; max-width: 500px; text-align: left; display: none;">
+                <h4 style="color: var(--gold); margin-bottom: 10px;">💎 Always-On Cloud Bridge</h4>
+                <p style="color: var(--text-dim); font-size: 13px; margin-bottom: 15px;">
+                  Sync your data to Google Drive for 24/7 responsiveness even when this laptop is off. (Diamond Tier Only)
+                </p>
+                
+                <div id="cloud-setup-form" style="display: none; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                    <label style="font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 5px;">Google App Credentials</label>
+                    <input type="text" id="google-client-id" placeholder="Google Client ID" style="width: 100%; margin-bottom: 10px; padding: 8px; border-radius: 4px; background: var(--bg-main); border: 1px solid var(--border); color: white;">
+                    <input type="password" id="google-client-secret" placeholder="Google Client Secret" style="width: 100%; margin-bottom: 10px; padding: 8px; border-radius: 4px; background: var(--bg-main); border: 1px solid var(--border); color: white;">
+                    <button class="primary-btn" id="btn-save-google-creds" style="width: 100%;">Save Credentials</button>
+                </div>
+
+                <div id="cloud-status-panel" style="display: flex; align-items: center; justify-content: space-between; background: var(--bg-main); padding: 12px; border-radius: 8px; border: 1px solid var(--border);">
+                    <div id="cloud-status-indicator">
+                        <span style="color: var(--text-dim);">Status:</span> <span id="cloud-sync-status" style="color: var(--danger);">Not Configured</span>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="small-btn" id="btn-trigger-sync" style="display: none; background: var(--accent); color: var(--bg-dark); border-color: var(--accent);">Sync Now</button>
+                        <button class="small-btn" id="btn-connect-google">Configure</button>
+                    </div>
+                </div>
+
+                <div id="cloud-key-panel" style="margin-top: 15px; background: rgba(212, 175, 55, 0.1); border: 1px solid var(--gold); padding: 12px; border-radius: 8px; display: none;">
+                    <div style="font-size: 11px; color: var(--gold); text-transform: uppercase; margin-bottom: 5px; display: flex; align-items: center; gap: 5px;">
+                        <span>🔐 Pulse Security Key (Keep Secret)</span>
+                    </div>
+                    <code id="pulse-security-key" style="color: white; font-family: monospace; display: block; word-break: break-all; margin-bottom: 8px; font-size: 12px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px;"></code>
+                    <button class="small-btn" id="btn-copy-security-key" style="border-color: var(--gold); color: var(--gold);">Copy Key</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

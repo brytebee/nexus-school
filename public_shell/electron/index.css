@@ -568,6 +568,26 @@ body {
 .primary-btn:hover  { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,229,255,0.35); background: #4affff; }
 .primary-btn:active { transform: translateY(0); }
 
+.danger-btn {
+  background: linear-gradient(135deg, #ff4d4d 0%, #ff1a1a 100%);
+  color: white;
+  border: none;
+  padding: 10px 24px;
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 15px rgba(255, 77, 77, 0.2);
+}
+.danger-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(255, 77, 77, 0.35);
+  background: #ff6666;
+}
+.danger-btn:active {
+  transform: translateY(0);
+}
+
 /* Outlined ghost button — used alongside primary-btn in action bars */
 .secondary-btn {
     background: transparent;
@@ -1105,4 +1125,25 @@ code {
     font-weight: bold;
     -webkit-print-color-adjust: exact;
   }
+}
+
+.small-btn {
+  padding: 6px 12px;
+  font-size: 11px;
+  border-radius: 6px;
+  background: var(--bg-dark);
+  color: white;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.2s;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+.small-btn:hover {
+  background: var(--border);
+  border-color: var(--text-dim);
+}
+.small-btn:active {
+  transform: translateY(1px);
 }

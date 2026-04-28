@@ -59,9 +59,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // Gold Phase B: Nexus Pulse (WhatsApp Bot)
     onPulseStatus:      (callback) => ipcRenderer.on('pulse-status', (_event, value) => callback(value)),
-    startPulse:         ()         => ipcRenderer.send('pulse:start'),
-    stopPulse:          ()         => ipcRenderer.send('pulse:stop'),
-    getPulseStatus:     ()         => ipcRenderer.invoke('pulse:status'),
+    pulse: {
+        start: () => ipcRenderer.send('pulse:start'),
+        stop: () => ipcRenderer.send('pulse:stop'),
+        status: () => ipcRenderer.invoke('pulse:status'),
+        // Cloud Bridge (Turn 2)
+        saveGoogleCreds: (creds) => ipcRenderer.send('pulse:save-google-creds', creds),
+        getGoogleAuthUrl: () => ipcRenderer.invoke('pulse:get-google-auth-url'),
+        getCloudStatus: () => ipcRenderer.invoke('pulse:get-cloud-status'),
+        triggerSync: () => ipcRenderer.send('pulse:trigger-sync'),
+        onCloudSynced: (callback) => ipcRenderer.on('pulse:cloud-synced', (_event, value) => callback(value))
+    }
 });
-
-
