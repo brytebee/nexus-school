@@ -164,6 +164,17 @@ class PulseExporter {
             }
         } catch (err) {
             console.error("[Pulse Exporter] Sync Failed:", err);
+            let errorMessage = "Sync Failed: Unknown Error";
+            
+            if (err.message && err.message.includes("Google Drive API has not been used")) {
+                errorMessage = "Google Drive API is disabled. Please enable it in your Google Cloud Console.";
+            } else if (err.code === 401) {
+                errorMessage = "Authentication expired. Please link your account again.";
+            }
+
+            if (this.onSyncError) {
+                this.onSyncError(errorMessage);
+            }
         } finally {
             this.isSyncing = false;
         }

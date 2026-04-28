@@ -68,6 +68,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         getGoogleAuthUrl: () => ipcRenderer.invoke('pulse:get-google-auth-url'),
         getCloudStatus: () => ipcRenderer.invoke('pulse:get-cloud-status'),
         triggerSync: () => ipcRenderer.send('pulse:trigger-sync'),
-        onCloudSynced: (callback) => ipcRenderer.on('pulse:cloud-synced', (_event, value) => callback(value))
+        onCloudSynced: (callback) => ipcRenderer.on('pulse:cloud-synced', (_event, value) => callback(value)),
+        onSyncError: (callback) => ipcRenderer.on('pulse:sync-error', (_event, value) => callback(value))
     }
 });
