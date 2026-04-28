@@ -15,6 +15,8 @@ const { database, server, reports } = require("../../private_engine");
 const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, handleCSVUpload, clearData } = server;
 const address = require("address");
 const pulseBot = require('./pulse-bot.js');
+const pulseExporter = require('./pulse-exporter.js');
+const express = require('express');
 
 // Set app name BEFORE createWindow so Menu.buildFromTemplate picks it up correctly
 app.setName("NexusSchoolOS");
@@ -47,9 +49,43 @@ let licenseStatus = { locked: false, message: "" };
 
 // ── ALL ipcMain.handle registrations (ONCE at module scope) ──────────────────
 
-ipcMain.on("pulse:start", () => pulseBot.startPulse());
+ipcMain.on("pulse:start", () => {
+    if (licenseStatus?.tier === 'Gold' || licenseStatus?.tier === 'Diamond') {
+        pulseBot.startPulse();
+    } else {
+        console.warn("[Pulse] Attempted start on non-eligible tier:", licenseStatus?.tier);
+    }
+});
 ipcMain.on("pulse:stop", () => pulseBot.destroyPulse());
 ipcMain.handle("pulse:status", () => pulseBot.getPulseStatus());
+
+// ── Pulse Cloud Bridge (Turn 2) ───────────────────────────────────────────
+ipcMain.on("pulse:save-google-creds", (event, { clientId, clientSecret }) => {
+    const db = database.getDb();
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('google_client_id', ?)").run(clientId);
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('google_client_secret', ?)").run(clientSecret);
+    pulseExporter.init();
+});
+
+ipcMain.handle("pulse:get-google-auth-url", async () => {
+    await pulseExporter.init();
+    if (!pulseExporter.oAuth2Client) return null;
+    return pulseExporter.oAuth2Client.generateAuthUrl({
+        access_type: 'offline',
+        scope: ['https://www.googleapis.com/auth/drive.file'],
+        prompt: 'consent'
+    });
+});
+
+ipcMain.handle("pulse:get-cloud-status", () => {
+    return {
+        isConfigured: !!pulseExporter.oAuth2Client,
+        isSyncing: pulseExporter.isSyncing,
+        securityKey: pulseExporter.getOrCreateSecurityKey()
+    };
+});
+
+ipcMain.on("pulse:trigger-sync", () => pulseExporter.syncToDrive());
 
 ipcMain.handle("get-identity", () => {
   return { ...identityPacket, tier: licenseStatus?.tier || "Silver" };
@@ -1178,6 +1214,34 @@ function createWindow() {
   mainWindow.loadFile("index.html");
 
   pulseBot.initPulseBot(mainWindow);
+  pulseExporter.init().then(() => {
+      // If initialized and Diamond tier, start periodic sync
+      if (pulseExporter.oAuth2Client && licenseStatus?.tier === 'Diamond') {
+          pulseExporter.startPeriodicSync();
+      }
+  });
+
+  // Small callback server for Google Auth
+  const callbackServer = express();
+  callbackServer.get('/google-callback', async (req, res) => {
+      const { code } = req.query;
+      if (code && pulseExporter.oAuth2Client) {
+          try {
+              const { tokens } = await pulseExporter.oAuth2Client.getToken(code);
+              const db = database.getDb();
+              db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('google_tokens', ?)").run(JSON.stringify(tokens));
+              pulseExporter.oAuth2Client.setCredentials(tokens);
+              pulseExporter.startPeriodicSync();
+              res.send("<h1>Authentication Successful!</h1><p>You can close this window now.</p>");
+              if (mainWindow) mainWindow.webContents.send("pulse:cloud-synced");
+          } catch (err) {
+              res.status(500).send("Authentication failed: " + err.message);
+          }
+      } else {
+          res.send("Invalid callback.");
+      }
+  });
+  callbackServer.listen(3005, () => console.log("[Pulse] Google Auth callback server listening on port 3005"));
 
   // ── Dev shortcuts: Cmd+R → reload, Cmd+Option+I → DevTools ───────────────
   globalShortcut.register("CommandOrControl+R", () => {
