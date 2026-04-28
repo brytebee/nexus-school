@@ -1214,6 +1214,10 @@ function createWindow() {
   mainWindow.loadFile("index.html");
 
   pulseBot.initPulseBot(mainWindow);
+  pulseExporter.onSyncError = (message) => {
+      if (mainWindow) mainWindow.webContents.send("pulse:sync-error", message);
+  };
+
   pulseExporter.init().then(() => {
       // If initialized and Diamond tier, start periodic sync
       if (pulseExporter.oAuth2Client && licenseStatus?.tier === 'Diamond') {

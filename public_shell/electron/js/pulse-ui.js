@@ -199,5 +199,11 @@ document.addEventListener("DOMContentLoaded", () => {
     refreshCloudStatus();
   });
 
+  window.electronAPI.pulse.onSyncError((message) => {
+    alert(message);
+    btnTriggerSync.textContent = "Sync Now";
+    btnTriggerSync.disabled = false;
+  });
+
   refreshCloudStatus();
 });
