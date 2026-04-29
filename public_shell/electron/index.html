@@ -1365,8 +1365,20 @@
                     <div style="font-size: 11px; color: var(--gold); text-transform: uppercase; margin-bottom: 5px; display: flex; align-items: center; gap: 5px;">
                         <span>🔐 Pulse Security Key (Keep Secret)</span>
                     </div>
-                    <code id="pulse-security-key" style="color: white; font-family: monospace; display: block; word-break: break-all; margin-bottom: 8px; font-size: 12px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px;"></code>
-                    <button class="small-btn" id="btn-copy-security-key" style="border-color: var(--gold); color: var(--gold);">Copy Key</button>
+                    <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                        <code id="pulse-security-key" data-full-token="" style="flex: 1; color: white; font-family: monospace; display: block; word-break: break-all; font-size: 12px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px;"></code>
+                        <button class="small-btn" id="btn-copy-security-key" style="border-color: var(--gold); color: var(--gold); align-self: flex-start;">Copy</button>
+                    </div>
+
+                    <div id="refresh-token-wrapper" style="display: none;">
+                        <div style="font-size: 11px; color: var(--gold); text-transform: uppercase; margin-bottom: 5px; display: flex; align-items: center; gap: 5px;">
+                            <span>🔑 Google Refresh Token</span>
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            <code id="pulse-refresh-token" data-full-token="" style="flex: 1; color: white; font-family: monospace; display: block; word-break: break-all; font-size: 12px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px;"></code>
+                            <button class="small-btn" id="btn-copy-refresh-token" style="border-color: var(--gold); color: var(--gold); align-self: flex-start;">Copy</button>
+                        </div>
+                    </div>
                 </div>
               </div>
             </div>

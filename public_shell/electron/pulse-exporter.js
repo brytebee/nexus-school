@@ -48,6 +48,24 @@ class PulseExporter {
     }
 
     /**
+     * Retrieves the Google Refresh Token from local database
+     */
+    getRefreshToken() {
+        const db = database.getDb();
+        const tokensStr = db.prepare("SELECT value FROM app_settings WHERE key = 'google_tokens'").get()?.value;
+        if (tokensStr) {
+            try {
+                const tokens = JSON.parse(tokensStr);
+                return tokens.refresh_token || null;
+            } catch (err) {
+                console.error("[Pulse Exporter] Error parsing google_tokens JSON:", err);
+                return null;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Encrypts data using AES-256-GCM
      */
     encrypt(text, key) {
