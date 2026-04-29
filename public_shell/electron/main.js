@@ -332,46 +332,63 @@ ipcMain.handle("update-student", (event, { id, name, class_name, subjects, reg_n
 });
 
 // ── Directory: Get All Teachers (with allocations) ──────────────────────────
-ipcMain.handle("get-all-teachers", () => {
+ipcMain.handle("get-all-teachers", (event, { limit = 15, offset = 0, search = "" } = {}) => {
   try {
     const db = database.getDb();
-    const teachers = db
-      .prepare("SELECT * FROM teachers ORDER BY name ASC")
-      .all();
+    const query = search ? `%${search}%` : "%";
+    
+    const total = db.prepare("SELECT COUNT(*) as total FROM teachers WHERE name LIKE ? OR id LIKE ?").get(query, query).total;
+
+    const teachers = db.prepare(`
+      SELECT * FROM teachers 
+      WHERE name LIKE ? OR id LIKE ? 
+      ORDER BY name ASC 
+      LIMIT ? OFFSET ?
+    `).all(query, query, limit, offset);
+
     const getAllocs = db.prepare(
       "SELECT class_name, subject FROM teacher_allocations WHERE teacher_id = ? ORDER BY class_name, subject",
     );
     for (const t of teachers) {
       t.allocations = getAllocs.all(t.id);
     }
-    return teachers;
+    return { ok: true, data: teachers, total };
   } catch (err) {
     console.error("[Dir] Failed to get teachers:", err);
-    return [];
+    return { ok: false, error: err.message, data: [], total: 0 };
   }
 });
 
 // ── Directory: Get All Students ─────────────────────────────────────────
-ipcMain.handle("get-all-students", () => {
+ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = "" } = {}) => {
   try {
     const db = database.getDb();
-    const students = db
-      .prepare(
-        "SELECT id, name, class_name, reg_no, gender, dob, photo, parent_email, parent_phone, fee_status FROM students ORDER BY class_name ASC, name ASC",
-      )
-      .all();
+    const query = search ? `%${search}%` : "%";
+
+    const total = db.prepare("SELECT COUNT(*) as total FROM students WHERE name LIKE ? OR id LIKE ? OR reg_no LIKE ?")
+                    .get(query, query, query).total;
+
+    const students = db.prepare(`
+      SELECT id, name, class_name, reg_no, gender, dob, photo, parent_email, parent_phone, fee_status 
+      FROM students 
+      WHERE name LIKE ? OR id LIKE ? OR reg_no LIKE ?
+      ORDER BY class_name ASC, name ASC
+      LIMIT ? OFFSET ?
+    `).all(query, query, query, limit, offset);
+
     // Attach subject enrollment
     const stmt = db.prepare("SELECT subject FROM student_subjects WHERE student_id = ?");
     for (const student of students) {
       student.subjects = stmt.all(student.id).map(row => row.subject);
     }
     
-    return students;
+    return { ok: true, data: students, total };
   } catch (err) {
     console.error("[Dir] Failed to get students:", err);
-    return [];
+    return { ok: false, error: err.message, data: [], total: 0 };
   }
 });
+
 
 // ── Directory: Delete Teacher ─────────────────────────────────────────────────
 ipcMain.handle("delete-teacher", (event, { id }) => {
@@ -478,9 +495,13 @@ const _parseFeeSettings = (db) => {
  * fees:get-roster — students LEFT-JOINed with student_fees for a given term.
  * balance = total_billed - total_paid is computed dynamically; never stored.
  */
-ipcMain.handle("fees:get-roster", (event, { academic_session, term }) => {
+ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, offset = 0, search = "" }) => {
   try {
     const db = database.getDb();
+    const query = search ? `%${search}%` : "%";
+
+    const total = db.prepare("SELECT COUNT(*) as total FROM students WHERE name LIKE ? OR id LIKE ?").get(query, query).total;
+
     const rows = db.prepare(`
       SELECT
         s.id              AS student_id,
@@ -498,12 +519,15 @@ ipcMain.handle("fees:get-roster", (event, { academic_session, term }) => {
         ON  f.student_id       = s.id
         AND f.academic_session = ?
         AND f.term             = ?
+      WHERE s.name LIKE ? OR s.id LIKE ?
       ORDER BY s.class_name ASC, s.name ASC
-    `).all(academic_session, term);
-    return { ok: true, data: rows };
+      LIMIT ? OFFSET ?
+    `).all(academic_session, term, query, query, limit, offset);
+    
+    return { ok: true, data: rows, total };
   } catch (err) {
     console.error("[Fees] get-roster error:", err);
-    return { ok: false, error: err.message, data: [] };
+    return { ok: false, error: err.message, data: [], total: 0 };
   }
 });
 
@@ -618,6 +642,76 @@ ipcMain.handle("fees:save-settings", (event, patch) => {
     return { ok: true };
   } catch (err) {
     console.error("[Fees] save-settings error:", err);
+    return { ok: false, error: err.message };
+  }
+});
+
+// ── Phase 6: Attendance Desktop Engine ────────────────────────────────────────
+
+ipcMain.handle("get-daily-attendance", async (event, { class_name, date }) => {
+  try {
+    const db = database.getDb();
+    const records = db.prepare("SELECT * FROM daily_attendance WHERE class_name = ? AND date = ?").all(class_name, date);
+    const config = db.prepare("SELECT term_start_date, term_end_date FROM school_term_config WHERE id = 1").get();
+    return { 
+      ok: true, 
+      data: records, 
+      term_start_date: config?.term_start_date, 
+      term_end_date: config?.term_end_date 
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("save-daily-attendance", async (event, { class_name, date, session, term, records }) => {
+  const db = database.getDb();
+  const transaction = db.transaction(() => {
+    // 1. Bulk Save daily records
+    const deleteStmt = db.prepare("DELETE FROM daily_attendance WHERE student_id = ? AND date = ?");
+    const insertStmt = db.prepare(`
+      INSERT INTO daily_attendance (student_id, class_name, date, status, academic_session, term)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    for (const r of records) {
+      deleteStmt.run(r.student_id, date);
+      insertStmt.run(r.student_id, class_name, date, r.status, session, term);
+    }
+
+    // 2. Synchronize aggregates for Report Cards (Sovereign Hub Auto-Sync)
+    for (const r of records) {
+      const stats = db.prepare(`
+        SELECT COUNT(*) as total, SUM(CASE WHEN status IN ('Present', 'Late') THEN 1 ELSE 0 END) as attended
+        FROM daily_attendance
+        WHERE student_id = ? AND academic_session = ? AND term = ?
+      `).get(r.student_id, session, term);
+
+      db.prepare(`
+        INSERT INTO student_attendance (student_id, academic_session, term, total_days, days_attended)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
+        total_days = excluded.total_days,
+        days_attended = excluded.days_attended
+      `).run(r.student_id, session, term, stats.total, stats.attended);
+    }
+  });
+
+  try {
+    transaction();
+    return { ok: true };
+  } catch (err) {
+    console.error("[Attendance] save-daily-attendance error:", err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("get-student-attendance-report", async (event, { student_id }) => {
+  try {
+    const db = database.getDb();
+    const records = db.prepare("SELECT * FROM daily_attendance WHERE student_id = ? ORDER BY date DESC").all(student_id);
+    return { ok: true, data: records };
+  } catch (err) {
     return { ok: false, error: err.message };
   }
 });
@@ -1021,71 +1115,9 @@ ipcMain.handle("set-form-teacher", (event, { class_name, teacher_id }) => {
   }
 });
 
-ipcMain.handle("get-daily-attendance", (event, { class_name, date }) => {
-  try {
-    const db = database.getDb();
-    const rows = db.prepare(`
-      SELECT student_id, status, source
-      FROM daily_attendance
-      WHERE class_name = ? AND date = ?
-    `).all(class_name, date);
 
-    // Return term dates alongside records so the renderer can validate
-    // the selected date without an extra IPC round-trip.
-    const cfg = db.prepare(`
-      SELECT term_start_date, term_end_date
-      FROM school_term_config WHERE id = 1
-    `).get() || {};
 
-    return {
-      ok: true,
-      data: rows,
-      term_start_date: cfg.term_start_date || null,
-      term_end_date:   cfg.term_end_date   || null,
-    };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
-});
 
-ipcMain.handle("save-daily-attendance", (event, { class_name, date, session, term, records }) => {
-  try {
-    const db = database.getDb();
-    const insert = db.prepare(`
-      INSERT INTO daily_attendance (student_id, class_name, date, status, academic_session, term, source)
-      VALUES (?, ?, ?, ?, ?, ?, 'admin')
-      ON CONFLICT(student_id, date) DO UPDATE SET 
-        status = excluded.status,
-        source = excluded.source
-    `);
-    
-    const transaction = db.transaction((recs) => {
-      for (const rec of recs) {
-        insert.run(rec.student_id, class_name, date, rec.status, session, term);
-      }
-    });
-    transaction(records);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
-});
-
-ipcMain.handle("get-student-attendance-report", (event, { student_id }) => {
-  try {
-    const db = database.getDb();
-    // Fetch all attendance for the student
-    const rows = db.prepare(`
-      SELECT date, status, academic_session, term, class_name, source 
-      FROM daily_attendance 
-      WHERE student_id = ? 
-      ORDER BY date DESC
-    `).all(student_id);
-    return { ok: true, data: rows };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
-});
 
 ipcMain.handle("save-identity", (event, newIdentity) => {
   try {

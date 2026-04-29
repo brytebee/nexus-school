@@ -84,49 +84,48 @@
         }
       }
 
+      let _studentsPage   = 0;
+      let _studentsLimit  = 15;
+      let _studentsSearch = "";
+      let _studentsTotal  = 0;
+
       async function refreshStudentsTable() {
         if (!window.electronAPI?.getAllStudents) return;
-        _allStudents = await window.electronAPI.getAllStudents();
-
-        // Update badge
-        const badge = document.getElementById("badge-students");
-        if (badge) badge.textContent = _allStudents.length;
-        const dashCount = document.getElementById("dash-students-count");
-        if (dashCount) dashCount.textContent = _allStudents.length;
-
-        // Rebuild class filter dropdown
-        const filter = document.getElementById("student-class-filter");
-        const currentFilter = filter.value;
-        const classes = [
-          ...new Set(_allStudents.map((s) => s.class_name)),
-        ].sort();
-        filter.innerHTML = '<option value="">All Classes</option>';
-        classes.forEach((cls) => {
-          const opt = document.createElement("option");
-          opt.value = cls;
-          opt.textContent = cls;
-          filter.appendChild(opt);
+        
+        const filter = document.getElementById("student-class-filter").value;
+        const res = await window.electronAPI.getAllStudents({
+          limit: _studentsLimit,
+          offset: _studentsPage * _studentsLimit,
+          search: _studentsSearch
         });
-        filter.value = currentFilter;
+
+        if (!res.ok) return;
+
+        _allStudents = res.data;
+        _studentsTotal = res.total;
+
+        // Update badge (Note: total in DB might be different from filtered)
+        const badge = document.getElementById("badge-students");
+        if (badge) badge.textContent = _studentsTotal;
+        const dashCount = document.getElementById("dash-students-count");
+        if (dashCount) dashCount.textContent = _studentsTotal;
+
+        // Rebuild class filter dropdown (Optional: keep this client-side for now or fetch all classes)
+        // For 1000+ students, we might need a separate API for classes, but let's stick to search for now.
 
         renderStudentsTable();
       }
 
       function renderStudentsTable() {
-        const filter = document.getElementById("student-class-filter").value;
         const tbody = document.getElementById("students-tbody");
         tbody.innerHTML = "";
 
-        const filtered = filter
-          ? _allStudents.filter((s) => s.class_name === filter)
-          : _allStudents;
-
-        if (!filtered.length) {
-          tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim);">${_allStudents.length ? "No students in this class." : "No students loaded. Import a CSV or add manually."}</td></tr>`;
+        if (!_allStudents.length) {
+          tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim);">${_studentsTotal ? "No matching students found." : "No students loaded. Import a CSV or add manually."}</td></tr>`;
           return;
         }
 
-        filtered.forEach((s, idx) => {
+        _allStudents.forEach((s, idx) => {
           const row = document.createElement("tr");
           const subjectsList =
             s.subjects && s.subjects.length > 0
@@ -139,7 +138,7 @@
               : '<span style="color:#666;font-style:italic;font-size:11px;">No explicitly enrolled subjects</span>';
 
           row.innerHTML = `
-          <td style="color:var(--text-dim);font-size:12px;">${idx + 1}</td>
+          <td style="color:var(--text-dim);font-size:12px;">${(_studentsPage * _studentsLimit) + idx + 1}</td>
           <td style="font-family:monospace;font-size:11px;color:var(--text-dim);">${s.id}</td>
           <td style="font-weight:600;">${s.name}</td>
           <td>
@@ -153,7 +152,27 @@
         `;
           tbody.appendChild(row);
         });
+
+        NexusUI.renderPagination("students-pagination", _studentsTotal, _studentsLimit, _studentsPage, (newPage) => {
+          _studentsPage = newPage;
+          refreshStudentsTable();
+        });
       }
+
+      // Initialize Search
+      const initStudentsSearch = () => {
+        const header = document.querySelector("#view-students .view-header");
+        if (!header) {
+          setTimeout(initStudentsSearch, 100);
+          return;
+        }
+        NexusUI.injectSearch("#view-students .view-header", "Search name, ID or Reg No...", (val) => {
+          _studentsSearch = val;
+          _studentsPage = 0;
+          refreshStudentsTable();
+        });
+      };
+      initStudentsSearch();
 
       async function deleteStudent(id, name) {
         const { isConfirmed } = await Swal.fire({

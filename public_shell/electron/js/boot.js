@@ -279,7 +279,18 @@
             if (id) applyIdentityToUI(id);
           });
         }
-        refreshDashboardStats();
+        // ── Seed Metadata Cache ─────────────────────────────────────────────
+        if (window.electronAPI.getAllStudents) {
+          window.electronAPI.getAllStudents({ limit: 5000 }).then(res => {
+            _allStudents = res.data || [];
+            refreshDashboardStats();
+          });
+        }
+        if (window.electronAPI.getAllTeachers) {
+          window.electronAPI.getAllTeachers({ limit: 500 }).then(res => {
+            _allTeachers = res.data || [];
+          });
+        }
 
         // Robustness: retry renderQR until QRCode library is ready
         const readyInterval = setInterval(() => {

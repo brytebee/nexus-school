@@ -30,6 +30,9 @@
   let _pending    = new Map();// studentId → { total_billed, total_paid, next_due_date }
   let _isDiamond  = false;
   let _currentTerm, _currentSession;
+  let _currentPage = 0;
+  let _pageSize    = 15;
+  let _searchQuery = "";
 
   // ── DOM refs (resolved at init time) ────────────────────────────────────────
   let $ = {};
@@ -43,6 +46,8 @@
       // Settings modal
       "modal-fees-settings","btn-fees-settings-close","btn-fees-settings-cancel",
       "btn-fees-settings-save","fees-reminder-1","fees-reminder-2",
+      "fees-accounts-list","btn-fees-add-account",
+      "fees-installments-list","btn-fees-add-installment",
       "fees-shield-section","fees-shield-enabled","fees-shield-mode-group","fees-shield-mode",
       // Payment modal (Diamond)
       "modal-record-payment","payment-student-id","payment-modal-student-name",
@@ -197,13 +202,26 @@
         Loading…</td></tr>`;
     }
 
-    const res = await window.electronAPI.fees.getRoster({ academic_session: session, term });
+    const res = await window.electronAPI.fees.getRoster({ 
+      academic_session: session, 
+      term,
+      limit: _pageSize,
+      offset: _currentPage * _pageSize,
+      search: _searchQuery
+    });
+
     if (!res.ok) {
       console.error("[Financial Hub] getRoster failed:", res.error);
       return;
     }
     _roster = res.data;
     _renderRoster(_roster);
+
+    // Render pagination
+    NexusUI.renderPagination("fees-pagination", res.total, _pageSize, _currentPage, (newPage) => {
+      _currentPage = newPage;
+      _loadRoster();
+    });
   }
 
   // ── Gold: inline edit event delegation ───────────────────────────────────────
@@ -333,6 +351,35 @@
     </tr>`).join("");
   }
 
+  // ── Dynamic List Helpers ────────────────────────────────────────────────────
+  function _createAccountRow(acc = {}) {
+    const div = document.createElement("div");
+    div.className = "fee-setting-row";
+    div.style = "display:flex;gap:8px;align-items:center;margin-bottom:6px;";
+    div.innerHTML = `
+      <input type="text" placeholder="Bank Name" class="modern-input acc-bank" value="${acc.bank || ""}" style="flex:1;font-size:11px;padding:6px 10px;">
+      <input type="text" placeholder="Acc Number" class="modern-input acc-num" value="${acc.number || ""}" style="flex:1;font-size:11px;padding:6px 10px;">
+      <input type="text" placeholder="Acc Name" class="modern-input acc-name" value="${acc.name || ""}" style="flex:1;font-size:11px;padding:6px 10px;">
+      <button class="small-btn btn-remove-row" style="color:#ff6b6b;border-color:rgba(255,107,107,0.2);">×</button>
+    `;
+    return div;
+  }
+
+  function _createInstallmentRow(inst = {}) {
+    const div = document.createElement("div");
+    div.className = "fee-setting-row";
+    div.style = "display:flex;gap:8px;align-items:center;margin-bottom:6px;";
+    div.innerHTML = `
+      <input type="text" placeholder="Milestone Label (e.g. 1st Installment)" class="modern-input inst-label" value="${inst.label || ""}" style="flex:2;font-size:11px;padding:6px 10px;">
+      <div style="display:flex;align-items:center;flex:1;gap:4px;">
+        <input type="number" placeholder="%" class="modern-input inst-pct" value="${inst.percent || ""}" min="1" max="100" style="width:100%;font-size:11px;padding:6px 10px;">
+        <span style="font-size:11px;color:var(--text-dim);">%</span>
+      </div>
+      <button class="small-btn btn-remove-row" style="color:#ff6b6b;border-color:rgba(255,107,107,0.2);">×</button>
+    `;
+    return div;
+  }
+
   // ── Unified Settings Modal ───────────────────────────────────────────────────
   async function _openSettingsModal() {
     const res = await window.electronAPI.fees.getSettings();
@@ -340,6 +387,31 @@
 
     if ($["fees-reminder-1"])    $["fees-reminder-1"].value    = s.reminder_date_1 || "";
     if ($["fees-reminder-2"])    $["fees-reminder-2"].value    = s.reminder_date_2 || "";
+    
+    // Accounts
+    const accList = $["fees-accounts-list"];
+    if (accList) {
+      accList.innerHTML = "";
+      const accounts = s.bank_accounts || [];
+      if (accounts.length) {
+        accounts.forEach(a => accList.appendChild(_createAccountRow(a)));
+      } else {
+        accList.appendChild(_createAccountRow());
+      }
+    }
+
+    // Installments
+    const instList = $["fees-installments-list"];
+    if (instList) {
+      instList.innerHTML = "";
+      const installments = s.installment_plans || [];
+      if (installments.length) {
+        installments.forEach(i => instList.appendChild(_createInstallmentRow(i)));
+      } else {
+        instList.appendChild(_createInstallmentRow());
+      }
+    }
+
     if ($["fees-shield-section"]) $["fees-shield-section"].style.display = _isDiamond ? "block" : "none";
     if ($["fees-shield-enabled"]) $["fees-shield-enabled"].checked = !!s.fee_shield_enabled;
     if ($["fees-shield-mode"])    $["fees-shield-mode"].value        = s.fee_shield_mode || "warn";
@@ -353,7 +425,29 @@
     const patch = {
       reminder_date_1: $["fees-reminder-1"]?.value || "",
       reminder_date_2: $["fees-reminder-2"]?.value || "",
+      bank_accounts: [],
+      installment_plans: [],
     };
+
+    // Serialize accounts
+    document.querySelectorAll("#fees-accounts-list .fee-setting-row").forEach(row => {
+      const bank = row.querySelector(".acc-bank").value.trim();
+      const num  = row.querySelector(".acc-num").value.trim();
+      const name = row.querySelector(".acc-name").value.trim();
+      if (bank && num && name) {
+        patch.bank_accounts.push({ bank, number: num, name });
+      }
+    });
+
+    // Serialize installments
+    document.querySelectorAll("#fees-installments-list .fee-setting-row").forEach(row => {
+      const label = row.querySelector(".inst-label").value.trim();
+      const pct   = row.querySelector(".inst-pct").value;
+      if (label && pct) {
+        patch.installment_plans.push({ label, percent: Number(pct) });
+      }
+    });
+
     if (_isDiamond) {
       patch.fee_shield_enabled = $["fees-shield-enabled"]?.checked || false;
       patch.fee_shield_mode    = $["fees-shield-mode"]?.value      || "warn";
@@ -397,6 +491,23 @@
     $["btn-fees-settings-close"]?.addEventListener("click", () => _closeModal("modal-fees-settings"));
     $["btn-fees-settings-cancel"]?.addEventListener("click", () => _closeModal("modal-fees-settings"));
     $["btn-fees-settings-save"]?.addEventListener("click", _saveSettings);
+    
+    // Dynamic lists events
+    $["btn-fees-add-account"]?.addEventListener("click", () => {
+      $["fees-accounts-list"]?.appendChild(_createAccountRow());
+    });
+    $["btn-fees-add-installment"]?.addEventListener("click", () => {
+      $["fees-installments-list"]?.appendChild(_createInstallmentRow());
+    });
+
+    ["fees-accounts-list", "fees-installments-list"].forEach(id => {
+      $[id]?.addEventListener("click", (e) => {
+        if (e.target.closest(".btn-remove-row")) {
+          e.target.closest(".fee-setting-row").remove();
+        }
+      });
+    });
+
     $["fees-shield-enabled"]?.addEventListener("change", (e) => {
       if ($["fees-shield-mode-group"]) {
         $["fees-shield-mode-group"].style.display = e.target.checked ? "block" : "none";
@@ -456,6 +567,13 @@
     if (config?.term && $["fees-term-select"]) {
       $["fees-term-select"].value = config.term;
     }
+
+    // Inject Search
+    NexusUI.injectSearch("#view-fees .view-header", "Search students by name or ID...", (val) => {
+      _searchQuery = val;
+      _currentPage = 0;
+      _loadRoster();
+    });
 
     await _loadRoster();
   };

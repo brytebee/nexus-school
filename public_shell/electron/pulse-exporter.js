@@ -87,14 +87,18 @@ class PulseExporter {
         const schoolName = schoolNameRow?.value || "Nexus School";
 
         const students = db.prepare(`
-            SELECT id, name, class_name, parent_phone, fee_status 
+            SELECT id, name, class_name, parent_phone 
             FROM students 
             WHERE parent_phone IS NOT NULL AND parent_phone != ''
         `).all();
 
+        const feeSettingsRow = db.prepare("SELECT value FROM app_settings WHERE key = 'fee_settings'").get();
+        const feeSettings    = feeSettingsRow ? JSON.parse(feeSettingsRow.value) : {};
+
         const data = {
             schoolName,
             termConfig,
+            feeSettings,
             lastUpdated: new Date().toISOString(),
             parents: {}
         };
@@ -122,11 +126,29 @@ class PulseExporter {
                 WHERE student_id = ?
             `).all(student.id);
 
+            // Get latest fee status from Phase 5 table
+            const fees = db.prepare(`
+                SELECT total_billed, total_paid, status, next_due_date
+                FROM student_fees
+                WHERE student_id = ? AND academic_session = ? AND term = ?
+            `).get(student.id, termConfig?.academic_session, termConfig?.term) || {
+                total_billed: 0,
+                total_paid: 0,
+                status: 'unpaid',
+                next_due_date: ''
+            };
+
             data.parents[phone].students.push({
                 id: student.id,
                 name: student.name,
                 class_name: student.class_name,
-                fee_status: student.fee_status,
+                fee_details: {
+                    billed: fees.total_billed,
+                    paid: fees.total_paid,
+                    balance: fees.total_billed - fees.total_paid,
+                    status: fees.status,
+                    dueDate: fees.next_due_date
+                },
                 results,
                 attendance
             });
@@ -136,65 +158,86 @@ class PulseExporter {
     }
 
     /**
-     * Exports the encrypted cache to Google Drive
+     * Exports the encrypted cache and full database backup to Google Drive
      */
     async syncToDrive() {
         if (!this.oAuth2Client || this.isSyncing) return;
         this.isSyncing = true;
 
         try {
+            // 1. Sync the Pulse Cache (for the WhatsApp Bot)
             const cache = this.generateCache();
             const key = this.getOrCreateSecurityKey();
             const encryptedData = this.encrypt(cache, key);
 
             const drive = google.drive({ version: 'v3', auth: this.oAuth2Client });
             
-            // Find existing file or create new
             const response = await drive.files.list({
                 q: "name = 'pulse_cache.enc' and trashed = false",
                 fields: 'files(id)',
             });
 
-            const fileMetadata = {
-                name: 'pulse_cache.enc',
-                mimeType: 'text/plain',
-            };
-
-            const media = {
-                mimeType: 'text/plain',
-                body: encryptedData,
-            };
+            const media = { mimeType: 'text/plain', body: encryptedData };
 
             if (response.data.files.length > 0) {
-                const fileId = response.data.files[0].id;
-                await drive.files.update({
-                    fileId: fileId,
-                    media: media,
-                });
-                console.log("[Pulse Exporter] Sync Successful: pulse_cache.enc updated.");
+                await drive.files.update({ fileId: response.data.files[0].id, media });
+                console.log("[Pulse Exporter] Cache Sync Successful.");
             } else {
                 await drive.files.create({
-                    resource: fileMetadata,
-                    media: media,
+                    resource: { name: 'pulse_cache.enc', mimeType: 'text/plain' },
+                    media,
                     fields: 'id',
                 });
-                console.log("[Pulse Exporter] Sync Successful: pulse_cache.enc created.");
+                console.log("[Pulse Exporter] Cache Sync Successful (Created).");
             }
+
+            // 2. Perform Full Database Backup (Sovereign Shield Requirement)
+            await this.backupDatabaseToDrive(drive, key);
+
         } catch (err) {
             console.error("[Pulse Exporter] Sync Failed:", err);
             let errorMessage = "Sync Failed: Unknown Error";
-            
-            if (err.message && err.message.includes("Google Drive API has not been used")) {
-                errorMessage = "Google Drive API is disabled. Please enable it in your Google Cloud Console.";
-            } else if (err.code === 401) {
-                errorMessage = "Authentication expired. Please link your account again.";
-            }
+            if (err.message?.includes("Google Drive API")) errorMessage = "Google Drive API is disabled.";
+            else if (err.code === 401) errorMessage = "Authentication expired.";
 
-            if (this.onSyncError) {
-                this.onSyncError(errorMessage);
-            }
+            if (this.onSyncError) this.onSyncError(errorMessage);
         } finally {
             this.isSyncing = false;
+        }
+    }
+
+    /**
+     * Encrypts and uploads the raw nexus.sqlite file to Google Drive
+     */
+    async backupDatabaseToDrive(drive, key) {
+        try {
+            const dbPath = path.join(__dirname, '../../private_engine/nexus.sqlite');
+            if (!fs.existsSync(dbPath)) return;
+
+            const dbContent = fs.readFileSync(dbPath);
+            // Encrypt the base64 string of the binary DB
+            const encrypted = this.encrypt(dbContent.toString('base64'), key);
+
+            const fileName = `nexus_backup_${new Date().toISOString().split('T')[0]}.enc`;
+            
+            // Check if backup for today already exists to avoid clutter
+            const existing = await drive.files.list({
+                q: `name = '${fileName}' and trashed = false`,
+                fields: 'files(id)',
+            });
+
+            if (existing.data.files.length > 0) {
+                await drive.files.update({ fileId: existing.data.files[0].id, media: { body: encrypted } });
+            } else {
+                await drive.files.create({
+                    resource: { name: fileName, mimeType: 'text/plain' },
+                    media: { body: encrypted },
+                    fields: 'id',
+                });
+            }
+            console.log(`[Pulse Exporter] Full DB Backup successful: ${fileName}`);
+        } catch (err) {
+            console.error("[Pulse Exporter] DB Backup failed:", err);
         }
     }
 
@@ -203,7 +246,6 @@ class PulseExporter {
      */
     startPeriodicSync(intervalMs = 30 * 60 * 1000) {
         setInterval(() => this.syncToDrive(), intervalMs);
-        // Also sync immediately
         this.syncToDrive();
     }
 }
