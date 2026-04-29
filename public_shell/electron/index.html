@@ -157,11 +157,11 @@
           <li
             class="nav-item"
             data-view="fees"
-            data-tier="Diamond"
+            data-tier="Gold"
             onclick="showView('fees')"
           >
             <span class="nav-icon">💳</span>
-            <span class="nav-label">Fee Engine</span>
+            <span class="nav-label">Financial Hub</span>
             <span class="nav-lock" style="display:none;margin-left:auto;font-size:12px;">🔒</span>
           </li>
         </ul>
@@ -1427,6 +1427,203 @@
           </div>
         </div>
 
+        <!-- ─────────────────── VIEW: FINANCIAL HUB ─────────────────────── -->
+        <div class="view" id="view-fees">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">💳 Financial Hub</h2>
+              <p class="view-sub" id="fees-subtitle">Track student fee balances and automate reminders via Nexus Pulse.</p>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;">
+              <span id="fees-save-indicator" style="font-size:12px;color:var(--text-dim);transition:opacity 0.3s;opacity:0;"></span>
+              <button class="small-btn" id="btn-fees-settings" title="Financial Hub Settings" style="font-size:16px;padding:6px 10px;background:rgba(255,255,255,0.06);border-color:var(--glass-border);">⚙️</button>
+            </div>
+          </div>
+
+          <!-- Term Context Bar -->
+          <div class="ph-config-strip" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:14px 20px;flex-shrink:0;">
+            <div class="ph-config-group">
+              <label class="ph-label">Session</label>
+              <select id="fees-session-select" class="modern-input" style="width:130px;font-size:12px;"></select>
+            </div>
+            <div class="ph-config-group">
+              <label class="ph-label">Term</label>
+              <select id="fees-term-select" class="modern-input" style="width:140px;font-size:12px;">
+                <option value="First Term">First Term</option>
+                <option value="Second Term">Second Term</option>
+                <option value="Third Term">Third Term</option>
+              </select>
+            </div>
+            <div class="ph-config-group">
+              <label class="ph-label">Filter</label>
+              <select id="fees-status-filter" class="modern-input" style="width:130px;font-size:12px;">
+                <option value="all">All Students</option>
+                <option value="unpaid">Unpaid Only</option>
+                <option value="partial">Partial Only</option>
+                <option value="cleared">Cleared Only</option>
+              </select>
+            </div>
+            <div style="margin-left:auto;display:flex;gap:10px;align-items:center;">
+              <span id="fees-summary-pill" style="font-size:12px;background:rgba(0,0,0,0.25);border:1px solid var(--glass-border);border-radius:20px;padding:4px 14px;color:var(--text-dim);white-space:nowrap;"></span>
+              <button class="primary-btn" id="btn-fees-load" style="padding:7px 18px;font-size:12px;">Load</button>
+            </div>
+          </div>
+
+          <!-- Fee Roster Table -->
+          <div class="table-container" style="flex:1;overflow-y:auto;">
+            <table class="data-table" id="fees-table">
+              <thead>
+                <tr>
+                  <th style="width:32px;">#</th>
+                  <th>Student Name</th>
+                  <th>Class</th>
+                  <th style="text-align:right;">Total Billed (₦)</th>
+                  <th style="text-align:right;">Amount Paid (₦)</th>
+                  <th style="text-align:right;">Balance (₦)</th>
+                  <th style="text-align:center;">Status</th>
+                  <th style="text-align:center;">Due Date</th>
+                  <!-- Diamond-only column header, hidden for Gold -->
+                  <th id="fees-th-actions" style="text-align:center;display:none;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="fees-tbody">
+                <tr>
+                  <td colspan="9" style="text-align:center;padding:50px;color:var(--text-dim);">
+                    Select a session and term, then click <strong>Load</strong>.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Gold: bulk save bar (inline edits accumulated, saved on click) -->
+          <div id="fees-save-bar" style="display:none;padding:14px 20px;border-top:1px solid var(--glass-border);background:rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+            <span style="font-size:12px;color:var(--text-dim);" id="fees-pending-count">0 unsaved changes</span>
+            <div style="display:flex;gap:10px;">
+              <button class="secondary-btn" id="btn-fees-discard" style="font-size:12px;padding:7px 16px;">Discard</button>
+              <button class="primary-btn" id="btn-fees-save-all" style="font-size:12px;padding:7px 18px;background:linear-gradient(135deg,#b8860b,#ffd700);color:#000;border:none;box-shadow:none;">💾 Save All</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ════════ FINANCIAL HUB MODALS ════════════════════════════════════ -->
+
+        <!-- Diamond: Record Payment Modal -->
+        <div id="modal-record-payment" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);backdrop-filter:blur(6px);z-index:1000;align-items:center;justify-content:center;">
+          <div style="background:var(--bg-panel);border:1px solid var(--glass-border);border-radius:16px;padding:28px 32px;width:440px;max-width:92vw;position:relative;">
+            <h3 style="margin-bottom:4px;font-size:16px;">Record Payment</h3>
+            <p id="payment-modal-student-name" style="font-size:12px;color:var(--text-dim);margin-bottom:20px;"></p>
+            <input type="hidden" id="payment-student-id">
+            <div style="display:flex;flex-direction:column;gap:14px;">
+              <div>
+                <label class="ph-label">Amount Paid (₦)</label>
+                <input type="number" id="payment-amount" class="modern-input" placeholder="e.g. 50000" min="1" style="width:100%;">
+              </div>
+              <div>
+                <label class="ph-label">Payment Method</label>
+                <select id="payment-method" class="modern-input" style="width:100%;">
+                  <option value="cash">💵 Cash</option>
+                  <option value="transfer">🏦 Bank Transfer</option>
+                  <option value="pos">💳 POS</option>
+                  <option value="bank_teller">🧾 Bank Teller</option>
+                </select>
+              </div>
+              <div>
+                <label class="ph-label">Reference / Teller No. <span style="color:var(--text-dim);font-weight:normal;">(optional)</span></label>
+                <input type="text" id="payment-reference" class="modern-input" placeholder="e.g. TXN12345678" style="width:100%;">
+              </div>
+              <div>
+                <label class="ph-label">Note <span style="color:var(--text-dim);font-weight:normal;">(optional)</span></label>
+                <input type="text" id="payment-note" class="modern-input" placeholder="e.g. Part payment" style="width:100%;">
+              </div>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:22px;justify-content:flex-end;">
+              <button class="secondary-btn" id="btn-payment-cancel">Cancel</button>
+              <button class="primary-btn" id="btn-payment-submit" style="background:linear-gradient(135deg,#b8860b,#ffd700);color:#000;border:none;box-shadow:none;">Record Payment</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Diamond: Ledger / Transaction History Modal -->
+        <div id="modal-ledger" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);backdrop-filter:blur(6px);z-index:1000;align-items:center;justify-content:center;">
+          <div style="background:var(--bg-panel);border:1px solid var(--glass-border);border-radius:16px;padding:28px 32px;width:580px;max-width:94vw;position:relative;max-height:80vh;display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+              <div>
+                <h3 style="font-size:16px;margin-bottom:2px;">Payment History</h3>
+                <p id="ledger-modal-student-name" style="font-size:12px;color:var(--text-dim);"></p>
+              </div>
+              <button id="btn-ledger-close" style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;line-height:1;">✕</button>
+            </div>
+            <div style="overflow-y:auto;flex:1;">
+              <table class="data-table" id="ledger-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th style="text-align:right;">Amount (₦)</th>
+                    <th>Method</th>
+                    <th>Reference</th>
+                    <th>Note</th>
+                  </tr>
+                </thead>
+                <tbody id="ledger-tbody">
+                  <tr><td colspan="5" style="text-align:center;padding:30px;color:var(--text-dim);">No transactions recorded.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Unified: Financial Settings Modal (Gold: reminder dates | Diamond: + Fee Shield) -->
+        <div id="modal-fees-settings" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);backdrop-filter:blur(6px);z-index:1000;align-items:center;justify-content:center;">
+          <div style="background:var(--bg-panel);border:1px solid var(--glass-border);border-radius:16px;padding:28px 32px;width:480px;max-width:92vw;position:relative;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+              <h3 style="font-size:16px;">⚙️ Financial Hub Settings</h3>
+              <button id="btn-fees-settings-close" style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;line-height:1;">✕</button>
+            </div>
+
+            <!-- SECTION 1: Nexus Pulse Automated Reminders (Gold+) -->
+            <div style="background:rgba(0,229,255,0.04);border:1px solid rgba(0,229,255,0.15);border-radius:10px;padding:16px;margin-bottom:16px;">
+              <p style="font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:12px;">🤖 Nexus Pulse — Automated Fee Reminders</p>
+              <p style="font-size:11px;color:var(--text-dim);margin-bottom:14px;line-height:1.6;">Set two dates per term when the WhatsApp bot will automatically send a professional fee reminder to all parents with outstanding balances.</p>
+              <div style="display:flex;gap:14px;flex-wrap:wrap;">
+                <div style="flex:1;min-width:140px;">
+                  <label class="ph-label">First Reminder Date</label>
+                  <input type="date" id="fees-reminder-1" class="modern-input" style="width:100%;font-size:12px;">
+                </div>
+                <div style="flex:1;min-width:140px;">
+                  <label class="ph-label">Second Reminder Date</label>
+                  <input type="date" id="fees-reminder-2" class="modern-input" style="width:100%;font-size:12px;">
+                </div>
+              </div>
+            </div>
+
+            <!-- SECTION 2: Fee Shield (Diamond only) -->
+            <div id="fees-shield-section" style="display:none;background:rgba(212,175,55,0.06);border:1px solid rgba(212,175,55,0.2);border-radius:10px;padding:16px;margin-bottom:16px;">
+              <p style="font-size:11px;color:var(--gold);text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:12px;">💎 Fee Shield — Report Card Enforcement</p>
+              <p style="font-size:11px;color:var(--text-dim);margin-bottom:14px;line-height:1.6;">Control what happens when a student's fee balance is outstanding at the time of report card generation.</p>
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--text-dim);">
+                  <input type="checkbox" id="fees-shield-enabled" style="width:14px;height:14px;accent-color:var(--gold);">
+                  <span>Enable Fee Shield enforcement</span>
+                </label>
+              </div>
+              <div id="fees-shield-mode-group" style="display:none;">
+                <label class="ph-label">Enforcement Mode</label>
+                <select id="fees-shield-mode" class="modern-input" style="width:100%;font-size:12px;">
+                  <option value="warn">⚠️ Warning Prompt Only</option>
+                  <option value="watermark">🖋️ Watermark PDF ("OUTSTANDING BALANCE")</option>
+                  <option value="block">🚫 Block PDF Generation Entirely</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:10px;justify-content:flex-end;">
+              <button class="secondary-btn" id="btn-fees-settings-cancel">Cancel</button>
+              <button class="primary-btn" id="btn-fees-settings-save" style="background:linear-gradient(135deg,#b8860b,#ffd700);color:#000;border:none;box-shadow:none;">Save Settings</button>
+            </div>
+          </div>
+        </div>
+
         <!-- ─────────────────── VIEW: SETTINGS ──────────────────────────── -->
         <div class="view" id="view-settings">
           <div class="view-header">
@@ -1800,6 +1997,7 @@
     <script src="js/sync.js"></script>
     <script src="js/attendance.js"></script>
     <script src="js/pulse-ui.js"></script>
+    <script src="js/fees-ui.js"></script>
     <script src="js/boot.js"></script>
     <!-- Global Hidden Inputs -->
     <input type="file" id="csv-upload" accept=".csv" style="display: none" />

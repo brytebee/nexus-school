@@ -224,4 +224,5 @@
         if (viewId === "printhub")       _safe(() => phInit());
         if (viewId === "result-studio")  _safe(() => rsInit());
         if (viewId === "attendance")     _safe(() => { if (typeof window.attendanceInit === "function") window.attendanceInit(); });
+        if (viewId === "fees")           _safe(() => { if (typeof window.feesInit === "function") window.feesInit(); });
       }

@@ -70,5 +70,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
         triggerSync: () => ipcRenderer.send('pulse:trigger-sync'),
         onCloudSynced: (callback) => ipcRenderer.on('pulse:cloud-synced', (_event, value) => callback(value)),
         onSyncError: (callback) => ipcRenderer.on('pulse:sync-error', (_event, value) => callback(value))
+    },
+    // Phase 5: Fee Management
+    fees: {
+        getRoster:       (params) => ipcRenderer.invoke('fees:get-roster',        params),
+        upsert:          (params) => ipcRenderer.invoke('fees:upsert',            params),
+        recordPayment:   (params) => ipcRenderer.invoke('fees:record-payment',    params),
+        getTransactions: (params) => ipcRenderer.invoke('fees:get-transactions',  params),
+        getSettings:     ()       => ipcRenderer.invoke('fees:get-settings'),
+        saveSettings:    (patch)  => ipcRenderer.invoke('fees:save-settings',     patch),
     }
 });
