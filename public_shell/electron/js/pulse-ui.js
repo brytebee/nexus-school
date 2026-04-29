@@ -117,6 +117,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const cloudKeyPanel = document.getElementById("cloud-key-panel");
   const pulseSecurityKey = document.getElementById("pulse-security-key");
   const btnCopySecurityKey = document.getElementById("btn-copy-security-key");
+  const pulseRefreshToken = document.getElementById("pulse-refresh-token");
+  const btnCopyRefreshToken = document.getElementById("btn-copy-refresh-token");
+  const refreshTokenWrapper = document.getElementById("refresh-token-wrapper");
+
+  function maskToken(token) {
+    if (!token) return "";
+    if (token.length <= 8) return "***";
+    return token.substring(0, 4) + "••••••••••••" + token.substring(token.length - 4);
+  }
 
   async function refreshCloudStatus() {
     const identity = await window.electronAPI.getIdentity();
@@ -141,7 +150,21 @@ document.addEventListener("DOMContentLoaded", () => {
       btnConnectGoogle.textContent = "Change Account";
       btnTriggerSync.style.display = "block";
       cloudKeyPanel.style.display = "block";
-      pulseSecurityKey.textContent = status.securityKey;
+      
+      pulseSecurityKey.dataset.fullToken = status.securityKey;
+      pulseSecurityKey.textContent = maskToken(status.securityKey);
+
+      if (status.refreshToken) {
+        pulseRefreshToken.dataset.fullToken = status.refreshToken;
+        pulseRefreshToken.textContent = maskToken(status.refreshToken);
+        pulseRefreshToken.style.color = "white";
+        refreshTokenWrapper.style.display = "block";
+      } else {
+        pulseRefreshToken.dataset.fullToken = "";
+        pulseRefreshToken.textContent = "Token not found. Re-authenticate.";
+        pulseRefreshToken.style.color = "var(--danger)";
+        refreshTokenWrapper.style.display = "block";
+      }
     } else {
       cloudSyncStatus.textContent = "Not Configured";
       cloudSyncStatus.style.color = "var(--danger)";
@@ -190,10 +213,20 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   btnCopySecurityKey.addEventListener("click", () => {
-    navigator.clipboard.writeText(pulseSecurityKey.textContent);
+    const token = pulseSecurityKey.dataset.fullToken || pulseSecurityKey.textContent;
+    navigator.clipboard.writeText(token);
     btnCopySecurityKey.textContent = "Copied!";
-    setTimeout(() => (btnCopySecurityKey.textContent = "Copy Key"), 2000);
+    setTimeout(() => (btnCopySecurityKey.textContent = "Copy"), 2000);
   });
+
+  if (btnCopyRefreshToken) {
+    btnCopyRefreshToken.addEventListener("click", () => {
+      const token = pulseRefreshToken.dataset.fullToken;
+      if (token) navigator.clipboard.writeText(token);
+      btnCopyRefreshToken.textContent = "Copied!";
+      setTimeout(() => (btnCopyRefreshToken.textContent = "Copy"), 2000);
+    });
+  }
 
   window.electronAPI.pulse.onCloudSynced(() => {
     refreshCloudStatus();

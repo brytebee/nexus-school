@@ -81,7 +81,8 @@ ipcMain.handle("pulse:get-cloud-status", () => {
     return {
         isConfigured: !!pulseExporter.oAuth2Client,
         isSyncing: pulseExporter.isSyncing,
-        securityKey: pulseExporter.getOrCreateSecurityKey()
+        securityKey: pulseExporter.getOrCreateSecurityKey(),
+        refreshToken: pulseExporter.getRefreshToken()
     };
 });
 
