@@ -18,8 +18,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateTeacher: (data) => ipcRenderer.invoke('update-teacher', data),
     addStudentForm: (data) => ipcRenderer.invoke('add-student-form', data),
     onLicenseStatus: (callback) => ipcRenderer.on('license-status', (_event, value) => callback(value)),
-    getAllTeachers: () => ipcRenderer.invoke('get-all-teachers'),
-    getAllStudents: () => ipcRenderer.invoke('get-all-students'),
+    getAllTeachers: (params) => ipcRenderer.invoke('get-all-teachers', params),
+    getAllStudents: (params) => ipcRenderer.invoke('get-all-students', params),
     deleteTeacher: (data) => ipcRenderer.invoke('delete-teacher', data),
     deleteStudent: (data) => ipcRenderer.invoke('delete-student', data),
     // Window chrome controls

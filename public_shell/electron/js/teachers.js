@@ -214,23 +214,38 @@
         }
       }
 
+      let _teachersPage   = 0;
+      let _teachersLimit  = 15;
+      let _teachersSearch = "";
+      let _teachersTotal  = 0;
+
       async function refreshTeachersTable() {
         if (!window.electronAPI?.getAllTeachers) return;
-        _allTeachers = await window.electronAPI.getAllTeachers();
+        
+        const res = await window.electronAPI.getAllTeachers({
+          limit: _teachersLimit,
+          offset: _teachersPage * _teachersLimit,
+          search: _teachersSearch
+        });
+
+        if (!res.ok) return;
+
+        _allTeachers = res.data;
+        _teachersTotal = res.total;
+
         const tbody = document.getElementById("teachers-tbody");
         tbody.innerHTML = "";
 
         // Update badge
         const badge = document.getElementById("badge-teachers");
-        badge.textContent = _allTeachers.length;
+        if (badge) badge.textContent = _teachersTotal;
         const dashCount = document.getElementById("dash-teachers-count");
-        if (dashCount) dashCount.textContent = _allTeachers.length;
+        if (dashCount) dashCount.textContent = _teachersTotal;
 
         await refreshDropdownMetadata();
 
         if (!_allTeachers.length) {
-          tbody.innerHTML =
-            '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim);">No teachers yet. Click <strong>＋ Add Teacher</strong> or <strong>Import CSV</strong>.</td></tr>';
+          tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-dim);">${_teachersTotal ? "No matching teachers found." : "No teachers yet. Click <strong>＋ Add Teacher</strong> or <strong>Import CSV</strong>."}</td></tr>`;
           return;
         }
 
@@ -271,7 +286,27 @@
         `;
           tbody.appendChild(row);
         });
+
+        NexusUI.renderPagination("teachers-pagination", _teachersTotal, _teachersLimit, _teachersPage, (newPage) => {
+          _teachersPage = newPage;
+          refreshTeachersTable();
+        });
       }
+
+      // Initialize Search
+      const initTeachersSearch = () => {
+        const header = document.querySelector("#view-teachers .view-header");
+        if (!header) {
+          setTimeout(initTeachersSearch, 100);
+          return;
+        }
+        NexusUI.injectSearch("#view-teachers .view-header", "Search teachers by name or ID...", (val) => {
+          _teachersSearch = val;
+          _teachersPage = 0;
+          refreshTeachersTable();
+        });
+      };
+      initTeachersSearch();
 
       async function deleteTeacher(id, name) {
         const { isConfirmed } = await Swal.fire({

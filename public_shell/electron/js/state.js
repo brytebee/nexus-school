@@ -7,11 +7,12 @@
       // ══════════════════════════════════════════════════════════════════════════
       let cachedPayload = null;
       let _wizAllocations = []; // staged allocations in teacher form
-      let _allTeachers = []; // live teacher cache
-      let _allStudents = []; // live student cache
-      let devicesMarried = 0;
-      let totalGradeEvents = 0;
-      const allGradeEvents = [];
+      // State (Global variables)
+      var _allTeachers = [];
+      var _allStudents = [];
+      var devicesMarried = 0;
+      var totalGradeEvents = 0;
+      var allGradeEvents = [];
       let _phComponents = [
         { key: "CA1", label: "C.A. 1", max: 10 },
         { key: "CA2", label: "C.A. 2", max: 10 },

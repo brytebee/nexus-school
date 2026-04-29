@@ -17,12 +17,14 @@
         }
         // Load teacher cache first (needed by refreshDropdownMetadata for the teacher picker)
         if (!_allTeachers || !_allTeachers.length) {
-          _allTeachers = await window.electronAPI.getAllTeachers() || [];
+          const res = await window.electronAPI.getAllTeachers({ limit: 500 });
+          _allTeachers = res.data || [];
         }
         // Populate classes, subjects (from DB) and teachers via single source of truth
         await refreshDropdownMetadata();
         // Student picker needs full name + class display — handle separately
-        const students = await window.electronAPI.getAllStudents() || [];
+        const res = await window.electronAPI.getAllStudents({ limit: 5000 });
+        const students = res.data || [];
         const stuEl = document.getElementById("rs-student-pick");
         if (stuEl) {
           stuEl.innerHTML = `<option value="">-- All Students --</option>` +

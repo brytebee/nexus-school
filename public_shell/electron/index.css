@@ -217,12 +217,25 @@ body {
 
 .view-header {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: center;
     margin-bottom: 24px;
     padding-bottom: 20px;
     border-bottom: 1px solid var(--glass-border);
     flex-shrink: 0;
+    gap: 20px;
+}
+
+.view-header > div:first-child {
+    flex: 1;
+    min-width: 300px;
+}
+
+.action-bar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
 }
 .view-title { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
 .view-sub   { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
@@ -1146,4 +1159,39 @@ code {
 }
 .small-btn:active {
   transform: translateY(1px);
+}
+
+/* ════════════════════════════════════════════════════════════
+   Pagination & Search Utilities
+   ════════════════════════════════════════════════════════════ */
+.pagination-ctrl button {
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    color: var(--text-main);
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s;
+}
+
+.pagination-ctrl button:hover:not(:disabled) {
+    background: var(--accent);
+    color: var(--bg-deep);
+    border-color: var(--accent);
+}
+
+.pagination-ctrl button:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+.nexus-search-input {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.nexus-search-input:focus {
+    max-width: 400px !important;
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 15px rgba(0, 229, 255, 0.15) !important;
 }
