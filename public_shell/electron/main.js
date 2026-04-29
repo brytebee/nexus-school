@@ -467,6 +467,161 @@ ipcMain.handle("save-term-config", (event, config) => {
   }
 });
 
+// ── Phase 5: Fee Management ───────────────────────────────────────────────────
+// Helper — parse fee_settings JSON from app_settings
+const _parseFeeSettings = (db) => {
+  const raw = db.prepare("SELECT value FROM app_settings WHERE key = 'fee_settings'").get()?.value;
+  try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+};
+
+/**
+ * fees:get-roster — students LEFT-JOINed with student_fees for a given term.
+ * balance = total_billed - total_paid is computed dynamically; never stored.
+ */
+ipcMain.handle("fees:get-roster", (event, { academic_session, term }) => {
+  try {
+    const db = database.getDb();
+    const rows = db.prepare(`
+      SELECT
+        s.id              AS student_id,
+        s.name,
+        s.class_name,
+        s.parent_phone,
+        COALESCE(f.total_billed, 0)                              AS total_billed,
+        COALESCE(f.total_paid,   0)                              AS total_paid,
+        COALESCE(f.total_billed, 0) - COALESCE(f.total_paid, 0) AS balance,
+        COALESCE(f.status,       'unpaid')                       AS status,
+        COALESCE(f.next_due_date, '')                            AS next_due_date,
+        COALESCE(f.updated_at,   '')                             AS updated_at
+      FROM students s
+      LEFT JOIN student_fees f
+        ON  f.student_id       = s.id
+        AND f.academic_session = ?
+        AND f.term             = ?
+      ORDER BY s.class_name ASC, s.name ASC
+    `).all(academic_session, term);
+    return { ok: true, data: rows };
+  } catch (err) {
+    console.error("[Fees] get-roster error:", err);
+    return { ok: false, error: err.message, data: [] };
+  }
+});
+
+/**
+ * fees:upsert — Gold lightweight write. Status is derived server-side.
+ */
+ipcMain.handle("fees:upsert", (event, { student_id, academic_session, term, total_billed, total_paid, next_due_date }) => {
+  try {
+    const db = database.getDb();
+    const billed = Number(total_billed) || 0;
+    const paid   = Number(total_paid)   || 0;
+    const status = paid >= billed && billed > 0 ? "cleared"
+                 : paid > 0                     ? "partial"
+                 : "unpaid";
+    db.prepare(`
+      INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status, next_due_date, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
+        total_billed  = excluded.total_billed,
+        total_paid    = excluded.total_paid,
+        status        = excluded.status,
+        next_due_date = excluded.next_due_date,
+        updated_at    = datetime('now')
+    `).run(student_id, academic_session, term, billed, paid, status, next_due_date || "");
+    return { ok: true };
+  } catch (err) {
+    console.error("[Fees] upsert error:", err);
+    return { ok: false, error: err.message };
+  }
+});
+
+/**
+ * fees:record-payment — Diamond ledger write.
+ * Appends transaction, then recomputes total_paid from the ledger (single source of truth).
+ */
+ipcMain.handle("fees:record-payment", (event, { student_id, academic_session, term, amount, payment_method, reference_number, note }) => {
+  try {
+    const db = database.getDb();
+    const amt = Number(amount);
+    if (!amt || amt <= 0) return { ok: false, error: "Invalid payment amount." };
+    db.transaction(() => {
+      db.prepare(`
+        INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(student_id, academic_session, term, amt, payment_method || "cash", reference_number || "", note || "");
+
+      const { total_paid } = db.prepare(`
+        SELECT COALESCE(SUM(amount), 0) AS total_paid FROM fee_transactions
+        WHERE student_id = ? AND academic_session = ? AND term = ?
+      `).get(student_id, academic_session, term);
+
+      const existing = db.prepare(`
+        SELECT COALESCE(total_billed, 0) AS total_billed FROM student_fees
+        WHERE student_id = ? AND academic_session = ? AND term = ?
+      `).get(student_id, academic_session, term) || { total_billed: 0 };
+
+      const status = total_paid >= existing.total_billed && existing.total_billed > 0 ? "cleared"
+                   : total_paid > 0                                                    ? "partial"
+                   : "unpaid";
+
+      db.prepare(`
+        INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
+          total_paid = excluded.total_paid,
+          status     = excluded.status,
+          updated_at = datetime('now')
+      `).run(student_id, academic_session, term, existing.total_billed, total_paid, status);
+    })();
+    return { ok: true };
+  } catch (err) {
+    console.error("[Fees] record-payment error:", err);
+    return { ok: false, error: err.message };
+  }
+});
+
+/** fees:get-transactions — ledger history for a student+term (Diamond). */
+ipcMain.handle("fees:get-transactions", (event, { student_id, academic_session, term }) => {
+  try {
+    const db = database.getDb();
+    const rows = db.prepare(`
+      SELECT id, amount, payment_method, reference_number, note, recorded_by, created_at
+      FROM fee_transactions WHERE student_id = ? AND academic_session = ? AND term = ?
+      ORDER BY created_at DESC
+    `).all(student_id, academic_session, term);
+    return { ok: true, data: rows };
+  } catch (err) {
+    console.error("[Fees] get-transactions error:", err);
+    return { ok: false, error: err.message, data: [] };
+  }
+});
+
+/** fees:get-settings — reminder dates (Gold+) and Fee Shield config (Diamond). */
+ipcMain.handle("fees:get-settings", () => {
+  try {
+    const db = database.getDb();
+    return { ok: true, data: _parseFeeSettings(db) };
+  } catch (err) {
+    return { ok: false, error: err.message, data: {} };
+  }
+});
+
+/**
+ * fees:save-settings — merges patch into existing settings object (partial-update safe).
+ * Gold can update reminder_date_1/2; Diamond can also update fee_shield_* keys.
+ */
+ipcMain.handle("fees:save-settings", (event, patch) => {
+  try {
+    const db = database.getDb();
+    const updated = { ..._parseFeeSettings(db), ...patch };
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('fee_settings', ?)").run(JSON.stringify(updated));
+    return { ok: true };
+  } catch (err) {
+    console.error("[Fees] save-settings error:", err);
+    return { ok: false, error: err.message };
+  }
+});
+
 // ── V2: Query Results (dynamic scope filtering) ───────────────────────────────
 ipcMain.handle("query-results", (event, { scope, session, term, class_name, subject, teacher_id, student_id }) => {
   console.log(`[Diagnostic] query-results: scope=${scope}, session=${session}, term=${term}`);
