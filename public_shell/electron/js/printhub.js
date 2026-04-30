@@ -49,6 +49,10 @@
           const attWrapper = document.getElementById("ph-attendance-wrapper");
           if (attWrapper) attWrapper.style.display = "none";
         }
+        if (window.currentLicenseTier === "Gold" || window.currentLicenseTier === "Diamond") {
+          const portalSec = document.getElementById("ph-portal-section");
+          if (portalSec) portalSec.style.display = "block";
+        }
         // Hydrate template picker and trigger preview
         if (cfg.template) {
           const tplEl = document.getElementById("ph-template");

@@ -5,7 +5,9 @@
 
 window.NexusUI = {
     /**
-     * Debounces a function to prevent excessive calls
+     * Debounces a function to prevent excessive calls.
+     * @param {Function} fn  Function to debounce
+     * @param {number}   ms  Delay in milliseconds
      */
     debounce(fn, ms = 300) {
         let timeoutId;
@@ -16,7 +18,12 @@ window.NexusUI = {
     },
 
     /**
-     * Renders a professional pagination control
+     * Renders a professional pagination control.
+     * @param {string}   containerId   ID of the container element
+     * @param {number}   total         Total record count
+     * @param {number}   limit         Records per page
+     * @param {number}   current       Zero-indexed current page
+     * @param {Function} onPageChange  Callback(newPage)
      */
     renderPagination(containerId, total, limit, current, onPageChange) {
         const container = document.getElementById(containerId);
@@ -28,41 +35,55 @@ window.NexusUI = {
             return;
         }
 
-        let html = `
-            <div class="pagination-ctrl" style="display:flex;align-items:center;justify-content:center;gap:12px;margin-top:20px;padding:15px;border-top:1px solid var(--glass-border);">
-                <button class="small-btn prev-page" ${current === 0 ? 'disabled' : ''} style="min-width:80px;">← Previous</button>
-                <span style="font-size:12px;color:var(--text-dim);">Page <strong>${current + 1}</strong> of ${totalPages}</span>
-                <button class="small-btn next-page" ${current >= totalPages - 1 ? 'disabled' : ''} style="min-width:80px;">Next →</button>
+        container.innerHTML = `
+            <div class="pagination-ctrl">
+                <button class="prev-page" ${current === 0 ? 'disabled' : ''}>← Previous</button>
+                <span class="pagination-info">
+                    Page <strong>${current + 1}</strong> of ${totalPages}
+                    &nbsp;·&nbsp; ${total.toLocaleString()} records
+                </span>
+                <button class="next-page" ${current >= totalPages - 1 ? 'disabled' : ''}>Next →</button>
             </div>
         `;
-
-        container.innerHTML = html;
 
         container.querySelector(".prev-page")?.addEventListener("click", () => onPageChange(current - 1));
         container.querySelector(".next-page")?.addEventListener("click", () => onPageChange(current + 1));
     },
 
     /**
-     * Injects a search bar into a view header if it doesn't exist
+     * Injects a full-width search bar as a second row inside .view-header.
+     * Uses design-system classes (.nexus-search-row, .nexus-search-icon, .nexus-search-input)
+     * — zero inline styles. Idempotent: safe to call on every view activation.
+     *
+     * @param {string}   headerSelector  CSS selector for the .view-header element
+     * @param {string}   placeholder     Input placeholder text
+     * @param {Function} onSearch        Debounced callback(query: string)
      */
     injectSearch(headerSelector, placeholder, onSearch) {
         const header = document.querySelector(headerSelector);
-        if (!header || header.querySelector(".nexus-search-input")) return;
+        if (!header || header.querySelector(".nexus-search-row")) return;
 
-        const searchWrap = document.createElement("div");
-        searchWrap.className = "nexus-search-wrap";
-        searchWrap.style = "position:relative; flex: 1 1 100%; order: 10; margin-top: 8px;";
-        searchWrap.innerHTML = `
-            <input type="text" class="modern-input nexus-search-input" placeholder="${placeholder}" 
-                   style="width:100%; padding:10px 12px 10px 40px; font-size:13px; border-radius:10px; 
-                          -webkit-app-region: no-drag; position: relative; z-index: 10; background: rgba(0,0,0,0.3);">
-            <span style="position:absolute; left:14px; top:50%; transform:translateY(-50%); opacity:0.6; pointer-events: none; font-size: 16px;">🔍</span>
+        const row = document.createElement("div");
+        row.className = "nexus-search-row";
+        row.innerHTML = `
+            <span class="nexus-search-icon">🔍</span>
+            <input
+                type="text"
+                class="modern-input nexus-search-input"
+                placeholder="${placeholder}"
+                autocomplete="off"
+                spellcheck="false"
+            >
         `;
 
-        console.log(`[NexusUI] Injecting search into ${headerSelector}`);
-        header.appendChild(searchWrap);
+        header.appendChild(row);
 
-        const input = searchWrap.querySelector(".nexus-search-input");
-        input.addEventListener("input", NexusUI.debounce((e) => onSearch(e.target.value), 400));
-    }
+        const input = row.querySelector(".nexus-search-input");
+        input.addEventListener(
+            "input",
+            NexusUI.debounce((e) => onSearch(e.target.value.trim()), 380)
+        );
+
+        console.log(`[NexusUI] ✓ Search injected → ${headerSelector}`);
+    },
 };
