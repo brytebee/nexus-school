@@ -79,5 +79,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
         getTransactions: (params) => ipcRenderer.invoke('fees:get-transactions',  params),
         getSettings:     ()       => ipcRenderer.invoke('fees:get-settings'),
         saveSettings:    (patch)  => ipcRenderer.invoke('fees:save-settings',     patch),
-    }
+    },
+    // Phase 3.2: Sovereign Portal (Nexus Mask Architecture)
+    portal: {
+        getInfo: () => ipcRenderer.invoke('portal:get-info'),
+    },
+    // Generic send/on for Guardian Shield events
+    send: (channel, data) => ipcRenderer.send(channel, data),
+    on:   (channel, cb)   => ipcRenderer.on(channel, (_event, value) => cb(value)),
 });

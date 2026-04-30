@@ -15,6 +15,8 @@
         document.getElementById("school-address-input").value = identity.address || "";
         document.getElementById("school-motto-input").value = identity.motto || "";
         document.getElementById("school-signature-input").value = identity.signature || "";
+        document.getElementById("principal-phone-input").value = identity.principalPhone || "";
+        document.getElementById("portal-slug-input").value = identity.portalSlug || "";
         document.getElementById("premium-plan-toggle").checked = !!identity.premiumPlan;
         const tp = document.getElementById("theme-primary");
         const ts = document.getElementById("theme-secondary");
@@ -96,6 +98,7 @@
         document.getElementById("school-address-input").value = identity.address || "";
         document.getElementById("school-motto-input").value = identity.motto || "";
         document.getElementById("school-signature-input").value = identity.signature || "";
+        document.getElementById("principal-phone-input").value = identity.principalPhone || "";
         document.getElementById("theme-primary").value = identity.themePrimary || "#1A237E";
         document.getElementById("theme-secondary").value = identity.themeSecondary || "#00E5FF";
         document.getElementById("primary-hex").textContent = identity.themePrimary || "#1A237E";
@@ -300,6 +303,9 @@ function initSettingsListeners() {
         stampStyle: _stampStyle,
         stampCustomColor: _stampCustomColor,
         principalSignBase64: _principalSignBase64 || undefined,
+        principalPhone: document.getElementById("principal-phone-input").value.trim(),
+        // portalSlug: sanitised to only lowercase letters+digits; empty means auto-derive
+        portalSlug: document.getElementById("portal-slug-input").value.trim().toLowerCase().replace(/[^a-z0-9]/g, "") || undefined,
       };
       if (window.electronAPI.saveIdentity) {
         const res = await window.electronAPI.saveIdentity(identity);

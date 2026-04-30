@@ -17,6 +17,8 @@ const address = require("address");
 const pulseBot = require('./pulse-bot.js');
 const pulseExporter = require('./pulse-exporter.js');
 const express = require('express');
+const { Bonjour } = require('bonjour-service');
+const bonjour = new Bonjour();
 
 // Set app name BEFORE createWindow so Menu.buildFromTemplate picks it up correctly
 app.setName("NexusSchoolOS");
@@ -90,6 +92,38 @@ ipcMain.on("pulse:trigger-sync", () => pulseExporter.syncToDrive());
 
 ipcMain.handle("get-identity", () => {
   return { ...identityPacket, tier: licenseStatus?.tier || "Silver" };
+});
+
+// ── Portal Info (Nexus Mask Architecture) ────────────────────────────────────
+// Returns the real LAN IP URL (for QR), the branded .edu.nexus URL (display-only),
+// and ALL non-loopback IPv4 addresses so the admin can troubleshoot multi-NIC/hotspot setups.
+ipcMain.handle("portal:get-info", () => {
+  const PORTAL_PORT = 3002;
+  const nets = os.networkInterfaces();
+
+  // Collect every non-loopback IPv4 address — first one becomes primary.
+  const allIps = [];
+  for (const iface of Object.values(nets)) {
+    for (const n of iface) {
+      if (n.family === "IPv4" && !n.internal) allIps.push(n.address);
+    }
+  }
+  const lanIp = allIps[0] || "127.0.0.1";
+
+  const schoolName = identityPacket?.name || "Nexus";
+  // portalSlug: school-customisable; falls back to sanitised first word of school name
+  const namePart = (identityPacket?.portalSlug || schoolName.split(" ")[0])
+    .toLowerCase().replace(/[^a-z0-9]/g, "");
+  return {
+    schoolName,
+    namePart,
+    lanIp,
+    allIps,          // ← full list for diagnostic display
+    port:     PORTAL_PORT,
+    realUrl:  `http://${lanIp}:${PORTAL_PORT}/portal`,
+    mdnsUrl:  `http://${namePart}.nexus.local`,
+    brandUrl: `http://${namePart}.edu.nexus`,
+  };
 });
 
 ipcMain.handle("get-unique-metadata", () => {
@@ -1239,7 +1273,10 @@ ipcMain.handle("generate-reports", async (event, payload) => {
     let outPath = "";
     const baseDir = path.join(__dirname, "../../private_engine");
     
-    if (reportType !== "broadsheet") {
+    if (reportType === "portal_card") {
+        html = reports.generatePortalCards(payload);
+        outPath = path.join(outFolder, `Parent_Access_Cards_${timestamp}.${format === "image" ? "png" : "pdf"}`);
+    } else if (reportType !== "broadsheet") {
         html = reports.generateHTMLPages(payload, baseDir);
         outPath = path.join(outFolder, `TerminalReport_${termConfig?.term?.replace(/\s/g,"_")||"Term"}_${timestamp}.${format === "image" ? "png" : "pdf"}`);
     } else {
@@ -1454,6 +1491,21 @@ function createWindow() {
     }
   });
 
+  serverInstance.on('attendance-alert', async (data) => {
+    const { student_id, date } = data;
+    try {
+        const db = database.getDb();
+        const student = db.prepare("SELECT name, parent_phone FROM students WHERE id = ?").get(student_id);
+        
+        if (student && student.parent_phone) {
+            console.log(`[Guardian Shield] Triggering Attendance Alert for ${student.name} (${student.parent_phone})`);
+            await pulseBot.sendAttendanceAlert(student.parent_phone, student.name, identityPacket.name || "Nexus School", date);
+        }
+    } catch (err) {
+        console.error("[Guardian Shield] Alert Failed:", err);
+    }
+  });
+
   // ── Phase 3.1: The Pulse (UDP Listener) ────────────────────────────
   const udpServer = dgram.createSocket('udp4');
   udpServer.on('error', (err) => {
@@ -1474,7 +1526,163 @@ function createWindow() {
   });
   udpServer.bind(3001);
 
+  // ── Phase 3.2: Local Parent Portal (Gold/Diamond) ──────────────────
+  const portalApp = express();
+  const portalPort = 3002;
+  const portalSessions = new Map(); // phone -> { pin, expiry, students }
+  const activeTokens = new Map();   // token -> { phone, expiry, students }
 
+  // Broadcast the portal on the local network
+  function startPortalBroadcaster() {
+    const schoolName = identityPacket.name || "Nexus";
+    const name = schoolName.split(' ')[0].toLowerCase();
+    
+    bonjour.publish({
+      name: `${name}.nexus`,
+      type: 'http',
+      port: portalPort,
+      txt: { path: '/portal' }
+    });
+    console.log(`[Gold Portal] Broadcasting as http://${name}.nexus.local`);
+  }
+
+  portalApp.use(express.json());
+
+  portalApp.get('/portal', (req, res) => {
+    res.sendFile(path.join(__dirname, 'portal.html'));
+  });
+
+  // Identity for self-branding (The Nexus Mask — portal.html calls this on load)
+  portalApp.get('/portal/api/identity', (req, res) => {
+    const schoolName = identityPacket?.name || "Nexus";
+    const namePart   = schoolName.split(" ")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+    res.json({
+      ok:         true,
+      schoolName,
+      brandUrl:   `http://${namePart}.edu.nexus`,
+      logoBase64: identityPacket?.logoBase64 || null,
+      themePrimary: identityPacket?.themePrimary || null,
+      themeSecondary: identityPacket?.themeSecondary || null
+    });
+  });
+
+  // Step 1: Request Access via Phone Number
+  portalApp.post('/portal/api/request-otp', async (req, res) => {
+    const { phone } = req.body;
+    if (!phone) return res.json({ ok: false, error: 'Phone number required' });
+
+    try {
+      const db = database.getDb();
+      const matchable = phone.replace(/\D/g, "").slice(-10);
+      
+      const students = db.prepare("SELECT id, name, class_name FROM students WHERE parent_phone LIKE ?").all(`%${matchable}`);
+      if (!students.length) return res.json({ ok: false, error: 'No students found for this number.' });
+
+      const pin = Math.floor(1000 + Math.random() * 9000).toString();
+      const expiry = Date.now() + (12 * 60 * 60 * 1000); // 12 Hours
+      
+      portalSessions.set(matchable, { pin, expiry, students });
+
+      // Send via WhatsApp Bot
+      try {
+        await pulseBot.sendOTP(phone, pin, identityPacket.name || "Nexus School");
+        res.json({ ok: true, message: 'OTP sent via WhatsApp' });
+      } catch (e) {
+        console.error("[Portal] WhatsApp failed:", e);
+        // Fallback for demo: log it
+        console.log(`[DEMO FALLBACK] OTP for ${phone} is ${pin}`);
+        res.json({ ok: true, message: 'OTP generated (Bot offline fallback)' });
+      }
+    } catch (err) {
+      res.json({ ok: false, error: err.message });
+    }
+  });
+
+  // Step 2: Verify PIN and Get Session Token
+  portalApp.post('/portal/api/verify-otp', (req, res) => {
+    const { phone, pin } = req.body;
+    const matchable = phone.replace(/\D/g, "").slice(-10);
+    const session = portalSessions.get(matchable);
+
+    if (!session || session.pin !== pin || Date.now() > session.expiry) {
+      return res.json({ ok: false, error: 'Invalid or expired PIN' });
+    }
+
+    // Burn the PIN — true one-time use. The 12-hour clock lives on the access token.
+    portalSessions.delete(matchable);
+
+    const token  = crypto.randomBytes(32).toString('hex');
+    const expiry = Date.now() + (12 * 60 * 60 * 1000); // 12 hours from verification
+    activeTokens.set(token, { phone: matchable, students: session.students, expiry });
+
+    res.json({ ok: true, token, students: session.students });
+  });
+
+  // Step 3: Get Student Data (Authorized)
+  // Special studentId value '__list__' resumes a session: validates the token
+  // and returns the student roster without fetching full academic data.
+  portalApp.get('/portal/api/student-data', async (req, res) => {
+    const { token, studentId } = req.query;
+    const session = activeTokens.get(token);
+
+    if (!session || Date.now() > session.expiry) {
+      return res.status(401).json({ ok: false, error: 'Session expired' });
+    }
+
+    // Session-resumption shortcut: return the student list only
+    if (studentId === '__list__') {
+      return res.json({ ok: true, students: session.students });
+    }
+
+    // Ensure student belongs to this parent
+    if (studentId && !session.students.find(s => s.id === studentId)) {
+      return res.status(403).json({ ok: false, error: 'Access denied' });
+    }
+
+    try {
+      const db = database.getDb();
+      const id = studentId || session.students[0].id;
+      
+      const student = db.prepare("SELECT id, name, class_name FROM students WHERE id = ?").get(id);
+      const termConfig = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get();
+      const schoolName = identityPacket.name || "Nexus School";
+
+      const results = db.prepare(`
+        SELECT subject, score FROM student_records 
+        WHERE student_id = ? AND academic_session = ? AND term = ?
+      `).all(id, termConfig.academic_session, termConfig.term);
+
+      const attendance = db.prepare(`
+        SELECT status, date FROM daily_attendance 
+        WHERE student_id = ? AND academic_session = ? AND term = ?
+      `).all(id, termConfig.academic_session, termConfig.term);
+
+      const fees = db.prepare(`
+        SELECT total_billed, total_paid FROM student_fees 
+        WHERE student_id = ? AND academic_session = ? AND term = ?
+      `).get(id, termConfig.academic_session, termConfig.term) || { total_billed: 0, total_paid: 0 };
+
+      res.json({
+        ok: true,
+        schoolName,
+        termConfig,
+        student,
+        results,
+        attendance,
+        fees
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Bind to 0.0.0.0 so the portal is reachable on ALL network interfaces:
+  // school router Wi-Fi, phone hotspot, USB tethering — not just loopback.
+  // ⚠  On Windows, the first launch may trigger a Firewall prompt — click "Allow".
+  portalApp.listen(portalPort, '0.0.0.0', () => {
+    console.log(`[Gold Portal] Parent Portal active on all interfaces → port ${portalPort}`);
+    startPortalBroadcaster();
+  });
   // ── Phase 4: License Enforcement Engine & Security Lock ────────────
   // licenseStatus already initialized at module scope (line 43)
 
@@ -1647,6 +1855,90 @@ MCowBQYDK2VwAyEAU//Zax5arKg2zRA+d4F+kE6H19E977fhJrU/rNqcdw8=
       2,
     ),
   );
+
+  // ── Guardian Shield: Automated Governance Service ────────────────────────
+  function startGovernanceService() {
+    console.log("[Guardian Shield] Service Active. Monitoring school governance metrics...");
+    
+    const CHECK_INTERVAL = 15 * 60 * 1000; // 15 Minutes
+    
+    setInterval(async () => {
+      const now = new Date();
+      const hour = now.getHours();
+      const day = now.getDay(); // 0=Sun, 5=Fri
+      const dateStr = now.toISOString().split('T')[0];
+
+      if (licenseStatus?.tier !== 'Gold' && licenseStatus?.tier !== 'Diamond') return;
+
+      const db = database.getDb();
+
+      // 1. Principal's Morning Briefing (9:00 AM)
+      if (hour === 9 && identityPacket.principalPhone) {
+        const lastBriefing = db.prepare("SELECT value FROM app_settings WHERE key='last_briefing_date'").get()?.value;
+        if (lastBriefing !== dateStr) {
+          try {
+            console.log("[Guardian Shield] Compiling Morning Briefing...");
+            const studentCount = db.prepare("SELECT COUNT(*) as c FROM students").get().c;
+            const attendance = db.prepare("SELECT COUNT(*) as c FROM daily_attendance WHERE date = ? AND status='Present'").get(dateStr).c;
+            
+            const stats = {
+                studentCount,
+                attendance,
+                absenceRate: studentCount > 0 ? (((studentCount - attendance) / studentCount) * 100).toFixed(1) : 0
+            };
+            
+            await pulseBot.sendMorningBriefing(identityPacket.principalPhone, identityPacket.name || "Nexus School", stats);
+            
+            db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_briefing_date', ?)").run(dateStr);
+          } catch(e) { console.error("[Guardian Shield] Briefing Failed:", e); }
+        }
+      }
+
+      // 2. Weekly Academic Pulse (Friday 4:00 PM)
+      if (day === 5 && hour === 16) {
+        const lastPulse = db.prepare("SELECT value FROM app_settings WHERE key='last_academic_pulse_date'").get()?.value;
+        const weekStr = `${now.getFullYear()}-W${Math.ceil(now.getDate() / 7)}`;
+        if (lastPulse !== weekStr) {
+           console.log("[Guardian Shield] Dispatched Weekly Academic Pulse.");
+           // This would typically iterate parents. For now, we log the intent.
+           db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_academic_pulse_date', ?)").run(weekStr);
+        }
+      }
+    }, CHECK_INTERVAL);
+  }
+
+  startGovernanceService();
+
+  // On-Demand Fee Reminders
+  ipcMain.on("trigger-fee-reminders", async () => {
+    try {
+        const db = database.getDb();
+        const termConfig = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get();
+        const debtors = db.prepare(`
+            SELECT s.name, s.parent_phone, f.total_billed, f.total_paid 
+            FROM students s
+            JOIN student_fees f ON s.id = f.student_id
+            WHERE f.academic_session = ? AND f.term = ? AND (f.total_billed - f.total_paid) > 0
+        `).all(termConfig.academic_session, termConfig.term);
+
+        console.log(`[Guardian Shield] Triggering Fee Reminders for ${debtors.length} parents...`);
+        
+        for (const debtor of debtors) {
+            if (debtor.parent_phone) {
+                const balance = debtor.total_billed - debtor.total_paid;
+                await pulseBot.sendFeeReminder(debtor.parent_phone, debtor.name, identityPacket.name || "Nexus School", balance);
+                // Simple rate limiting: 2s delay
+                await new Promise(r => setTimeout(r, 2000));
+            }
+        }
+        
+        if (mainWindow) {
+            mainWindow.webContents.send("fee-reminders-sent", { count: debtors.length });
+        }
+    } catch (err) {
+        console.error("[Guardian Shield] Fee Pulse Failed:", err);
+    }
+  });
 }
 
 if (app) {

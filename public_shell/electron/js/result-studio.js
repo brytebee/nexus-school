@@ -48,6 +48,19 @@
         if (copyBtn) copyBtn.style.display = fmt === "image" ? "inline-flex" : "none";
       }
 
+      function rsOnTypeChange() {
+        const type = document.getElementById("rs-type").value;
+        const tplGroup = document.getElementById("rs-template")?.parentElement;
+        const brandGroup = document.getElementById("brand-color-group");
+        if (type === "portal_card") {
+          if (tplGroup) { tplGroup.style.opacity = "0.5"; tplGroup.style.pointerEvents = "none"; }
+          if (brandGroup) brandGroup.style.display = "none";
+        } else {
+          if (tplGroup) { tplGroup.style.opacity = "1"; tplGroup.style.pointerEvents = "auto"; }
+          toggleBrandColorOption(document.getElementById("rs-template")?.value || "clean_slate");
+        }
+      }
+
       function toggleBrandColorOption(templateId) {
         const grp = document.getElementById('brand-color-group');
         if (!grp) return;

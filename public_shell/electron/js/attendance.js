@@ -34,6 +34,11 @@ document.head.appendChild(styleEl);
 const initAttendanceModule = async () => {
     const classSelect = document.getElementById("attendance-class-select");
     const datePicker = document.getElementById("attendance-date-picker");
+    
+    // Prevent selecting future dates
+    const today = new Date().toISOString().split('T')[0];
+    datePicker.max = today;
+    
     const saveBtn = document.getElementById("btn-save-attendance");
     const tbody = document.getElementById("attendance-tbody");
 

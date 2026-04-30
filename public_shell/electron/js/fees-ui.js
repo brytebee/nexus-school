@@ -42,7 +42,7 @@
       "fees-session-select","fees-term-select","fees-status-filter",
       "fees-summary-pill","btn-fees-load","fees-tbody","fees-th-actions",
       "fees-save-bar","fees-pending-count","btn-fees-save-all","btn-fees-discard",
-      "fees-save-indicator","btn-fees-settings","fees-subtitle",
+      "fees-save-indicator","btn-fees-settings","fees-subtitle","btn-trigger-fee-pulse",
       // Settings modal
       "modal-fees-settings","btn-fees-settings-close","btn-fees-settings-cancel",
       "btn-fees-settings-save","fees-reminder-1","fees-reminder-2",
@@ -520,6 +520,42 @@
 
     // Ledger modal
     $["btn-ledger-close"]?.addEventListener("click", () => _closeModal("modal-ledger"));
+    
+    // Fee Pulse Trigger
+    $["btn-trigger-fee-pulse"]?.addEventListener("click", async () => {
+      const { isConfirmed } = await Swal.fire({
+        title: "Trigger Fee Reminders?",
+        text: "This will send a WhatsApp message to ALL parents with outstanding balances for the current term. Proceed?",
+        icon: "info",
+        showCancelButton: true,
+        confirmButtonColor: "var(--gold)",
+        confirmButtonText: "🚀 Yes, Send Reminders",
+        background: "#0A0E2E",
+        color: "#fff",
+        backdrop: false
+      });
+
+      if (isConfirmed) {
+        $["btn-trigger-fee-pulse"].disabled = true;
+        $["btn-trigger-fee-pulse"].textContent = "⌛ Sending...";
+        window.electronAPI.send("trigger-fee-reminders");
+      }
+    });
+
+    if (window.electronAPI.on) {
+      window.electronAPI.on("fee-reminders-sent", (data) => {
+        $["btn-trigger-fee-pulse"].disabled = false;
+        $["btn-trigger-fee-pulse"].textContent = "🚀 Trigger Fee Pulse";
+        Swal.fire({
+          title: "Pulse Dispatched",
+          text: `Successfully sent reminders to ${data.count} parents.`,
+          icon: "success",
+          background: "#0A0E2E",
+          color: "#fff",
+          backdrop: false
+        });
+      });
+    }
 
     // Diamond action buttons (event delegation — tbody rebuilt on reload)
     $["fees-tbody"]?.addEventListener("click", (e) => {
@@ -551,6 +587,11 @@
       $["fees-subtitle"].textContent = _isDiamond
         ? "Full financial ledger — record payments, view transaction history, and enforce Fee Shield."
         : "Lightweight fee entry — track balances synced to Nexus Pulse for automated WhatsApp reminders.";
+    }
+
+    // Toggle Fee Pulse visibility
+    if ($["btn-trigger-fee-pulse"]) {
+      $["btn-trigger-fee-pulse"].style.display = (tier === "Gold" || tier === "Diamond") ? "block" : "none";
     }
 
     // Show/hide Diamond columns
