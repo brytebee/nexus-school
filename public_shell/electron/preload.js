@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('electronAPI', {
+// Shared API object — exposed as both 'electronAPI' (legacy) and 'nexusAPI' (lock screen + new code)
+const nexusAPI = {
     onQrPayload: (callback) => ipcRenderer.on('qr-payload', (_event, value) => callback(value)),
     onHandshakeComplete: (callback) => ipcRenderer.on('handshake-complete', (_event, value) => callback(value)),
     onSyncUpdate: (callback) => ipcRenderer.on('sync-update', (_event, value) => callback(value)),
@@ -20,6 +21,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onLicenseStatus: (callback) => ipcRenderer.on('license-status', (_event, value) => callback(value)),
     getAllTeachers: (params) => ipcRenderer.invoke('get-all-teachers', params),
     getAllStudents: (params) => ipcRenderer.invoke('get-all-students', params),
+    getClasses:     ()       => ipcRenderer.invoke('get-classes'),
     deleteTeacher: (data) => ipcRenderer.invoke('delete-teacher', data),
     deleteStudent: (data) => ipcRenderer.invoke('delete-student', data),
     // Window chrome controls
@@ -84,7 +86,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
     portal: {
         getInfo: () => ipcRenderer.invoke('portal:get-info'),
     },
-    // Generic send/on for Guardian Shield events
-    send: (channel, data) => ipcRenderer.send(channel, data),
-    on:   (channel, cb)   => ipcRenderer.on(channel, (_event, value) => cb(value)),
-});
+    // ── Admin Authentication (The Vault) ──────────────────────────────────
+    auth: {
+        getAdmins:  ()       => ipcRenderer.invoke('auth:get-admins'),
+        verifyPin:  (data)   => ipcRenderer.invoke('auth:verify-pin', data),
+        unlock:     ()       => ipcRenderer.send('auth:unlock'),
+        getSession: ()       => ipcRenderer.invoke('auth:get-session'),
+    },
+    // ── Fee Structure Management ───────────────────────────────────────
+    feeStructure: {
+        getAll:      (params) => ipcRenderer.invoke('fee-structure:get-all',       params),
+        upsertItem:  (data)   => ipcRenderer.invoke('fee-structure:upsert-item',   data),
+        deleteItem:  (id)     => ipcRenderer.invoke('fee-structure:delete-item',   id),
+        applyToClass:(data)   => ipcRenderer.invoke('fee-structure:apply-to-class',data),
+        getAdjustments: (params) => ipcRenderer.invoke('fee-structure:get-adjustments', params),
+        addAdjustment:  (data)   => ipcRenderer.invoke('fee-structure:add-adjustment',  data),
+        deleteAdjustment:(id)    => ipcRenderer.invoke('fee-structure:delete-adjustment',id),
+    },
+    // ── Message Queue (WhatsApp bulk send) ───────────────────────────
+    queue: {
+        getStatus:   ()       => ipcRenderer.invoke('queue:get-status'),
+        onProgress:  (cb)     => ipcRenderer.on('queue:progress', (_e, v) => cb(v)),
+    },
+    // ── Generic bridge (Guardian Shield, etc.) ───────────────────────
+    invoke: (channel, data)  => ipcRenderer.invoke(channel, data),
+    send:   (channel, data)  => ipcRenderer.send(channel, data),
+    on:     (channel, cb)    => ipcRenderer.on(channel, (_event, value) => cb(value)),
+    openExternal: (url)      => ipcRenderer.send('shell:openExternal', url),
+};
+
+// Expose under both names — legacy code uses electronAPI, new code (lock.html etc.) uses nexusAPI
+contextBridge.exposeInMainWorld('electronAPI', nexusAPI);
+contextBridge.exposeInMainWorld('nexusAPI', nexusAPI);

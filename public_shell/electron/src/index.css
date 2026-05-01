@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+@theme {
+  --color-nexus-bg: var(--bg);
+  --color-nexus-panel: var(--bg-panel);
+  --color-nexus-border: var(--glass-border);
+  --color-nexus-gold: var(--gold);
+  --color-nexus-accent: var(--accent);
+  --color-nexus-text: var(--text);
+  --color-nexus-text-dim: var(--text-dim);
+  
+  --font-inter: "Inter", sans-serif;
+}
+
+body {
+  background-color: var(--color-nexus-bg);
+  color: var(--color-nexus-text);
+  font-family: var(--font-inter);
+}

@@ -33,6 +33,9 @@
   let _currentPage = 0;
   let _pageSize    = 15;
   let _searchQuery = "";
+  let _fsClasses   = []; // Classes from db
+  let _fsData      = []; // Fee structure items
+  let _adjData     = []; // Fee adjustments
 
   // ── DOM refs (resolved at init time) ────────────────────────────────────────
   let $ = {};
@@ -43,7 +46,9 @@
       "fees-summary-pill","btn-fees-load","fees-tbody","fees-th-actions",
       "fees-save-bar","fees-pending-count","btn-fees-save-all","btn-fees-discard",
       "fees-save-indicator","btn-fees-settings","fees-subtitle","btn-trigger-fee-pulse",
-      // Settings modal
+      // Tabs & Settings
+      "fees-tab-btn-roster","fees-tab-btn-structure","fees-tab-btn-adjustments",
+      "fees-tab-roster","fees-tab-structure","fees-tab-adjustments",
       "modal-fees-settings","btn-fees-settings-close","btn-fees-settings-cancel",
       "btn-fees-settings-save","fees-reminder-1","fees-reminder-2",
       "fees-accounts-list","btn-fees-add-account",
@@ -55,9 +60,29 @@
       "btn-payment-cancel","btn-payment-submit",
       // Ledger modal (Diamond)
       "modal-ledger","ledger-modal-student-name","ledger-tbody","btn-ledger-close",
+      // Fee Structure Tab
+      "fs-class-select","fs-term-filter","btn-fs-load","btn-fs-apply",
+      "fs-tbody","fs-new-name","fs-new-term","fs-new-amount","btn-fs-add-item",
+      "fs-class-count","fs-total-display",
+      // Adjustments Tab
+      "adj-tbody","btn-adj-add",
+      "modal-adj","adj-student-select","adj-class-filter","adj-students-datalist","adj-type","adj-amount","adj-description",
+      "btn-adj-cancel","btn-adj-submit",
     ];
     ids.forEach(id => { $[id] = document.getElementById(id); });
   }
+
+  // ── Tab Management ───────────────────────────────────────────────────────────
+  window.feesSetTab = function(tabId) {
+    ["roster", "structure", "adjustments"].forEach(t => {
+      const btn = $[`fees-tab-btn-${t}`];
+      const panel = $[`fees-tab-${t}`];
+      if (btn) btn.classList.toggle("active", t === tabId);
+      if (panel) panel.style.display = t === tabId ? (t === 'roster' ? 'block' : 'flex') : 'none';
+    });
+    if (tabId === 'structure') _loadStructure();
+    if (tabId === 'adjustments') _loadAdjustments();
+  };
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
   function _showIndicator(msg, color = "#4CAF50") {
@@ -105,6 +130,65 @@
       opt.textContent = val;
       sel.appendChild(opt);
     }
+  }
+
+  async function _populateClassesAndStudents() {
+    try {
+      _fsClasses = await window.electronAPI.getClasses();
+      if (!_fsClasses || _fsClasses.length === 0) {
+         _fsClasses = ["JSS1", "JSS2", "JSS3", "SS1", "SS2", "SS3"];
+      }
+      const fsSel = $["fs-class-select"];
+      if (fsSel) {
+        fsSel.innerHTML = "";
+        _fsClasses.forEach(c => {
+          const opt = document.createElement("option");
+          opt.value = c;
+          opt.textContent = c;
+          fsSel.appendChild(opt);
+        });
+      }
+
+      // Populate students for adjustments dropdown
+      const adjSel = $["adj-students-datalist"];
+      const classSel = $["adj-class-filter"];
+      if (adjSel && classSel) {
+        adjSel.innerHTML = "";
+        classSel.innerHTML = '<option value="">All Classes</option>';
+        window._adjAllStudents = [];
+        const res = await window.electronAPI.getAllStudents({ limit: 10000 });
+        if (res.ok && res.data) {
+          window._adjAllStudents = res.data;
+          
+          // Populate class filter dropdown
+          const classes = [...new Set(res.data.map(s => s.class_name))].sort();
+          classes.forEach(c => {
+             const opt = document.createElement("option");
+             opt.value = c; opt.textContent = c;
+             classSel.appendChild(opt);
+          });
+
+          // Define filter function
+          window.NexusFees = window.NexusFees || {};
+          window.NexusFees.filterAdjStudents = (cls) => {
+             adjSel.innerHTML = "";
+             let studentIdInput = document.getElementById("adj-student-select").value.trim();
+             const studentId = studentIdInput.split(" ")[0]; // Just in case name is also copied
+             const inputEl = document.getElementById("adj-student-select");
+             if (inputEl) inputEl.value = "";
+             
+             const filtered = cls ? window._adjAllStudents.filter(s => s.class_name === cls) : window._adjAllStudents;
+             filtered.forEach(s => {
+                const opt = document.createElement("option");
+                opt.value = s.id;
+                opt.textContent = `${s.name} (${s.class_name})`;
+                adjSel.appendChild(opt);
+             });
+          };
+          window.NexusFees.filterAdjStudents("");
+        }
+      }
+    } catch(e) { console.error("Failed to load classes/students for fees ui", e); }
   }
 
   // ── Render roster ────────────────────────────────────────────────────────────
@@ -351,6 +435,158 @@
     </tr>`).join("");
   }
 
+  // ── Fee Structure (Phase B) ──────────────────────────────────────────────────
+  async function _loadStructure() {
+    const className = $["fs-class-select"]?.value;
+    if (!className) return;
+
+    const tbody = $["fs-tbody"];
+    if (tbody) tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:30px;color:var(--text-dim);">Loading...</td></tr>`;
+
+    try {
+      _fsData = await window.electronAPI.feeStructure.getAll({ className });
+      if (tbody) {
+        if (!_fsData.length) {
+          tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:40px;color:var(--text-dim);">No fee items mapped for ${className}. Add one below.</td></tr>`;
+          if ($["fs-total-display"]) $["fs-total-display"].textContent = "Total: ₦0";
+          return;
+        }
+
+        const termFilter = $["fs-term-filter"]?.value || "All Terms";
+        let total = 0;
+        
+        tbody.innerHTML = _fsData.map(item => {
+          if (item.term === "All Terms" || item.term === termFilter) total += item.amount;
+          return `<tr data-id="${item.id}">
+            <td style="font-weight:500;">${item.item_name}</td>
+            <td style="font-size:12px;color:var(--text-dim);">${item.term}</td>
+            <td style="text-align:right;font-family:var(--font-mono);font-size:13px;color:#fff;">₦${fmt(item.amount)}</td>
+            <td style="text-align:center;">
+              <button class="small-btn btn-fs-del" data-id="${item.id}" style="color:#ff6b6b;border-color:rgba(255,107,107,0.2);">✕</button>
+            </td>
+          </tr>`;
+        }).join("");
+
+        if ($["fs-total-display"]) $["fs-total-display"].textContent = `Total (${termFilter}): ₦${fmt(total)}`;
+      }
+    } catch(e) {
+      console.error("[Financial Hub] getStructure failed", e);
+    }
+  }
+
+  async function _addStructureItem() {
+    const className = $["fs-class-select"]?.value;
+    const name = $["fs-new-name"]?.value.trim();
+    const term = $["fs-new-term"]?.value;
+    const amount = Number($["fs-new-amount"]?.value);
+    
+    if (!className || !name || !amount) return;
+
+    $["btn-fs-add-item"].disabled = true;
+    try {
+      await window.electronAPI.feeStructure.upsertItem({ className, itemName: name, term, amount });
+      $["fs-new-name"].value = "";
+      $["fs-new-amount"].value = "";
+      await _loadStructure();
+    } finally {
+      $["btn-fs-add-item"].disabled = false;
+    }
+  }
+
+  async function _applyStructureToClass() {
+    const className = $["fs-class-select"]?.value;
+    const session = $["fees-session-select"]?.value || _currentSession;
+    const term = $["fs-term-filter"]?.value || _currentTerm;
+    
+    if (!className || !session || !term) return;
+
+    const { isConfirmed } = await Swal.fire({
+      title: "Apply Fee Structure?",
+      text: `This will bill ALL students in ${className} for ${term} based on the current structure. Proceed?`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "var(--gold)",
+      background: "#0A0E2E", color: "#fff"
+    });
+
+    if (isConfirmed) {
+      const btn = $["btn-fs-apply"];
+      if (btn) { btn.disabled = true; btn.textContent = "Applying..."; }
+      try {
+        const res = await window.electronAPI.feeStructure.applyToClass({ className, academicSession: session, term });
+        if (res.ok) {
+          _showIndicator(`✅ Billed ₦${fmt(res.totalBilled)} to ${res.count} students`);
+          if (document.getElementById("fees-tab-btn-roster").classList.contains("active")) {
+             _loadRoster();
+          }
+        }
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "⚡ Apply to Class"; }
+      }
+    }
+  }
+
+  // ── Adjustments (Phase B) ────────────────────────────────────────────────────
+  async function _loadAdjustments() {
+    const tbody = $["adj-tbody"];
+    if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-dim);">Loading...</td></tr>`;
+
+    try {
+      _adjData = await window.electronAPI.feeStructure.getAdjustments({ academicSession: _currentSession, term: _currentTerm });
+      if (tbody) {
+        if (!_adjData.length) {
+          tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-dim);">No adjustments recorded for this term.</td></tr>`;
+          return;
+        }
+        tbody.innerHTML = _adjData.map(adj => {
+          let emoji = "🏷️";
+          if (adj.adjustment_type === 'scholarship') emoji = "🎓";
+          if (adj.adjustment_type === 'waiver') emoji = "✋";
+          if (adj.adjustment_type === 'owner_grant') emoji = "🏫";
+          if (adj.adjustment_type === 'bursary') emoji = "💼";
+
+          return `<tr>
+            <td style="font-weight:500;">${adj.student_name}</td>
+            <td style="font-size:12px;color:var(--text-dim);">${adj.class_name}</td>
+            <td style="font-size:12px;">${emoji} ${adj.adjustment_type.replace('_',' ')}</td>
+            <td style="font-size:12px;color:var(--text-dim);">${adj.description || '—'}</td>
+            <td style="text-align:right;font-family:var(--font-mono);font-size:13px;color:#4CAF50;">₦${fmt(adj.amount)}</td>
+            <td style="font-size:11px;color:var(--text-dim);">${adj.approved_by}</td>
+            <td style="text-align:center;">
+              <button class="small-btn btn-adj-del" data-id="${adj.id}" style="color:#ff6b6b;border-color:rgba(255,107,107,0.2);">✕</button>
+            </td>
+          </tr>`;
+        }).join("");
+      }
+    } catch(e) {
+      console.error("[Financial Hub] getAdjustments failed", e);
+    }
+  }
+
+  async function _submitAdjustment() {
+    const studentIdRaw = $["adj-student-select"]?.value || "";
+    const studentId = studentIdRaw.split(" ")[0].trim();
+    const type = $["adj-type"]?.value;
+    const amount = Number($["adj-amount"]?.value);
+    const desc = $["adj-description"]?.value.trim();
+
+    if (!studentId || !amount) return;
+
+    const btn = $["btn-adj-submit"];
+    if (btn) { btn.disabled = true; btn.textContent = "Applying..."; }
+
+    try {
+      await window.electronAPI.feeStructure.addAdjustment({
+        studentId, academicSession: _currentSession, term: _currentTerm, adjustmentType: type, description: desc, amount
+      });
+      _closeModal("modal-adj");
+      _showIndicator("✅ Adjustment applied");
+      await _loadAdjustments();
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "Apply Adjustment"; }
+    }
+  }
+
   // ── Dynamic List Helpers ────────────────────────────────────────────────────
   function _createAccountRow(acc = {}) {
     const div = document.createElement("div");
@@ -520,6 +756,40 @@
 
     // Ledger modal
     $["btn-ledger-close"]?.addEventListener("click", () => _closeModal("modal-ledger"));
+
+    // Fee Structure Events
+    $["fs-class-select"]?.addEventListener("change", _loadStructure);
+    $["fs-term-filter"]?.addEventListener("change", _loadStructure);
+    $["btn-fs-load"]?.addEventListener("click", _loadStructure);
+    $["btn-fs-add-item"]?.addEventListener("click", _addStructureItem);
+    $["btn-fs-apply"]?.addEventListener("click", _applyStructureToClass);
+    $["fs-tbody"]?.addEventListener("click", async (e) => {
+      const delBtn = e.target.closest(".btn-fs-del");
+      if (delBtn) {
+        if (confirm("Delete this fee item?")) {
+          await window.electronAPI.feeStructure.deleteItem(delBtn.dataset.id);
+          _loadStructure();
+        }
+      }
+    });
+
+    // Adjustments Events
+    $["btn-adj-add"]?.addEventListener("click", () => {
+      $["adj-amount"].value = "";
+      $["adj-description"].value = "";
+      _openModal("modal-adj");
+    });
+    $["btn-adj-cancel"]?.addEventListener("click", () => _closeModal("modal-adj"));
+    $["btn-adj-submit"]?.addEventListener("click", _submitAdjustment);
+    $["adj-tbody"]?.addEventListener("click", async (e) => {
+      const delBtn = e.target.closest(".btn-adj-del");
+      if (delBtn) {
+        if (confirm("Delete this adjustment? It will NOT reverse the student's bill automatically.")) {
+          await window.electronAPI.feeStructure.deleteAdjustment(delBtn.dataset.id);
+          _loadAdjustments();
+        }
+      }
+    });
     
     // Fee Pulse Trigger
     $["btn-trigger-fee-pulse"]?.addEventListener("click", async () => {
@@ -598,6 +868,7 @@
     if ($["fees-th-actions"]) $["fees-th-actions"].style.display = _isDiamond ? "" : "none";
 
     _populateSessions();
+    await _populateClassesAndStudents();
     _bindEvents();
 
     // Auto-load with current config term

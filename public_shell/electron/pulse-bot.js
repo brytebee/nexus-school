@@ -20,6 +20,12 @@ let qrCodeData = null;
 const sessions = new Map();
 const SESSION_TTL_MS = 5 * 60 * 1000; // 5 minutes inactivity
 
+// ─── JID → Phone Resolution Cache ─────────────────────────────────────────────
+// Keyed by raw JID string (msg.from). Avoids re-running the 4-strategy async
+// resolution (200 ms – 5 s) on every subsequent message from the same contact.
+// Lives for the lifetime of the bot session — cleared on destroyPulse().
+const _jidPhoneCache = new Map();
+
 const STATE = Object.freeze({
   MENU: "MENU",
   SCOPE: "SCOPE",
@@ -151,6 +157,7 @@ async function destroyPulse() {
   }
   isReady = false;
   qrCodeData = null;
+  _jidPhoneCache.clear(); // Flush the resolution cache on disconnect
   sendStatus("disconnected");
 }
 
@@ -158,38 +165,52 @@ async function destroyPulse() {
 // whatsapp-web.js LIDs (Linked Device IDs) look like long numbers starting with
 // 5, 6, or 7 (e.g., 66267268534294). We detect and reject these in favour of
 // the actual E.164 phone number via multiple fallback strategies.
+//
+// Results are cached by JID so returning contacts resolve instantly (O(1))
+// instead of paying the 200 ms – 5 s puppeteer IPC cost on every message.
 
 async function resolvePhoneNumber(msg) {
+  // ── Fast path: cache hit ──────────────────────────────────────────────────
+  const cached = _jidPhoneCache.get(msg.from);
+  if (cached) {
+    console.log(`[Pulse Bot] Phone resolved via cache for JID: ${msg.from}`);
+    return cached;
+  }
+
   try {
     const contact = await msg.getContact();
     console.log(`[Pulse Bot] Raw JID: ${msg.from} | contact.number: ${contact.number}`);
 
+    let resolved = null;
+
     // Strategy 1: Contact's own number field (most reliable)
-    if (contact.number && isLikelyPhone(contact.number)) {
+    if (!resolved && contact.number && isLikelyPhone(contact.number)) {
       console.log("[Pulse Bot] Phone resolved via contact.number");
-      return contact.number;
+      resolved = contact.number;
     }
 
     // Strategy 2: contact.id._serialized stripped of @c.us and device suffix
-    const serialized = contact.id?._serialized ?? "";
-    if (serialized.includes("@c.us")) {
-      const extracted = serialized.split("@")[0].split(":")[0];
-      if (isLikelyPhone(extracted)) {
-        console.log("[Pulse Bot] Phone resolved via contact.id._serialized");
-        return extracted;
+    if (!resolved) {
+      const serialized = contact.id?._serialized ?? "";
+      if (serialized.includes("@c.us")) {
+        const extracted = serialized.split("@")[0].split(":")[0];
+        if (isLikelyPhone(extracted)) {
+          console.log("[Pulse Bot] Phone resolved via contact.id._serialized");
+          resolved = extracted;
+        }
       }
     }
 
     // Strategy 3: client.getNumberId lookup (resolves LID → real number)
-    if (client) {
+    if (!resolved && client) {
       const lid = msg.from.split("@")[0].split(":")[0];
       try {
         const wid = await client.getNumberId(lid);
         if (wid) {
-          const resolved = wid._serialized.split("@")[0];
-          if (isLikelyPhone(resolved)) {
+          const r = wid._serialized.split("@")[0];
+          if (isLikelyPhone(r)) {
             console.log("[Pulse Bot] Phone resolved via getNumberId");
-            return resolved;
+            resolved = r;
           }
         }
       } catch (lidErr) {
@@ -198,18 +219,25 @@ async function resolvePhoneNumber(msg) {
     }
 
     // Strategy 4: Parse directly from msg.from JID
-    if (msg.from.includes("@c.us")) {
+    if (!resolved && msg.from.includes("@c.us")) {
       const fromPhone = msg.from.split("@")[0].split(":")[0];
       if (isLikelyPhone(fromPhone)) {
         console.log("[Pulse Bot] Phone resolved via msg.from JID");
-        return fromPhone;
+        resolved = fromPhone;
       }
     }
 
-    console.warn("[Pulse Bot] All resolution strategies exhausted.", {
-      from: msg.from, number: contact.number, serialized,
-    });
-    return null;
+    if (!resolved) {
+      console.warn("[Pulse Bot] All resolution strategies exhausted.", {
+        from: msg.from, number: contact.number,
+      });
+      return null;
+    }
+
+    // ── Cache the resolved phone so future messages from this JID are instant
+    _jidPhoneCache.set(msg.from, resolved);
+    return resolved;
+
   } catch (err) {
     console.error("[Pulse Bot] resolvePhoneNumber failed:", err);
     return null;
@@ -458,19 +486,46 @@ async function sendAttendance(msg, session, termOverride = null) {
   await msg.reply(text);
 }
 
+// ─── Fee Status Response ───────────────────────────────────────────────────────
+// Reads from the `student_fees` table (populated by the Financial Hub) so the
+// balance is always accurate — NOT from the stale `students.fee_status` text
+// column, which is never updated when a payment is recorded via the Hub.
 async function sendFeeStatus(msg, session) {
   const db = database.getDb();
-  const { students, termConfig } = session;
+  const { students, termConfig, schoolName } = session;
 
-  let text = `💳 *Fee Status*\n_Term: ${termConfig.term}, ${termConfig.academic_session}_\n${DIV}\n\n`;
+  const fmt = (n) => `₦${Number(n || 0).toLocaleString('en-NG')}`;
+
+  let text = `💳 *Fee Status*\n_${termConfig.term}, ${termConfig.academic_session}_\n${DIV}\n\n`;
 
   for (const student of students) {
-    const row = db.prepare("SELECT fee_status FROM students WHERE id=?").get(student.id);
-    const status = row?.fee_status ?? "unknown";
-    const cleared = status === "cleared";
-    const emoji = cleared ? "🟢" : status === "debtor" ? "🔴" : "⚪";
-    const label = cleared ? "Fees Cleared ✅" : status === "debtor" ? "Outstanding Balance ⚠️" : "Status Unknown";
-    text += `👤 *${student.name}* (${student.class_name})\n${emoji} ${label}\n\n`;
+    text += `👤 *${student.name}* (${student.class_name})\n`;
+
+    const fees = db.prepare(`
+      SELECT total_billed, total_paid
+      FROM   student_fees
+      WHERE  student_id       = ?
+        AND  academic_session = ?
+        AND  term             = ?
+    `).get(student.id, termConfig.academic_session, termConfig.term);
+
+    if (!fees || (!fees.total_billed && !fees.total_paid)) {
+      text += `⚪ _No fee record for this term._\n\n`;
+      continue;
+    }
+
+    const balance = (fees.total_billed || 0) - (fees.total_paid || 0);
+    const cleared = balance <= 0;
+
+    text += `${cleared ? '🟢' : '🔴'} *${cleared ? 'Fees Cleared ✅' : 'Outstanding Balance ⚠️'}*\n`;
+    text += `   Billed : ${fmt(fees.total_billed)}\n`;
+    text += `   Paid   : ${fmt(fees.total_paid)}\n`;
+
+    if (!cleared) {
+      text += `   *Balance: ${fmt(balance)}*\n`;
+    }
+
+    text += `\n`;
   }
 
   text += `${DIV}\n_For payment enquiries, please contact the school office._\n_Powered by Nexus Pulse_ 🎓`;
@@ -650,5 +705,16 @@ module.exports = {
     const message = `📊 *Principal's Morning Briefing*\n_Nexus School OS — ${schoolName}_\n\n🗓️ *Date:* ${date}\n━━━━━━━━━━━━━━━━━━━━\n\n🔹 *Student Enrollment:* ${stats.studentCount}\n🔹 *Present Today:* ${stats.attendance}\n🔹 *Absence Rate:* ${stats.absenceRate}%\n\n✅ *System Status:* Secure & Synchronized\n\n_Generated by Nexus Pulse_ 🎓`;
     
     await client.sendMessage(target, message);
+  },
+
+  // ── Generic raw send — used by the Message Queue Worker ─────────────────────
+  // Takes a pre-formatted message and a raw phone number. Normalises to E.164.
+  sendRawMessage: async (phone, message) => {
+    if (!client || !isReady) throw new Error('WhatsApp bot not connected');
+    let target = phone.replace(/\D/g, "");
+    if (target.startsWith("0")) target = "234" + target.slice(1);
+    if (!target.includes("@c.us")) target += "@c.us";
+    await client.sendMessage(target, message);
   }
 };
+

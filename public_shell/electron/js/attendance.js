@@ -179,8 +179,15 @@ const initAttendanceModule = async () => {
     // ── Report Logic ──────────────────────────────────────────────────────
     const btnReport = document.getElementById("btn-student-attendance-report");
     if (btnReport) {
-        btnReport.addEventListener("click", () => {
+        btnReport.addEventListener("click", async () => {
             document.getElementById("attendance-report-overlay").style.display = "flex";
+            
+            // Populate Session and Term from TermConfig
+            const termCfg = await window.electronAPI.getTermConfig();
+            const sessSelect = document.getElementById("att-report-session");
+            const termSelect = document.getElementById("att-report-term");
+            if (sessSelect && termCfg.academic_session) sessSelect.value = termCfg.academic_session;
+            if (termSelect && termCfg.term) termSelect.value = termCfg.term;
         });
     }
     const btnClose = document.getElementById("btn-att-report-close");

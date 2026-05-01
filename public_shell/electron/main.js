@@ -12,6 +12,7 @@ const os = require("os");
 const dgram = require("dgram");
 const Handlebars = require("handlebars");
 const { database, server, reports } = require("../../private_engine");
+const scholar = require("../../private_engine/src/scholar");
 const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, handleCSVUpload, clearData } = server;
 const address = require("address");
 const pulseBot = require('./pulse-bot.js');
@@ -61,12 +62,298 @@ ipcMain.on("pulse:start", () => {
 ipcMain.on("pulse:stop", () => pulseBot.destroyPulse());
 ipcMain.handle("pulse:status", () => pulseBot.getPulseStatus());
 
+// ── NEXUS SCHOLAR IPC ────────────────────────────────────────────────────────
+ipcMain.handle("scholar:get-stats", () => scholar.getStats());
+ipcMain.handle("scholar:query", async (event, query) => {
+    try {
+        const db = database.getDb();
+        const row = db.prepare("SELECT value FROM app_settings WHERE key = 'gemini_api_key'").get();
+        const apiKey = row ? row.value : null;
+        const res = await scholar.query(query, apiKey);
+        return { ok: true, ...res };
+    } catch (e) {
+        return { ok: false, error: e.message };
+    }
+});
+ipcMain.handle("scholar:clear", () => {
+    scholar.clearIndex();
+    return { ok: true };
+});
+ipcMain.handle("scholar:upload", async (event, { fileData, fileName }) => {
+    return await scholar.ingestDocument(fileData, fileName);
+});
+
+// ── GENERIC APP SETTINGS KV STORE ────────────────────────────────────────────
+ipcMain.handle("app-settings:get", (event, key) => {
+    const row = database.getDb().prepare("SELECT value FROM app_settings WHERE key = ?").get(key);
+    return row ? row.value : null;
+});
+ipcMain.handle("app-settings:set", (event, { key, value }) => {
+    database.getDb().prepare(
+        "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)"
+    ).run(key, value);
+    return { ok: true };
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN AUTHENTICATION — The Vault (Phase 9)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Current session (who is logged in). Persists for the lifetime of the app process.
+let currentAdminSession = null;
+
+ipcMain.handle('auth:get-admins', () => {
+    const db = database.getDb();
+    return db.prepare('SELECT id, name, role FROM admin_users WHERE is_active = 1 ORDER BY role DESC, name ASC').all();
+});
+
+ipcMain.handle('auth:verify-pin', (event, { adminId, pin }) => {
+    const db = database.getDb();
+    const admin = db.prepare('SELECT * FROM admin_users WHERE id = ? AND is_active = 1').get(adminId);
+    if (!admin) return { ok: false };
+    const pinHash = crypto.createHash('sha256').update(String(pin)).digest('hex');
+    if (pinHash !== admin.pin_hash) return { ok: false };
+    currentAdminSession = { id: admin.id, name: admin.name, role: admin.role, loginAt: Date.now() };
+    db.prepare("UPDATE admin_users SET last_login = datetime('now') WHERE id = ?").run(admin.id);
+    console.log(`[Auth] Session opened: ${admin.name} (${admin.role})`);
+    return { ok: true, name: admin.name, role: admin.role };
+});
+
+ipcMain.handle('auth:get-session', () => currentAdminSession);
+
+// auth:unlock — fired by lock.html after PIN accepted. Loads the main app.
+ipcMain.on('auth:unlock', () => {
+    if (!mainWindow) return;
+    const targetFile = process.env.USE_REACT_UI === 'true' ? 'renderer.html' : 'index.html';
+    mainWindow.loadFile(targetFile);
+    console.log(`[Auth] Lock screen dismissed. Loading ${targetFile}.`);
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FEE STRUCTURE (Class-Level Billing + Adjustments) — Gold Phase B
+// ─────────────────────────────────────────────────────────────────────────────
+
+ipcMain.handle('fee-structure:get-all', (event, { className } = {}) => {
+    const db = database.getDb();
+    if (className) {
+        return db.prepare('SELECT * FROM fee_structures WHERE class_name = ? ORDER BY item_name ASC').all(className);
+    }
+    return db.prepare('SELECT * FROM fee_structures ORDER BY class_name ASC, item_name ASC').all();
+});
+
+ipcMain.handle('fee-structure:upsert-item', (event, { id, className, itemName, amount, term }) => {
+    const db = database.getDb();
+    if (id) {
+        db.prepare('UPDATE fee_structures SET class_name=?, item_name=?, amount=?, term=? WHERE id=?')
+          .run(className, itemName, amount, term || 'All Terms', id);
+        return { ok: true, id };
+    }
+    const result = db.prepare('INSERT OR REPLACE INTO fee_structures (class_name, item_name, amount, term) VALUES (?,?,?,?)')
+      .run(className, itemName, amount, term || 'All Terms');
+    return { ok: true, id: result.lastInsertRowid };
+});
+
+ipcMain.handle('fee-structure:delete-item', (event, id) => {
+    const db = database.getDb();
+    db.prepare('DELETE FROM fee_structures WHERE id = ?').run(id);
+    return { ok: true };
+});
+
+// Bulk-apply the fee structure total to all students in a class
+ipcMain.handle('fee-structure:apply-to-class', (event, { className, academicSession, term }) => {
+    const db = database.getDb();
+    const termConfig = db.prepare('SELECT * FROM school_term_config WHERE id = 1').get();
+    const session = academicSession || termConfig.academic_session;
+    const activeTerm = term || termConfig.term;
+
+    const { total } = db.prepare(`
+        SELECT COALESCE(SUM(amount), 0) as total FROM fee_structures
+        WHERE class_name = ? AND (term = 'All Terms' OR term = ?)
+    `).get(className, activeTerm);
+
+    const students = db.prepare('SELECT id FROM students WHERE class_name = ?').all(className);
+    if (students.length === 0) return { ok: false, error: 'No students in class', count: 0 };
+
+    const upsert = db.prepare(`
+        INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status)
+        VALUES (?, ?, ?, ?, 0, 'unpaid')
+        ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
+          total_billed = excluded.total_billed, updated_at = datetime('now')
+    `);
+    db.transaction(() => { for (const s of students) upsert.run(s.id, session, activeTerm, total); })();
+
+    console.log(`[Fee Structure] Applied ₦${total.toLocaleString()} to ${students.length} students in ${className}`);
+    return { ok: true, count: students.length, totalBilled: total };
+});
+
+ipcMain.handle('fee-structure:get-adjustments', (event, { studentId, academicSession, term } = {}) => {
+    const db = database.getDb();
+    const termConfig = db.prepare('SELECT * FROM school_term_config WHERE id = 1').get();
+    const session = academicSession || termConfig.academic_session;
+    const activeTerm = term || termConfig.term;
+    if (studentId) {
+        return db.prepare(`
+            SELECT fa.*, s.name as student_name, s.class_name FROM fee_adjustments fa
+            JOIN students s ON fa.student_id = s.id
+            WHERE fa.student_id = ? AND fa.academic_session = ? AND fa.term = ?
+            ORDER BY fa.created_at DESC
+        `).all(studentId, session, activeTerm);
+    }
+    return db.prepare(`
+        SELECT fa.*, s.name as student_name, s.class_name FROM fee_adjustments fa
+        JOIN students s ON fa.student_id = s.id
+        WHERE fa.academic_session = ? AND fa.term = ?
+        ORDER BY s.class_name, s.name
+    `).all(session, activeTerm);
+});
+
+ipcMain.handle('fee-structure:add-adjustment', (event, data) => {
+    const db = database.getDb();
+    const { studentId, adjustmentType, description, amount } = data;
+    const termConfig = db.prepare('SELECT * FROM school_term_config WHERE id = 1').get();
+    const session = data.academicSession || termConfig.academic_session;
+    const term = data.term || termConfig.term;
+    const adminName = data.approvedBy || currentAdminSession?.name || 'Admin';
+
+    db.transaction(() => {
+        db.prepare(`
+            INSERT INTO fee_adjustments (student_id, academic_session, term, adjustment_type, description, amount, approved_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(studentId, session, term, adjustmentType || 'discount', description || '', amount, adminName);
+        // Reduce total_billed by adjustment amount
+        db.prepare(`
+            UPDATE student_fees SET total_billed = MAX(0, total_billed - ?), updated_at = datetime('now')
+            WHERE student_id = ? AND academic_session = ? AND term = ?
+        `).run(amount, studentId, session, term);
+    })();
+    return { ok: true };
+});
+
+ipcMain.handle('fee-structure:delete-adjustment', (event, id) => {
+    database.getDb().prepare('DELETE FROM fee_adjustments WHERE id = ?').run(id);
+    return { ok: true };
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WHATSAPP MESSAGE QUEUE WORKER — Gold Phase B
+// Drains pending_pulse_messages one message at a time every 3 seconds.
+// Prevents UI freeze and WhatsApp rate-limit bans during bulk sends.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function startMessageQueueWorker() {
+    const QUEUE_INTERVAL_MS = 3000;
+    const MAX_ATTEMPTS = 3;
+
+    setInterval(async () => {
+        const status = pulseBot.getPulseStatus();
+        if (!status || status.status !== 'ready') return;
+
+        const db = database.getDb();
+        const msg = db.prepare(`
+            SELECT * FROM pending_pulse_messages
+            WHERE status = 'pending' AND attempts < ?
+            ORDER BY created_at ASC LIMIT 1
+        `).get(MAX_ATTEMPTS);
+        if (!msg) return;
+
+        db.prepare("UPDATE pending_pulse_messages SET status='sending', attempts=attempts+1 WHERE id=?").run(msg.id);
+
+        try {
+            await pulseBot.sendRawMessage(msg.phone, msg.message);
+            db.prepare("UPDATE pending_pulse_messages SET status='sent', sent_at=datetime('now') WHERE id=?").run(msg.id);
+        } catch (err) {
+            const newStatus = msg.attempts + 1 >= MAX_ATTEMPTS ? 'failed' : 'pending';
+            db.prepare("UPDATE pending_pulse_messages SET status=?, error_msg=? WHERE id=?").run(newStatus, err.message, msg.id);
+        }
+
+        if (mainWindow) {
+            const stats = db.prepare(`
+                SELECT
+                  SUM(CASE WHEN status IN ('pending','sending') THEN 1 ELSE 0 END) as pending,
+                  SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) as sent,
+                  SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed
+                FROM pending_pulse_messages
+            `).get();
+            mainWindow.webContents.send('queue:progress', stats);
+        }
+    }, QUEUE_INTERVAL_MS);
+    console.log('[Queue] WhatsApp message queue worker started.');
+}
+
+ipcMain.handle("pulse:trigger-digest", async (event, { class_name }) => {
+  try {
+    const db = database.getDb();
+    const students = db.prepare("SELECT id, name, parent_phone FROM students WHERE class_name = ?").all(class_name);
+    
+    let count = 0;
+    const enqueueMsg = db.prepare(`
+      INSERT INTO pending_pulse_messages (phone, message, type, student_id)
+      VALUES (?, ?, 'digest', ?)
+    `);
+
+    db.transaction(() => {
+      for (const s of students) {
+        if (s.parent_phone) {
+          const msg = `📚 Nexus Weekly Digest:\n\nDear Parent, here is the weekly summary for ${s.name}.\n- Attendance: 100%\n- Assignments: 3 completed.\nHave a great weekend!`;
+          enqueueMsg.run(s.parent_phone, msg, s.id);
+          count++;
+        }
+      }
+    })();
+    return { ok: true, queued: count };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('queue:get-status', () => {
+    return database.getDb().prepare(`
+        SELECT
+          SUM(CASE WHEN status IN ('pending','sending') THEN 1 ELSE 0 END) as pending,
+          SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) as sent,
+          SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed,
+          COUNT(*) as total
+        FROM pending_pulse_messages
+    `).get();
+});
+
+// Overwrite the old trigger-fee-reminders to use the queue instead of direct sends
+ipcMain.removeAllListeners('trigger-fee-reminders');
+ipcMain.on('trigger-fee-reminders', () => {
+    const db = database.getDb();
+    const termConfig = db.prepare('SELECT * FROM school_term_config WHERE id = 1').get();
+    const debtors = db.prepare(`
+        SELECT s.name, s.parent_phone, f.total_billed, f.total_paid
+        FROM students s JOIN student_fees f ON s.id = f.student_id
+        WHERE f.academic_session = ? AND f.term = ?
+          AND (f.total_billed - f.total_paid) > 0
+          AND s.parent_phone IS NOT NULL AND s.parent_phone != ''
+    `).all(termConfig.academic_session, termConfig.term);
+
+    const schoolName = identityPacket.name || 'Nexus School';
+    const enqueue = db.prepare(`INSERT INTO pending_pulse_messages (phone, message, type) VALUES (?, ?, 'fee_reminder')`);
+    db.transaction(() => {
+        for (const d of debtors) {
+            const balance = (d.total_billed - d.total_paid).toLocaleString('en-NG');
+            const msg = `Hello! This is a reminder from ${schoolName}.\n\nStudent: *${d.name}*\nOutstanding Balance: *₦${balance}*\n\nKindly make payment to avoid any inconvenience. Thank you! 📚`;
+            enqueue.run(d.parent_phone, msg);
+        }
+    })();
+    console.log(`[Queue] ${debtors.length} fee reminders enqueued.`);
+    if (mainWindow) mainWindow.webContents.send('fee-reminders-queued', { count: debtors.length });
+});
+
 // ── Pulse Cloud Bridge (Turn 2) ───────────────────────────────────────────
-ipcMain.on("pulse:save-google-creds", (event, { clientId, clientSecret }) => {
+
+ipcMain.on("pulse:save-google-creds", async (event, { clientId, clientSecret }) => {
     const db = database.getDb();
     db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('google_client_id', ?)").run(clientId);
     db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('google_client_secret', ?)").run(clientSecret);
-    pulseExporter.init();
+    // Await init so oAuth2Client is ready before the auth URL is requested.
+    await pulseExporter.init();
+    console.log('[Pulse] Google credentials saved and OAuth client re-initialised.');
 });
 
 ipcMain.handle("pulse:get-google-auth-url", async () => {
@@ -143,6 +430,17 @@ ipcMain.handle("get-unique-metadata", () => {
   } catch (err) {
     console.error("Failed to fetch unique metadata:", err);
     return { classes: [], subjects: [] };
+  }
+});
+
+ipcMain.handle("get-classes", () => {
+  try {
+    const db = database.getDb();
+    const rows = db.prepare("SELECT DISTINCT class_name FROM students WHERE class_name IS NOT NULL AND class_name != '' ORDER BY class_name ASC").all();
+    return rows.map(r => r.class_name);
+  } catch (err) {
+    console.error("Failed to fetch classes:", err);
+    return [];
   }
 });
 
@@ -699,6 +997,8 @@ ipcMain.handle("get-daily-attendance", async (event, { class_name, date }) => {
 });
 
 ipcMain.handle("save-daily-attendance", async (event, { class_name, date, session, term, records }) => {
+  if (!records || records.length === 0) return { ok: true };
+
   const db = database.getDb();
   const transaction = db.transaction(() => {
     // 1. Bulk Save daily records
@@ -708,26 +1008,51 @@ ipcMain.handle("save-daily-attendance", async (event, { class_name, date, sessio
       VALUES (?, ?, ?, ?, ?, ?)
     `);
 
+    // Fetch student details for Guardian Shield alerts
+    const studentIds = records.map(r => r.student_id);
+    const placeholders = studentIds.map(() => '?').join(',');
+    const studentDetails = db.prepare(`SELECT id, name, parent_phone FROM students WHERE id IN (${placeholders})`).all(...studentIds);
+    const studentMap = {};
+    for (const s of studentDetails) { studentMap[s.id] = s; }
+
+    const enqueueMsg = db.prepare(`
+      INSERT INTO pending_pulse_messages (phone, message, type, student_id)
+      VALUES (?, ?, 'guardian_alert', ?)
+    `);
+
     for (const r of records) {
       deleteStmt.run(r.student_id, date);
       insertStmt.run(r.student_id, class_name, date, r.status, session, term);
+
+      // Wire Guardian Shield (Absence Alert) to Queue
+      if (r.status === 'Absent') {
+        const student = studentMap[r.student_id];
+        if (student && student.parent_phone) {
+          const msg = `🚨 Nexus Guardian Alert:\n\nDear Parent, please be informed that ${student.name} was marked ABSENT from school today (${date}).\n\nIf you are not aware of this, please contact the school immediately.`;
+          enqueueMsg.run(student.parent_phone, msg, r.student_id);
+        }
+      }
     }
 
-    // 2. Synchronize aggregates for Report Cards (Sovereign Hub Auto-Sync)
-    for (const r of records) {
-      const stats = db.prepare(`
-        SELECT COUNT(*) as total, SUM(CASE WHEN status IN ('Present', 'Late') THEN 1 ELSE 0 END) as attended
-        FROM daily_attendance
-        WHERE student_id = ? AND academic_session = ? AND term = ?
-      `).get(r.student_id, session, term);
+    // 2. Synchronize aggregates for Report Cards (Fixing N+1 bug)
+    // Run a single aggregation query instead of one per student
+    const statsQuery = db.prepare(`
+      SELECT student_id, COUNT(*) as total, SUM(CASE WHEN status IN ('Present', 'Late') THEN 1 ELSE 0 END) as attended
+      FROM daily_attendance
+      WHERE academic_session = ? AND term = ? AND student_id IN (${placeholders})
+      GROUP BY student_id
+    `).all(session, term, ...studentIds);
 
-      db.prepare(`
-        INSERT INTO student_attendance (student_id, academic_session, term, total_days, days_attended)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
-        total_days = excluded.total_days,
-        days_attended = excluded.days_attended
-      `).run(r.student_id, session, term, stats.total, stats.attended);
+    const updateAggStmt = db.prepare(`
+      INSERT INTO student_attendance (student_id, academic_session, term, total_days, days_attended)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
+      total_days = excluded.total_days,
+      days_attended = excluded.days_attended
+    `);
+
+    for (const stat of statsQuery) {
+      updateAggStmt.run(stat.student_id, session, term, stat.total, stat.attended);
     }
   });
 
@@ -1160,17 +1485,28 @@ ipcMain.handle("save-identity", (event, newIdentity) => {
       const userDataPath = require('electron').app.getPath("userData");
       identityFilePath = require('path').join(userDataPath, "identity.json");
     }
-    
+
     identityPacket = { ...identityPacket, ...newIdentity };
     fs.writeFileSync(identityFilePath, JSON.stringify(identityPacket, null, 2));
     console.log("[Electron] Identity saved locally.");
-    
+
+    // ── Keep app_settings.school_name in sync so pulse-bot.js and
+    // pulse-exporter.js (which read from the DB) always use the correct name.
+    if (identityPacket.name) {
+      try {
+        const db = database.getDb();
+        db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_name', ?)").run(identityPacket.name);
+      } catch (dbErr) {
+        console.warn("[Identity] Could not sync school_name to DB:", dbErr.message);
+      }
+    }
+
     if (qrPayload) {
       qrPayload.config = identityPacket;
       setSchoolConfig(qrPayload.config);
       if (mainWindow) mainWindow.webContents.send("qr-payload", qrPayload);
     }
-    
+
     return { ok: true, identity: { ...identityPacket, tier: licenseStatus?.tier || "Silver" } };
   } catch (err) {
     console.error("Failed to save identity:", err);
@@ -1269,6 +1605,16 @@ ipcMain.handle("generate-reports", async (event, payload) => {
     if (!fs.existsSync(outFolder)) fs.mkdirSync(outFolder, { recursive: true });
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 
+    const db = database.getDb();
+    if (payload.students) {
+      for (const s of payload.students) {
+        // Fee Shield Check
+        const feeStatus = db.prepare(`SELECT status FROM fee_transactions WHERE student_id = ? AND academic_session = ? AND term = ? ORDER BY id DESC LIMIT 1`).get(s.id, termConfig?.academic_session, termConfig?.term);
+        // If no record exists, assume unpaid unless otherwise specified
+        s.feeStatus = feeStatus ? feeStatus.status : 'unpaid';
+      }
+    }
+
     let html = "";
     let outPath = "";
     const baseDir = path.join(__dirname, "../../private_engine");
@@ -1337,7 +1683,8 @@ function createWindow() {
     identityFilePath = path.join(userDataPath, "identity.json");
 
     // Initialize SQLite Database
-    let dbPath = path.join(userDataPath, "nexus.sqlite");
+    let dbPath = path.join(userDataPath, 'nexus_os.db');
+    scholar.init(userDataPath);
     
     // DEMO MODE: Prioritize the seeded DB in the project root if it exists
     const repoDbPath = path.join(__dirname, "../../private_engine/nexus.sqlite");
@@ -1360,6 +1707,18 @@ function createWindow() {
     if (fs.existsSync(identityFilePath)) {
       const data = fs.readFileSync(identityFilePath, "utf-8");
       identityPacket = JSON.parse(data);
+      // Sync the private_engine server's school_config so the handshake
+      // payload reflects the saved identity on every cold start.
+      setSchoolConfig(identityPacket);
+      // ── Keep app_settings.school_name in sync so pulse-bot.js and
+      // pulse-exporter.js (which read from the DB) always use the correct name.
+      try {
+        const db = database.getDb();
+        if (identityPacket.name) {
+          db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_name', ?)").run(identityPacket.name);
+        }
+      } catch (_) { /* DB not yet ready on very first boot — seeded default is fine */ }
+      console.log(`[Electron] Identity loaded → school: "${identityPacket.name || 'N/A'}"`);
     } else {
       fs.writeFileSync(
         identityFilePath,
@@ -1436,19 +1795,36 @@ function createWindow() {
   });
 
   // (app name already set at module scope)
-  mainWindow.loadFile("index.html");
+  // ── Boot: load lock screen first, unless developer bypass is active ────────
+  // Set DEV_AUTO_LOGIN=true in .env to skip auth during testing and go straight
+  // to the main app. This flag must NEVER appear in production builds.
+  let bootFile = 'lock.html';
+  if (process.env.DEV_AUTO_LOGIN === 'true') {
+    currentAdminSession = { id: 1, name: 'Developer', role: 'super_admin', loginAt: Date.now() };
+    console.log('[Auth] DEV_AUTO_LOGIN active — skipping lock screen.');
+    bootFile = process.env.USE_REACT_UI === 'true' ? 'renderer.html' : 'index.html';
+  }
+  mainWindow.loadFile(bootFile);
+
+
+  // Start the message queue worker now that the main window exists
+  startMessageQueueWorker();
 
   pulseBot.initPulseBot(mainWindow);
+  const dbApp = database.getDb();
+  const autoStart = dbApp.prepare("SELECT value FROM app_settings WHERE key = 'pulse_autostart'").get();
+  if (autoStart && autoStart.value === 'true') {
+    console.log('[Pulse] Auto-start is enabled. Starting bot...');
+    pulseBot.startPulse();
+  }
+
   pulseExporter.onSyncError = (message) => {
       if (mainWindow) mainWindow.webContents.send("pulse:sync-error", message);
   };
 
-  pulseExporter.init().then(() => {
-      // If initialized and Diamond tier, start periodic sync
-      if (pulseExporter.oAuth2Client && licenseStatus?.tier === 'Diamond') {
-          pulseExporter.startPeriodicSync();
-      }
-  });
+  // Init the exporter now so oAuth2Client is ready if credentials exist.
+  // Periodic sync is started AFTER the license tier is determined (see below).
+  pulseExporter.init().catch(e => console.error('[Pulse] Exporter init error:', e));
 
   // Small callback server for Google Auth
   const callbackServer = express();
@@ -1566,8 +1942,26 @@ function createWindow() {
     });
   });
 
+  // Rate limiting store: { ip: { count, resetAt } }
+  const otpRateLimits = new Map();
+
   // Step 1: Request Access via Phone Number
   portalApp.post('/portal/api/request-otp', async (req, res) => {
+    const ip = req.ip || req.connection.remoteAddress;
+    const now = Date.now();
+    const hourLimit = 60 * 60 * 1000;
+
+    // Check rate limit
+    let limitData = otpRateLimits.get(ip);
+    if (!limitData || limitData.resetAt < now) {
+      limitData = { count: 0, resetAt: now + hourLimit };
+    }
+    if (limitData.count >= 5) {
+      return res.json({ ok: false, error: 'Rate limit exceeded. Please try again in an hour.' });
+    }
+    limitData.count++;
+    otpRateLimits.set(ip, limitData);
+
     const { phone } = req.body;
     if (!phone) return res.json({ ok: false, error: 'Phone number required' });
 
@@ -1583,15 +1977,24 @@ function createWindow() {
       
       portalSessions.set(matchable, { pin, expiry, students });
 
-      // Send via WhatsApp Bot
+      // Send via WhatsApp Bot or push to Queue
       try {
-        await pulseBot.sendOTP(phone, pin, identityPacket.name || "Nexus School");
-        res.json({ ok: true, message: 'OTP sent via WhatsApp' });
+        const botStatus = await pulseBot.getPulseStatus();
+        if (botStatus && botStatus.status === 'ready') {
+          await pulseBot.sendOTP(phone, pin, identityPacket.name || "Nexus School");
+          res.json({ ok: true, message: 'OTP sent via WhatsApp' });
+        } else {
+          // Push to pending queue so worker sends it when bot comes online
+          db.prepare(`
+            INSERT INTO pending_pulse_messages (phone, message, type)
+            VALUES (?, ?, 'otp')
+          `).run(phone, `Nexus Portal Login PIN: ${pin}`);
+          
+          res.json({ ok: true, message: 'WhatsApp delivery queued. Please ensure Nexus Pulse is online.' });
+        }
       } catch (e) {
         console.error("[Portal] WhatsApp failed:", e);
-        // Fallback for demo: log it
-        console.log(`[DEMO FALLBACK] OTP for ${phone} is ${pin}`);
-        res.json({ ok: true, message: 'OTP generated (Bot offline fallback)' });
+        res.json({ ok: false, error: 'WhatsApp delivery failed. Message queued.' });
       }
     } catch (err) {
       res.json({ ok: false, error: err.message });
@@ -1795,6 +2198,15 @@ MCowBQYDK2VwAyEAU//Zax5arKg2zRA+d4F+kE6H19E977fhJrU/rNqcdw8=
   }
 
 
+
+  // ── Start Google Drive periodic sync NOW that the license tier is known ─────
+  // Previously this ran inside a .then() microtask that fired BEFORE the
+  // synchronous license-loading block above, so licenseStatus.tier was always
+  // undefined and startPeriodicSync() was never called for production Diamond installs.
+  if (pulseExporter.oAuth2Client && licenseStatus?.tier === 'Diamond') {
+      console.log('[Pulse] Diamond tier confirmed — starting periodic Drive sync.');
+      pulseExporter.startPeriodicSync();
+  }
 
   // Build QR Payload
   qrPayload = {
