@@ -174,6 +174,16 @@
             <span class="nav-label">Sovereign Portal</span>
             <span class="nav-lock" style="display:none;margin-left:auto;font-size:12px;">🔒</span>
           </li>
+          <li
+            class="nav-item"
+            data-view="scholar"
+            data-tier="Diamond"
+            onclick="showView('scholar')"
+          >
+            <span class="nav-icon">🧠</span>
+            <span class="nav-label">Nexus Scholar</span>
+            <span class="nav-lock" style="display:none;margin-left:auto;font-size:12px;">🔒</span>
+          </li>
         </ul>
 
         <div class="sidebar-footer-nav">
@@ -348,9 +358,28 @@
               <h2 class="view-title" style="color:var(--accent-gold);">Sovereign Portal</h2>
               <p class="view-sub">Parent access gateway · WhatsApp PIN · 12-hour session</p>
             </div>
-            <div class="pulse-indicator" id="portal-status-badge">
-              <span class="pulse-dot"></span>
-              <span>Broadcasting Live</span>
+            <div style="display:flex;gap:10px;align-items:center;">
+              <div class="pulse-indicator" id="portal-status-badge">
+                <span class="pulse-dot"></span>
+                <span>Broadcasting Live</span>
+              </div>
+              <button id="btn-portal-settings-toggle" title="Portal Settings" onclick="const p=document.getElementById('portal-settings-panel');p.style.display=p.style.display==='none'?'block':'none'" style="background:rgba(255,255,255,0.05);border:1px solid var(--glass-border);color:var(--text-dim);padding:6px 10px;border-radius:8px;cursor:pointer;font-size:16px;">⚙️</button>
+            </div>
+          </div>
+
+          <!-- Portal Inline Settings Panel -->
+          <div id="portal-settings-panel" style="display:none;background:rgba(0,229,255,0.05);border:1px solid rgba(0,229,255,0.2);border-radius:12px;padding:18px 22px;margin-bottom:18px;">
+            <h4 style="margin-bottom:14px;font-size:13px;color:var(--accent);text-transform:uppercase;letter-spacing:1px;">⚙️ Portal Configuration</h4>
+            <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;">
+              <div style="flex:1;min-width:220px;">
+                <label class="ph-label">Domain Slug <span style="font-size:10px;color:var(--text-dim);">(locked to .edu.nexus)</span></label>
+                <div style="display:flex;align-items:center;gap:0;">
+                  <input type="text" id="portal-slug-input" class="modern-input" placeholder="Auto-derived from school name" style="border-radius:8px 0 0 8px;flex:1;" />
+                  <span style="background:rgba(0,229,255,0.1);border:1px solid rgba(0,229,255,0.2);border-left:none;padding:10px 14px;border-radius:0 8px 8px 0;font-size:12px;color:var(--accent);white-space:nowrap;font-weight:700;">.edu.nexus</span>
+                </div>
+                <p style="font-size:10px;color:var(--text-dim);margin-top:4px;">Leave blank to auto-generate. QR code encodes the real LAN IP.</p>
+              </div>
+              <button id="btn-portal-slug-save" class="primary-btn" style="padding:10px 20px;font-size:12px;white-space:nowrap;">Save</button>
             </div>
           </div>
 
@@ -1388,18 +1417,22 @@
           <div class="view-header">
             <div>
               <h2 class="view-title">Nexus Pulse</h2>
-              <p class="view-subtitle">
-                Automated WhatsApp Assistant for Parents (Gold Feature)
-              </p>
+              <p class="view-subtitle">Automated WhatsApp Assistant for Parents (Gold Feature)</p>
             </div>
             <div class="header-actions">
-              <button class="primary-btn" id="btn-start-pulse">
-                Start Bot
-              </button>
-              <button class="danger-btn" id="btn-stop-pulse" style="display: none;">
-                Stop Bot
-              </button>
+              <button class="primary-btn" id="btn-start-pulse">Start Bot</button>
+              <button class="danger-btn" id="btn-stop-pulse" style="display: none;">Stop Bot</button>
+              <button id="btn-pulse-settings-toggle" title="Pulse Settings" onclick="const p=document.getElementById('pulse-settings-panel');p.style.display=p.style.display==='none'?'flex':'none'" style="background:rgba(255,255,255,0.05);border:1px solid var(--glass-border);color:var(--text-dim);padding:6px 10px;border-radius:8px;cursor:pointer;font-size:16px;">⚙️</button>
             </div>
+          </div>
+
+          <!-- Pulse Inline Settings Panel -->
+          <div id="pulse-settings-panel" style="display:none;background:rgba(37,211,102,0.05);border:1px solid rgba(37,211,102,0.2);border-radius:12px;padding:18px 22px;margin-bottom:18px;align-items:flex-end;gap:14px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:220px;">
+              <label class="ph-label">Principal's Secure Phone <span style="font-size:10px;color:var(--text-dim);">(For Morning Briefings)</span></label>
+              <input type="text" id="principal-phone-input" class="modern-input" placeholder="e.g. 08012345678" style="width:100%;" />
+            </div>
+            <button id="btn-pulse-phone-save" class="primary-btn" style="padding:10px 20px;font-size:12px;background:linear-gradient(135deg,#25D366,#128C7E);border:none;white-space:nowrap;">Save</button>
           </div>
 
           <div class="content-panel" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 400px; text-align: center;">
@@ -1506,7 +1539,7 @@
         </div>
 
         <!-- ─────────────────── VIEW: GUARDIAN SHIELD (Nexus Pulse) ───────── -->
-        <div class="view" id="view-pulse">
+        <div class="view" id="view-guardian">
           <div class="view-header">
             <div>
               <h2 class="view-title" style="color:var(--accent-gold);">🛡️ Guardian Shield</h2>
@@ -1600,6 +1633,16 @@
             </div>
           </div>
 
+          <!-- Financial Hub Tabs -->
+          <div style="display:flex;gap:4px;padding:0 20px;border-bottom:1px solid var(--glass-border);flex-shrink:0;">
+            <button class="fees-tab-btn active" id="fees-tab-btn-roster"  onclick="feesSetTab('roster')">📋 Fee Roster</button>
+            <button class="fees-tab-btn"        id="fees-tab-btn-structure" onclick="feesSetTab('structure')">🏗️ Fee Structure</button>
+            <button class="fees-tab-btn"        id="fees-tab-btn-adjustments" onclick="feesSetTab('adjustments')">🎓 Adjustments</button>
+          </div>
+
+          <!-- TAB: Fee Roster (existing content) -->
+          <div id="fees-tab-roster" class="fees-tab-panel">
+
           <!-- Term Context Bar -->
           <div class="ph-config-strip" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:14px 20px;flex-shrink:0;">
             <div class="ph-config-group">
@@ -1656,7 +1699,7 @@
             </table>
           </div>
 
-          <!-- Gold: bulk save bar (inline edits accumulated, saved on click) -->
+          <!-- Gold: bulk save bar -->
           <div id="fees-save-bar" style="display:none;padding:14px 20px;border-top:1px solid var(--glass-border);background:rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
             <span style="font-size:12px;color:var(--text-dim);" id="fees-pending-count">0 unsaved changes</span>
             <div style="display:flex;gap:10px;">
@@ -1664,10 +1707,141 @@
               <button class="primary-btn" id="btn-fees-save-all" style="font-size:12px;padding:7px 18px;background:linear-gradient(135deg,#b8860b,#ffd700);color:#000;border:none;box-shadow:none;">💾 Save All</button>
             </div>
             <div id="fees-pagination"></div>
-        </div>
-        </div>
+          </div>
+          </div><!-- /fees-tab-roster -->
+
+          <!-- TAB: Fee Structure -->
+          <div id="fees-tab-structure" class="fees-tab-panel" style="display:none;flex-direction:column;flex:1;overflow:hidden;">
+            <div style="display:flex;gap:12px;align-items:center;padding:16px 20px;border-bottom:1px solid var(--glass-border);flex-shrink:0;flex-wrap:wrap;">
+              <div class="ph-config-group">
+                <label class="ph-label">Class</label>
+                <select id="fs-class-select" class="modern-input" style="width:160px;font-size:12px;"></select>
+              </div>
+              <div class="ph-config-group">
+                <label class="ph-label">Applies To</label>
+                <select id="fs-term-filter" class="modern-input" style="width:140px;font-size:12px;">
+                  <option value="All Terms">All Terms</option>
+                  <option value="First Term">First Term</option>
+                  <option value="Second Term">Second Term</option>
+                  <option value="Third Term">Third Term</option>
+                </select>
+              </div>
+              <div style="margin-left:auto;display:flex;gap:8px;">
+                <button class="primary-btn" id="btn-fs-load" style="padding:7px 16px;font-size:12px;">Load</button>
+                <button class="primary-btn" id="btn-fs-apply" style="padding:7px 16px;font-size:12px;background:linear-gradient(135deg,#1A237E,#00E5FF);border:none;"
+                  title="Compute total and apply to all students in the selected class">⚡ Apply to Class</button>
+              </div>
+            </div>
+
+            <!-- Fee Structure Items Table -->
+            <div class="table-container" style="flex:1;overflow-y:auto;">
+              <table class="data-table" id="fs-table">
+                <thead>
+                  <tr>
+                    <th>Fee Item</th>
+                    <th style="width:160px;">Applies To</th>
+                    <th style="text-align:right;width:140px;">Amount (₦)</th>
+                    <th style="width:80px;text-align:center;">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="fs-tbody">
+                  <tr><td colspan="4" style="text-align:center;padding:40px;color:var(--text-dim);">Select a class and click Load.</td></tr>
+                </tbody>
+                <!-- Add new item row -->
+                <tfoot>
+                  <tr>
+                    <td><input type="text" id="fs-new-name" class="modern-input" placeholder="e.g. Tuition Fee" style="width:100%;font-size:12px;"></td>
+                    <td>
+                      <select id="fs-new-term" class="modern-input" style="width:100%;font-size:12px;">
+                        <option value="All Terms">All Terms</option>
+                        <option value="First Term">First Term</option>
+                        <option value="Second Term">Second Term</option>
+                        <option value="Third Term">Third Term</option>
+                      </select>
+                    </td>
+                    <td><input type="number" id="fs-new-amount" class="modern-input" placeholder="e.g. 80000" min="0" style="width:100%;text-align:right;font-size:12px;"></td>
+                    <td style="text-align:center;">
+                      <button class="primary-btn" id="btn-fs-add-item" style="padding:5px 12px;font-size:12px;">+ Add</button>
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <!-- Total bar -->
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-top:1px solid var(--glass-border);flex-shrink:0;background:rgba(0,0,0,0.15);">
+              <span style="font-size:12px;color:var(--text-dim);" id="fs-class-count"></span>
+              <span style="font-size:15px;font-weight:600;" id="fs-total-display">Total: ₦0</span>
+            </div>
+          </div><!-- /fees-tab-structure -->
+
+          <!-- TAB: Adjustments (Scholarships / Waivers) -->
+          <div id="fees-tab-adjustments" class="fees-tab-panel" style="display:none;flex-direction:column;flex:1;overflow:hidden;">
+            <div style="display:flex;gap:12px;align-items:center;padding:16px 20px;border-bottom:1px solid var(--glass-border);flex-shrink:0;flex-wrap:wrap;">
+              <span style="font-size:13px;font-weight:500;">Fee Adjustments — Scholarships, Waivers &amp; Grants</span>
+              <button class="primary-btn" id="btn-adj-add" style="margin-left:auto;padding:7px 16px;font-size:12px;">+ New Adjustment</button>
+            </div>
+            <div class="table-container" style="flex:1;overflow-y:auto;">
+              <table class="data-table" id="adj-table">
+                <thead><tr>
+                  <th>Student</th><th>Class</th><th>Type</th>
+                  <th>Description</th><th style="text-align:right;">Amount (₦)</th>
+                  <th>Approved By</th><th style="text-align:center;">Action</th>
+                </tr></thead>
+                <tbody id="adj-tbody">
+                  <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-dim);">No adjustments this term.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div><!-- /fees-tab-adjustments -->
 
         <!-- ════════ FINANCIAL HUB MODALS ════════════════════════════════════ -->
+
+        <!-- Adjustment Modal -->
+        <div id="modal-adj" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);backdrop-filter:blur(6px);z-index:1000;align-items:center;justify-content:center;">
+          <div style="background:var(--bg-panel);border:1px solid var(--glass-border);border-radius:16px;padding:28px 32px;width:460px;max-width:92vw;">
+            <h3 style="margin-bottom:16px;font-size:16px;">New Fee Adjustment</h3>
+            <div style="display:flex;flex-direction:column;gap:14px;">
+              <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px;">
+                <div>
+                  <label class="ph-label">Class Filter</label>
+                  <select id="adj-class-filter" class="modern-input" style="width:100%;" onchange="window.NexusFees && window.NexusFees.filterAdjStudents(this.value)">
+                    <option value="">All Classes</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="ph-label">Student (Search)</label>
+                  <input type="text" id="adj-student-select" class="modern-input" style="width:100%;" list="adj-students-datalist" placeholder="Type name or ID...">
+                  <datalist id="adj-students-datalist"></datalist>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                <div>
+                  <label class="ph-label">Type</label>
+                  <select id="adj-type" class="modern-input" style="width:100%;">
+                    <option value="scholarship">🎓 Scholarship</option>
+                    <option value="waiver">✋ Waiver</option>
+                    <option value="owner_grant">🏫 Owner Grant</option>
+                    <option value="bursary">💼 Bursary</option>
+                    <option value="discount">🏷️ Discount</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="ph-label">Amount (₦)</label>
+                  <input type="number" id="adj-amount" class="modern-input" placeholder="e.g. 20000" min="1" style="width:100%;">
+                </div>
+              </div>
+              <div>
+                <label class="ph-label">Description</label>
+                <input type="text" id="adj-description" class="modern-input" placeholder="e.g. 50% merit scholarship" style="width:100%;">
+              </div>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:22px;justify-content:flex-end;">
+              <button class="secondary-btn" id="btn-adj-cancel">Cancel</button>
+              <button class="primary-btn" id="btn-adj-submit" style="background:linear-gradient(135deg,#1A237E,#00E5FF);border:none;">Apply Adjustment</button>
+            </div>
+          </div>
+        </div>
 
         <!-- Diamond: Record Payment Modal -->
         <div id="modal-record-payment" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);backdrop-filter:blur(6px);z-index:1000;align-items:center;justify-content:center;">
@@ -1804,6 +1978,43 @@
             <div style="display:flex;gap:10px;justify-content:flex-end;">
               <button class="secondary-btn" id="btn-fees-settings-cancel">Cancel</button>
               <button class="primary-btn" id="btn-fees-settings-save" style="background:linear-gradient(135deg,#b8860b,#ffd700);color:#000;border:none;box-shadow:none;">Save Settings</button>
+            </div>
+          </div>
+        </div>
+        </div> <!-- End view-fees -->
+
+        <!-- ─────────────────── VIEW: SCHOLAR ──────────────────────────── -->
+        <div class="view" id="view-scholar">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">Nexus Scholar Engine</h2>
+              <p class="view-sub">Offline AI Knowledge Base for automated policy & document retrieval.</p>
+            </div>
+            <button id="btn-scholar-settings-toggle" title="Scholar Settings" onclick="const p=document.getElementById('scholar-settings-panel');p.style.display=p.style.display==='none'?'flex':'none'" style="background:rgba(255,255,255,0.05);border:1px solid var(--glass-border);color:var(--text-dim);padding:6px 10px;border-radius:8px;cursor:pointer;font-size:16px;">&#x2699;&#xFE0F;</button>
+          </div>
+          <div id="scholar-settings-panel" style="display:none;background:rgba(99,102,241,0.07);border:1px solid rgba(99,102,241,0.25);border-radius:12px;padding:18px 22px;margin-bottom:18px;align-items:flex-end;gap:14px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:220px;">
+              <label class="ph-label">Google Gemini API Key <span style="font-size:10px;color:var(--text-dim);">(Powers AI Answers)</span></label>
+              <input type="password" id="gemini-api-key-input" class="modern-input" placeholder="AIza..." style="width:100%;" />
+              <p style="font-size:10px;color:var(--text-dim);margin-top:4px;">Leave blank for raw search only. <a href="https://aistudio.google.com" style="color:#818cf8;">Get free key &#8594;</a></p>
+            </div>
+            <button id="btn-scholar-apikey-save" class="primary-btn" style="padding:10px 20px;font-size:12px;background:linear-gradient(135deg,#4f46e5,#818cf8);border:none;white-space:nowrap;">Save Key</button>
+          </div>
+          <div style="display:flex;gap:20px;padding:20px;">
+            <div style="flex:1;background:var(--bg-panel);border:1px solid var(--glass-border);border-radius:12px;padding:20px;">
+              <h3 style="margin-bottom:15px;">Document Ingestion</h3>
+              <div id="scholar-upload-zone" style="border:2px dashed var(--glass-border);border-radius:8px;padding:40px;text-align:center;cursor:pointer;margin-bottom:15px;">
+                <div style="font-size:32px;margin-bottom:10px;">📄</div>
+                <div>Drag & Drop PDF/DOCX or click to browse</div>
+              </div>
+              <input type="file" id="scholar-file-input" accept=".pdf,.docx" style="display:none;">
+              <div id="scholar-stats" style="font-size:13px;color:var(--text-dim);"></div>
+            </div>
+            <div style="flex:1;background:var(--bg-panel);border:1px solid var(--glass-border);border-radius:12px;padding:20px;">
+              <h3 style="margin-bottom:15px;">Query Intelligence</h3>
+              <input type="text" id="scholar-query-input" class="modern-input" placeholder="Ask a question..." style="width:100%;margin-bottom:15px;">
+              <button class="primary-btn" id="btn-scholar-search" style="width:100%;">Search Knowledge Base</button>
+              <div id="scholar-results" style="margin-top:20px;max-height:300px;overflow-y:auto;"></div>
             </div>
           </div>
         </div>
@@ -1947,62 +2158,14 @@
                   </div>
                 </div>
               </div>
-              <div class="form-group">
-                <label>Principal's Secure Phone <span style="font-size:10px;color:var(--text-dim);">(For Automated Morning Briefings)</span></label>
-                <input
-                  type="text"
-                  id="principal-phone-input"
-                  class="modern-input"
-                  placeholder="e.g. 08012345678"
-                />
-              </div>
-              <div class="form-group">
-                <label>Portal Domain Slug <span style="font-size:10px;color:var(--text-dim);">(Customise the brand address — locked to .edu.nexus)</span></label>
-                <div style="display:flex;align-items:center;gap:0;">
-                  <input
-                    type="text"
-                    id="portal-slug-input"
-                    class="modern-input"
-                    placeholder="Auto-derived from school name"
-                    style="border-radius:8px 0 0 8px;flex:1;"
-                  />
-                  <span style="background:rgba(0,229,255,0.1);border:1px solid rgba(0,229,255,0.2);border-left:none;padding:10px 14px;border-radius:0 8px 8px 0;font-size:12px;color:var(--accent);white-space:nowrap;font-weight:700;">.edu.nexus</span>
-                </div>
-                <p style="font-size:10px;color:var(--text-dim);margin-top:6px;">Leave blank to auto-generate. QR code encodes the real LAN IP — .edu.nexus is display/PR only.</p>
-              </div>
-                            <div
-                class="form-group"
-                style="
-                  background: rgba(255, 215, 0, 0.05);
-                  padding: 12px;
-                  border-radius: 8px;
-                  border: 1px dashed rgba(255, 215, 0, 0.3);
-                "
-              >
-                <label style="color: #ffd700">⭐ Nexus Premium Plan</label>
-                <div
-                  style="
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                    margin-top: 6px;
-                  "
-                >
-                  <input
-                    type="checkbox"
-                    id="premium-plan-toggle"
-                    style="width: 16px; height: 16px; accent-color: #ffd700"
-                  />
-                  <span style="font-size: 12px; color: #ccc"
-                    >Enable 'Digital Envelope' HTML Exports for WhatsApp</span
-                  >
+              <div class="form-group" style="background:rgba(255,215,0,0.05);padding:12px;border-radius:8px;border:1px dashed rgba(255,215,0,0.3);">
+                <label style="color:#ffd700">⭐ Nexus Premium Plan</label>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+                  <input type="checkbox" id="premium-plan-toggle" style="width:16px;height:16px;accent-color:#ffd700" />
+                  <span style="font-size:12px;color:#ccc">Enable 'Digital Envelope' HTML Exports for WhatsApp</span>
                 </div>
               </div>
-              <button
-                id="save-identity-btn"
-                class="primary-btn"
-                style="margin-top: auto"
-              >
+              <button id="save-identity-btn" class="primary-btn" style="margin-top:auto">
                 Save Identity Shard
               </button>
             </div>
@@ -2500,6 +2663,7 @@
     <script src="js/portal-ui.js"></script>
     <script src="js/pulse-ui.js"></script>
     <script src="js/boot.js"></script>
+    <script src="js/scholar-ui.js"></script>
 
     </body>
 </html>

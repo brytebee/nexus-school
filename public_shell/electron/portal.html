@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <title>Nexus Sovereign Portal</title>
-    <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests" script-src 'self' 'unsafe-inline'">
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline'">
     <style>
         :root {
             --primary: #1A237E;
@@ -401,12 +401,12 @@
 
         function renderDashboard(data) {
             const s = data.student;
-            
-            // Only update DOM elements if data is available so we don't accidentally blank out the branding
-            if (data.schoolName && data.schoolName !== 'Nexus Academy') {
-                DOM.schoolName.textContent = data.schoolName;
-            }
-            
+
+            // Note: school name / logo / colours are exclusively managed by loadBranding().
+            // The student-data response carries schoolName only for informational purposes
+            // (e.g. WhatsApp messages). We do NOT re-apply it here to avoid overwriting the
+            // identity already painted by loadBranding() with a potentially stale DB value.
+
             DOM.dashName.textContent = s.name;
             DOM.dashClass.textContent = s.class_name;
             DOM.dashTerm.textContent = `${data.termConfig.term}, ${data.termConfig.academic_session}`;
@@ -444,27 +444,39 @@
             }
         };
 
-        // ── Self-branding: fetch school identity from the server ───────────────
+        // ── Self-branding: single source of truth for portal identity ──────────────
+        // Fetched once on boot; all other views read from DOM state set here.
         async function loadBranding() {
             try {
-                // Ensure bypass cache by appending timestamp
                 const res  = await fetch('/portal/api/identity?t=' + Date.now());
                 const data = await res.json();
                 if (!data.ok) return;
-                
-                DOM.schoolName.textContent = data.schoolName || 'Nexus Academy';
-                DOM.logoAbbr.textContent   = (data.schoolName || 'NX').substring(0, 2).toUpperCase();
-                
+
+                const name = (data.schoolName || '').trim() || 'Nexus Academy';
+                DOM.schoolName.textContent = name;
+
+                // Derive initials: first letter of each word (max 2), e.g. "Grace Academy" → "GA"
+                const initials = name
+                    .split(/\s+/)
+                    .filter(Boolean)
+                    .slice(0, 2)
+                    .map(w => w[0].toUpperCase())
+                    .join('');
+
                 if (data.logoBase64) {
-                    DOM.logoAbbr.style.backgroundImage = `url(${data.logoBase64})`;
-                    DOM.logoAbbr.style.backgroundSize  = 'contain';
-                    DOM.logoAbbr.style.backgroundRepeat = 'no-repeat';
-                    DOM.logoAbbr.style.backgroundPosition = 'center';
+                    // Clear both the text content AND the CSS gradient before painting the logo
                     DOM.logoAbbr.textContent = '';
+                    DOM.logoAbbr.style.background     = 'none';
+                    DOM.logoAbbr.style.backgroundImage    = `url(${data.logoBase64})`;
+                    DOM.logoAbbr.style.backgroundSize     = 'cover';
+                    DOM.logoAbbr.style.backgroundRepeat   = 'no-repeat';
+                    DOM.logoAbbr.style.backgroundPosition = 'center';
+                } else {
+                    DOM.logoAbbr.textContent = initials || 'NX';
                 }
-                
+
                 if (data.themePrimary) {
-                    document.documentElement.style.setProperty('--primary', data.themePrimary);
+                    document.documentElement.style.setProperty('--primary',   data.themePrimary);
                 }
                 if (data.themeSecondary) {
                     document.documentElement.style.setProperty('--secondary', data.themeSecondary);

@@ -227,4 +227,5 @@
         if (viewId === "fees")           _safe(() => { if (typeof window.feesInit === "function") window.feesInit(); });
         if (viewId === "portal")         _safe(() => { if (typeof initPortalView === "function") initPortalView(); });
         if (viewId === "pulse")          _safe(() => { if (typeof initPulseView === "function") initPulseView(); });
+        if (viewId === "scholar")        _safe(() => { if (typeof window.scholarInit === "function") window.scholarInit(); });
       }

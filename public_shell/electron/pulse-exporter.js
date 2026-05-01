@@ -160,6 +160,59 @@ class PulseExporter {
     /**
      * Exports the encrypted cache and full database backup to Google Drive
      */
+
+    /**
+     * Ensures the Nexus folder architecture exists in Google Drive
+     * Returns a map of folder names to their Drive IDs
+     */
+    async ensureFolderArchitecture(drive) {
+        // Helper to find or create a folder
+        const getOrCreateFolder = async (name, parentId = null) => {
+            const query = `name = '${name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false` + 
+                          (parentId ? ` and '${parentId}' in parents` : ` and 'root' in parents`);
+            
+            const response = await drive.files.list({ q: query, fields: 'files(id)' });
+            
+            if (response.data.files.length > 0) {
+                return response.data.files[0].id;
+            } else {
+                const resource = {
+                    name: name,
+                    mimeType: 'application/vnd.google-apps.folder'
+                };
+                if (parentId) resource.parents = [parentId];
+                
+                const created = await drive.files.create({
+                    resource,
+                    fields: 'id'
+                });
+                return created.data.id;
+            }
+        };
+
+        const db = database.getDb();
+        const schoolNameRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_name'").get();
+        const schoolName = schoolNameRow?.value || "Nexus School";
+
+        const rootId = await getOrCreateFolder('Nexus School OS');
+        const schoolId = await getOrCreateFolder(schoolName, rootId);
+        
+        const folders = {
+            root: rootId,
+            school: schoolId,
+            backups: await getOrCreateFolder('Backups', schoolId),
+            cache: await getOrCreateFolder('Cache', schoolId),
+            knowledge: await getOrCreateFolder('Knowledge Base', schoolId),
+            exports: await getOrCreateFolder('Exports', schoolId),
+            inbox: await getOrCreateFolder('Pulse Inbox Archive', schoolId)
+        };
+        
+        return folders;
+    }
+
+    /**
+     * Exports the encrypted cache and full database backup to Google Drive
+     */
     async syncToDrive() {
         if (!this.oAuth2Client || this.isSyncing) return;
         this.isSyncing = true;
@@ -171,9 +224,12 @@ class PulseExporter {
             const encryptedData = this.encrypt(cache, key);
 
             const drive = google.drive({ version: 'v3', auth: this.oAuth2Client });
-            
+
+            // Ensure Diamond folder architecture
+            const folders = await this.ensureFolderArchitecture(drive);
+
             const response = await drive.files.list({
-                q: "name = 'pulse_cache.enc' and trashed = false",
+                q: `name = 'pulse_cache.enc' and '${folders.cache}' in parents and trashed = false`,
                 fields: 'files(id)',
             });
 
@@ -184,7 +240,7 @@ class PulseExporter {
                 console.log("[Pulse Exporter] Cache Sync Successful.");
             } else {
                 await drive.files.create({
-                    resource: { name: 'pulse_cache.enc', mimeType: 'text/plain' },
+                    resource: { name: 'pulse_cache.enc', mimeType: 'text/plain', parents: [folders.cache] },
                     media,
                     fields: 'id',
                 });
@@ -192,13 +248,25 @@ class PulseExporter {
             }
 
             // 2. Perform Full Database Backup (Sovereign Shield Requirement)
-            await this.backupDatabaseToDrive(drive, key);
+            await this.backupDatabaseToDrive(drive, key, folders);
 
         } catch (err) {
             console.error("[Pulse Exporter] Sync Failed:", err);
-            let errorMessage = "Sync Failed: Unknown Error";
-            if (err.message?.includes("Google Drive API")) errorMessage = "Google Drive API is disabled.";
-            else if (err.code === 401) errorMessage = "Authentication expired.";
+
+            // ── Classify the error so the UI shows an actionable message ─────────
+            let errorMessage;
+            const status = err.code ?? err.status ?? err.response?.status;
+            const reason = err.errors?.[0]?.reason ?? '';
+
+            if (status === 403 || reason === 'forbidden' || reason === 'accessNotConfigured') {
+                errorMessage = "Google Drive API is disabled or access was denied. Enable the Drive API in your Google Cloud Console and re-authorise.";
+            } else if (status === 401 || err.code === 'invalid_grant') {
+                errorMessage = "Google authorisation expired. Re-link your Google account in the Nexus Pulse settings.";
+            } else if (!this.oAuth2Client) {
+                errorMessage = "Google Drive not configured. Add your Client ID and Secret in the Pulse settings.";
+            } else {
+                errorMessage = `Sync Failed: ${err.message || 'Unknown Error'}`;
+            }
 
             if (this.onSyncError) this.onSyncError(errorMessage);
         } finally {
@@ -209,20 +277,27 @@ class PulseExporter {
     /**
      * Encrypts and uploads the raw nexus.sqlite file to Google Drive
      */
-    async backupDatabaseToDrive(drive, key) {
+    async backupDatabaseToDrive(drive, key, folders) {
         try {
-            const dbPath = path.join(__dirname, '../../private_engine/nexus.sqlite');
-            if (!fs.existsSync(dbPath)) return;
+            // Resolve the live DB path dynamically from the open connection
+            // instead of using a hardcoded __dirname-relative path that breaks
+            // in production where the DB lives in Electron's userData directory.
+            const { database } = require('../../private_engine');
+            const dbPath = database.getDb().name;
+            if (!fs.existsSync(dbPath)) {
+                console.warn('[Pulse Exporter] DB backup skipped: file not found at', dbPath);
+                return;
+            }
 
             const dbContent = fs.readFileSync(dbPath);
             // Encrypt the base64 string of the binary DB
             const encrypted = this.encrypt(dbContent.toString('base64'), key);
 
             const fileName = `nexus_backup_${new Date().toISOString().split('T')[0]}.enc`;
-            
+
             // Check if backup for today already exists to avoid clutter
             const existing = await drive.files.list({
-                q: `name = '${fileName}' and trashed = false`,
+                q: `name = '${fileName}' and '${folders.backups}' in parents and trashed = false`,
                 fields: 'files(id)',
             });
 
@@ -230,7 +305,7 @@ class PulseExporter {
                 await drive.files.update({ fileId: existing.data.files[0].id, media: { body: encrypted } });
             } else {
                 await drive.files.create({
-                    resource: { name: fileName, mimeType: 'text/plain' },
+                    resource: { name: fileName, mimeType: 'text/plain', parents: [folders.backups] },
                     media: { body: encrypted },
                     fields: 'id',
                 });

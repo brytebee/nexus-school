@@ -460,7 +460,8 @@
             const classes = [...new Set(students.results.map(s => s.class_name))].sort();
 
             // 2. Get all teachers
-            const teachers = await window.electronAPI.getAllTeachers();
+            const teachersRes = await window.electronAPI.getAllTeachers();
+            const teachers = teachersRes.ok ? teachersRes.data : [];
 
             // 3. Get current mapping
             const mappingRes = await window.electronAPI.getFormTeachers();
