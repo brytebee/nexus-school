@@ -1383,3 +1383,33 @@ code {
     line-height: 1.5;
     margin: 0;
 }
+
+/* ── Staff Accounts Slide-In Panel ────────────────────────────────── */
+#admin-mgmt-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    z-index: 2000;
+    -webkit-app-region: no-drag;
+}
+#admin-mgmt-panel {
+    position: fixed;
+    top: 0;
+    right: -430px;
+    width: 400px;
+    height: 100vh;
+    background: #0d1235;
+    border-left: 1px solid rgba(99,102,241,0.3);
+    z-index: 2001;
+    display: flex;
+    flex-direction: column;
+    transition: right 0.32s cubic-bezier(0.4,0,0.2,1);
+    padding: 24px 22px;
+    overflow-y: auto;
+    box-sizing: border-box;
+    -webkit-app-region: no-drag;
+}
+#admin-mgmt-panel.open {
+    right: 0;
+}

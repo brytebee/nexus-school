@@ -84,10 +84,10 @@
         }
       }
 
-      let _studentsPage   = 0;
-      let _studentsLimit  = 15;
-      let _studentsSearch = "";
-      let _studentsTotal  = 0;
+      var _studentsPage   = 0;
+      var _studentsLimit  = 15;
+      var _studentsSearch = "";
+      var _studentsTotal  = 0;
 
       async function refreshStudentsTable() {
         if (!window.electronAPI?.getAllStudents) return;
