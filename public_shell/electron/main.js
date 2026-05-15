@@ -24,11 +24,28 @@ const bonjour = new Bonjour();
 // Set app name BEFORE createWindow so Menu.buildFromTemplate picks it up correctly
 app.setName("NexusSchoolOS");
 
+// ── Single-instance lock: prevents duplicate processes fighting over ports ──
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  // Another instance is already running — bring it to front and quit this one
+  console.warn('[Nexus] Duplicate instance detected. Quitting.');
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    // Someone tried to launch a second instance — focus our window
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
 if (!app) {
   console.error(
     "[CRITICAL] Electron 'app' is undefined. Ensure you are running with 'electron .'",
   );
 }
+
 
 let mainWindow;
 
@@ -50,6 +67,10 @@ let identityFilePath = "";
 let qrPayload = null;
 let licenseStatus = { locked: false, message: "" };
 
+// Synchronous getter — renderer calls this at boot to pre-populate tier
+// before the reactive `license-status` push event arrives.
+ipcMain.handle('license:get-status', () => licenseStatus);
+
 // ── ALL ipcMain.handle registrations (ONCE at module scope) ──────────────────
 
 ipcMain.on("pulse:start", () => {
@@ -61,6 +82,19 @@ ipcMain.on("pulse:start", () => {
 });
 ipcMain.on("pulse:stop", () => pulseBot.destroyPulse());
 ipcMain.handle("pulse:status", () => pulseBot.getPulseStatus());
+
+// ── CBT ENGINE IPC ───────────────────────────────────────────────────────────
+require('./cbt-ipc-handlers')(database);
+
+// ── ATTENDANCE ENGINE IPC (V2.3) ─────────────────────────────────────────────
+// Pass a lightweight enqueue helper so the Guardian Shield can WhatsApp parents
+require('./attendance-ipc-handlers')(database, (phone, message, studentId) => {
+    try {
+        database.getDb().prepare(
+            "INSERT INTO pending_pulse_messages (phone, message, type, student_id) VALUES (?, ?, 'guardian_alert', ?)"
+        ).run(phone, message, studentId);
+    } catch(e) { console.error('[Guardian Shield] Enqueue failed:', e.message); }
+});
 
 // ── NEXUS SCHOLAR IPC ────────────────────────────────────────────────────────
 ipcMain.handle("scholar:get-stats", () => scholar.getStats());
@@ -105,22 +139,172 @@ let currentAdminSession = null;
 
 ipcMain.handle('auth:get-admins', () => {
     const db = database.getDb();
-    return db.prepare('SELECT id, name, role FROM admin_users WHERE is_active = 1 ORDER BY role DESC, name ASC').all();
+    // Use role_level instead of role string, username instead of name.
+    return db.prepare('SELECT id, username, role_level, avatar FROM admin_users ORDER BY role_level DESC, username ASC').all();
 });
 
 ipcMain.handle('auth:verify-pin', (event, { adminId, pin }) => {
     const db = database.getDb();
-    const admin = db.prepare('SELECT * FROM admin_users WHERE id = ? AND is_active = 1').get(adminId);
-    if (!admin) return { ok: false };
-    const pinHash = crypto.createHash('sha256').update(String(pin)).digest('hex');
-    if (pinHash !== admin.pin_hash) return { ok: false };
-    currentAdminSession = { id: admin.id, name: admin.name, role: admin.role, loginAt: Date.now() };
-    db.prepare("UPDATE admin_users SET last_login = datetime('now') WHERE id = ?").run(admin.id);
-    console.log(`[Auth] Session opened: ${admin.name} (${admin.role})`);
-    return { ok: true, name: admin.name, role: admin.role };
+    const admin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(adminId);
+    if (!admin) return { ok: false, error: 'Admin not found' };
+    
+    // For simplicity in the Vault, the hash is base64 of the pin.
+    const pinHash = Buffer.from(String(pin)).toString('base64');
+    if (pinHash !== admin.secret_hash) return { ok: false, error: 'Incorrect PIN' };
+    
+    currentAdminSession = { id: admin.id, username: admin.username, role_level: admin.role_level, loginAt: Date.now() };
+    console.log(`[Auth] Session opened: ${admin.username} (Level ${admin.role_level})`);
+    
+    // Log the login event
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'LOGIN', 'SYSTEM', 'Session initialized')").run(admin.id);
+    
+    return { ok: true, username: admin.username, role_level: admin.role_level };
+});
+
+ipcMain.handle('auth:logout', () => {
+    if (currentAdminSession) {
+        const db = database.getDb();
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'LOGOUT', 'SYSTEM', 'Session terminated')").run(currentAdminSession.id);
+    }
+    currentAdminSession = null;
+    console.log(`[Auth] Session closed.`);
+    return { ok: true };
+});
+
+const pendingOTPs = {};
+
+ipcMain.handle('auth:forgot-password', (event, { adminId }) => {
+    const db = database.getDb();
+    const admin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(adminId);
+    if (!admin) return { ok: false, error: 'Admin not found' };
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    pendingOTPs[adminId] = { otp, expiresAt: Date.now() + 10 * 60000 }; // 10 min expiry
+
+    // Phone is stored in identityPacket.principalPhone (loaded from identity.json at boot)
+    // NOT in app_settings — so we read it directly from the in-memory packet.
+    const phone = identityPacket?.principalPhone?.trim() || null;
+
+    if (!phone && process.env.DEV_MODE !== 'true') {
+        return { ok: false, error: 'School contact phone not configured. Go to Settings → School Identity and save the Principal phone first.' };
+    }
+
+    const message = `*Nexus School OS - Emergency Access*\n\nAdmin: ${admin.username}\nYour OTP is: *${otp}*\n\nThis OTP expires in 10 minutes.`;
+
+    // Only queue WhatsApp message if we have a real phone number
+    // (in DEV_MODE with no phone configured, we skip the queue to avoid NOT NULL crash)
+    if (phone) {
+        try {
+            db.prepare(`
+                INSERT INTO pending_pulse_messages (phone, message, type, status)
+                VALUES (?, ?, 'otp', 'pending')
+            `).run(phone, message);
+        } catch (e) {
+            console.warn('[OTP] Could not queue WhatsApp message:', e.message);
+        }
+    }
+
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'OTP_REQUESTED', 'SYSTEM', 'Emergency OTP requested via Pulse')").run(adminId);
+
+    const result = { ok: true };
+    if (process.env.DEV_MODE === 'true') result.devOtp = otp;
+    return result;
+});
+
+
+ipcMain.handle('auth:verify-otp-login', (event, { adminId, otp }) => {
+    const db = database.getDb();
+    const admin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(adminId);
+    if (!admin) return { ok: false, error: 'Admin not found' };
+
+    const record = pendingOTPs[adminId];
+    if (!record) return { ok: false, error: 'No OTP requested' };
+    if (Date.now() > record.expiresAt) {
+        delete pendingOTPs[adminId];
+        return { ok: false, error: 'OTP expired' };
+    }
+    if (record.otp !== otp) return { ok: false, error: 'Invalid OTP' };
+
+    // Login successful
+    delete pendingOTPs[adminId];
+    currentAdminSession = { id: admin.id, username: admin.username, role_level: admin.role_level, loginAt: Date.now() };
+    console.log(`[Auth] Session opened via OTP: ${admin.username} (Level ${admin.role_level})`);
+    
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'LOGIN', 'SYSTEM', 'Session initialized via Emergency OTP')").run(admin.id);
+    
+    return { ok: true, username: admin.username, role_level: admin.role_level };
+});
+
+// auth:change-pin — called after OTP verify to let admin set a new PIN/password
+ipcMain.handle('auth:change-pin', (event, { adminId, newPin, authType }) => {
+    try {
+        const db = database.getDb();
+        const admin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(adminId);
+        if (!admin) return { ok: false, error: 'Admin not found' };
+        if (!newPin || newPin.trim().length < 4) return { ok: false, error: 'PIN must be at least 4 characters.' };
+        const newHash = Buffer.from(newPin.trim()).toString('base64');
+        db.prepare('UPDATE admin_users SET secret_hash = ?, auth_type = ? WHERE id = ?')
+          .run(newHash, authType || admin.auth_type || 'pin', adminId);
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'PIN_CHANGED', 'SYSTEM', 'Admin changed credentials via Emergency OTP flow')").run(adminId);
+        console.log(`[Auth] PIN changed for admin ID ${adminId}`);
+        return { ok: true };
+    } catch (e) {
+        console.error('[Auth] change-pin error:', e);
+        return { ok: false, error: e.message };
+    }
+});
+
+// auth:create-admin — Super-admins can add new staff accounts
+ipcMain.handle('auth:create-admin', (event, { username, pin, roleLevel, displayName }) => {
+    try {
+        const db = database.getDb();
+        if (!username?.trim() || !pin?.trim()) return { ok: false, error: 'Username and PIN are required.' };
+        const exists = db.prepare('SELECT id FROM admin_users WHERE username = ?').get(username.trim());
+        if (exists) return { ok: false, error: `Username "${username.trim()}" is already taken.` };
+        if (pin.trim().length < 4) return { ok: false, error: 'PIN must be at least 4 characters.' };
+        const hash = Buffer.from(pin.trim()).toString('base64');
+        const result = db.prepare(`INSERT INTO admin_users (username, secret_hash, auth_type, role_level) VALUES (?, ?, 'pin', ?)`).run(username.trim(), hash, parseInt(roleLevel) || 1);
+        if (currentAdminSession) db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'CREATE_ADMIN', 'admin_users', ?)").run(currentAdminSession.id, `Created: ${username.trim()} (Level ${roleLevel || 1})`);
+        return { ok: true, id: result.lastInsertRowid };
+    } catch (e) { return { ok: false, error: e.message }; }
+});
+
+// auth:delete-admin — Remove a staff account (cannot delete self or last super-admin)
+ipcMain.handle('auth:delete-admin', (event, { adminId }) => {
+    try {
+        const db = database.getDb();
+        const target = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(adminId);
+        if (!target) return { ok: false, error: 'Admin not found.' };
+        if (currentAdminSession?.id === adminId) return { ok: false, error: 'You cannot delete your own account.' };
+        const superCount = db.prepare('SELECT COUNT(*) as c FROM admin_users WHERE role_level = 9').get().c;
+        if (target.role_level === 9 && superCount <= 1) return { ok: false, error: 'Cannot delete the only Super Admin account.' };
+        db.prepare('DELETE FROM admin_users WHERE id = ?').run(adminId);
+        if (currentAdminSession) db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'DELETE_ADMIN', 'admin_users', ?)").run(currentAdminSession.id, `Deleted: ${target.username}`);
+        return { ok: true };
+    } catch (e) { return { ok: false, error: e.message }; }
+});
+
+// cbt:scholar-extract — reads Gemini key from DB; uses AI if available, regex fallback otherwise
+ipcMain.handle('cbt:scholar-extract', async (event, { fileData, fileName }) => {
+    const db = database.getDb();
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'gemini_api_key'").get();
+    const apiKey = row?.value || null;
+    return await scholar.extractQuestions(fileData, fileName, 15, apiKey);
 });
 
 ipcMain.handle('auth:get-session', () => currentAdminSession);
+
+ipcMain.handle('auth:get-audit-logs', () => {
+    const db = database.getDb();
+    return db.prepare(`
+        SELECT a.id, a.action, a.target, a.details, a.timestamp, u.username as admin_name 
+        FROM audit_logs a 
+        LEFT JOIN admin_users u ON a.admin_id = u.id 
+        ORDER BY a.timestamp DESC 
+        LIMIT 100
+    `).all();
+});
 
 // auth:unlock — fired by lock.html after PIN accepted. Loads the main app.
 ipcMain.on('auth:unlock', () => {
@@ -128,6 +312,17 @@ ipcMain.on('auth:unlock', () => {
     const targetFile = process.env.USE_REACT_UI === 'true' ? 'renderer.html' : 'index.html';
     mainWindow.loadFile(targetFile);
     console.log(`[Auth] Lock screen dismissed. Loading ${targetFile}.`);
+});
+
+ipcMain.on('auth:lock', () => {
+    if (!mainWindow) return;
+    if (currentAdminSession) {
+        const db = database.getDb();
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'LOCK', 'SYSTEM', 'Idle timeout triggered lock')").run(currentAdminSession.id);
+        currentAdminSession = null;
+    }
+    mainWindow.loadFile('lock.html');
+    console.log(`[Auth] System locked due to idle timeout.`);
 });
 
 
@@ -145,19 +340,31 @@ ipcMain.handle('fee-structure:get-all', (event, { className } = {}) => {
 
 ipcMain.handle('fee-structure:upsert-item', (event, { id, className, itemName, amount, term }) => {
     const db = database.getDb();
+    const adminId = currentAdminSession ? currentAdminSession.id : null;
+    
     if (id) {
         db.prepare('UPDATE fee_structures SET class_name=?, item_name=?, amount=?, term=? WHERE id=?')
           .run(className, itemName, amount, term || 'All Terms', id);
+        
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'UPDATE_FEE_ITEM', 'fee_structures', ?)").run(adminId, `Updated ${itemName} for ${className} (₦${amount})`);
         return { ok: true, id };
     }
     const result = db.prepare('INSERT OR REPLACE INTO fee_structures (class_name, item_name, amount, term) VALUES (?,?,?,?)')
       .run(className, itemName, amount, term || 'All Terms');
+      
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'ADD_FEE_ITEM', 'fee_structures', ?)").run(adminId, `Added ${itemName} for ${className} (₦${amount})`);
     return { ok: true, id: result.lastInsertRowid };
 });
 
 ipcMain.handle('fee-structure:delete-item', (event, id) => {
     const db = database.getDb();
+    const item = db.prepare('SELECT * FROM fee_structures WHERE id = ?').get(id);
     db.prepare('DELETE FROM fee_structures WHERE id = ?').run(id);
+    
+    if (item) {
+        const adminId = currentAdminSession ? currentAdminSession.id : null;
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'DELETE_FEE_ITEM', 'fee_structures', ?)").run(adminId, `Deleted ${item.item_name} for ${item.class_name}`);
+    }
     return { ok: true };
 });
 
@@ -183,6 +390,9 @@ ipcMain.handle('fee-structure:apply-to-class', (event, { className, academicSess
           total_billed = excluded.total_billed, updated_at = datetime('now')
     `);
     db.transaction(() => { for (const s of students) upsert.run(s.id, session, activeTerm, total); })();
+
+    const adminId = currentAdminSession ? currentAdminSession.id : null;
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'BULK_APPLY_FEES', 'student_fees', ?)").run(adminId, `Applied ₦${total.toLocaleString()} to ${students.length} students in ${className}`);
 
     console.log(`[Fee Structure] Applied ₦${total.toLocaleString()} to ${students.length} students in ${className}`);
     return { ok: true, count: students.length, totalBilled: total };
@@ -228,11 +438,19 @@ ipcMain.handle('fee-structure:add-adjustment', (event, data) => {
             WHERE student_id = ? AND academic_session = ? AND term = ?
         `).run(amount, studentId, session, term);
     })();
+    const adminId = currentAdminSession ? currentAdminSession.id : null;
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'ADD_FEE_ADJUSTMENT', 'fee_adjustments', ?)").run(adminId, `Added ${adjustmentType} of ₦${amount} for student ${studentId}`);
     return { ok: true };
 });
 
 ipcMain.handle('fee-structure:delete-adjustment', (event, id) => {
-    database.getDb().prepare('DELETE FROM fee_adjustments WHERE id = ?').run(id);
+    const db = database.getDb();
+    const adj = db.prepare('SELECT * FROM fee_adjustments WHERE id = ?').get(id);
+    db.prepare('DELETE FROM fee_adjustments WHERE id = ?').run(id);
+    if (adj) {
+        const adminId = currentAdminSession ? currentAdminSession.id : null;
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'DELETE_FEE_ADJUSTMENT', 'fee_adjustments', ?)").run(adminId, `Deleted adjustment ID ${id} for student ${adj.student_id}`);
+    }
     return { ok: true };
 });
 
@@ -720,7 +938,48 @@ ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = ""
     return { ok: false, error: err.message, data: [], total: 0 };
   }
 });
+// ── Subject Consistency Engine ────────────────────────────────────────────────
+ipcMain.handle("subjects:get-canonical-list", () => {
+  try {
+    const db = database.getDb();
+    // Return all distinct subjects taught by any teacher, or full allocations if needed.
+    // To fix stale lists, we return the canonical mapping.
+    const allocations = db.prepare("SELECT teacher_id, class_name, subject FROM teacher_allocations").all();
+    return { ok: true, data: allocations };
+  } catch (err) {
+    console.error("[Subjects] Failed to get canonical list:", err);
+    return { ok: false, error: err.message, data: [] };
+  }
+});
 
+ipcMain.handle("subjects:get-sync-warnings", () => {
+  try {
+    const db = database.getDb();
+    const warnings = db.prepare(`
+      SELECT w.id, w.device_id, w.teacher_id, w.student_id, w.mismatched_subject, w.timestamp, 
+             t.name as teacher_name, s.name as student_name
+      FROM sync_warnings w
+      LEFT JOIN teachers t ON w.teacher_id = t.id
+      LEFT JOIN students s ON w.student_id = s.id
+      ORDER BY w.timestamp DESC LIMIT 50
+    `).all();
+    return { ok: true, data: warnings };
+  } catch (err) {
+    console.error("[Subjects] Failed to get sync warnings:", err);
+    return { ok: false, error: err.message, data: [] };
+  }
+});
+
+ipcMain.handle("subjects:clear-sync-warnings", () => {
+  try {
+    const db = database.getDb();
+    db.prepare("DELETE FROM sync_warnings").run();
+    return { ok: true };
+  } catch (err) {
+    console.error("[Subjects] Failed to clear sync warnings:", err);
+    return { ok: false, error: err.message };
+  }
+});
 
 // ── Directory: Delete Teacher ─────────────────────────────────────────────────
 ipcMain.handle("delete-teacher", (event, { id }) => {
@@ -1291,6 +1550,10 @@ ipcMain.handle("save-domain-scores", (event, { student_id, session, term, domain
       }
     });
     run();
+    
+    const adminId = currentAdminSession ? currentAdminSession.id : null;
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'UPDATE_DOMAIN_SCORES', 'student_domains', ?)").run(adminId, `Updated affective/psychomotor scores for ${student_id} (${term})`);
+    
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -1314,6 +1577,10 @@ ipcMain.handle("save-teacher-remark", (event, { student_id, teacher_id, session,
         principal_remark = excluded.principal_remark,
         teacher_id = COALESCE(excluded.teacher_id, teacher_remarks.teacher_id)
     `).run({ student_id, teacher_id: teacher_id || null, session, term, remark: remark || "", principal_remark: principal_remark || "" });
+    
+    const adminId = currentAdminSession ? currentAdminSession.id : null;
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'UPDATE_REMARKS', 'teacher_remarks', ?)").run(adminId, `Updated remarks for ${student_id} (${term})`);
+    
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -1608,10 +1875,21 @@ ipcMain.handle("generate-reports", async (event, payload) => {
     const db = database.getDb();
     if (payload.students) {
       for (const s of payload.students) {
-        // Fee Shield Check
-        const feeStatus = db.prepare(`SELECT status FROM fee_transactions WHERE student_id = ? AND academic_session = ? AND term = ? ORDER BY id DESC LIMIT 1`).get(s.id, termConfig?.academic_session, termConfig?.term);
-        // If no record exists, assume unpaid unless otherwise specified
-        s.feeStatus = feeStatus ? feeStatus.status : 'unpaid';
+        // Fee Shield Check — status lives in student_fees, not fee_transactions
+        try {
+          const feeStatus = db.prepare(
+            `SELECT status FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ? LIMIT 1`
+          ).get(s.id, termConfig?.academic_session, termConfig?.term);
+          s.feeStatus = feeStatus?.status ?? 'unpaid';
+        } catch (feeErr) {
+          s.feeStatus = 'unpaid'; // non-fatal — proceed without fee status
+        }
+
+        // Subject Attendance Aggregation (Diamond Tier)
+        try {
+            const subAtt = db.prepare(`SELECT subject_name, total_classes, classes_attended FROM subject_attendance_agg WHERE student_id = ? AND academic_session = ? AND term = ?`).all(s.id, termConfig?.academic_session, termConfig?.term);
+            if (subAtt && subAtt.length > 0) s.subject_attendance_agg = subAtt;
+        } catch (e) { /* ignore if table not ready */ }
       }
     }
 
@@ -2369,6 +2647,8 @@ if (app) {
   app.on("will-quit", () => {
     // Release all keyboard shortcuts so they don't linger in other apps
     globalShortcut.unregisterAll();
+    // Release mDNS/Bonjour service so macOS doesn't increment the hostname
+    try { bonjour.unpublishAll(() => bonjour.destroy()); } catch(_) {}
   });
 } else {
   console.warn(

@@ -233,7 +233,11 @@ class HandshakeActivity : AppCompatActivity() {
                         setContent {
                             val config = result.school_config
                             val students = result.students
-                            val primaryColorStr = config.themePrimary ?: "#1A237E"
+                            // Server normalises the field to primary_color; fall back to themePrimary
+                            // for backwards compat, then hardcode navy as last resort.
+                            val primaryColorStr = config.primary_color
+                                ?: config.themePrimary
+                                ?: "#1A237E"
                             val primaryColor = try {
                                 Color(android.graphics.Color.parseColor(primaryColorStr))
                             } catch (e: Exception) {
@@ -317,46 +321,69 @@ class HandshakeActivity : AppCompatActivity() {
                                                     color = Color.White,
                                                     trackColor = Color(0x44FFFFFF)
                                                 )
-                                            } else if (students.isNotEmpty()) {
-                                                Spacer(modifier = Modifier.height(16.dp))
-                                                Text("✅ ${students.size} Students Safely Digested", color = Color(0xFFA5D6A7), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-                                                Spacer(modifier = Modifier.height(16.dp))
-                                                Button(
-                                                    onClick = {
-                                                        identityManager.saveSchoolBranding(
-                                                            config.name ?: "Nexus School",
-                                                            config.themePrimary ?: "#1A237E"
-                                                        )
-                                                        // Persist school logo for offline display on home screen
-                                                        identityManager.saveLogoBase64(config.logoBase64)
-                                                        // Persist the tier modules so FeatureGate can gate UI
-                                                        if (config.modules.isNotEmpty()) {
-                                                            identityManager.saveTierModules(config.modules)
+                                            } else {
+                                                // Shared lambda so both branches use identical persist + navigate logic
+                                                val navigateToRoster: () -> Unit = {
+                                                    identityManager.saveSchoolBranding(
+                                                        config.name ?: "Nexus School",
+                                                        primaryColorStr
+                                                    )
+                                                    identityManager.saveLogoBase64(config.logoBase64)
+                                                    if (config.modules.isNotEmpty()) {
+                                                        identityManager.saveTierModules(config.modules)
+                                                    }
+                                                    val scoreJson = buildString {
+                                                        append("[")
+                                                        result.score_components.forEachIndexed { idx, comp ->
+                                                            if (idx > 0) append(",")
+                                                            append("{\"key\":\"${comp.key}\",\"label\":\"${comp.label}\",\"max\":${comp.max}}")
                                                         }
-                                                        // Serialize score_components to JSON and persist
-                                                        val scoreJson = buildString {
-                                                            append("[")
-                                                            result.score_components.forEachIndexed { idx, comp ->
-                                                                if (idx > 0) append(",")
-                                                                append("{\"key\":\"${comp.key}\",\"label\":\"${comp.label}\",\"max\":${comp.max}}")
-                                                            }
-                                                            append("]")
-                                                        }
-                                                        identityManager.saveScoreComponents(scoreJson)
-                                                        // Persist form/homeroom class assignment
-                                                        // A null form_class means this teacher is a subject teacher only
-                                                        identityManager.saveFormClass(result.form_class)
-                                                        // Route to AppLaunchActivity — it reads everything from IdentityManager
-                                                        startActivity(android.content.Intent(this@HandshakeActivity, AppLaunchActivity::class.java))
-                                                        finish()
-                                                    },
-                                                    colors = ButtonDefaults.buttonColors(
-                                                        containerColor = Color.White,
-                                                        contentColor = primaryColor
-                                                    ),
-                                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(50)
-                                                ) {
-                                                    Text("View Class Roster  →", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+                                                        append("]")
+                                                    }
+                                                    identityManager.saveScoreComponents(scoreJson)
+                                                    identityManager.saveFormClass(result.form_class)
+                                                    startActivity(android.content.Intent(this@HandshakeActivity, AppLaunchActivity::class.java))
+                                                    finish()
+                                                }
+
+                                                if (students.isNotEmpty()) {
+                                                    Spacer(modifier = Modifier.height(16.dp))
+                                                    Text(
+                                                        "✅ ${students.size} Students Safely Digested",
+                                                        color = Color(0xFFA5D6A7),
+                                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                                    )
+                                                    Spacer(modifier = Modifier.height(16.dp))
+                                                    Button(
+                                                        onClick = navigateToRoster,
+                                                        colors = ButtonDefaults.buttonColors(
+                                                            containerColor = Color.White,
+                                                            contentColor = primaryColor
+                                                        ),
+                                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(50)
+                                                    ) {
+                                                        Text("View Class Roster  →", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+                                                    }
+                                                } else {
+                                                    // Fallback: handshake succeeded but no students assigned yet
+                                                    // (teacher has no allocations configured on the Hub).
+                                                    // Let them through so they are not permanently stuck.
+                                                    Spacer(modifier = Modifier.height(16.dp))
+                                                    Text(
+                                                        "⚠️ No students assigned to you yet.",
+                                                        color = Color(0xFFFFCC80),
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                                    )
+                                                    Spacer(modifier = Modifier.height(8.dp))
+                                                    OutlinedButton(
+                                                        onClick = navigateToRoster,
+                                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
+                                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(50)
+                                                    ) {
+                                                        Text("Continue Anyway  →")
+                                                    }
                                                 }
                                             }
                                             

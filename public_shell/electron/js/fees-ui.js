@@ -847,9 +847,8 @@
   window.feesInit = async function () {
     _resolve();
 
-    // Determine tier
-    const identity = await window.electronAPI.getIdentity();
-    const tier     = identity?.tier || "Silver";
+    // Determine tier correctly from global license state
+    const tier     = window.currentLicenseTier || "Silver";
     _isDiamond     = (tier === "Diamond");
 
     // Configure subtitle

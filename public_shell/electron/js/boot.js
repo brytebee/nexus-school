@@ -15,6 +15,33 @@
           });
         }
 
+        // ── The Vault: Idle Lock Timer ────────────────────────────────────────
+        let idleTime = 0;
+        const IDLE_TIMEOUT_MS = 1800000; // 30 minutes
+        
+        function resetIdleTimer() {
+          idleTime = 0;
+        }
+
+        // Listen for activity
+        document.addEventListener('mousemove', resetIdleTimer);
+        document.addEventListener('keydown', resetIdleTimer);
+        document.addEventListener('click', resetIdleTimer);
+        document.addEventListener('scroll', resetIdleTimer);
+
+        // Check idle time every second
+        setInterval(() => {
+          idleTime += 1000;
+          // Skip lock if a long-running background task is active (e.g. Scholar extraction)
+          if (window._nexusBusy) { idleTime = 0; return; }
+          if (idleTime >= IDLE_TIMEOUT_MS) {
+            // Lock the system
+            if (window.electronAPI.auth && window.electronAPI.auth.lock) {
+              window.electronAPI.auth.lock();
+            }
+          }
+        }, 1000);
+
         // ── QR Payload ────────────────────────────────────────────────────────
         window.electronAPI.onQrPayload((payload) => {
           renderQR(payload);
@@ -255,21 +282,35 @@
           });
 
         // ── License Status Enforcement ─────────────────────────────────────────
-        if (window.electronAPI.onLicenseStatus) {
-            window.electronAPI.onLicenseStatus(async (status) => {
-                window.currentLicenseTier = status.tier || "Silver";
-                window.currentLicenseData = status;
-                if (typeof window.applyFeatureMasking === "function") window.applyFeatureMasking();
-                
-                if (status.locked) {
-                    document.getElementById("license-lock-screen").style.display = "flex";
-                    document.getElementById("lock-message").textContent = status.message || "Your Sovereign Shield license has expired.";
-                    const hwid = await window.electronAPI.getHardwareId();
-                    document.getElementById("lock-hardware-id").textContent = hwid;
-                } else {
-                    document.getElementById("license-lock-screen").style.display = "none";
-                }
+        // Step 1: Eagerly fetch the tier synchronously at boot so it's available
+        // before any view renders. The reactive `onLicenseStatus` push event fires
+        // after did-finish-load, which is too late for views navigated immediately.
+        const _applyLicenseStatus = async (status) => {
+            if (!status) return;
+            window.currentLicenseTier = status.tier || "Silver";
+            window.currentLicenseData = status;
+            if (typeof window.applyFeatureMasking === "function") window.applyFeatureMasking();
+
+            if (status.locked) {
+                document.getElementById("license-lock-screen").style.display = "flex";
+                document.getElementById("lock-message").textContent = status.message || "Your Sovereign Shield license has expired.";
+                const hwid = await window.electronAPI.getHardwareId();
+                document.getElementById("lock-hardware-id").textContent = hwid;
+            } else {
+                document.getElementById("license-lock-screen").style.display = "none";
+            }
+        };
+
+        // Eager initial hydration (invoke = immediate, awaitable)
+        if (window.electronAPI.getLicenseStatus) {
+            window.electronAPI.getLicenseStatus().then(_applyLicenseStatus).catch(() => {
+                window.currentLicenseTier = window.currentLicenseTier || "Silver";
             });
+        }
+
+        // Step 2: Keep the reactive listener for subsequent lock/expiry events
+        if (window.electronAPI.onLicenseStatus) {
+            window.electronAPI.onLicenseStatus(_applyLicenseStatus);
         }
 
         // ── Settings Persistence ──────────────────────────────────────────────
@@ -321,6 +362,16 @@
         // ── Init Module Listeners ─────────────────────────────────────────────
         if (typeof initSettingsListeners === "function") initSettingsListeners();
         if (typeof initSyncListeners === "function") initSyncListeners();
+
+        // ── Restore last active view after lock/unlock ─────────────────────
+        try {
+          const lastView = localStorage.getItem('nexus_last_view');
+          if (lastView && lastView !== 'dashboard' && typeof showView === 'function') {
+            setTimeout(() => {
+              try { showView(lastView); } catch(_) { /* fallback to dashboard */ }
+            }, 500);
+          }
+        } catch(_) {}
       }
       
       // Global Support Backdoor

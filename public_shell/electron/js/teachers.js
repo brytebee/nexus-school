@@ -214,10 +214,10 @@
         }
       }
 
-      let _teachersPage   = 0;
-      let _teachersLimit  = 15;
-      let _teachersSearch = "";
-      let _teachersTotal  = 0;
+      var _teachersPage   = 0;
+      var _teachersLimit  = 15;
+      var _teachersSearch = "";
+      var _teachersTotal  = 0;
 
       async function refreshTeachersTable() {
         if (!window.electronAPI?.getAllTeachers) return;
@@ -534,3 +534,71 @@
         document.getElementById("edit-tch-sign-preview-wrap").style.display = "none";
         document.getElementById("edit-tch-signature-upload").value = "";
     }
+
+    // ── Subject Consistency Engine UI ──────────────────────────────────────────
+    window.openSubjectAuditModal = async function() {
+        const res = await window.electronAPI.subjects.getSyncWarnings();
+        if (!res.ok) {
+            Swal.fire('Error', 'Failed to load Subject Audit log: ' + res.error, 'error');
+            return;
+        }
+
+        const warnings = res.data;
+        if (warnings.length === 0) {
+            Swal.fire({
+                title: 'Subject Audit Clean',
+                text: 'All Android apps are perfectly in sync with the canonical subject list. No mismatches detected.',
+                icon: 'success',
+                background: '#0A0E2E',
+                color: '#fff'
+            });
+            return;
+        }
+
+        let rowsHTML = warnings.map(w => `
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.05); font-size: 12px;">
+                <td style="padding:10px; color:var(--text);">${w.teacher_name || w.teacher_id}</td>
+                <td style="color:#ef4444; font-weight:bold;">${w.mismatched_subject}</td>
+                <td style="color:var(--text-dim);">${w.student_name || w.student_id}</td>
+                <td style="color:var(--text-dim); font-size:11px;">${new Date(w.timestamp).toLocaleString()}</td>
+            </tr>
+        `).join('');
+
+        Swal.fire({
+            title: 'Subject Consistency Audit',
+            html: `
+                <div style="text-align:left;">
+                    <div style="background:rgba(239, 68, 68, 0.1); border:1px solid rgba(239, 68, 68, 0.3); padding:10px; border-radius:8px; margin-bottom:15px; color:#ef4444; font-size:12px;">
+                        <strong>Action Required:</strong> The following Android devices are recording grades for subjects that are not in their canonical allocations. The data was saved to prevent loss, but you should sync these devices again to realign their lists.
+                    </div>
+                    <table style="width:100%; text-align:left; border-collapse:collapse;">
+                        <thead>
+                            <tr style="color:var(--text-dim); border-bottom:1px solid var(--glass-border); font-size:11px;">
+                                <th style="padding-bottom:5px; padding-left:10px;">Teacher</th>
+                                <th style="padding-bottom:5px;">Mismatched Subject</th>
+                                <th style="padding-bottom:5px;">Target Student</th>
+                                <th style="padding-bottom:5px;">Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rowsHTML}</tbody>
+                    </table>
+                </div>
+            `,
+            width: '700px',
+            showCancelButton: true,
+            cancelButtonText: 'Close',
+            confirmButtonText: 'Clear Audit Log',
+            confirmButtonColor: '#10b981',
+            background: '#0A0E2E',
+            color: '#fff',
+            preConfirm: async () => {
+                const clearRes = await window.electronAPI.subjects.clearSyncWarnings();
+                if (!clearRes.ok) Swal.showValidationMessage('Failed to clear logs.');
+                return true;
+            }
+        }).then((result) => {
+            if (result.isConfirmed) {
+                Swal.fire('Cleared', 'The audit log has been cleared.', 'success');
+            }
+        });
+    };

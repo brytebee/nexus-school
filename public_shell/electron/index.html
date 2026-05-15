@@ -184,22 +184,69 @@
             <span class="nav-label">Nexus Scholar</span>
             <span class="nav-lock" style="display:none;margin-left:auto;font-size:12px;">🔒</span>
           </li>
-        </ul>
-
-        <div class="sidebar-footer-nav">
           <li
             class="nav-item"
-            data-view="settings"
-            onclick="showView('settings')"
+            data-view="cbt"
+            data-tier="Diamond"
+            onclick="showView('cbt')"
           >
+            <span class="nav-icon">💎</span>
+            <span class="nav-label">CBT Arena</span>
+            <span class="nav-lock" style="display:none;margin-left:auto;font-size:12px;">🔒</span>
+          </li>
+        </ul>
+
+        <!-- ── Fixed-bottom Footer: Coming Soon + Lock + ? + Settings + About ─ -->
+        <div class="sidebar-footer-nav">
+          <!-- Coming Soon section – pinned above Settings group -->
+          <div style="padding: 4px 16px 2px; border-top: 1px solid rgba(255,255,255,0.05); margin-top:2px;">
+            <div style="font-size: 9px; font-weight: 700; letter-spacing: 1.5px; color: var(--text-dim); text-transform: uppercase;">Coming Soon</div>
+          </div>
+          <ul class="sidebar-nav" style="margin: 0; padding: 0;">
+            <li class="nav-item" data-view="live-quiz" onclick="showView('live-quiz')">
+              <span class="nav-icon">⚡</span>
+              <span class="nav-label">Live Quiz System</span>
+              <span class="nav-badge" style="font-size:9px; background:rgba(99,102,241,0.2); color:#818cf8; padding:2px 5px; border-radius:8px; margin-left:auto; white-space:nowrap;">SOON</span>
+            </li>
+            <li class="nav-item" data-view="analytics" onclick="showView('analytics')">
+              <span class="nav-icon">📈</span>
+              <span class="nav-label">Analytics Dashboard</span>
+              <span class="nav-badge" style="font-size:9px; background:rgba(99,102,241,0.2); color:#818cf8; padding:2px 5px; border-radius:8px; margin-left:auto; white-space:nowrap;">SOON</span>
+            </li>
+            <li class="nav-item" data-view="notes-marketplace" onclick="showView('notes-marketplace')">
+              <span class="nav-icon">📚</span>
+              <span class="nav-label">Notes Marketplace</span>
+              <span class="nav-badge" style="font-size:9px; background:rgba(99,102,241,0.2); color:#818cf8; padding:2px 5px; border-radius:8px; margin-left:auto; white-space:nowrap;">SOON</span>
+            </li>
+            <li class="nav-item" data-view="skill-mastery" onclick="showView('skill-mastery')">
+              <span class="nav-icon">🎯</span>
+              <span class="nav-label">Skill Mastery</span>
+              <span class="nav-badge" style="font-size:9px; background:rgba(99,102,241,0.2); color:#818cf8; padding:2px 5px; border-radius:8px; margin-left:auto; white-space:nowrap;">SOON</span>
+            </li>
+          </ul>
+          <div style="height:1px; background:rgba(255,255,255,0.06); margin: 4px 12px;"></div>
+          <!-- Lock Now -->
+          <li class="nav-item" id="nav-lock-btn" onclick="window.electronAPI?.send?.('auth:lock')" title="Lock the screen" style="color:rgba(255,110,110,0.85);">
+            <span class="nav-icon">🔒</span>
+            <span class="nav-label">Lock Now</span>
+          </li>
+          <!-- Contextual ? Help -->
+          <li class="nav-item" id="nav-help-btn" onclick="window._showNavHelp && window._showNavHelp()" title="Help for this screen">
+            <span class="nav-icon" style="font-weight:900; color:var(--accent); font-size:15px;">?</span>
+            <span class="nav-label">About This Screen</span>
+          </li>
+          <!-- Settings -->
+          <li class="nav-item" data-view="settings" onclick="showView('settings')">
             <span class="nav-icon">⚙️</span>
             <span class="nav-label">Settings</span>
           </li>
+          <!-- About -->
           <li class="nav-item" data-view="about" onclick="showView('about')">
             <span class="nav-icon">ℹ️</span>
             <span class="nav-label">About</span>
           </li>
         </div>
+
 
         <div class="sidebar-status" id="thermal-badge">
           <span class="dot"></span> Hardware: COOL
@@ -282,9 +329,15 @@
               <h2 class="view-title">Command Center</h2>
               <p class="view-sub">Real-time overview of your school vault.</p>
             </div>
-            <div class="pulse-indicator" id="pulse-indicator">
-              <div class="pulse-dot"></div>
-              <span id="pulse-label">Ready for teacher sync…</span>
+            <div style="display:flex; gap:10px; align-items:center;">
+              <div class="pulse-indicator" id="pulse-indicator">
+                <div class="pulse-dot"></div>
+                <span id="pulse-label">Ready for teacher sync…</span>
+              </div>
+              <button id="btn-dashboard-settings" title="Academic Pipeline Settings"
+                onclick="const p=document.getElementById('dashboard-settings-panel'); p.style.transform = p.style.transform === 'translateX(0px)' ? 'translateX(100%)' : 'translateX(0px)';"
+                style="background:rgba(255,255,255,0.05); border:1px solid var(--glass-border); color:var(--text-dim); padding:6px 10px; border-radius:8px; cursor:pointer; font-size:14px; transition:background 0.2s;"
+                onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background='rgba(255,255,255,0.05)'">⚙️</button>
             </div>
           </div>
 
@@ -349,6 +402,47 @@
             </button>
           </div>
           <div class="events-container" id="events-container"></div>
+
+          <!-- ── Academic Pipeline Settings Panel (Slide-in) ────────────────── -->
+          <div id="dashboard-settings-panel" style="position:absolute; right:0; top:0; bottom:0; width:420px; background:#0d1235; border-left:1px solid var(--glass-border); transform:translateX(100%); transition:transform 0.3s cubic-bezier(0.4,0,0.2,1); z-index:100; display:flex; flex-direction:column; box-shadow:-10px 0 40px rgba(0,0,0,0.7);">
+            <div style="padding:20px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <h3 style="margin:0 0 4px; font-size:16px;">⚙️ Academic Pipeline</h3>
+                <p style="margin:0; font-size:11px; color:var(--text-dim);">Class hierarchy, pass marks &amp; session management</p>
+              </div>
+              <button onclick="document.getElementById('dashboard-settings-panel').style.transform='translateX(100%)'" style="background:none; border:none; color:var(--text-dim); font-size:24px; cursor:pointer; line-height:1;">&times;</button>
+            </div>
+            <div style="padding:20px; flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:16px;">
+              <!-- Class Hierarchy -->
+              <div class="card" style="padding:16px; background:rgba(16,185,129,0.04); border:1px solid rgba(16,185,129,0.2);">
+                <h4 style="font-size:11px; font-weight:800; color:var(--text-dim); margin:0 0 8px; letter-spacing:1px;">CLASS PROGRESSION HIERARCHY</h4>
+                <p style="font-size:12px; color:var(--text-dim); margin-bottom:12px; line-height:1.5;">Define class order from lowest to highest. Students are promoted along this track.</p>
+                <div id="dp-class-hierarchy-container" style="display:flex; flex-direction:column; gap:8px; margin-bottom:10px; max-height:180px; overflow-y:auto; padding-right:4px;">
+                  <div style="color:var(--text-dim); font-size:12px; text-align:center; padding:10px;">Loading…</div>
+                </div>
+                <div style="display:flex; gap:8px; margin-bottom:8px;">
+                  <input type="text" id="dp-new-class-input" class="modern-input" placeholder="e.g. Nursery 1" style="flex:1; font-size:12px;">
+                  <button class="primary-btn" id="dp-btn-add-class" style="background:#10b981; border:none; color:#000; white-space:nowrap;">+ Add</button>
+                </div>
+                <button class="secondary-btn" id="dp-btn-save-hierarchy" style="width:100%;">&#128190; Save Hierarchy</button>
+              </div>
+              <!-- Pass Mark -->
+              <div class="card" style="padding:16px; background:rgba(255,255,255,0.02); border:1px solid var(--glass-border);">
+                <h4 style="font-size:11px; font-weight:800; color:var(--text-dim); margin:0 0 12px; letter-spacing:1px;">GLOBAL PASS MARK (%)</h4>
+                <div style="display:flex; gap:8px;">
+                  <input type="number" id="dp-pass-mark-input" class="modern-input" value="50" min="0" max="100" style="flex:1;">
+                  <button class="primary-btn" id="dp-btn-save-threshold">Save</button>
+                </div>
+                <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">Minimum score for promotion recommendation.</p>
+              </div>
+              <!-- Rollover -->
+              <div class="card" style="padding:16px; background:rgba(239,68,68,0.04); border:1px solid rgba(239,68,68,0.2);">
+                <h4 style="font-size:11px; font-weight:800; color:#ef4444; margin:0 0 6px; letter-spacing:1px;">ACADEMIC ROLLOVER</h4>
+                <p style="font-size:12px; color:var(--text-dim); margin-bottom:12px; line-height:1.4;">Current Session: <strong id="dp-lbl-active-session" style="color:#fff;">2025/2026</strong></p>
+                <button id="dp-btn-end-session" style="width:100%; padding:10px; background:transparent; border:1px dashed #ef4444; color:#ef4444; cursor:pointer; border-radius:6px; font-size:13px;">End Session &amp; Rollover →</button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- ─────────────────── VIEW: PORTAL (Gold) ────────────────────────── -->
@@ -448,11 +542,17 @@
                 ⚡ Import CSV
               </label>
               </label>
+              <button class="primary-btn" style="background:rgba(245, 158, 11, 0.1);color:#f59e0b;border:1px solid rgba(245, 158, 11, 0.3);box-shadow:none;" onclick="openSubjectAuditModal()">
+                ⚠️ Subject Audit
+              </button>
               <button class="primary-btn" style="background:rgba(0,229,255,0.1);color:#00e5ff;border:1px solid rgba(0,229,255,0.3);box-shadow:none;" onclick="openFormTeacherModal()">
                 🏠 Class Hosts
               </button>
               <button class="primary-btn" onclick="toggleAddTeacherForm()">
                 ＋ Add Teacher
+              </button>
+              <button class="primary-btn" style="background:rgba(99,102,241,0.12);color:#818cf8;border:1px solid rgba(99,102,241,0.3);box-shadow:none;" onclick="window.initAdminManagement()" title="Manage staff login accounts">
+                👥 Staff Accounts
               </button>
             </div>
           </div>
@@ -1417,124 +1517,201 @@
           <div class="view-header">
             <div>
               <h2 class="view-title">Nexus Pulse</h2>
-              <p class="view-subtitle">Automated WhatsApp Assistant for Parents (Gold Feature)</p>
+              <p class="view-subtitle">Automated WhatsApp Assistant for Parents <span style="font-size:10px;font-weight:700;color:#f59e0b;padding:2px 7px;background:rgba(245,158,11,0.12);border-radius:10px;vertical-align:middle;">Gold+</span></p>
             </div>
             <div class="header-actions">
-              <button class="primary-btn" id="btn-start-pulse">Start Bot</button>
-              <button class="danger-btn" id="btn-stop-pulse" style="display: none;">Stop Bot</button>
-              <button id="btn-pulse-settings-toggle" title="Pulse Settings" onclick="const p=document.getElementById('pulse-settings-panel');p.style.display=p.style.display==='none'?'flex':'none'" style="background:rgba(255,255,255,0.05);border:1px solid var(--glass-border);color:var(--text-dim);padding:6px 10px;border-radius:8px;cursor:pointer;font-size:16px;">⚙️</button>
+              <button class="primary-btn" id="btn-start-pulse">🤖 Start Bot</button>
+              <button class="danger-btn" id="btn-stop-pulse" style="display:none;">⏹ Stop Bot</button>
+              <button onclick="document.getElementById('pulse-settings-panel').style.transform='translateX(0)'" title="Pulse Settings" style="background:rgba(255,255,255,0.05);border:1px solid var(--glass-border);color:var(--text-dim);padding:6px 10px;border-radius:8px;cursor:pointer;font-size:16px;">⚙️</button>
             </div>
           </div>
 
-          <!-- Pulse Inline Settings Panel -->
-          <div id="pulse-settings-panel" style="display:none;background:rgba(37,211,102,0.05);border:1px solid rgba(37,211,102,0.2);border-radius:12px;padding:18px 22px;margin-bottom:18px;align-items:flex-end;gap:14px;flex-wrap:wrap;">
-            <div style="flex:1;min-width:220px;">
-              <label class="ph-label">Principal's Secure Phone <span style="font-size:10px;color:var(--text-dim);">(For Morning Briefings)</span></label>
-              <input type="text" id="principal-phone-input" class="modern-input" placeholder="e.g. 08012345678" style="width:100%;" />
-            </div>
-            <button id="btn-pulse-phone-save" class="primary-btn" style="padding:10px 20px;font-size:12px;background:linear-gradient(135deg,#25D366,#128C7E);border:none;white-space:nowrap;">Save</button>
-          </div>
+          <div class="content-panel" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;text-align:center;position:relative;">
 
-          <div class="content-panel" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 400px; text-align: center;">
-            <div id="pulse-status-container">
-              <div id="pulse-icon" style="font-size: 64px; margin-bottom: 20px;">🤖</div>
-              <h3 id="pulse-status-text" style="color: var(--text-bright); margin-bottom: 10px;">Bot is Disconnected</h3>
-              <p id="pulse-status-desc" style="color: var(--text-dim); max-width: 400px; margin: 0 auto 20px;">
-                Click "Start Bot" to initialize the WhatsApp engine. You will need to scan a QR code with the school's WhatsApp phone.
-              </p>
-              
-              <div id="pulse-qr-container" style="display: none; background: white; padding: 20px; border-radius: 12px; display: inline-block; margin-top: 20px;">
-                <canvas id="pulse-qr-canvas"></canvas>
+            <!-- Gold Tier Gate -->
+            <div id="pulse-tier-gate" style="display:none;padding:40px;text-align:center;border:1px dashed var(--glass-border);border-radius:16px;max-width:420px;">
+              <span style="font-size:40px;display:block;margin-bottom:16px;">🔐</span>
+              <h3 style="color:var(--text-bright);margin-bottom:8px;">Gold Tier Required</h3>
+              <p style="color:var(--text-dim);font-size:13px;max-width:300px;margin:0 auto 20px;">Nexus Pulse automates parent communication via WhatsApp — fee reminders, attendance alerts, and exam OTPs.</p>
+              <span style="font-size:11px;font-weight:700;color:#f59e0b;padding:4px 12px;background:rgba(245,158,11,0.1);border-radius:12px;">Upgrade to Gold to unlock</span>
+            </div>
+
+            <!-- Bot UI (shown when Gold+) -->
+            <div id="pulse-bot-ui">
+              <div id="pulse-icon" style="font-size:64px;margin-bottom:20px;">🤖</div>
+              <h3 id="pulse-status-text" style="color:var(--text-bright);margin-bottom:10px;">Bot is Disconnected</h3>
+              <p id="pulse-status-desc" style="color:var(--text-dim);max-width:400px;margin:0 auto 20px;">Click "Start Bot" to initialise the WhatsApp engine. Scan the QR code with the school's WhatsApp phone.</p>
+              <!-- QR Code — single display:none (fixed double-display bug) -->
+              <div id="pulse-qr-container" style="display:none;background:white;padding:20px;border-radius:12px;margin-top:20px;"></div>
+            </div>
+
+            <!-- 💎 Always-On Cloud Bridge -->
+            <div id="pulse-cloud-bridge" style="margin-top:40px;border-top:1px solid var(--border);padding-top:20px;width:100%;max-width:520px;text-align:left;display:none;">
+              <h4 style="color:var(--gold);margin-bottom:10px;">💎 Always-On Cloud Bridge
+                <span style="font-size:10px;font-weight:700;color:#00e5ff;padding:2px 7px;background:rgba(0,229,255,0.1);border-radius:10px;margin-left:8px;vertical-align:middle;">Diamond</span>
+              </h4>
+              <p style="color:var(--text-dim);font-size:13px;margin-bottom:15px;">Sync data to Google Drive for 24/7 parent responses — even when this laptop is off.</p>
+              <div id="cloud-setup-form" style="display:none;background:rgba(0,0,0,0.2);padding:15px;border-radius:8px;margin-bottom:15px;">
+                <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:5px;">Google App Credentials</label>
+                <input type="text" id="google-client-id" placeholder="Google Client ID" class="modern-input" style="width:100%;margin-bottom:10px;">
+                <input type="password" id="google-client-secret" placeholder="Google Client Secret" class="modern-input" style="width:100%;margin-bottom:10px;">
+                <button class="primary-btn" id="btn-save-google-creds" style="width:100%;">Save Credentials</button>
               </div>
-
-              <!-- 💎 Always-On Cloud Bridge (Turn 2) -->
-              <div id="pulse-cloud-bridge" style="margin-top: 40px; border-top: 1px solid var(--border); padding-top: 20px; width: 100%; max-width: 500px; text-align: left; display: none;">
-                <h4 style="color: var(--gold); margin-bottom: 10px;">💎 Always-On Cloud Bridge</h4>
-                <p style="color: var(--text-dim); font-size: 13px; margin-bottom: 15px;">
-                  Sync your data to Google Drive for 24/7 responsiveness even when this laptop is off. (Diamond Tier Only)
-                </p>
-                
-                <div id="cloud-setup-form" style="display: none; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                    <label style="font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 5px;">Google App Credentials</label>
-                    <input type="text" id="google-client-id" placeholder="Google Client ID" style="width: 100%; margin-bottom: 10px; padding: 8px; border-radius: 4px; background: var(--bg-main); border: 1px solid var(--border); color: white;">
-                    <input type="password" id="google-client-secret" placeholder="Google Client Secret" style="width: 100%; margin-bottom: 10px; padding: 8px; border-radius: 4px; background: var(--bg-main); border: 1px solid var(--border); color: white;">
-                    <button class="primary-btn" id="btn-save-google-creds" style="width: 100%;">Save Credentials</button>
+              <div id="cloud-status-panel" style="display:flex;align-items:center;justify-content:space-between;background:var(--bg-main);padding:12px;border-radius:8px;border:1px solid var(--border);">
+                <div><span style="color:var(--text-dim);">Status:</span> <span id="cloud-sync-status" style="color:var(--danger);">Not Configured</span></div>
+                <div style="display:flex;gap:8px;">
+                  <button class="small-btn" id="btn-trigger-sync" style="display:none;background:var(--accent);color:var(--bg-dark);border-color:var(--accent);">Sync Now</button>
+                  <button class="small-btn" id="btn-connect-google">Configure</button>
                 </div>
-
-                <div id="cloud-status-panel" style="display: flex; align-items: center; justify-content: space-between; background: var(--bg-main); padding: 12px; border-radius: 8px; border: 1px solid var(--border);">
-                    <div id="cloud-status-indicator">
-                        <span style="color: var(--text-dim);">Status:</span> <span id="cloud-sync-status" style="color: var(--danger);">Not Configured</span>
-                    </div>
-                    <div style="display: flex; gap: 8px;">
-                        <button class="small-btn" id="btn-trigger-sync" style="display: none; background: var(--accent); color: var(--bg-dark); border-color: var(--accent);">Sync Now</button>
-                        <button class="small-btn" id="btn-connect-google">Configure</button>
-                    </div>
+              </div>
+              <div id="cloud-key-panel" style="margin-top:15px;background:rgba(212,175,55,0.1);border:1px solid var(--gold);padding:12px;border-radius:8px;display:none;">
+                <div style="font-size:11px;color:var(--gold);text-transform:uppercase;margin-bottom:8px;">🔐 Pulse Security Key</div>
+                <div style="display:flex;gap:8px;margin-bottom:12px;">
+                  <code id="pulse-security-key" data-full-token="" style="flex:1;color:white;font-family:monospace;word-break:break-all;font-size:12px;background:rgba(0,0,0,0.3);padding:8px;border-radius:4px;"></code>
+                  <button class="small-btn" id="btn-copy-security-key" style="border-color:var(--gold);color:var(--gold);align-self:flex-start;">Copy</button>
                 </div>
-
-                <div id="cloud-key-panel" style="margin-top: 15px; background: rgba(212, 175, 55, 0.1); border: 1px solid var(--gold); padding: 12px; border-radius: 8px; display: none;">
-                    <div style="font-size: 11px; color: var(--gold); text-transform: uppercase; margin-bottom: 5px; display: flex; align-items: center; gap: 5px;">
-                        <span>🔐 Pulse Security Key (Keep Secret)</span>
-                    </div>
-                    <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-                        <code id="pulse-security-key" data-full-token="" style="flex: 1; color: white; font-family: monospace; display: block; word-break: break-all; font-size: 12px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px;"></code>
-                        <button class="small-btn" id="btn-copy-security-key" style="border-color: var(--gold); color: var(--gold); align-self: flex-start;">Copy</button>
-                    </div>
-
-                    <div id="refresh-token-wrapper" style="display: none;">
-                        <div style="font-size: 11px; color: var(--gold); text-transform: uppercase; margin-bottom: 5px; display: flex; align-items: center; gap: 5px;">
-                            <span>🔑 Google Refresh Token</span>
-                        </div>
-                        <div style="display: flex; gap: 8px;">
-                            <code id="pulse-refresh-token" data-full-token="" style="flex: 1; color: white; font-family: monospace; display: block; word-break: break-all; font-size: 12px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px;"></code>
-                            <button class="small-btn" id="btn-copy-refresh-token" style="border-color: var(--gold); color: var(--gold); align-self: flex-start;">Copy</button>
-                        </div>
-                    </div>
+                <div id="refresh-token-wrapper" style="display:none;">
+                  <div style="font-size:11px;color:var(--gold);text-transform:uppercase;margin-bottom:5px;">🔑 Google Refresh Token</div>
+                  <div style="display:flex;gap:8px;">
+                    <code id="pulse-refresh-token" data-full-token="" style="flex:1;color:white;font-family:monospace;word-break:break-all;font-size:12px;background:rgba(0,0,0,0.3);padding:8px;border-radius:4px;"></code>
+                    <button class="small-btn" id="btn-copy-refresh-token" style="border-color:var(--gold);color:var(--gold);align-self:flex-start;">Copy</button>
+                  </div>
                 </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- ⚙️ Slide-In Settings (matches Attendance pattern) -->
+          <div id="pulse-settings-panel" style="position:absolute;right:0;top:0;bottom:0;width:400px;background:#0d1235;border-left:1px solid var(--glass-border);transform:translateX(100%);transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);z-index:100;display:flex;flex-direction:column;box-shadow:-10px 0 40px rgba(0,0,0,0.7);">
+            <div style="padding:20px;border-bottom:1px solid var(--glass-border);display:flex;justify-content:space-between;align-items:center;">
+              <h3 style="margin:0;font-size:16px;">⚙️ Pulse Settings</h3>
+              <button onclick="document.getElementById('pulse-settings-panel').style.transform='translateX(100%)';" style="background:none;border:none;color:var(--text-dim);font-size:24px;cursor:pointer;">&times;</button>
+            </div>
+            <div style="padding:20px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:20px;">
+              <!-- Gold: Principal Phone -->
+              <div class="card" style="padding:16px;background:rgba(255,255,255,0.02);border:1px solid var(--glass-border);">
+                <h4 style="font-size:12px;font-weight:800;color:var(--text-dim);margin-bottom:12px;letter-spacing:1px;display:flex;align-items:center;gap:8px;">PRINCIPAL PHONE <span style="font-size:10px;font-weight:700;color:#f59e0b;padding:2px 6px;background:rgba(245,158,11,0.1);border-radius:8px;">Gold</span></h4>
+                <p style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">Used for morning briefings and Guardian Shield escalations.</p>
+                <input type="text" id="principal-phone-pulse" class="modern-input" placeholder="e.g. 08012345678" style="width:100%;margin-bottom:10px;">
+                <button id="btn-pulse-phone-save" class="primary-btn" style="width:100%;background:linear-gradient(135deg,#25D366,#128C7E);border:none;">Save Phone</button>
+              </div>
+              <!-- Diamond: Cloud Bridge shortcut -->
+              <div class="card" style="padding:16px;background:rgba(255,255,255,0.02);border:1px solid var(--glass-border);">
+                <h4 style="font-size:12px;font-weight:800;color:var(--text-dim);margin-bottom:4px;letter-spacing:1px;display:flex;align-items:center;gap:8px;">CLOUD BRIDGE <span style="font-size:10px;font-weight:700;color:#00e5ff;padding:2px 6px;background:rgba(0,229,255,0.1);border-radius:8px;">Diamond</span></h4>
+                <p style="font-size:12px;color:var(--text-dim);margin:6px 0 12px;">Always-On Google Drive sync — 24/7 parent responses when this laptop is off.</p>
+                <button class="small-btn" style="width:100%;" onclick="document.getElementById('pulse-settings-panel').style.transform='translateX(100%)';setTimeout(()=>document.getElementById('btn-connect-google')?.click(),300);">Open Cloud Bridge Config ↓</button>
+              </div>
+              <!-- Bot Behaviour -->
+              <div class="card" style="padding:16px;background:rgba(255,255,255,0.02);border:1px solid var(--glass-border);">
+                <h4 style="font-size:12px;font-weight:800;color:var(--text-dim);margin-bottom:12px;letter-spacing:1px;">BOT BEHAVIOUR</h4>
+                <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+                  <span style="font-size:13px;">Auto-start bot on app launch</span>
+                  <input type="checkbox" id="pulse-autostart-toggle" style="transform:scale(1.2);">
+                </label>
               </div>
             </div>
           </div>
         </div>
 
+
         <!-- ─────────────────── VIEW: ATTENDANCE ────────────────────────── -->
         <div class="view" id="view-attendance">
           <div class="view-header">
             <div>
-              <h2 class="view-title">Class Attendance Register</h2>
-              <p class="view-sub">
-                Manage daily attendance records (Gold Feature)
-              </p>
+              <h2 class="view-title">📅 Attendance Module</h2>
+              <p class="view-sub">Manage daily records and subject-level truancy detection.</p>
             </div>
             <div class="action-bar" style="display:flex;gap:12px;align-items:center;">
+              <button class="small-btn" onclick="document.getElementById('attendance-settings-panel').style.transform='translateX(0)'" title="Attendance Settings" style="font-size:16px;padding:6px 10px;background:rgba(255,255,255,0.06);border-color:var(--glass-border);">⚙️</button>
+            </div>
+          </div>
+
+          <!-- Tabs -->
+          <div style="display:flex;gap:4px;padding:0 20px;border-bottom:1px solid var(--glass-border);flex-shrink:0;">
+            <button class="fees-tab-btn active" id="att-tab-btn-daily" onclick="document.getElementById('att-tab-daily').style.display='block';document.getElementById('att-tab-truancy').style.display='none';this.classList.add('active');document.getElementById('att-tab-btn-truancy').classList.remove('active');">📋 Daily Register</button>
+            <button class="fees-tab-btn" id="att-tab-btn-truancy" onclick="document.getElementById('att-tab-truancy').style.display='block';document.getElementById('att-tab-daily').style.display='none';this.classList.add('active');document.getElementById('att-tab-btn-daily').classList.remove('active');">🚨 Truancy Radar</button>
+          </div>
+
+          <!-- Tab Content: Daily Register -->
+          <div id="att-tab-daily" style="display:block; flex:1; overflow-y:auto; padding-top:15px;">
+            <div style="display:flex;gap:12px;align-items:center;padding:0 20px 10px;">
               <input type="date" id="attendance-date-picker" class="modern-input" style="width: 150px; font-family: var(--font-mono);">
               <select id="attendance-class-select" class="modern-input" style="width: 200px;">
                 <option value="">Select Class...</option>
               </select>
-              <button class="secondary-btn" id="btn-student-attendance-report">
-                Student Report
-              </button>
-              <button class="primary-btn" id="btn-save-attendance" style="background:linear-gradient(135deg,#b8860b,#ffd700);color:#000;box-shadow:none;border:none;">
-                Save Register
-              </button>
+              <button class="secondary-btn" id="btn-student-attendance-report">Student Report</button>
+              <button class="primary-btn" id="btn-save-attendance" style="background:linear-gradient(135deg,#b8860b,#ffd700);color:#000;box-shadow:none;border:none;margin-left:auto;">Save Register</button>
+            </div>
+            <div id="attendance-pagination"></div>
+            <div class="table-container">
+              <table class="data-table">
+                <thead><tr><th>Student Name</th><th style="text-align:center;">Status</th></tr></thead>
+                <tbody id="attendance-tbody">
+                  <tr><td colspan="2" style="text-align:center; padding:40px; color:#64748b;">Please select a class and date to load the attendance register.</td></tr>
+                </tbody>
+              </table>
             </div>
           </div>
-          <div id="attendance-pagination"></div>
-          
-          <div class="table-container">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Student Name</th>
-                  <th style="text-align:center;">Status</th>
-                </tr>
-              </thead>
-              <tbody id="attendance-tbody">
-                <tr>
-                  <td colspan="2" style="text-align:center; padding:40px; color:#64748b;">
-                    Please select a class and date to load the attendance register.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+
+          <!-- Tab Content: Truancy Radar -->
+          <div id="att-tab-truancy" style="display:none; flex:1; overflow-y:auto; padding-top:15px;">
+             <div class="table-container" style="margin: 0 20px;">
+               <table class="data-table">
+                 <thead>
+                   <tr>
+                     <th>Student</th>
+                     <th>Class</th>
+                     <th style="text-align:center;">Flags</th>
+                     <th>Current Escalation</th>
+                     <th>Last Flagged</th>
+                     <th>Actions</th>
+                   </tr>
+                 </thead>
+                 <tbody id="truancy-radar-tbody">
+                   <tr><td colspan="6" style="text-align:center; padding:40px; color:#64748b;">Loading Truancy Radar...</td></tr>
+                 </tbody>
+               </table>
+             </div>
+          </div>
+
+          <!-- Attendance Settings Panel (Slide-in) -->
+          <div id="attendance-settings-panel" style="position:absolute; right:0; top:0; bottom:0; width:400px; background:#0d1235; border-left:1px solid var(--glass-border); transform:translateX(100%); transition:transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); z-index:100; display:flex; flex-direction:column; box-shadow:-10px 0 40px rgba(0,0,0,0.7);">
+             <div style="padding:20px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;">
+                <h3 style="margin:0; font-size:16px;">⚙️ Attendance Settings</h3>
+                <button onclick="document.getElementById('attendance-settings-panel').style.transform='translateX(100%)'" style="background:none; border:none; color:var(--text-dim); font-size:24px; cursor:pointer;">&times;</button>
+             </div>
+             <div style="padding:20px; flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:20px;">
+                <!-- Layer Toggles -->
+                <div class="card" style="padding:16px; background:rgba(255,255,255,0.02); border:1px solid var(--glass-border);">
+                   <h4 style="font-size:12px; font-weight:800; color:var(--text-dim); margin-bottom:12px; letter-spacing:1px;">ATTENDANCE LAYERS</h4>
+                   <label style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; cursor:pointer;">
+                      <span style="font-size:14px;">Daily Roll Call <span style="font-size:11px; font-weight:700; color:#f59e0b; margin-left:6px; padding:2px 6px; background:rgba(245,158,11,0.1); border-radius:4px;">Gold</span></span>
+                      <input type="checkbox" id="att-toggle-daily" style="transform:scale(1.2);">
+                   </label>
+                   <div style="height:1px; background:var(--glass-border); margin:12px 0;"></div>
+                   <label style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;">
+                      <span style="font-size:14px;">Subject Roll Call <span style="font-size:11px; font-weight:700; color:#00e5ff; margin-left:6px; padding:2px 6px; background:rgba(0,229,255,0.1); border-radius:4px;">Diamond</span></span>
+                      <input type="checkbox" id="att-toggle-subject" style="transform:scale(1.2);">
+                   </label>
+                </div>
+
+                <!-- Truancy Config -->
+                <div id="truancy-config-wrapper" class="card" style="padding:16px; background:rgba(255,255,255,0.02); border:1px solid var(--glass-border);">
+                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                       <h4 style="font-size:12px; font-weight:800; color:var(--text-dim); margin:0; letter-spacing:1px;">GUARDIAN SHIELD ESCALATION</h4>
+                       <span style="font-size:11px; font-weight:700; color:#00e5ff; padding:2px 6px; background:rgba(0,229,255,0.1); border-radius:4px;">Diamond</span>
+                   </div>
+                   <p style="font-size:11px; color:var(--text-dim); margin-bottom:16px; line-height:1.4;">Define the intervention ladder when a student is marked present for the day but skips specific subjects.</p>
+                   
+                   <div id="truancy-escalation-container"></div>
+                   
+                   <button onclick="window.addEscalationStep()" style="width:100%; margin-top:12px; background:rgba(255,255,255,0.05); border:1px dashed rgba(255,255,255,0.2); color:var(--text-dim); padding:8px; border-radius:6px; cursor:pointer; font-size:12px; transition:background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background='rgba(255,255,255,0.05)'">+ Add Step</button>
+                </div>
+             </div>
+             <div style="padding:20px; border-top:1px solid var(--glass-border);">
+                <button onclick="window.saveAttendanceSettings()" class="primary-btn" style="width:100%;">Save Settings</button>
+             </div>
           </div>
         </div>
 
@@ -2018,8 +2195,317 @@
             </div>
           </div>
         </div>
+        <!-- ─────────────────── VIEW: CBT ARENA ──────────────────────────── -->
+        <div class="view" id="view-cbt">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title" style="background:linear-gradient(135deg, #FFD700, #FDB931);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">CBT Arena 💎</h2>
+              <p class="view-sub">Advanced Computer Based Testing Engine & Admissions Pipeline.</p>
+            </div>
+            <div style="display:flex; gap:10px; align-items:center;">
+              <div id="cbt-external-balance-display" style="background:rgba(255,215,0,0.1); border:1px solid rgba(255,215,0,0.3); padding:6px 12px; border-radius:20px; font-size:12px; color:#FFD700; font-weight:bold;">
+                Token Balance: <span id="cbt-balance-count">Loading...</span>
+              </div>
+              <button id="btn-cbt-buy-tokens" style="background:rgba(255,255,255,0.05);border:1px solid var(--glass-border);color:var(--text-dim);padding:6px 10px;border-radius:8px;cursor:pointer;font-size:12px;">Add Tokens 🔑</button>
+              <button class="small-btn" onclick="document.getElementById('cbt-settings-panel').style.transform='translateX(0)'" title="CBT Settings" style="font-size:16px;padding:6px 10px;background:rgba(255,255,255,0.06);border-color:var(--glass-border);">⚙️</button>
+            </div>
+          </div>
+
+          <!-- CBT Tab Navigation -->
+          <div style="display:flex; gap:10px; margin-bottom:20px; border-bottom:1px solid var(--glass-border); padding-bottom:10px;">
+            <button class="ph-tab active" id="tab-cbt-banks" style="background:transparent; border:none; color:var(--text-dim); cursor:pointer; font-size:14px; padding:5px 10px; border-radius:4px;">📚 Question Banks</button>
+            <button class="ph-tab" id="tab-cbt-deploy" style="background:transparent; border:none; color:var(--text-dim); cursor:pointer; font-size:14px; padding:5px 10px; border-radius:4px;">🚀 Deploy Exam</button>
+            <button class="ph-tab" id="tab-cbt-live" style="background:transparent; border:none; color:var(--text-dim); cursor:pointer; font-size:14px; padding:5px 10px; border-radius:4px;">📡 Live Invigilation</button>
+            <button class="ph-tab" id="tab-cbt-about" style="background:transparent; border:none; color:var(--text-dim); cursor:pointer; font-size:14px; padding:5px 10px; border-radius:4px;">ℹ️ About</button>
+          </div>
+
+          <!-- CBT View Container -->
+          <div id="cbt-view-container" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; position:relative; overflow-x:hidden;">
+            
+            <!-- CBT Settings Panel (Slide-in) -->
+            <div id="cbt-settings-panel" style="position:absolute; right:0; top:0; bottom:0; width:400px; background:#0d1235; border-left:1px solid var(--glass-border); transform:translateX(100%); transition:transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); z-index:100; display:flex; flex-direction:column; box-shadow:-10px 0 40px rgba(0,0,0,0.7);">
+              <div style="padding:15px 20px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;">
+                <h3 style="margin:0; font-size:16px;">CBT Settings</h3>
+                <button onclick="document.getElementById('cbt-settings-panel').style.transform='translateX(100%)'" style="background:none; border:none; color:var(--text-dim); font-size:24px; cursor:pointer;">&times;</button>
+              </div>
+              <div style="padding:20px; flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:20px;">
+                
+                <!-- Install Premium Pack -->
+                <div style="background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:8px; padding:15px;">
+                  <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                    <span style="font-size:18px;">📦</span>
+                    <h4 style="margin:0; font-size:14px; color:#FFD700;">Install Premium Pack</h4>
+                  </div>
+                  <p style="font-size:12px; color:var(--text-dim); margin-bottom:12px;">Install an encrypted .nexpack file to securely load premium questions like WAEC/JAMB past papers.</p>
+                  
+                  <input type="file" id="nexpack-upload-input" accept=".nexpack" style="display:none;" />
+                  <button class="primary-btn" onclick="document.getElementById('nexpack-upload-input').click()" style="width:100%; font-size:12px; padding:8px;">Select .nexpack File</button>
+                  
+                  <!-- Progress UI -->
+                  <div id="nexpack-progress-container" style="display:none; margin-top:15px;">
+                    <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-dim); margin-bottom:4px;">
+                      <span id="nexpack-status-text">Decrypting...</span>
+                      <span id="nexpack-percent-text">0%</span>
+                    </div>
+                    <div style="width:100%; height:6px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden;">
+                      <div id="nexpack-progress-bar" style="height:100%; width:0%; background:linear-gradient(90deg, #10b981, #34d399); transition:width 0.2s;"></div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            <!-- About / Docs Container -->
+            <div id="cbt-about-container" style="display:none; padding:20px; max-width:800px; margin:0 auto; width:100%;">
+              <div id="nexpack-doc-content" class="markdown-body" style="background:rgba(255,255,255,0.03); padding:30px; border-radius:12px; border:1px solid var(--glass-border); line-height:1.6; color:var(--text-dim);">
+                <h1 style="color:#FFD700; border-bottom:1px solid var(--glass-border); padding-bottom:10px;">NexPack — Premium Content System</h1>
+                <h2 style="color:#fff; margin-top:20px;">Overview</h2>
+                <p>The NexPack system allows Nexus School OS to seamlessly import bulk premium question banks (such as JAMB, WAEC, or NECO past papers) securely. These premium packs are distributed as encrypted <code>.nexpack</code> files.</p>
+                <p>Once installed, NexPack banks are treated specially by the system:</p>
+                <ul>
+                  <li><strong>Locked Interface</strong>: To prevent content leaking, the Question Bank library will only display a 5-question preview.</li>
+                  <li><strong>Export Disabled</strong>: The 'Export to CSV' and 'Print' functions are fully blocked for premium banks.</li>
+                  <li><strong>Full Exam Access</strong>: Despite the UI restrictions, the Nexus CBT engine has full access to the premium bank and can construct exams, shuffle questions, and grade students normally.</li>
+                </ul>
+
+                <h2 style="color:#fff; margin-top:30px;">1. How to Install a Premium Pack</h2>
+                <ol>
+                  <li>Open <strong>Nexus School OS</strong> and navigate to the <strong>CBT Arena</strong> (💎).</li>
+                  <li>Click the <strong>Settings (⚙️)</strong> icon in the top right of the CBT header.</li>
+                  <li>In the sliding panel, locate the <strong>"Install Premium Pack (.nexpack)"</strong> section.</li>
+                  <li>Click <strong>Select .nexpack File</strong> and browse to the <code>.nexpack</code> file you received.</li>
+                  <li>The system will decrypt, verify, and import the questions. You will see a progress bar indicating the import status.</li>
+                  <li>Once complete, your new premium bank will appear in the <strong>Question Banks</strong> list with a 🔒 badge.</li>
+                </ol>
+
+                <h2 style="color:#fff; margin-top:30px;">2. Managing Annual Updates</h2>
+                <p>Exams like WAEC and JAMB release new questions annually. Installing an update pack works exactly the same way as the initial install.</p>
+                <p>The Nexus engine uses <strong>Smart Upsert Technology</strong>:</p>
+                <ul>
+                  <li>It mathematically identifies questions you already have.</li>
+                  <li>It safely ignores duplicates.</li>
+                  <li>It seamlessly appends only the new questions to your existing premium bank.</li>
+                  <li>Your existing live exams remain unbroken.</li>
+                </ul>
+              </div>
+            </div>
+            
+            <!-- Question Banks Studio -->
+            <div id="cbt-banks-container" style="display:block;">
+              <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
+                <h3 style="font-size:16px;">Question Bank Library</h3>
+                <button class="primary-btn" id="btn-create-bank">+ Create New Bank</button>
+              </div>
+              <div id="cbt-banks-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:15px;">
+                <!-- Dynamically populated -->
+                <div style="color:var(--text-dim); font-size:13px; text-align:center; padding:40px; border:1px dashed var(--glass-border); border-radius:8px; grid-column:1/-1;">Loading Question Banks...</div>
+              </div>
+            </div>
+
+            <!-- Deploy Exam Studio -->
+            <div id="cbt-deploy-container" style="display:none; flex-direction:column; gap:20px;">
+               <!-- Built dynamically by JS to keep HTML clean -->
+            </div>
+
+            <!-- Live Invigilation Studio -->
+            <div id="cbt-live-container" style="display:none; flex-direction:column; gap:20px;">
+               <!-- Built dynamically by JS to keep HTML clean -->
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ─────────────────── VIEW: LIVE QUIZ SYSTEM ─────────────── -->
+        <div class="view" id="view-live-quiz">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title" style="background:linear-gradient(135deg,#f59e0b,#ef4444);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">⚡ Live Quiz System</h2>
+              <p class="view-sub">Kahoot-style real-time classroom quiz engine — no app install required.</p>
+            </div>
+            <span style="font-size:11px; font-weight:700; background:rgba(99,102,241,0.15); color:#818cf8; padding:6px 14px; border-radius:20px; border:1px solid rgba(99,102,241,0.3);">Coming in Next Release</span>
+          </div>
+          <div style="max-width:700px; margin:0 auto; width:100%;">
+            <div style="background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.2); border-radius:16px; padding:32px; margin-bottom:24px; text-align:center;">
+              <div style="font-size:64px; margin-bottom:16px;">⚡</div>
+              <h3 style="font-size:22px; font-weight:800; margin-bottom:12px; color:#f59e0b;">Turn Every Lesson into a Game</h3>
+              <p style="color:var(--text-dim); font-size:14px; line-height:1.7; max-width:500px; margin:0 auto;">The teacher projects a question on the board. Students answer on their phones. A live leaderboard updates in real-time. No app install — just a browser. Closes demo deals in 60 seconds.</p>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:24px;">
+              <div style="background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:12px; padding:20px;">
+                <div style="font-size:24px; margin-bottom:8px;">📱</div>
+                <div style="font-weight:700; margin-bottom:6px;">Browser-Only</div>
+                <div style="font-size:12px; color:var(--text-dim); line-height:1.5;">Students connect to the school's local hub via WiFi. No app download. Just open a browser.</div>
+              </div>
+              <div style="background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:12px; padding:20px;">
+                <div style="font-size:24px; margin-bottom:8px;">🏆</div>
+                <div style="font-weight:700; margin-bottom:6px;">Live Leaderboard</div>
+                <div style="font-size:12px; color:var(--text-dim); line-height:1.5;">Real-time scoring, animations, and excitement. Students compete, teachers engage.</div>
+              </div>
+              <div style="background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:12px; padding:20px;">
+                <div style="font-size:24px; margin-bottom:8px;">📊</div>
+                <div style="font-weight:700; margin-bottom:6px;">Instant Analytics</div>
+                <div style="font-size:12px; color:var(--text-dim); line-height:1.5;">See which questions students got wrong most. Identify weak spots immediately.</div>
+              </div>
+              <div style="background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:12px; padding:20px;">
+                <div style="font-size:24px; margin-bottom:8px;">🔗</div>
+                <div style="font-weight:700; margin-bottom:6px;">Linked to CBT Banks</div>
+                <div style="font-size:12px; color:var(--text-dim); line-height:1.5;">Pull questions directly from your existing CBT Question Banks for review sessions.</div>
+              </div>
+            </div>
+            <div style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.2); border-radius:12px; padding:20px; display:flex; align-items:center; gap:16px;">
+              <div style="font-size:32px;">💎</div>
+              <div>
+                <div style="font-weight:700; color:#818cf8; margin-bottom:4px;">Diamond Tier Feature</div>
+                <div style="font-size:12px; color:var(--text-dim);">Available as part of the CBT Engine suite. Contact your Nexus partner to upgrade.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─────────────────── VIEW: ANALYTICS DASHBOARD ──────────── -->
+        <div class="view" id="view-analytics">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title" style="background:linear-gradient(135deg,#10b981,#3b82f6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">📈 Analytics Dashboard</h2>
+              <p class="view-sub">At-risk flagging, subject heatmaps, and grade progression intelligence.</p>
+            </div>
+            <span style="font-size:11px; font-weight:700; background:rgba(99,102,241,0.15); color:#818cf8; padding:6px 14px; border-radius:20px; border:1px solid rgba(99,102,241,0.3);">Coming in Next Release</span>
+          </div>
+          <div style="max-width:700px; margin:0 auto; width:100%;">
+            <div style="background:rgba(16,185,129,0.06); border:1px solid rgba(16,185,129,0.2); border-radius:16px; padding:32px; margin-bottom:24px; text-align:center;">
+              <div style="font-size:64px; margin-bottom:16px;">📈</div>
+              <h3 style="font-size:22px; font-weight:800; margin-bottom:12px; color:#10b981;">From Report Cards to Intelligence</h3>
+              <p style="color:var(--text-dim); font-size:14px; line-height:1.7; max-width:500px; margin:0 auto;">Stop reacting to failure after the term. The Analytics Dashboard flags students at risk <em>before</em> they fail. Subject heatmaps reveal where your school is weakest. Grade progression shows who is truly improving.</p>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:24px;">
+              <div style="background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:12px; padding:20px;">
+                <div style="font-size:24px; margin-bottom:8px;">🚨</div>
+                <div style="font-weight:700; margin-bottom:6px;">At-Risk Flagging</div>
+                <div style="font-size:12px; color:var(--text-dim); line-height:1.5;">Automatically identifies students with declining scores, attendance patterns, or missed submissions.</div>
+              </div>
+              <div style="background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:12px; padding:20px;">
+                <div style="font-size:24px; margin-bottom:8px;">🗺️</div>
+                <div style="font-weight:700; margin-bottom:6px;">Subject Heatmaps</div>
+                <div style="font-size:12px; color:var(--text-dim); line-height:1.5;">Visual grid of class performance by subject. Spot which teachers need support and which subjects underperform.</div>
+              </div>
+              <div style="background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:12px; padding:20px;">
+                <div style="font-size:24px; margin-bottom:8px;">📉</div>
+                <div style="font-weight:700; margin-bottom:6px;">Grade Progression</div>
+                <div style="font-size:12px; color:var(--text-dim); line-height:1.5;">Track individual student performance across multiple terms. Identify consistent improvers and decliners.</div>
+              </div>
+              <div style="background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:12px; padding:20px;">
+                <div style="font-size:24px; margin-bottom:8px;">📋</div>
+                <div style="font-weight:700; margin-bottom:6px;">Admin Reports</div>
+                <div style="font-size:12px; color:var(--text-dim); line-height:1.5;">Exportable PDF reports for board meetings, proprietor reviews, and accreditation audits.</div>
+              </div>
+            </div>
+            <div style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.2); border-radius:12px; padding:20px; display:flex; align-items:center; gap:16px;">
+              <div style="font-size:32px;">💎</div>
+              <div>
+                <div style="font-weight:700; color:#818cf8; margin-bottom:4px;">Diamond Tier Feature</div>
+                <div style="font-size:12px; color:var(--text-dim);">Part of the Elite Intelligence suite. Contact your Nexus partner to upgrade your school.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─────────────────── VIEW: NOTES MARKETPLACE ────────────── -->
+        <div class="view" id="view-notes-marketplace">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title" style="background:linear-gradient(135deg,#8b5cf6,#ec4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">📚 Nexus Notes Marketplace</h2>
+              <p class="view-sub">A digital storefront for teachers to sell curated study materials to students.</p>
+            </div>
+            <span style="font-size:11px; font-weight:700; background:rgba(99,102,241,0.15); color:#818cf8; padding:6px 14px; border-radius:20px; border:1px solid rgba(99,102,241,0.3);">Coming in Next Release</span>
+          </div>
+          <div style="max-width:700px; margin:0 auto; width:100%;">
+            <div style="background:rgba(139,92,246,0.06); border:1px solid rgba(139,92,246,0.2); border-radius:16px; padding:32px; margin-bottom:24px; text-align:center;">
+              <div style="font-size:64px; margin-bottom:16px;">📚</div>
+              <h3 style="font-size:22px; font-weight:800; margin-bottom:12px; color:#8b5cf6;">Teachers Earn. Students Learn.</h3>
+              <p style="color:var(--text-dim); font-size:14px; line-height:1.7; max-width:500px; margin:0 auto;">Your best teachers spend hours creating brilliant study materials. Nexus Notes lets them monetize that work — selling PDFs, past question compilations, and study guides directly to students via the school portal. The school earns a commission on every sale.</p>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:24px;">
+              <div style="background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:12px; padding:20px;">
+                <div style="font-size:24px; margin-bottom:8px;">💰</div>
+                <div style="font-weight:700; margin-bottom:6px;">Teacher Revenue</div>
+                <div style="font-size:12px; color:var(--text-dim); line-height:1.5;">Teachers upload and price their materials. Nexus handles payments, downloads, and delivery automatically.</div>
+              </div>
+              <div style="background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:12px; padding:20px;">
+                <div style="font-size:24px; margin-bottom:8px;">🏫</div>
+                <div style="font-weight:700; margin-bottom:6px;">School Commission</div>
+                <div style="font-size:12px; color:var(--text-dim); line-height:1.5;">The school sets a commission rate. Every sale generates passive revenue for the institution.</div>
+              </div>
+              <div style="background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:12px; padding:20px;">
+                <div style="font-size:24px; margin-bottom:8px;">📲</div>
+                <div style="font-weight:700; margin-bottom:6px;">Parent Access via Portal</div>
+                <div style="font-size:12px; color:var(--text-dim); line-height:1.5;">Parents browse and purchase from the school's public portal. Instant PDF delivery.</div>
+              </div>
+              <div style="background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:12px; padding:20px;">
+                <div style="font-size:24px; margin-bottom:8px;">📑</div>
+                <div style="font-weight:700; margin-bottom:6px;">Curated Content Only</div>
+                <div style="font-size:12px; color:var(--text-dim); line-height:1.5;">School admin approves all materials before listing. Maintain quality control across your marketplace.</div>
+              </div>
+            </div>
+            <div style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.2); border-radius:12px; padding:20px; display:flex; align-items:center; gap:16px;">
+              <div style="font-size:32px;">💎</div>
+              <div>
+                <div style="font-weight:700; color:#818cf8; margin-bottom:4px;">Diamond Tier Feature</div>
+                <div style="font-size:12px; color:var(--text-dim);">Requires the Always-On Portal for parent access. Contact your Nexus partner to upgrade.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─────────────────── VIEW: SKILL MASTERY TRACKING ──────── -->
+        <div class="view" id="view-skill-mastery">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title" style="background:linear-gradient(135deg,#f59e0b,#10b981);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">🎯 Skill Mastery Tracking</h2>
+              <p class="view-sub">International IEP-standard academic progress reports for every student.</p>
+            </div>
+            <span style="font-size:11px; font-weight:700; background:rgba(99,102,241,0.15); color:#818cf8; padding:6px 14px; border-radius:20px; border:1px solid rgba(99,102,241,0.3);">Coming in Next Release</span>
+          </div>
+          <div style="max-width:700px; margin:0 auto; width:100%;">
+            <div style="background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.2); border-radius:16px; padding:32px; margin-bottom:24px; text-align:center;">
+              <div style="font-size:64px; margin-bottom:16px;">🎯</div>
+              <h3 style="font-size:22px; font-weight:800; margin-bottom:12px; color:#f59e0b;">Beyond Grades — Real Learning Outcomes</h3>
+              <p style="color:var(--text-dim); font-size:14px; line-height:1.7; max-width:500px; margin:0 auto;">Report cards show scores. Skill Mastery shows <em>what a student can actually do</em>. Aligned to international competency frameworks, these reports tell parents and administrators which skills have been mastered, which are developing, and which need attention.</p>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:24px;">
+              <div style="background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:12px; padding:20px;">
+                <div style="font-size:24px; margin-bottom:8px;">🌐</div>
+                <div style="font-weight:700; margin-bottom:6px;">IEP-Standard Reports</div>
+                <div style="font-size:12px; color:var(--text-dim); line-height:1.5;">Competency-based reports aligned to international educational frameworks. Differentiate your school.</div>
+              </div>
+              <div style="background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:12px; padding:20px;">
+                <div style="font-size:24px; margin-bottom:8px;">✅</div>
+                <div style="font-weight:700; margin-bottom:6px;">Mastery Indicators</div>
+                <div style="font-size:12px; color:var(--text-dim); line-height:1.5;">Not Attempted / Developing / Approaching / Mastered — clear, actionable status for every skill.</div>
+              </div>
+              <div style="background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:12px; padding:20px;">
+                <div style="font-size:24px; margin-bottom:8px;">👩‍🏫</div>
+                <div style="font-weight:700; margin-bottom:6px;">Teacher Assessment Input</div>
+                <div style="font-size:12px; color:var(--text-dim); line-height:1.5;">Teachers record skill assessments from their devices. Syncs to the hub automatically.</div>
+              </div>
+              <div style="background:rgba(255,255,255,0.03); border:1px solid var(--glass-border); border-radius:12px; padding:20px;">
+                <div style="font-size:24px; margin-bottom:8px;">📄</div>
+                <div style="font-weight:700; margin-bottom:6px;">Printable + Portal</div>
+                <div style="font-size:12px; color:var(--text-dim); line-height:1.5;">Skill Mastery reports are printable as PDFs and visible to parents on the school portal.</div>
+              </div>
+            </div>
+            <div style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.2); border-radius:12px; padding:20px; display:flex; align-items:center; gap:16px;">
+              <div style="font-size:32px;">💎</div>
+              <div>
+                <div style="font-weight:700; color:#818cf8; margin-bottom:4px;">Diamond Tier Feature</div>
+                <div style="font-size:12px; color:var(--text-dim);">Part of the Elite Intelligence suite. Contact your Nexus partner to upgrade your school.</div>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <!-- ─────────────────── VIEW: SETTINGS ──────────────────────────── -->
+
         <div class="view" id="view-settings">
           <div class="view-header">
             <div>
@@ -2197,6 +2683,7 @@
                 <button class="primary-btn" style="width:100%; font-size:11px; padding:6px; background:linear-gradient(135deg, #b8860b, #ffd700); color:#000;">Apply Mode</button>
               </div>
             </div>
+
           </div>
         </div>
 
@@ -2355,22 +2842,6 @@
     </div>
     <!-- end .app-shell -->
 
-    <script src="libs/qrcode.min.js"></script>
-    <script src="libs/sweetalert2.all.min.js"></script>
-    <script src="js/ui-utils.js"></script>
-    <script src="js/state.js"></script>
-    <script src="js/nav.js"></script>
-    <script src="js/dashboard.js"></script>
-    <script src="js/teachers.js"></script>
-    <script src="js/students.js"></script>
-    <script src="js/printhub.js"></script>
-    <script src="js/result-studio.js"></script>
-    <script src="js/settings.js"></script>
-    <script src="js/sync.js"></script>
-    <script src="js/attendance.js"></script>
-    <script src="js/pulse-ui.js"></script>
-    <script src="js/fees-ui.js"></script>
-    <script src="js/boot.js"></script>
     <!-- Global Hidden Inputs -->
     <input type="file" id="csv-upload" accept=".csv" style="display: none" />
   
@@ -2648,6 +3119,8 @@
       </div>
     </div>
     <!-- ═══ Nexus System Scripts ══════════════════════════════════════════ -->
+    <script src="libs/qrcode.min.js"></script>
+    <script src="libs/sweetalert2.all.min.js"></script>
     <script src="js/state.js"></script>
     <script src="js/ui-utils.js"></script>
     <script src="js/nav.js"></script>
@@ -2664,6 +3137,34 @@
     <script src="js/pulse-ui.js"></script>
     <script src="js/boot.js"></script>
     <script src="js/scholar-ui.js"></script>
+    <script src="js/cbt-ui.js"></script>
+    <script src="js/attendance-ui.js"></script>
 
-    </body>
+    <!-- ── Staff Accounts Slide-In Panel (global overlay) ──────────────── -->
+    <div id="admin-mgmt-overlay"></div>
+    <div id="admin-mgmt-panel">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
+        <div>
+          <h3 style="margin:0 0 4px;font-size:16px;font-weight:700;">👥 Staff Accounts</h3>
+          <p style="font-size:12px;color:rgba(255,255,255,0.4);margin:0;">Manage who can log in to Nexus School OS</p>
+        </div>
+        <button id="admin-mgmt-close" style="background:transparent;border:none;color:rgba(255,255,255,0.45);font-size:20px;cursor:pointer;line-height:1;padding:2px 6px;border-radius:4px;" title="Close">✕</button>
+      </div>
+
+      <button id="admin-add-btn" style="width:100%;padding:11px;background:linear-gradient(135deg,rgba(99,102,241,0.25),rgba(99,102,241,0.12));border:1px solid rgba(99,102,241,0.45);color:#818cf8;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:18px;transition:all 0.2s;" onmouseenter="this.style.background='rgba(99,102,241,0.35)'" onmouseleave="this.style.background='linear-gradient(135deg,rgba(99,102,241,0.25),rgba(99,102,241,0.12))'">+ Add Staff Account</button>
+
+      <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.8px;">Current Accounts</div>
+      <div id="admin-list-container" style="flex:1;min-height:80px;"></div>
+
+      <div style="margin-top:20px;padding:12px;background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid rgba(255,255,255,0.07);">
+        <p style="font-size:11px;color:rgba(255,255,255,0.3);margin:0;line-height:1.6;">
+          👑 <strong style="color:rgba(255,255,255,0.5);">Super Admin</strong> — Full system access<br>
+          🔑 <strong style="color:rgba(255,255,255,0.5);">Manager</strong> — Most features, no admin management<br>
+          🧑‍💼 <strong style="color:rgba(255,255,255,0.5);">Staff</strong> — Limited read access<br><br>
+          New accounts appear instantly on the login screen.
+        </p>
+      </div>
+    </div>
+  </body>
+
 </html>

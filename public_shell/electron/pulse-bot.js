@@ -6,14 +6,26 @@
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const { database } = require("../../private_engine");
 const path = require("path");
-const os = require("os");
+const os   = require("os");
+const fs   = require("fs");
 const QRCode = require("qrcode");
 
+// Suppress Puppeteer "Execution context was destroyed" noise that fires
+// when WhatsApp LOGOUT causes a page navigation mid-inject. This is expected
+// and harmless — the bot self-recovers by clearing the stale auth.
+process.on("unhandledRejection", (reason) => {
+  if (reason?.message?.includes("Execution context was destroyed")) return;
+  if (reason?.message?.includes("Session closed")) return;
+  console.error("[Pulse Bot] Unhandled rejection:", reason);
+});
+
 // ─── Module-level WA client state ─────────────────────────────────────────────
-let client = null;
-let mainWindowRef = null;
-let isReady = false;
-let qrCodeData = null;
+let client          = null;
+let mainWindowRef   = null;
+let isReady         = false;
+let qrCodeData      = null;
+let _authPath       = null; // set when startPulse() runs
+let _initInProgress = false; // true while client.initialize() is pending
 
 // ─── Conversation Session Manager ─────────────────────────────────────────────
 // Key: last-10-digit phone string  |  Value: Session object
@@ -86,10 +98,10 @@ async function startPulse() {
   console.log("[Pulse Bot] Starting...");
   sendStatus("starting");
 
+  _authPath = path.join(os.homedir(), ".nexus_pulse_auth");
   try {
-    const authPath = path.join(os.homedir(), ".nexus_pulse_auth");
     client = new Client({
-      authStrategy: new LocalAuth({ dataPath: authPath }),
+      authStrategy: new LocalAuth({ dataPath: _authPath }),
       puppeteer: {
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
@@ -128,8 +140,26 @@ async function startPulse() {
 
     client.on("disconnected", (reason) => {
       console.log("[Pulse Bot] Disconnected:", reason);
-      sendStatus("disconnected");
-      destroyPulse();
+      const userMsg = reason === "LOGOUT"
+        ? "WhatsApp session was logged out. Click \"Start Bot\" to scan a fresh QR."
+        : null;
+      sendStatus("disconnected", userMsg);
+
+      if (reason === "LOGOUT" && _authPath) {
+        // Clear the stale LocalAuth folder so next start shows a fresh QR
+        try {
+          if (fs.existsSync(_authPath)) {
+            fs.rmSync(_authPath, { recursive: true, force: true });
+            console.log("[Pulse Bot] Stale auth session cleared — next start will show QR.");
+          }
+        } catch (clearErr) {
+          console.error("[Pulse Bot] Could not clear stale auth:", clearErr.message);
+        }
+      }
+
+      // Delay destroy so client.initialize() can settle before Puppeteer tears down
+      const delay = _initInProgress ? 3000 : 0;
+      setTimeout(() => destroyPulse(), delay);
     });
 
     client.on("message", async (msg) => {
@@ -140,10 +170,20 @@ async function startPulse() {
       }
     });
 
-    await client.initialize();
+    _initInProgress = true;
+    try {
+      await client.initialize();
+    } finally {
+      _initInProgress = false;
+    }
   } catch (err) {
-    console.error("[Pulse Bot] Failed to initialize:", err);
-    sendStatus("error", err.message);
+    _initInProgress = false;
+    // Suppress context-destroyed noise from LOGOUT — handled by disconnected event
+    if (!err?.message?.includes("Execution context was destroyed") &&
+        !err?.message?.includes("Session closed")) {
+      console.error("[Pulse Bot] Failed to initialize:", err);
+      sendStatus("error", err.message);
+    }
     destroyPulse();
   }
 }
@@ -368,7 +408,21 @@ function queryAttendance(db, studentId, academicSession, term) {
     `SELECT date, term ${base}${termClause} AND status='Absent' ORDER BY date`
   ).all(...args);
 
-  return { present, total, absentRows };
+  let tier = process.env.DEV_MOCK_TIER || "Gold";
+  try {
+    const s = db.prepare("SELECT value FROM app_settings WHERE key='license_payload'").get();
+    if (s) tier = JSON.parse(s.value).tier;
+  } catch(e) {}
+
+  let subjectAggRows = [];
+  if (tier === "Diamond") {
+     const subBase = "FROM subject_attendance_agg WHERE student_id=? AND academic_session=?";
+     subjectAggRows = db.prepare(
+       `SELECT subject_name, total_classes, classes_attended, term ${subBase}${termClause} ORDER BY subject_name`
+     ).all(...args);
+  }
+
+  return { present, total, absentRows, subjectAggRows, tier };
 }
 
 // ─── Response Builders ─────────────────────────────────────────────────────────
@@ -436,7 +490,7 @@ async function sendAttendance(msg, session, termOverride = null) {
   let text = `📅 *Attendance Record*\n_Period: ${periodLabel}_\n${DIV}\n\n`;
 
   for (const student of students) {
-    const { present, total, absentRows } = queryAttendance(
+    const { present, total, absentRows, subjectAggRows, tier } = queryAttendance(
       db, student.id, termConfig.academic_session,
       scope === "year" ? null : activeTerm
     );
@@ -453,7 +507,6 @@ async function sendAttendance(msg, session, termOverride = null) {
 
     text += `${emoji} *${present}/${total} days present* (${pct.toFixed(1)}%)\n`;
 
-    // Missed dates breakdown
     if (absentRows.length > 0) {
       text += `\n📌 *Days Absent (${absentRows.length}):*\n`;
 
@@ -477,6 +530,23 @@ async function sendAttendance(msg, session, termOverride = null) {
       }
     } else {
       text += `✅ _No absences recorded!_\n`;
+    }
+
+    if (tier === "Diamond" && subjectAggRows && subjectAggRows.length > 0) {
+      text += `\n🔬 *Subject-Level Engagement:*\n`;
+      let currentTerm = "";
+      for (const row of subjectAggRows) {
+         if (scope === "year" && row.term !== currentTerm) {
+            currentTerm = row.term;
+            text += `_${currentTerm}:_\n`;
+         }
+         const subPct = row.total_classes > 0 ? (row.classes_attended / row.total_classes) * 100 : 0;
+         text += `  • ${row.subject_name}: *${subPct.toFixed(0)}%*\n`;
+      }
+    } else if (tier !== "Diamond") {
+      // Upsell info requested in plan (though maybe not strictly explicit queries only)
+      // We will only append it if they are not diamond and have no subject rows
+      text += `\n_Note: Granular subject-level tracking is available on the Diamond tier. Contact the school office for deeper insights._\n`;
     }
 
     text += `\n`;
