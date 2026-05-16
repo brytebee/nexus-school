@@ -1083,6 +1083,34 @@ const _parseFeeSettings = (db) => {
 };
 
 /**
+ * isStudentFeeGated — checks if a student's results should be withheld.
+ * termOrNull: pass the active term string for single-term check, or null for ALL terms in the session.
+ * Returns { gated: bool, balance: number }
+ */
+function isStudentFeeGated(db, studentId, session, termOrNull) {
+  const s = _parseFeeSettings(db);
+  const enabled   = s.fee_gate_enabled !== false; // default on
+  const mode      = s.fee_gate_mode      || 'fixed';
+  const threshold = Number(s.fee_gate_threshold) || 0;
+  if (!enabled) return { gated: false, balance: 0 };
+
+  const balRow = termOrNull
+    ? db.prepare(`SELECT COALESCE(SUM(total_billed - total_paid), 0) AS bal FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?`).get(studentId, session, termOrNull)
+    : db.prepare(`SELECT COALESCE(SUM(total_billed - total_paid), 0) AS bal FROM student_fees WHERE student_id = ? AND academic_session = ?`).get(studentId, session);
+  const balance = balRow?.bal || 0;
+  if (balance <= 0) return { gated: false, balance: 0 };
+
+  if (mode === 'percent') {
+    const billedRow = db.prepare(`SELECT COALESCE(SUM(total_billed), 0) AS b FROM student_fees WHERE student_id = ? AND academic_session = ?`).get(studentId, session);
+    const totalBilled = billedRow?.b || 0;
+    if (totalBilled <= 0) return { gated: false, balance };
+    return { gated: (balance / totalBilled * 100) >= threshold, balance };
+  }
+  // fixed mode: threshold 0 = any positive balance
+  return { gated: threshold === 0 ? balance > 0 : balance >= threshold, balance };
+}
+
+/**
  * fees:get-roster — students LEFT-JOINed with student_fees for a given term.
  * balance = total_billed - total_paid is computed dynamically; never stored.
  */
@@ -1337,6 +1365,11 @@ ipcMain.handle("get-student-attendance-report", async (event, { student_id }) =>
 // ── V2: Query Results (dynamic scope filtering) ───────────────────────────────
 ipcMain.handle("query-results", (event, { scope, session, term, class_name, subject, teacher_id, student_id }) => {
   console.log(`[Diagnostic] query-results: scope=${scope}, session=${session}, term=${term}`);
+  // ── Silver plan: only 'all' scope permitted ──────────────────────────────
+  const _qrTier = licenseStatus?.tier || 'Silver';
+  if (_qrTier === 'Silver' && scope && scope !== 'all') {
+    return { ok: false, error: 'Generating individual, class, or subject reports requires a Gold or Diamond plan. Contact your Nexus Partner to upgrade.', results: [] };
+  }
   try {
     const db = database.getDb();
 
@@ -2343,12 +2376,33 @@ function createWindow() {
         WHERE student_id = ? AND academic_session = ? AND term = ?
       `).get(id, termConfig.academic_session, termConfig.term) || { total_billed: 0, total_paid: 0 };
 
+      // ── Fee Gate (Gold / Diamond only — Silver has no financial module) ────
+      const _portalTier = licenseStatus?.tier || 'Silver';
+      let resultsBlocked = false;
+      let resultsBlockedMsg = '';
+      let resultsBlockedBalance = 0;
+      if (_portalTier !== 'Silver') {
+        try {
+          const gateResult = isStudentFeeGated(db, id, termConfig.academic_session, termConfig.term);
+          if (gateResult.gated) {
+            resultsBlocked = true;
+            resultsBlockedBalance = gateResult.balance;
+            resultsBlockedMsg = `Your child's academic results are currently withheld pending fee clearance. Outstanding balance: ₦${Number(gateResult.balance).toLocaleString('en-NG')}. Please contact the school bursar to resolve this.`;
+          }
+        } catch (feeGateErr) {
+          console.warn('[Portal] Fee gate check failed (non-fatal):', feeGateErr.message);
+        }
+      }
+
       res.json({
         ok: true,
         schoolName,
         termConfig,
         student,
-        results,
+        results: resultsBlocked ? [] : results,
+        resultsBlocked,
+        resultsBlockedMsg,
+        resultsBlockedBalance,
         attendance,
         fees
       });

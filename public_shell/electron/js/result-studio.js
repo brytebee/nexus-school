@@ -30,9 +30,43 @@
           stuEl.innerHTML = `<option value="">-- All Students --</option>` +
             students.map(s => `<option value="${s.id}">${s.name} (${s.class_name})</option>`).join("");
         }
+
+        // ── Silver tier scope lock ────────────────────────────────────
+        try {
+          const identity = await window.electronAPI.getIdentity();
+          window._rsTier = identity?.tier || 'Silver';
+        } catch(e) { window._rsTier = 'Silver'; }
+
+        if (window._rsTier === 'Silver') {
+          const scopeEl = document.getElementById('rs-scope');
+          if (scopeEl) {
+            [...scopeEl.options].forEach(opt => { if (opt.value !== 'all') opt.disabled = true; });
+            scopeEl.value = 'all';
+            rsOnScopeChange();
+          }
+          // Inject compact upgrade badge into the view header
+          const hdrRight = document.querySelector('#view-result-studio .view-header > div:last-child');
+          if (hdrRight && !document.getElementById('rs-silver-notice')) {
+            const badge = document.createElement('div');
+            badge.id = 'rs-silver-notice';
+            badge.style.cssText = 'background:rgba(255,200,0,0.08);border:1px solid rgba(255,200,0,0.22);border-radius:8px;padding:7px 14px;font-size:11px;color:rgba(255,200,0,0.85);display:flex;align-items:center;gap:8px;flex-shrink:0;';
+            badge.innerHTML = '<span>⭐</span><span><strong>Silver Plan</strong> — Scope locked to <em>Entire School</em>. Upgrade to Gold for granular reports.</span>';
+            hdrRight.prepend(badge);
+          }
+        }
       }
 
       async function rsOnScopeChange() {
+        // Re-enforce Silver lock on every scope change attempt
+        if (window._rsTier === 'Silver') {
+          const scopeEl = document.getElementById('rs-scope');
+          if (scopeEl) scopeEl.value = 'all';
+          ['class','teacher','subject','student'].forEach(s => {
+            const el = document.getElementById('rs-scope-' + s);
+            if (el) el.style.display = 'none';
+          });
+          return;
+        }
         const scope = document.getElementById("rs-scope").value;
         ["class","teacher","subject","student"].forEach(s => {
           const el = document.getElementById("rs-scope-" + s);
