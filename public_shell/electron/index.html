@@ -176,6 +176,16 @@
           </li>
           <li
             class="nav-item"
+            data-view="portal-content"
+            data-tier="Gold"
+            onclick="showView('portal-content')"
+          >
+            <span class="nav-icon">📰</span>
+            <span class="nav-label">Portal Content</span>
+            <span class="nav-lock" style="display:none;margin-left:auto;font-size:12px;">🔒</span>
+          </li>
+          <li
+            class="nav-item"
             data-view="scholar"
             data-tier="Diamond"
             onclick="showView('scholar')"
@@ -513,6 +523,120 @@
               <p style="margin-top: 15px; font-size: 11px; color: var(--text-dim); text-align: center;">
                 Print and place at school reception.
               </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─────────────────── VIEW: PORTAL CONTENT (Gold) ────────────────── -->
+        <div class="view" id="view-portal-content">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title" style="color:var(--accent-gold);">Portal Content</h2>
+              <p class="view-sub">Manage News and Policies for the Sovereign Portal</p>
+            </div>
+          </div>
+          
+          <div style="display:flex;gap:20px;margin-top:20px;">
+            <div style="width:200px;display:flex;flex-direction:column;gap:8px;">
+                <button id="pc-tab-news" class="pc-tab active" onclick="switchPcTab('news')" style="padding:12px;text-align:left;background:rgba(255,255,255,0.1);border:none;color:#fff;border-radius:8px;cursor:pointer;">📢 News Articles</button>
+                <button id="pc-tab-policies" class="pc-tab" onclick="switchPcTab('policies')" style="padding:12px;text-align:left;background:transparent;border:none;color:var(--text-dim);border-radius:8px;cursor:pointer;">📋 School Policies</button>
+            </div>
+            
+            <div style="flex:1;background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.05);border-radius:16px;padding:24px;">
+                <!-- NEWS TAB -->
+                <div id="pc-content-news" class="pc-tab-content">
+                    <div id="pc-news-list-view">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                            <h3 style="font-size:16px;color:#fff;">News Articles</h3>
+                            <button class="primary-btn" onclick="showNewsEditor(true)" style="padding:8px 16px;font-size:13px;">＋ New Article</button>
+                        </div>
+                        <div id="pc-news-list"></div>
+                    </div>
+                    
+                    <div id="pc-news-edit-view" style="display:none;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                            <h3 style="font-size:16px;color:#fff;">Edit Article</h3>
+                            <button class="secondary-btn" onclick="hideNewsEditor()" style="padding:8px 16px;font-size:13px;">Cancel</button>
+                        </div>
+                        <input type="hidden" id="pc-news-id">
+                        <div style="display:flex;gap:16px;margin-bottom:16px;">
+                            <div style="flex:2;">
+                                <label class="ph-label">Title</label>
+                                <input type="text" id="pc-news-title" class="modern-input" placeholder="Article Title">
+                            </div>
+                            <div style="flex:1;">
+                                <label class="ph-label">Category</label>
+                                <select id="pc-news-category" class="modern-input">
+                                    <option value="general">General Notice</option>
+                                    <option value="pta">PTA</option>
+                                    <option value="fees">Fees & Payments</option>
+                                    <option value="infrastructure">Infrastructure</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div style="margin-bottom:16px;">
+                            <div style="display:flex;justify-content:space-between;align-items:flex-end;">
+                                <label class="ph-label">Content (Markdown)</label>
+                                <label style="font-size:12px;color:var(--accent);cursor:pointer;border:1px dashed var(--accent);padding:4px 8px;border-radius:4px;">
+                                    Import .md file
+                                    <input type="file" accept=".md,.txt" style="display:none;" onchange="importMarkdown(this, 'pc-news-body')">
+                                </label>
+                            </div>
+                            <textarea id="pc-news-body" class="modern-input" style="height:250px;margin-top:8px;font-family:monospace;font-size:13px;" placeholder="Write content in Markdown..."></textarea>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <label style="display:flex;align-items:center;gap:8px;color:#fff;font-size:14px;cursor:pointer;">
+                                <input type="checkbox" id="pc-news-published" checked> Publish immediately
+                            </label>
+                            <button class="primary-btn" onclick="saveNews()" style="padding:10px 24px;">Save Article</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- POLICIES TAB -->
+                <div id="pc-content-policies" class="pc-tab-content" style="display:none;">
+                    <div id="pc-policies-list-view">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                            <h3 style="font-size:16px;color:#fff;">School Policies</h3>
+                            <button class="primary-btn" onclick="showPolicyEditor(true)" style="padding:8px 16px;font-size:13px;">＋ New Policy</button>
+                        </div>
+                        <div id="pc-policies-list"></div>
+                    </div>
+                    
+                    <div id="pc-policies-edit-view" style="display:none;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                            <h3 style="font-size:16px;color:#fff;">Edit Policy</h3>
+                            <button class="secondary-btn" onclick="hidePolicyEditor()" style="padding:8px 16px;font-size:13px;">Cancel</button>
+                        </div>
+                        <input type="hidden" id="pc-pol-id">
+                        <div style="display:flex;gap:16px;margin-bottom:16px;">
+                            <div style="flex:3;">
+                                <label class="ph-label">Policy Title</label>
+                                <input type="text" id="pc-pol-title" class="modern-input" placeholder="e.g. Code of Conduct">
+                            </div>
+                            <div style="flex:1;">
+                                <label class="ph-label">Display Order</label>
+                                <input type="number" id="pc-pol-order" class="modern-input" value="0">
+                            </div>
+                        </div>
+                        <div style="margin-bottom:16px;">
+                            <div style="display:flex;justify-content:space-between;align-items:flex-end;">
+                                <label class="ph-label">Policy Content (Markdown)</label>
+                                <label style="font-size:12px;color:var(--accent);cursor:pointer;border:1px dashed var(--accent);padding:4px 8px;border-radius:4px;">
+                                    Import .md file
+                                    <input type="file" accept=".md,.txt" style="display:none;" onchange="importMarkdown(this, 'pc-pol-body')">
+                                </label>
+                            </div>
+                            <textarea id="pc-pol-body" class="modern-input" style="height:250px;margin-top:8px;font-family:monospace;font-size:13px;" placeholder="Write content in Markdown..."></textarea>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <label style="display:flex;align-items:center;gap:8px;color:#fff;font-size:14px;cursor:pointer;">
+                                <input type="checkbox" id="pc-pol-published" checked> Publish immediately
+                            </label>
+                            <button class="primary-btn" onclick="savePolicy()" style="padding:10px 24px;">Save Policy</button>
+                        </div>
+                    </div>
+                </div>
             </div>
           </div>
         </div>
@@ -3139,6 +3263,7 @@
     <script src="js/scholar-ui.js"></script>
     <script src="js/cbt-ui.js"></script>
     <script src="js/attendance-ui.js"></script>
+    <script src="js/portal-content-ui.js"></script>
 
     <!-- ── Staff Accounts Slide-In Panel (global overlay) ──────────────── -->
     <div id="admin-mgmt-overlay"></div>

@@ -736,9 +736,10 @@ module.exports = {
   },
   sendOTP: async (phone, pin, schoolName) => {
     if (!client || !isReady) throw new Error("WhatsApp bot not ready");
-    // Normalize phone to E.164
+    // Normalize phone to E.164 robustly
     let target = phone.replace(/\D/g, "");
-    if (target.startsWith("0")) target = "234" + target.slice(1);
+    if (target.length === 10) target = "234" + target;
+    else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
     if (!target.includes("@c.us")) target += "@c.us";
     
     const message = `🔐 *Nexus Security Challenge*\n\nYour access PIN for *${schoolName}* is: *${pin}*\n\nThis PIN is valid for 12 hours. Do not share this code with anyone.`;
@@ -747,7 +748,8 @@ module.exports = {
   sendAttendanceAlert: async (phone, studentName, schoolName, date) => {
     if (!client || !isReady) return; // Silent fail for background alerts
     let target = phone.replace(/\D/g, "");
-    if (target.startsWith("0")) target = "234" + target.slice(1);
+    if (target.length === 10) target = "234" + target;
+    else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
     if (!target.includes("@c.us")) target += "@c.us";
 
     const formattedDate = date ? new Date(date).toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long' }) : 'today';
@@ -758,7 +760,8 @@ module.exports = {
   sendFeeReminder: async (phone, studentName, schoolName, balance) => {
     if (!client || !isReady) return;
     let target = phone.replace(/\D/g, "");
-    if (target.startsWith("0")) target = "234" + target.slice(1);
+    if (target.length === 10) target = "234" + target;
+    else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
     if (!target.includes("@c.us")) target += "@c.us";
 
     const message = `💳 *Nexus Pulse: Fee Reminder*\n\nHello! This is a friendly reminder from *${schoolName}* regarding *${studentName}'s* outstanding balance.\n\n*Current Balance:* ₦${balance.toLocaleString()}\n\nPlease kindly clear this balance at your earliest convenience to avoid any disruption to academic activities.\n\n_Thank you for your partnership._`;
@@ -768,7 +771,8 @@ module.exports = {
   sendMorningBriefing: async (phone, schoolName, stats) => {
     if (!client || !isReady) return;
     let target = phone.replace(/\D/g, "");
-    if (target.startsWith("0")) target = "234" + target.slice(1);
+    if (target.length === 10) target = "234" + target;
+    else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
     if (!target.includes("@c.us")) target += "@c.us";
 
     const date = new Date().toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -782,7 +786,8 @@ module.exports = {
   sendRawMessage: async (phone, message) => {
     if (!client || !isReady) throw new Error('WhatsApp bot not connected');
     let target = phone.replace(/\D/g, "");
-    if (target.startsWith("0")) target = "234" + target.slice(1);
+    if (target.length === 10) target = "234" + target;
+    else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
     if (!target.includes("@c.us")) target += "@c.us";
     await client.sendMessage(target, message);
   }
