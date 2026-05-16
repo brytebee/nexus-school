@@ -49,10 +49,15 @@
       // Tabs & Settings
       "fees-tab-btn-roster","fees-tab-btn-structure","fees-tab-btn-adjustments",
       "fees-tab-roster","fees-tab-structure","fees-tab-adjustments",
-      "modal-fees-settings","btn-fees-settings-close","btn-fees-settings-cancel",
-      "btn-fees-settings-save","fees-reminder-1","fees-reminder-2",
+      // Settings slide-in panel
+      "fees-settings-panel","btn-fees-settings-close","btn-fees-settings-save",
+      "fees-reminder-1","fees-reminder-2",
       "fees-accounts-list","btn-fees-add-account",
       "fees-installments-list","btn-fees-add-installment",
+      // Fee Gate Config
+      "fee-gate-enabled","fee-gate-config-group","fee-gate-mode",
+      "fee-gate-threshold-group","fee-gate-threshold","fee-gate-threshold-label",
+      // Fee Shield (Diamond)
       "fees-shield-section","fees-shield-enabled","fees-shield-mode-group","fees-shield-mode",
       // Payment modal (Diamond)
       "modal-record-payment","payment-student-id","payment-modal-student-name",
@@ -94,6 +99,8 @@
     setTimeout(() => { el.style.opacity = "0"; }, 2500);
   }
 
+  function _openPanel()  { const p = $["fees-settings-panel"]; if (p) p.style.transform = 'translateX(0)'; }
+  function _closePanel() { const p = $["fees-settings-panel"]; if (p) p.style.transform = 'translateX(100%)'; }
   function _openModal(id)  { const el = $[id]; if (el) { el.style.display = "flex"; } }
   function _closeModal(id) { const el = $[id]; if (el) { el.style.display = "none"; } }
 
@@ -616,7 +623,7 @@
     return div;
   }
 
-  // ── Unified Settings Modal ───────────────────────────────────────────────────
+  // ── Unified Settings Panel (slide-in) ────────────────────────────────────────
   async function _openSettingsModal() {
     const res = await window.electronAPI.fees.getSettings();
     const s   = res.ok ? (res.data || {}) : {};
@@ -648,13 +655,27 @@
       }
     }
 
+    // ── Fee Gate Config ─────────────────────────────────────────────────────
+    const gateEnabled = s.fee_gate_enabled !== false; // default on
+    const gateMode    = s.fee_gate_mode || 'fixed';
+    const gateThresh  = Number(s.fee_gate_threshold) || 0;
+    if ($["fee-gate-enabled"]) $["fee-gate-enabled"].checked = gateEnabled;
+    if ($["fee-gate-config-group"]) $["fee-gate-config-group"].style.display = gateEnabled ? 'flex' : 'none';
+    // Map stored mode to UI option: threshold 0 + fixed → 'any', else use stored mode
+    const uiMode = (gateMode === 'fixed' && gateThresh === 0) ? 'any' : gateMode;
+    if ($["fee-gate-mode"]) $["fee-gate-mode"].value = uiMode;
+    if ($["fee-gate-threshold"]) $["fee-gate-threshold"].value = gateThresh || '';
+    if ($["fee-gate-threshold-group"]) $["fee-gate-threshold-group"].style.display = uiMode !== 'any' ? 'block' : 'none';
+    if ($["fee-gate-threshold-label"]) $["fee-gate-threshold-label"].textContent = gateMode === 'percent' ? 'Threshold (% of billed)' : 'Threshold Amount (₦)';
+
+    // Fee Shield (Diamond)
     if ($["fees-shield-section"]) $["fees-shield-section"].style.display = _isDiamond ? "block" : "none";
     if ($["fees-shield-enabled"]) $["fees-shield-enabled"].checked = !!s.fee_shield_enabled;
     if ($["fees-shield-mode"])    $["fees-shield-mode"].value        = s.fee_shield_mode || "warn";
     if ($["fees-shield-mode-group"]) {
       $["fees-shield-mode-group"].style.display = s.fee_shield_enabled ? "block" : "none";
     }
-    _openModal("modal-fees-settings");
+    _openPanel();
   }
 
   async function _saveSettings() {
@@ -684,6 +705,14 @@
       }
     });
 
+    // Fee Gate config
+    const gateEnabled = $["fee-gate-enabled"]?.checked || false;
+    const uiMode      = $["fee-gate-mode"]?.value || 'any';
+    const threshold   = Number($["fee-gate-threshold"]?.value) || 0;
+    patch.fee_gate_enabled   = gateEnabled;
+    patch.fee_gate_mode      = uiMode === 'any' ? 'fixed' : uiMode; // 'any' stored as fixed+threshold 0
+    patch.fee_gate_threshold = uiMode === 'any' ? 0 : threshold;
+
     if (_isDiamond) {
       patch.fee_shield_enabled = $["fees-shield-enabled"]?.checked || false;
       patch.fee_shield_mode    = $["fees-shield-mode"]?.value      || "warn";
@@ -696,7 +725,7 @@
     if (btn) { btn.disabled = false; btn.textContent = "Save Settings"; }
 
     if (res.ok) {
-      _closeModal("modal-fees-settings");
+      _closePanel();
       _showIndicator("✅ Settings saved");
     } else {
       console.error("[Financial Hub] saveSettings failed:", res.error);
@@ -722,11 +751,20 @@
       _renderRoster(_roster);
     });
 
-    // Settings modal
+    // Settings slide-in panel
     $["btn-fees-settings"]?.addEventListener("click", _openSettingsModal);
-    $["btn-fees-settings-close"]?.addEventListener("click", () => _closeModal("modal-fees-settings"));
-    $["btn-fees-settings-cancel"]?.addEventListener("click", () => _closeModal("modal-fees-settings"));
+    $["btn-fees-settings-close"]?.addEventListener("click", _closePanel);
     $["btn-fees-settings-save"]?.addEventListener("click", _saveSettings);
+
+    // Fee gate toggle
+    $["fee-gate-enabled"]?.addEventListener("change", (e) => {
+      if ($["fee-gate-config-group"]) $["fee-gate-config-group"].style.display = e.target.checked ? 'flex' : 'none';
+    });
+    // Threshold label update on mode change
+    $["fee-gate-mode"]?.addEventListener("change", (e) => {
+      const lbl = $["fee-gate-threshold-label"];
+      if (lbl) lbl.textContent = e.target.value === 'percent' ? 'Threshold (% of billed)' : 'Threshold Amount (₦)';
+    });
     
     // Dynamic lists events
     $["btn-fees-add-account"]?.addEventListener("click", () => {
@@ -836,7 +874,7 @@
     });
 
     // Close modals on backdrop click
-    ["modal-record-payment", "modal-ledger", "modal-fees-settings"].forEach(id => {
+    ["modal-record-payment", "modal-ledger"].forEach(id => {
       $[id]?.addEventListener("click", (e) => {
         if (e.target === $[id]) _closeModal(id);
       });

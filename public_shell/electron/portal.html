@@ -555,17 +555,31 @@
                 DOM.statFees.style.color = balance <= 0 ? 'var(--success)' : 'var(--danger)';
             }
             
-            // Results
+            // Results — may be blocked by fee gate
             if (DOM.resultsList) {
-                DOM.resultsList.innerHTML = data.results.length 
-                    ? data.results.map(r => `
-                        <div class="result-row">
-                            <div class="res-sub">${r.subject}</div>
-                            <div class="res-score">${r.score}</div>
-                        </div>
-                    `).join('')
-                    : '<div style="text-align:center; padding: 24px; color: var(--text-dim); font-weight: 500;">No results published yet.</div>';
+                if (data.resultsBlocked) {
+                    // Show prominent fee-gate card
+                    DOM.resultsList.innerHTML = `
+                        <div style="background:rgba(255,80,80,0.08);border:1px solid rgba(255,80,80,0.3);
+                                    border-radius:16px;padding:28px 24px;text-align:center;margin:8px 0;">
+                            <div style="font-size:36px;margin-bottom:12px;">🔒</div>
+                            <div style="font-weight:700;font-size:16px;margin-bottom:10px;color:#ff8080;">Results Withheld</div>
+                            <div style="font-size:13px;line-height:1.7;color:rgba(255,255,255,0.7);max-width:380px;margin:0 auto;">
+                                ${data.resultsBlockedMsg || 'Results are withheld pending fee clearance. Please contact the school office.'}
+                            </div>
+                        </div>`;
+                } else {
+                    DOM.resultsList.innerHTML = data.results.length
+                        ? data.results.map(r => `
+                            <div class="result-row">
+                                <div class="res-sub">${r.subject}</div>
+                                <div class="res-score">${r.score}</div>
+                            </div>
+                        `).join('')
+                        : '<div style="text-align:center; padding: 24px; color: var(--text-dim); font-weight: 500;">No results published yet.</div>';
+                }
             }
+
 
             // Fees section
             const feesEl = document.getElementById('fees-content');

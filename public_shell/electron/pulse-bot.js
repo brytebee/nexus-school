@@ -425,6 +425,35 @@ function queryAttendance(db, studentId, academicSession, term) {
   return { present, total, absentRows, subjectAggRows, tier };
 }
 
+// ─── Fee Gate Config (mirrors main.js isStudentFeeGated) ──────────────────────
+function _getPulseFeeGateConfig(db) {
+  try {
+    const raw = db.prepare("SELECT value FROM app_settings WHERE key = 'fee_settings'").get()?.value;
+    const s = raw ? JSON.parse(raw) : {};
+    return {
+      enabled:   s.fee_gate_enabled !== false,
+      mode:      s.fee_gate_mode      || 'fixed',
+      threshold: Number(s.fee_gate_threshold) || 0,
+    };
+  } catch { return { enabled: true, mode: 'fixed', threshold: 0 }; }
+}
+
+function _isPulseFeeGated(db, studentId, session, termOrNull) {
+  const cfg = _getPulseFeeGateConfig(db);
+  if (!cfg.enabled) return { gated: false, balance: 0 };
+  const balRow = termOrNull
+    ? db.prepare(`SELECT COALESCE(SUM(total_billed-total_paid),0) AS bal FROM student_fees WHERE student_id=? AND academic_session=? AND term=?`).get(studentId, session, termOrNull)
+    : db.prepare(`SELECT COALESCE(SUM(total_billed-total_paid),0) AS bal FROM student_fees WHERE student_id=? AND academic_session=?`).get(studentId, session);
+  const balance = balRow?.bal || 0;
+  if (balance <= 0) return { gated: false, balance: 0 };
+  if (cfg.mode === 'percent') {
+    const billedRow = db.prepare(`SELECT COALESCE(SUM(total_billed),0) AS b FROM student_fees WHERE student_id=? AND academic_session=?`).get(studentId, session);
+    const b = billedRow?.b || 0;
+    return { gated: b > 0 && (balance / b * 100) >= cfg.threshold, balance };
+  }
+  return { gated: cfg.threshold === 0 ? balance > 0 : balance >= cfg.threshold, balance };
+}
+
 // ─── Response Builders ─────────────────────────────────────────────────────────
 async function sendResults(msg, session, termOverride = null) {
   const db = database.getDb();
@@ -437,6 +466,29 @@ async function sendResults(msg, session, termOverride = null) {
   let text = `📊 *Academic Results*\n_Period: ${periodLabel}_\n${DIV}\n\n`;
 
   for (const student of students) {
+    // ── Fee Gate (Gold / Diamond only — Silver is exempt) ──────────────────
+    let tier = 'Gold';
+    try {
+      const s = db.prepare("SELECT value FROM app_settings WHERE key='license_payload'").get();
+      if (s) tier = JSON.parse(s.value).tier || 'Gold';
+    } catch(e) {}
+    if (tier !== 'Silver') {
+      try {
+        // year scope = check ALL terms; otherwise check active term only
+        const termForGate = scope === 'year' ? null : activeTerm;
+        const gate = _isPulseFeeGated(db, student.id, termConfig.academic_session, termForGate);
+        if (gate.gated) {
+          const fmt = (n) => Number(n||0).toLocaleString('en-NG', {minimumFractionDigits:0});
+          text += `👤 *${student.name}* — ${student.class_name}\n`;
+          text += `🔒 *Results Withheld — Outstanding Fee Balance*\n`;
+          text += `   Balance: *\u20a6${fmt(gate.balance)}*\n`;
+          text += `Please contact the school bursar to clear fees and unlock your results.\n\n`;
+          continue;
+        }
+      } catch(feeErr) {
+        console.warn('[Pulse] Fee gate check failed (non-fatal):', feeErr.message);
+      }
+    }
     const records = queryResults(db, student.id, termConfig.academic_session, scope === "year" ? null : activeTerm);
 
     text += `👤 *${student.name}*\n🏫 ${student.class_name}\n`;
