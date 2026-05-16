@@ -148,12 +148,16 @@
         .footer { text-align: center; margin-top: 50px; font-size: 11px; color: var(--text-dim); opacity: 0.5; font-weight: 500; letter-spacing: 0.5px; }
 
         #toast {
-            position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+            position: fixed; top: env(safe-area-inset-top, 20px); top: max(20px, env(safe-area-inset-top));
+            left: 50%; transform: translateX(-50%);
             background: var(--danger); color: white; padding: 14px 28px;
             border-radius: 30px; font-size: 14px; font-weight: 600;
-            display: none; box-shadow: 0 20px 40px rgba(0,0,0,0.4); z-index: 1000;
-            backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1);
+            display: none; box-shadow: 0 8px 32px rgba(0,0,0,0.5); z-index: 99999;
+            backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.15);
+            max-width: 88vw; text-align: center; white-space: pre-line;
+            animation: toastIn 0.3s cubic-bezier(0.16,1,0.3,1);
         }
+        @keyframes toastIn { from { opacity:0; transform: translateX(-50%) translateY(-20px); } to { opacity:1; transform: translateX(-50%) translateY(0); } }
 
         .loader-ring {
             display: inline-block; width: 22px; height: 22px;
@@ -161,6 +165,72 @@
             border-top-color: #fff; animation: spin 1s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* --- SIDEBAR & NEW SECTIONS --- */
+        .portal-header{position:fixed;top:0;left:0;right:0;z-index:100;height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;background:rgba(11,15,25,.92);backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,.07);}
+        .hdr-left{display:flex;align-items:center;gap:10px;}
+        .hdr-logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--primary),var(--secondary));display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;flex-shrink:0;}
+        .hdr-name{font-size:14px;font-weight:800;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+        .hdr-class{font-size:11px;color:var(--secondary);font-weight:700;letter-spacing:.5px;}
+        .hamburger{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);border-radius:12px;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;color:#fff;flex-shrink:0;transition:background .2s;}
+        .hamburger:active{background:rgba(255,255,255,.15);}
+        #sb-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;backdrop-filter:blur(4px);}
+        #sidebar{position:fixed;top:0;right:0;bottom:0;width:72vw;max-width:280px;background:rgba(16,22,38,.97);border-left:1px solid rgba(255,255,255,.1);z-index:201;transform:translateX(100%);transition:transform .35s cubic-bezier(.16,1,.3,1);padding:0;display:flex;flex-direction:column;}
+        #sidebar.open{transform:translateX(0);}
+        .sb-top{padding:24px 20px 16px;border-bottom:1px solid rgba(255,255,255,.07);}
+        .sb-school{font-size:16px;font-weight:800;margin-bottom:2px;}
+        .sb-sub{font-size:11px;color:var(--text-dim);font-weight:600;letter-spacing:.5px;}
+        .sb-close{position:absolute;top:18px;right:16px;background:rgba(255,255,255,.08);border:none;color:#fff;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;}
+        .nav-items{padding:12px 12px;flex:1;overflow-y:auto;}
+        .nav-item{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:14px;cursor:pointer;transition:background .2s;font-weight:600;font-size:15px;color:rgba(255,255,255,.7);margin-bottom:4px;}
+        .nav-item:active,.nav-item.active{background:rgba(255,255,255,.1);color:#fff;}
+        .nav-item .ni{font-size:20px;width:28px;text-align:center;}
+        .sb-logout{margin:12px;padding:14px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:transparent;color:rgba(255,255,255,.5);font-size:14px;font-weight:600;cursor:pointer;width:calc(100% - 24px);}
+        #dash-main{padding-top:72px;min-height:100vh;}
+        .section{display:none;padding:20px 18px 40px;animation:slideUp .4s cubic-bezier(.16,1,.3,1);}
+        .section.active{display:block;}
+        .sec-title{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-dim);margin-bottom:16px;}
+        .news-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:20px;padding:18px 20px;margin-bottom:12px;cursor:pointer;transition:background .2s;}
+        .news-card:active{background:rgba(255,255,255,.08);}
+        .news-tag{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--secondary);margin-bottom:6px;}
+        .news-title{font-size:16px;font-weight:700;line-height:1.4;margin-bottom:6px;}
+        .news-date{font-size:12px;color:var(--text-dim);}
+        .news-body{display:none;margin-top:14px;font-size:14px;color:rgba(255,255,255,.8);line-height:1.7;border-top:1px solid rgba(255,255,255,.07);padding-top:14px;}
+        .news-body h2{font-size:15px;font-weight:800;margin:12px 0 6px;}
+        .news-body h3{font-size:13px;font-weight:700;margin:10px 0 4px;color:var(--secondary);}
+        .news-body p{margin-bottom:8px;}
+        .news-body strong{color:#fff;font-weight:700;}
+        .news-body table{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0;}
+        .news-body td,.news-body th{padding:8px 10px;border:1px solid rgba(255,255,255,.1);text-align:left;}
+        .news-body th{background:rgba(255,255,255,.05);font-weight:700;}
+        .policy-item{border:1px solid rgba(255,255,255,.08);border-radius:16px;margin-bottom:10px;overflow:hidden;}
+        .policy-hdr{padding:16px 18px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:15px;background:rgba(255,255,255,.03);}
+        .policy-hdr:active{background:rgba(255,255,255,.07);}
+        .policy-arrow{transition:transform .3s;color:var(--secondary);font-size:12px;}
+        .policy-item.open .policy-arrow{transform:rotate(180deg);}
+        .policy-body{display:none;padding:16px 18px;font-size:13px;color:rgba(255,255,255,.8);line-height:1.7;border-top:1px solid rgba(255,255,255,.08);}
+        .policy-item.open .policy-body{display:block;}
+        .policy-body h2{font-size:14px;font-weight:800;margin:10px 0 4px;}
+        .policy-body h3{font-size:13px;font-weight:700;margin:8px 0 4px;color:var(--secondary);}
+        .policy-body p{margin-bottom:8px;}
+        .policy-body table{width:100%;border-collapse:collapse;font-size:12px;margin:8px 0;}
+        .policy-body td,.policy-body th{padding:7px 9px;border:1px solid rgba(255,255,255,.1);}
+        .policy-body th{background:rgba(255,255,255,.05);font-weight:700;}
+        .policy-body strong{color:#fff;}
+        .att-ring-wrap{display:flex;flex-direction:column;align-items:center;padding:24px 0 12px;}
+        .att-pct{font-size:52px;font-weight:900;letter-spacing:-2px;color:var(--secondary);}
+        .att-lbl{font-size:12px;color:var(--text-dim);font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-top:4px;}
+        .att-bar{height:8px;background:rgba(255,255,255,.08);border-radius:8px;margin:16px 0;overflow:hidden;}
+        .att-fill{height:100%;border-radius:8px;background:linear-gradient(90deg,var(--primary),var(--secondary));transition:width .6s ease;}
+        .fee-row{display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:14px;}
+        .fee-row:last-child{border:none;font-weight:800;font-size:16px;padding-top:16px;}
+        .fee-lbl{color:rgba(255,255,255,.75);}
+        .fee-amt{font-weight:700;color:#fff;}
+        .bal-badge{text-align:center;padding:20px;border-radius:20px;margin-bottom:20px;}
+        .bal-badge.ok{background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.3);}
+        .bal-badge.due{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);}
+        .bal-val{font-size:36px;font-weight:900;letter-spacing:-1px;}
+        .bal-sub{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-top:4px;opacity:.7;}
     </style>
 </head>
 <body>
@@ -181,7 +251,11 @@
                 <p class="subtitle">Enter your registered phone number to access your child's records.</p>
                 <div class="input-group">
                     <label>Parent Phone Number</label>
-                    <input type="tel" id="input-phone" placeholder="e.g. 0803 123 4567" autocomplete="tel">
+                    <input type="text" inputmode="tel" id="input-phone"
+                        placeholder="e.g. 08012345678 or +2348012345678"
+                        autocomplete="tel"
+                        style="letter-spacing:1px;"
+                        onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btn-request-otp').click();}">
                 </div>
                 <button id="btn-request-otp">Verify Identity</button>
             </div>
@@ -194,7 +268,9 @@
                 <p class="subtitle" id="pin-subtitle">We've sent a 4-digit PIN to your WhatsApp.</p>
                 <div class="input-group">
                     <label>Enter 4-Digit PIN</label>
-                    <input type="number" id="input-pin" maxlength="4" placeholder="0 0 0 0" style="text-align: center; letter-spacing: 24px; font-size: 24px;">
+                    <input type="number" id="input-pin" maxlength="4" placeholder="0 0 0 0"
+                        style="text-align: center; letter-spacing: 24px; font-size: 24px;"
+                        onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btn-verify-pin').click();}">
                 </div>
                 <button id="btn-verify-pin">Access Portal</button>
                 <p style="text-align: center; margin-top: 20px; font-size: 13px; color: var(--text-dim); cursor: pointer; font-weight: 500; transition: color 0.2s;" id="btn-back-to-login" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='var(--text-dim)'">← Use different number</p>
@@ -212,36 +288,56 @@
             </div>
         </div>
 
-        <!-- VIEW 4: DASHBOARD -->
+        <!-- VIEW 4: DASHBOARD (hamburger sidebar) -->
         <div id="view-dashboard" class="view">
-            <div class="card" style="padding: 32px;">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
+            <div class="portal-header">
+                <div class="hdr-left">
+                    <div class="hdr-logo" id="hdr-logo-abbr">NX</div>
                     <div>
-                        <div id="dash-child-class" style="font-size: 12px; color: var(--secondary); font-weight: 800; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">CLASS NAME</div>
-                        <h2 id="dash-child-name" style="margin-bottom: 0; font-size: 22px;">Student Name</h2>
-                    </div>
-                    <button id="btn-logout" style="width: auto; padding: 10px 16px; font-size: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; box-shadow: none;">Switch</button>
-                </div>
-
-                <div class="stat-grid">
-                    <div class="stat-item">
-                        <div class="stat-val" id="stat-attendance">0%</div>
-                        <div class="stat-lab">Attendance</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-val" id="stat-fees">₦0</div>
-                        <div class="stat-lab">Balance</div>
+                        <div class="hdr-name" id="dash-child-name">Student Name</div>
+                        <div class="hdr-class" id="dash-child-class">CLASS</div>
                     </div>
                 </div>
+                <button class="hamburger" onclick="openSidebar()">☰</button>
+            </div>
 
-                <div style="margin-top: 36px;">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px;">
-                        <span style="font-size: 13px; font-weight: 800; color: #fff; text-transform: uppercase; letter-spacing: 1px;">Academic Results</span>
-                        <span style="font-size: 12px; color: var(--secondary); font-weight: 600;" id="dash-term">Term Name</span>
-                    </div>
-                    <div id="results-list" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05); border-radius: 20px; padding: 8px 24px;">
-                        <!-- Results injected here -->
-                    </div>
+            <div id="sb-backdrop" onclick="closeSidebar()"></div>
+            <nav id="sidebar">
+                <div class="sb-top">
+                    <div class="sb-school" id="sb-school-name">Nexus School</div>
+                    <div class="sb-sub" id="dash-term">FIRST TERM</div>
+                </div>
+                <button class="sb-close" onclick="closeSidebar()">✕</button>
+                <div class="nav-items">
+                    <div class="nav-item active" id="ni-results" onclick="showSection('results')"><span class="ni">🎓</span>Results</div>
+                    <div class="nav-item" id="ni-fees"    onclick="showSection('fees')">   <span class="ni">💰</span>Fees</div>
+                    <div class="nav-item" id="ni-attend"  onclick="showSection('attendance')"><span class="ni">📅</span>Attendance</div>
+                    <div class="nav-item" id="ni-news"    onclick="showSection('news')">   <span class="ni">📢</span>News</div>
+                    <div class="nav-item" id="ni-policy"  onclick="showSection('policies')"><span class="ni">📋</span>Policies</div>
+                </div>
+                <button class="sb-logout" id="btn-logout">Switch Student</button>
+            </nav>
+
+            <div id="dash-main">
+                <div id="sec-results" class="section active">
+                    <div class="sec-title">Academic Results</div>
+                    <div id="results-list" style="background:rgba(0,0,0,.2);border:1px solid rgba(255,255,255,.05);border-radius:20px;padding:8px 20px;"></div>
+                </div>
+                <div id="sec-fees" class="section">
+                    <div class="sec-title">Fees & Payments</div>
+                    <div id="fees-content"></div>
+                </div>
+                <div id="sec-attendance" class="section">
+                    <div class="sec-title">Attendance</div>
+                    <div id="attendance-content"></div>
+                </div>
+                <div id="sec-news" class="section">
+                    <div class="sec-title">School News</div>
+                    <div id="news-list"></div>
+                </div>
+                <div id="sec-policies" class="section">
+                    <div class="sec-title">School Policies</div>
+                    <div id="policies-list"></div>
                 </div>
             </div>
         </div>
@@ -255,30 +351,55 @@
     <div id="toast">Error Message</div>
 
     <script>
+        // ── Module-level branding state (prevents race condition) ─────────────
+        let _brandingApplied = false;
+        const _branding = { name: '', initials: 'NX', logoBase64: null, primary: null, secondary: null };
+
+        // Safe DOM accessor — never throws even if element missing
+        function el(id) { return document.getElementById(id); }
+
         const DOM = {
             views: ['login', 'pin', 'selector', 'dashboard'],
-            schoolName: document.getElementById('display-school-name'),
-            logoAbbr: document.getElementById('logo-abbr'),
-            
-            phone: document.getElementById('input-phone'),
-            pin: document.getElementById('input-pin'),
-            
-            btnRequest: document.getElementById('btn-request-otp'),
-            btnVerify: document.getElementById('btn-verify-pin'),
-            btnBack: document.getElementById('btn-back-to-login'),
-            btnLogout: document.getElementById('btn-logout'),
-            
-            childList: document.getElementById('children-list'),
-            resultsList: document.getElementById('results-list'),
-            
-            dashName: document.getElementById('dash-child-name'),
-            dashClass: document.getElementById('dash-child-class'),
-            dashTerm: document.getElementById('dash-term'),
-            statAtt: document.getElementById('stat-attendance'),
-            statFees: document.getElementById('stat-fees'),
-            
-            toast: document.getElementById('toast')
+            schoolName: el('display-school-name'),
+            logoAbbr:   el('logo-abbr'),
+            phone:      el('input-phone'),
+            pin:        el('input-pin'),
+            btnRequest: el('btn-request-otp'),
+            btnVerify:  el('btn-verify-pin'),
+            btnBack:    el('btn-back-to-login'),
+            btnLogout:  el('btn-logout'),
+            childList:  el('children-list'),
+            resultsList:el('results-list'),
+            dashName:   el('dash-child-name'),
+            dashClass:  el('dash-child-class'),
+            dashTerm:   el('dash-term'),
+            toast:      el('toast')
         };
+
+        // Apply stored branding to ALL logo/name elements regardless of which view is active
+        function applyBranding() {
+            const { name, initials, logoBase64, primary, secondary } = _branding;
+            const logoEls = [el('logo-abbr'), el('hdr-logo-abbr')];
+            const nameEls = [el('display-school-name'), el('sb-school-name')];
+
+            logoEls.forEach(logo => {
+                if (!logo) return;
+                if (logoBase64) {
+                    logo.textContent = '';
+                    logo.style.background = 'none';
+                    logo.style.backgroundImage = `url(${logoBase64})`;
+                    logo.style.backgroundSize = 'cover';
+                    logo.style.backgroundRepeat = 'no-repeat';
+                    logo.style.backgroundPosition = 'center';
+                } else {
+                    logo.textContent = initials;
+                    logo.style.backgroundImage = '';
+                }
+            });
+            nameEls.forEach(n => { if (n && name) n.textContent = name; });
+            if (primary)   document.documentElement.style.setProperty('--primary',   primary);
+            if (secondary) document.documentElement.style.setProperty('--secondary', secondary);
+        }
 
         let state = {
             phone: '',
@@ -289,15 +410,22 @@
         };
 
         function showView(viewId) {
-            DOM.views.forEach(v => document.getElementById(`view-${v}`).classList.remove('active'));
-            document.getElementById(`view-${viewId}`).classList.add('active');
-            window.scrollTo(0,0);
+            DOM.views.forEach(v => {
+                const vEl = el('view-' + v);
+                if (vEl) vEl.classList.remove('active');
+            });
+            const target = el('view-' + viewId);
+            if (target) target.classList.add('active');
+            window.scrollTo(0, 0);
         }
 
-        function showToast(msg, duration = 4000) {
+        let _toastTimer = null;
+        function showToast(msg, duration = 5000) {
+            if (!DOM.toast) return;
             DOM.toast.textContent = msg;
             DOM.toast.style.display = 'block';
-            setTimeout(() => DOM.toast.style.display = 'none', duration);
+            if (_toastTimer) clearTimeout(_toastTimer);
+            _toastTimer = setTimeout(() => { DOM.toast.style.display = 'none'; }, duration);
         }
 
         async function api(path, method = 'GET', body = null) {
@@ -314,63 +442,65 @@
 
         // --- HANDLERS ---
 
-        DOM.btnRequest.onclick = async () => {
-            const phone = DOM.phone.value.trim();
-            if (!phone) return showToast('Please enter your phone number');
-            
-            DOM.btnRequest.disabled = true;
-            DOM.btnRequest.innerHTML = '<div class="loader-ring"></div>';
-            
-            try {
-                const res = await api('/portal/api/request-otp', 'POST', { phone });
-                if (res.ok) {
-                    state.phone = phone;
-                    showView('pin');
-                    setTimeout(() => DOM.pin.focus(), 100);
-                } else {
-                    showToast(res.error);
-                }
-            } catch (e) {
-                showToast('Connection failed. Are you on school Wi-Fi?');
-            } finally {
-                DOM.btnRequest.disabled = false;
-                DOM.btnRequest.textContent = 'Verify Identity';
-            }
-        };
+        if (DOM.btnRequest) {
+            DOM.btnRequest.onclick = async () => {
+                const raw = (DOM.phone ? DOM.phone.value : '').trim();
+                if (!raw) return showToast('Please enter your phone number');
 
-        DOM.btnVerify.onclick = async () => {
-            const pin = DOM.pin.value.trim();
-            if (pin.length !== 4) return showToast('Enter the 4-digit PIN');
+                const digits = raw.replace(/\D/g, '');
+                if (digits.length < 7) return showToast('Too short. Try: 08012345678 or +2348012345678');
 
-            DOM.btnVerify.disabled = true;
-            DOM.btnVerify.innerHTML = '<div class="loader-ring"></div>';
+                DOM.btnRequest.disabled = true;
+                DOM.btnRequest.innerHTML = '<div class="loader-ring"></div>';
 
-            try {
-                const res = await api('/portal/api/verify-otp', 'POST', { phone: state.phone, pin });
-                if (res.ok) {
-                    state.token = res.token;
-                    state.students = res.students;
-                    
-                    const TWELVE_HRS = 12 * 60 * 60 * 1000;
-                    localStorage.setItem('nexus_portal_token', res.token);
-                    localStorage.setItem('nexus_portal_expiry', Date.now() + TWELVE_HRS);
-
-                    if (res.students.length > 1) {
-                        renderSelector();
-                        showView('selector');
+                try {
+                    const res = await api('/portal/api/request-otp', 'POST', { phone: raw });
+                    if (res.ok) {
+                        state.phone = raw;
+                        showView('pin');
+                        setTimeout(() => { if (DOM.pin) DOM.pin.focus(); }, 150);
                     } else {
-                        loadStudentData(res.students[0].id);
+                        showToast(res.error || 'Number not found. Check the number registered at school.');
                     }
-                } else {
-                    showToast(res.error);
+                } catch (e) {
+                    console.error('[Portal] OTP request failed:', e);
+                    showToast('⚠️ Cannot reach portal server. Ensure you are on school Wi-Fi.');
+                } finally {
+                    DOM.btnRequest.disabled = false;
+                    DOM.btnRequest.textContent = 'Verify Identity';
                 }
-            } catch (e) {
-                showToast('Verification failed. Check your connection.');
-            } finally {
-                DOM.btnVerify.disabled = false;
-                DOM.btnVerify.textContent = 'Access Portal';
-            }
-        };
+            };
+        }
+
+        if (DOM.btnVerify) {
+            DOM.btnVerify.onclick = async () => {
+                const pin = (DOM.pin ? DOM.pin.value : '').trim();
+                if (pin.length !== 4) return showToast('Enter the 4-digit PIN from WhatsApp');
+
+                DOM.btnVerify.disabled = true;
+                DOM.btnVerify.innerHTML = '<div class="loader-ring"></div>';
+
+                try {
+                    const res = await api('/portal/api/verify-otp', 'POST', { phone: state.phone, pin });
+                    if (res.ok) {
+                        state.token = res.token;
+                        state.students = res.students;
+                        localStorage.setItem('nexus_portal_token', res.token);
+                        localStorage.setItem('nexus_portal_expiry', Date.now() + 12 * 60 * 60 * 1000);
+                        if (res.students.length > 1) { renderSelector(); showView('selector'); }
+                        else loadStudentData(res.students[0].id);
+                    } else {
+                        showToast(res.error || 'Invalid PIN. Try again.');
+                    }
+                } catch (e) {
+                    console.error('[Portal] Verify failed:', e);
+                    showToast('Verification failed. Check your connection.');
+                } finally {
+                    DOM.btnVerify.disabled = false;
+                    DOM.btnVerify.textContent = 'Access Portal';
+                }
+            };
+        }
 
         function renderSelector() {
             DOM.childList.innerHTML = state.students.map(s => `
@@ -415,27 +545,65 @@
             const att = data.attendance || [];
             const present = att.filter(r => r.status === 'Present' || r.status === 'Late').length;
             const pct = att.length === 0 ? 100 : Math.round((present / att.length) * 100);
-            DOM.statAtt.textContent = pct + '%';
+            if (DOM.statAtt) DOM.statAtt.textContent = pct + '%';
             
             // Fees
             const fees = data.fees || { total_billed: 0, total_paid: 0 };
             const balance = fees.total_billed - fees.total_paid;
-            DOM.statFees.textContent = balance <= 0 ? 'CLEARED' : '₦' + balance.toLocaleString();
-            DOM.statFees.style.color = balance <= 0 ? 'var(--success)' : 'var(--danger)';
+            if (DOM.statFees) {
+                DOM.statFees.textContent = balance <= 0 ? 'CLEARED' : '₦' + balance.toLocaleString();
+                DOM.statFees.style.color = balance <= 0 ? 'var(--success)' : 'var(--danger)';
+            }
             
             // Results
-            DOM.resultsList.innerHTML = data.results.length 
-                ? data.results.map(r => `
-                    <div class="result-row">
-                        <div class="res-sub">${r.subject}</div>
-                        <div class="res-score">${r.score}</div>
+            if (DOM.resultsList) {
+                DOM.resultsList.innerHTML = data.results.length 
+                    ? data.results.map(r => `
+                        <div class="result-row">
+                            <div class="res-sub">${r.subject}</div>
+                            <div class="res-score">${r.score}</div>
+                        </div>
+                    `).join('')
+                    : '<div style="text-align:center; padding: 24px; color: var(--text-dim); font-weight: 500;">No results published yet.</div>';
+            }
+
+            // Fees section
+            const feesEl = document.getElementById('fees-content');
+            if(feesEl) {
+                const bal = balance;
+                const cleared = bal <= 0;
+                feesEl.innerHTML = `
+                    <div class="bal-badge ${cleared?'ok':'due'}">
+                        <div class="bal-val" style="color:${cleared?'var(--success)':'var(--danger)'}">${cleared?'CLEARED':'₦'+bal.toLocaleString()}</div>
+                        <div class="bal-sub">${cleared?'All fees settled':'Outstanding Balance'}</div>
                     </div>
-                `).join('')
-                : '<div style="text-align:center; padding: 24px; color: var(--text-dim); font-weight: 500;">No results published yet.</div>';
+                    <div class="card" style="padding:16px 20px">
+                        <div class="fee-row"><span class="fee-lbl">Total Billed</span><span class="fee-amt">₦${(fees.total_billed||0).toLocaleString()}</span></div>
+                        <div class="fee-row"><span class="fee-lbl">Total Paid</span><span class="fee-amt" style="color:var(--success)">₦${(fees.total_paid||0).toLocaleString()}</span></div>
+                        <div class="fee-row"><span class="fee-lbl">Balance</span><span class="fee-amt" style="color:${cleared?'var(--success)':'var(--danger)'}">₦${Math.max(0,bal).toLocaleString()}</span></div>
+                    </div>`;
+            }
+            // Attendance section
+            const attEl = document.getElementById('attendance-content');
+            if(attEl) {
+                attEl.innerHTML = `
+                    <div class="att-ring-wrap">
+                        <div class="att-pct">${pct}%</div>
+                        <div class="att-lbl">Attendance Rate</div>
+                    </div>
+                    <div class="att-bar"><div class="att-fill" style="width:${pct}%"></div></div>
+                    <div style="display:flex;gap:12px;margin-top:8px">
+                        <div class="stat-item" style="flex:1"><div class="stat-val">${present}</div><div class="stat-lab">Present</div></div>
+                        <div class="stat-item" style="flex:1"><div class="stat-val">${att.length-present}</div><div class="stat-lab">Absent</div></div>
+                        <div class="stat-item" style="flex:1"><div class="stat-val">${att.length}</div><div class="stat-lab">School Days</div></div>
+                    </div>`;
+            }
+            // Re-apply branding to dashboard elements (fixes race with async loadBranding)
+            applyBranding();
         }
 
-        DOM.btnBack.onclick = () => showView('login');
-        DOM.btnLogout.onclick = () => {
+        if (DOM.btnBack)   DOM.btnBack.onclick   = () => showView('login');
+        if (DOM.btnLogout) DOM.btnLogout.onclick  = () => {
             if (state.students.length > 1) showView('selector');
             else {
                 localStorage.removeItem('nexus_portal_token');
@@ -452,37 +620,15 @@
                 const data = await res.json();
                 if (!data.ok) return;
 
-                const name = (data.schoolName || '').trim() || 'Nexus Academy';
-                DOM.schoolName.textContent = name;
+                _branding.name      = (data.schoolName || '').trim() || 'Nexus Academy';
+                _branding.initials  = _branding.name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || 'NX';
+                _branding.logoBase64 = data.logoBase64 || null;
+                _branding.primary    = data.themePrimary   || null;
+                _branding.secondary  = data.themeSecondary || null;
 
-                // Derive initials: first letter of each word (max 2), e.g. "Grace Academy" → "GA"
-                const initials = name
-                    .split(/\s+/)
-                    .filter(Boolean)
-                    .slice(0, 2)
-                    .map(w => w[0].toUpperCase())
-                    .join('');
-
-                if (data.logoBase64) {
-                    // Clear both the text content AND the CSS gradient before painting the logo
-                    DOM.logoAbbr.textContent = '';
-                    DOM.logoAbbr.style.background     = 'none';
-                    DOM.logoAbbr.style.backgroundImage    = `url(${data.logoBase64})`;
-                    DOM.logoAbbr.style.backgroundSize     = 'cover';
-                    DOM.logoAbbr.style.backgroundRepeat   = 'no-repeat';
-                    DOM.logoAbbr.style.backgroundPosition = 'center';
-                } else {
-                    DOM.logoAbbr.textContent = initials || 'NX';
-                }
-
-                if (data.themePrimary) {
-                    document.documentElement.style.setProperty('--primary',   data.themePrimary);
-                }
-                if (data.themeSecondary) {
-                    document.documentElement.style.setProperty('--secondary', data.themeSecondary);
-                }
+                applyBranding(); // Apply immediately to whatever view is visible
             } catch (e) {
-                console.warn('[Portal] Branding fetch failed:', e);
+                console.warn('[Portal] Branding fetch failed:', e.message);
             }
         }
 
@@ -514,6 +660,82 @@
                 }
             } catch (_) { /* network error, stay at login */ }
         }
+
+        // ── Sidebar ───────────────────────────────────────────────────────────
+        function openSidebar()  { document.getElementById('sidebar').classList.add('open'); document.getElementById('sb-backdrop').style.display='block'; }
+        function closeSidebar() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('sb-backdrop').style.display='none'; }
+
+        let _curSection = 'results';
+        function showSection(name) {
+            closeSidebar();
+            ['results','fees','attendance','news','policies'].forEach(s => {
+                document.getElementById('sec-'+s).classList.toggle('active', s===name);
+                const ni = document.getElementById('ni-'+({'results':'results','fees':'fees','attendance':'attend','news':'news','policies':'policy'}[s]));
+                if(ni) ni.classList.toggle('active', s===name);
+            });
+            _curSection = name;
+            if(name==='news' && !_newsLoaded) loadNews();
+            if(name==='policies' && !_polLoaded) loadPolicies();
+        }
+
+        // ── Markdown lite renderer ────────────────────────────────────────────
+        function mdToHtml(t) {
+            if (!t) return '';
+            return t
+                .replace(/^## (.+)$/mg,'<h2>$1</h2>')
+                .replace(/^### (.+)$/mg,'<h3>$1</h3>')
+                .replace(/[*][*](.+?)[*][*]/g,'<strong>$1</strong>')
+                .replace(/^[|](.+)[|]$/mg, row => '<tr>' + row.split('|').filter((_,i,a)=>i>0&&i<a.length-1).map(c=>'<td>'+c.trim()+'</td>').join('') + '</tr>')
+                .replace(/(<tr>[^]*?<[/]tr>\n?)+/g, m => '<table>' + m.replace(/<td>[-: ]+<[/]td>/g,'') + '</table>')
+                .replace(/^(?!<[htu]).+$/mg,'<p>$&</p>')
+                .replace(/<p><[/]p>/g,'');
+        }
+
+        // ── News ─────────────────────────────────────────────────────────────
+        let _newsLoaded = false;
+        async function loadNews() {
+            const el = document.getElementById('news-list');
+            el.innerHTML = '<p style="color:var(--text-dim);text-align:center;padding:20px">Loading…</p>';
+            try {
+                const d = await api('/portal/api/news');
+                if(!d.ok || !d.news.length) { el.innerHTML='<p style="text-align:center;color:var(--text-dim);padding:20px">No news yet.</p>'; return; }
+                el.innerHTML = d.news.map(n => {
+                    const cats = {pta:'PTA',infrastructure:'Infrastructure',fees:'Fees',general:'Notice'};
+                    const dt   = new Date(n.created_at).toLocaleDateString('en-NG',{day:'numeric',month:'long',year:'numeric'});
+                    return `<div class="news-card" onclick="toggleNews(this)">
+                        <div class="news-tag">${cats[n.category]||n.category}</div>
+                        <div class="news-title">${n.title}</div>
+                        <div class="news-date">${dt}</div>
+                        <div class="news-body">${mdToHtml(n.body)}</div>
+                    </div>`;
+                }).join('');
+                _newsLoaded = true;
+            } catch(e){ el.innerHTML='<p style="color:var(--danger);text-align:center;padding:20px">Could not load news.</p>'; }
+        }
+        function toggleNews(card) {
+            const body = card.querySelector('.news-body');
+            body.style.display = body.style.display==='block'?'none':'block';
+        }
+
+        // ── Policies ─────────────────────────────────────────────────────────
+        let _polLoaded = false;
+        async function loadPolicies() {
+            const el = document.getElementById('policies-list');
+            el.innerHTML = '<p style="color:var(--text-dim);text-align:center;padding:20px">Loading…</p>';
+            try {
+                const d = await api('/portal/api/policies');
+                if(!d.ok || !d.policies.length) { el.innerHTML='<p style="text-align:center;color:var(--text-dim);padding:20px">No policies published yet.</p>'; return; }
+                el.innerHTML = d.policies.map(p=>`
+                    <div class="policy-item">
+                        <div class="policy-hdr" onclick="togglePolicy(this.parentElement)">
+                            <span>${p.title}</span><span class="policy-arrow">▼</span>
+                        </div>
+                        <div class="policy-body">${mdToHtml(p.body)}</div>
+                    </div>`).join('');
+                _polLoaded = true;
+            } catch(e){ el.innerHTML='<p style="color:var(--danger);text-align:center;padding:20px">Could not load policies.</p>'; }
+        }
+        function togglePolicy(item) { item.classList.toggle('open'); }
 
         // ── Boot sequence ─────────────────────────────────────────────────────
         loadBranding();

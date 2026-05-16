@@ -2248,7 +2248,7 @@ function createWindow() {
       const matchable = phone.replace(/\D/g, "").slice(-10);
       
       const students = db.prepare("SELECT id, name, class_name FROM students WHERE parent_phone LIKE ?").all(`%${matchable}`);
-      if (!students.length) return res.json({ ok: false, error: 'No students found for this number.' });
+      if (!students.length) return res.json({ ok: false, error: `No students found for this number. Ensure it matches the number registered at the school (last 10 digits used: ${matchable}).` });
 
       const pin = Math.floor(1000 + Math.random() * 9000).toString();
       const expiry = Date.now() + (12 * 60 * 60 * 1000); // 12 Hours
@@ -2355,6 +2355,91 @@ function createWindow() {
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
+  });
+
+  // ── Ensure portal content tables exist (idempotent) ─────────────────────────
+  try {
+    const _db = database.getDb();
+    _db.exec(`
+      CREATE TABLE IF NOT EXISTS portal_news (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL, body TEXT NOT NULL,
+        category TEXT DEFAULT 'general', is_published INTEGER DEFAULT 1,
+        created_at TEXT, updated_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS portal_policies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL, body TEXT NOT NULL,
+        order_num INTEGER DEFAULT 0, is_published INTEGER DEFAULT 1,
+        created_at TEXT, updated_at TEXT
+      );
+    `);
+  } catch (_) {}
+
+  // ── Public portal content endpoints ──────────────────────────────────────────
+  portalApp.get('/portal/api/news', (req, res) => {
+    try {
+      const db = database.getDb();
+      const rows = db.prepare(
+        'SELECT id,title,body,category,created_at FROM portal_news WHERE is_published=1 ORDER BY id DESC'
+      ).all();
+      res.json({ ok: true, news: rows });
+    } catch (e) { res.json({ ok: false, news: [], error: e.message }); }
+  });
+
+  portalApp.get('/portal/api/policies', (req, res) => {
+    try {
+      const db = database.getDb();
+      const rows = db.prepare(
+        'SELECT id,title,body,order_num FROM portal_policies WHERE is_published=1 ORDER BY order_num ASC, id ASC'
+      ).all();
+      res.json({ ok: true, policies: rows });
+    } catch (e) { res.json({ ok: false, policies: [], error: e.message }); }
+  });
+
+  // ── Admin content CRUD (IPC — only accessible from Electron window) ───────────
+  ipcMain.handle('portal-content:get-all', () => {
+    const db = database.getDb();
+    return {
+      news:     db.prepare('SELECT * FROM portal_news     ORDER BY id DESC').all(),
+      policies: db.prepare('SELECT * FROM portal_policies ORDER BY order_num ASC, id ASC').all()
+    };
+  });
+
+  ipcMain.handle('portal-content:save-news', (_, item) => {
+    const db  = database.getDb();
+    const now = new Date().toISOString();
+    if (item.id) {
+      db.prepare('UPDATE portal_news SET title=?,body=?,category=?,is_published=?,updated_at=? WHERE id=?')
+        .run(item.title, item.body, item.category||'general', item.is_published??1, now, item.id);
+    } else {
+      db.prepare('INSERT INTO portal_news (title,body,category,is_published,created_at,updated_at) VALUES (?,?,?,?,?,?)')
+        .run(item.title, item.body, item.category||'general', item.is_published??1, now, now);
+    }
+    return { ok: true };
+  });
+
+  ipcMain.handle('portal-content:delete-news', (_, id) => {
+    database.getDb().prepare('DELETE FROM portal_news WHERE id=?').run(id);
+    return { ok: true };
+  });
+
+  ipcMain.handle('portal-content:save-policy', (_, item) => {
+    const db  = database.getDb();
+    const now = new Date().toISOString();
+    if (item.id) {
+      db.prepare('UPDATE portal_policies SET title=?,body=?,order_num=?,is_published=?,updated_at=? WHERE id=?')
+        .run(item.title, item.body, item.order_num||0, item.is_published??1, now, item.id);
+    } else {
+      db.prepare('INSERT INTO portal_policies (title,body,order_num,is_published,created_at,updated_at) VALUES (?,?,?,?,?,?)')
+        .run(item.title, item.body, item.order_num||0, item.is_published??1, now, now);
+    }
+    return { ok: true };
+  });
+
+  ipcMain.handle('portal-content:delete-policy', (_, id) => {
+    database.getDb().prepare('DELETE FROM portal_policies WHERE id=?').run(id);
+    return { ok: true };
   });
 
   // Bind to 0.0.0.0 so the portal is reachable on ALL network interfaces:
