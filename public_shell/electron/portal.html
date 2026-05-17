@@ -31,6 +31,18 @@
             overflow-x: hidden;
             position: relative;
         }
+        /* When the dashboard is active, stop centering — let the fixed nav + scrollable body take over */
+        body.dashboard-active {
+            align-items: stretch;
+            justify-content: flex-start;
+        }
+        body.dashboard-active .container {
+            max-width: 100%;
+            padding: 0;
+        }
+        body.dashboard-active header {
+            display: none;
+        }
 
         /* Ambient Glows tied to school theme */
         .ambient-glow-1 {
@@ -416,6 +428,8 @@
             });
             const target = el('view-' + viewId);
             if (target) target.classList.add('active');
+            // Toggle body layout: dashboard needs full-width, others need centered
+            document.body.classList.toggle('dashboard-active', viewId === 'dashboard');
             window.scrollTo(0, 0);
         }
 
@@ -566,9 +580,15 @@
                                     border-radius:16px;padding:28px 24px;text-align:center;margin:8px 0;">
                             <div style="font-size:36px;margin-bottom:12px;">🔒</div>
                             <div style="font-weight:700;font-size:16px;margin-bottom:10px;color:#ff8080;">Results Withheld</div>
-                            <div style="font-size:13px;line-height:1.7;color:rgba(255,255,255,0.7);max-width:380px;margin:0 auto;">
+                            <div style="font-size:13px;line-height:1.7;color:rgba(255,255,255,0.7);max-width:380px;margin:0 auto 18px;">
                                 ${data.resultsBlockedMsg || 'Results are withheld pending fee clearance. Please contact the school office.'}
                             </div>
+                            <button onclick="showSection('fees');setTimeout(()=>document.getElementById('receipt-upload-modal').style.display='flex',300);"
+                              style="display:inline-flex;align-items:center;gap:8px;padding:11px 22px;border-radius:12px;
+                                     background:rgba(76,175,80,0.15);border:1px solid rgba(76,175,80,0.4);
+                                     color:#4CAF50;font-size:13px;font-weight:700;cursor:pointer;">
+                              📤 Pay Now — Upload Receipt
+                            </button>
                         </div>`;
                 } else {
                     DOM.resultsList.innerHTML = data.results.length
