@@ -15,8 +15,9 @@ const { database, server, reports } = require("../../private_engine");
 const scholar = require("../../private_engine/src/scholar");
 const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, handleCSVUpload, clearData } = server;
 const address = require("address");
-const pulseBot = require('./pulse-bot.js');
+const pulseBot     = require('./pulse-bot.js');
 const pulseExporter = require('./pulse-exporter.js');
+const receiptAnalysis = require('./receipt-analysis.js');
 const express = require('express');
 const { Bonjour } = require('bonjour-service');
 const bonjour = new Bonjour();
@@ -806,26 +807,26 @@ ipcMain.handle("update-teacher-full", (event, { id, name, phone, email, signatur
 });
 
 // ── Form-based Student Entry (mobile adds/edits; this is a DB stub) ───────────
-ipcMain.handle("add-student-form", (event, { id, name, class_name, subjects, reg_no, gender, dob, photo, parent_email, parent_phone, fee_status }) => {
+ipcMain.handle("add-student-form", (event, { id, name, class_name, subjects, reg_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status }) => {
   try {
     const db = database.getDb();
     db.transaction(() => {
-      // 1. Upsert Student (with extended V2 profile fields)
       db.prepare(`
-        INSERT INTO students (id, name, class_name, reg_no, gender, dob, photo, parent_email, parent_phone, fee_status)
-        VALUES (@id, @name, @class_name, @reg_no, @gender, @dob, @photo, @parent_email, @parent_phone, @fee_status)
+        INSERT INTO students (id, name, class_name, reg_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status)
+        VALUES (@id, @name, @class_name, @reg_no, @gender, @dob, @photo, @parent_email, @parent_phone, @parent_name, @fee_status)
         ON CONFLICT(id) DO UPDATE SET
           name=excluded.name, class_name=excluded.class_name,
           reg_no=excluded.reg_no, gender=excluded.gender, dob=excluded.dob,
           photo=COALESCE(excluded.photo, photo),
           parent_email=excluded.parent_email, parent_phone=excluded.parent_phone,
+          parent_name=excluded.parent_name,
           fee_status=excluded.fee_status
       `).run({ id, name, class_name,
         reg_no: reg_no || '', gender: gender || '', dob: dob || '',
         photo: photo || null, parent_email: parent_email || '',
-        parent_phone: parent_phone || '', fee_status: fee_status || 'cleared'
+        parent_phone: parent_phone || '', parent_name: parent_name || null,
+        fee_status: fee_status || 'cleared'
       });
-      // 2. Refresh subject enrollment
       db.prepare("DELETE FROM student_subjects WHERE student_id = ?").run(id);
       if (subjects && subjects.length > 0) {
         const stmt = db.prepare("INSERT INTO student_subjects (student_id, subject) VALUES (?, ?)");
@@ -840,31 +841,30 @@ ipcMain.handle("add-student-form", (event, { id, name, class_name, subjects, reg
 });
 
 // ── Form-based Student Update (“Edit” path) ──────────────────────────────────────
-ipcMain.handle("update-student", (event, { id, name, class_name, subjects, reg_no, gender, dob, photo, parent_email, parent_phone, fee_status }) => {
+ipcMain.handle("update-student", (event, { id, name, class_name, subjects, reg_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status }) => {
   try {
     const db = database.getDb();
     db.transaction(() => {
-      // photo only updated when explicitly provided (avoids wiping existing photo on minor edits)
       if (photo !== undefined && photo !== null) {
         db.prepare(`
           UPDATE students SET name=@name, class_name=@class_name,
             reg_no=@reg_no, gender=@gender, dob=@dob, photo=@photo,
-            parent_email=@parent_email, parent_phone=@parent_phone,
+            parent_email=@parent_email, parent_phone=@parent_phone, parent_name=@parent_name,
             fee_status=@fee_status
           WHERE id=@id
         `).run({ id, name, class_name, reg_no: reg_no||'', gender: gender||'', dob: dob||'',
                  photo, parent_email: parent_email||'', parent_phone: parent_phone||'',
-                 fee_status: fee_status||'cleared' });
+                 parent_name: parent_name||null, fee_status: fee_status||'cleared' });
       } else {
         db.prepare(`
           UPDATE students SET name=@name, class_name=@class_name,
             reg_no=@reg_no, gender=@gender, dob=@dob,
-            parent_email=@parent_email, parent_phone=@parent_phone,
+            parent_email=@parent_email, parent_phone=@parent_phone, parent_name=@parent_name,
             fee_status=@fee_status
           WHERE id=@id
         `).run({ id, name, class_name, reg_no: reg_no||'', gender: gender||'', dob: dob||'',
                  parent_email: parent_email||'', parent_phone: parent_phone||'',
-                 fee_status: fee_status||'cleared' });
+                 parent_name: parent_name||null, fee_status: fee_status||'cleared' });
       }
       // Replace subject enrollment
       db.prepare("DELETE FROM student_subjects WHERE student_id = ?").run(id);
@@ -2394,6 +2394,13 @@ function createWindow() {
         }
       }
 
+      // Pull bank account details from settings (Gold+)
+      let bankAccounts = [];
+      try {
+        const fsr = db.prepare(`SELECT value FROM app_settings WHERE key='fee_settings'`).get();
+        if (fsr) bankAccounts = JSON.parse(fsr.value).bank_accounts || [];
+      } catch(_) {}
+
       res.json({
         ok: true,
         schoolName,
@@ -2404,7 +2411,8 @@ function createWindow() {
         resultsBlockedMsg,
         resultsBlockedBalance,
         attendance,
-        fees
+        fees,
+        bankAccounts
       });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
@@ -2426,6 +2434,29 @@ function createWindow() {
         title TEXT NOT NULL, body TEXT NOT NULL,
         order_num INTEGER DEFAULT 0, is_published INTEGER DEFAULT 1,
         created_at TEXT, updated_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS payment_receipts (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id           TEXT    NOT NULL,
+        submitted_via        TEXT    NOT NULL DEFAULT 'portal',
+        file_data_b64        TEXT,
+        file_type            TEXT,
+        extracted_amount     REAL,
+        extracted_reference  TEXT,
+        extracted_date       TEXT,
+        extracted_payer_name TEXT,
+        extracted_bank       TEXT,
+        extracted_confidence REAL,
+        name_match_score     REAL,
+        pdf_raw_text         TEXT,
+        ai_raw_response      TEXT,
+        status               TEXT    NOT NULL DEFAULT 'pending',
+        reviewed_by          TEXT,
+        reviewed_at          DATETIME,
+        rejection_reason     TEXT,
+        academic_session     TEXT,
+        term                 TEXT,
+        created_at           DATETIME DEFAULT CURRENT_TIMESTAMP
       );
     `);
   } catch (_) {}
@@ -2494,6 +2525,164 @@ function createWindow() {
   ipcMain.handle('portal-content:delete-policy', (_, id) => {
     database.getDb().prepare('DELETE FROM portal_policies WHERE id=?').run(id);
     return { ok: true };
+  });
+
+  // ── Receipt Upload — accepts JSON body with base64 file (Gold+: portal) ───
+  portalApp.post('/portal/api/receipt-upload', async (req, res) => {
+    try {
+      const { token, studentId, fileDataB64, fileType, session: termSession, term } = req.body;
+      const tokenRecord = activeTokens.get(token);
+      if (!tokenRecord || Date.now() > tokenRecord.expiry)
+        return res.status(401).json({ ok: false, error: 'Session expired. Please log in again.' });
+      if (!tokenRecord.students.some(s => s.id === studentId))
+        return res.status(403).json({ ok: false, error: 'Unauthorised.' });
+      // ~2MB base64 cap (base64 is ~4/3 of binary size)
+      const maxB64 = Math.ceil(2 * 1024 * 1024 * 1.4);
+      if (!fileDataB64 || fileDataB64.length > maxB64)
+        return res.status(413).json({ ok: false, error: 'File exceeds 2 MB limit.' });
+
+      const db       = database.getDb();
+      const keyRow   = db.prepare(`SELECT value FROM app_settings WHERE key = 'gemini_api_key'`).get();
+      const gemKey   = keyRow?.value || null;
+      const tier     = licenseStatus?.tier || 'Gold';
+
+      // PDF text — always extract if applicable (offline, free)
+      let pdfRawText = null;
+      if (fileType === 'application/pdf') {
+        const pr = await receiptAnalysis.extractPdfText(fileDataB64);
+        pdfRawText = pr.ok ? pr.text : null;
+      }
+
+      // AI extraction — Diamond only
+      let aiFields = {};
+      let extractedAmount = null;
+      if (tier === 'Diamond' && gemKey) {
+        const ai = await receiptAnalysis.analyzeReceiptAI(fileDataB64, fileType, gemKey);
+        if (ai.ok) {
+          aiFields = {
+            extracted_amount:     ai.amount,
+            extracted_reference:  ai.reference,
+            extracted_date:       ai.date,
+            extracted_payer_name: ai.payerName,
+            extracted_bank:       ai.bank,
+            extracted_confidence: ai.confidence,
+            ai_raw_response:      ai.rawResponse,
+          };
+          const stu = db.prepare(`SELECT parent_name FROM students WHERE id = ?`).get(studentId);
+          if (stu?.parent_name && ai.payerName)
+            aiFields.name_match_score = receiptAnalysis.fuzzyNameMatch(stu.parent_name, ai.payerName);
+          extractedAmount = ai.amount;
+        }
+      }
+
+      const ins = db.prepare(`
+        INSERT INTO payment_receipts
+          (student_id, submitted_via, file_data_b64, file_type,
+           extracted_amount, extracted_reference, extracted_date, extracted_payer_name,
+           extracted_bank, extracted_confidence, name_match_score,
+           pdf_raw_text, ai_raw_response, academic_session, term, status)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+      const row = ins.run(
+        studentId, 'portal', fileDataB64, fileType,
+        aiFields.extracted_amount     ?? null, aiFields.extracted_reference  ?? null,
+        aiFields.extracted_date       ?? null, aiFields.extracted_payer_name ?? null,
+        aiFields.extracted_bank       ?? null, aiFields.extracted_confidence ?? null,
+        aiFields.name_match_score     ?? null,
+        pdfRawText, aiFields.ai_raw_response ?? null,
+        termSession, term, 'pending'
+      );
+
+      // Real-time push to hub
+      const pending = db.prepare(`SELECT COUNT(*) as c FROM payment_receipts WHERE status='pending'`).get().c;
+      const stuName = db.prepare(`SELECT name FROM students WHERE id=?`).get(studentId)?.name || 'A parent';
+      if (mainWindow && !mainWindow.isDestroyed())
+        mainWindow.webContents.send('receipt:new', { count: pending, studentName: stuName });
+
+      res.json({ ok: true, receiptId: row.lastInsertRowid, extractedAmount, pdfText: pdfRawText });
+    } catch (err) {
+      console.error('[Portal] receipt-upload error:', err);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── Admin IPC: Payment Receipts ────────────────────────────────────────────────
+  ipcMain.handle('receipts:get-pending', () => {
+    try {
+      const db = database.getDb();
+      return { ok: true, data: db.prepare(`
+        SELECT r.*, s.name AS student_name, s.class_name, s.parent_name AS registered_parent_name
+        FROM payment_receipts r
+        JOIN students s ON r.student_id = s.id
+        WHERE r.status = 'pending'
+        ORDER BY r.created_at DESC
+      `).all() };
+    } catch (e) { return { ok: false, error: e.message, data: [] }; }
+  });
+
+  ipcMain.handle('receipts:get-count', () => {
+    try {
+      const c = database.getDb().prepare(`SELECT COUNT(*) as c FROM payment_receipts WHERE status='pending'`).get().c;
+      return { ok: true, count: c };
+    } catch { return { ok: false, count: 0 }; }
+  });
+
+  ipcMain.handle('receipts:approve', async (event, { receiptId, amount, method, reference, note, term, session }) => {
+    try {
+      const db      = database.getDb();
+      const receipt = db.prepare(`SELECT * FROM payment_receipts WHERE id=?`).get(receiptId);
+      if (!receipt) return { ok: false, error: 'Receipt not found' };
+      const reviewer = currentAdminSession?.username || 'Admin';
+
+      db.transaction(() => {
+        db.prepare(`
+          INSERT INTO fee_transactions
+            (student_id, academic_session, term, amount, payment_method, reference_number, recorded_by, note)
+          VALUES (?,?,?,?,?,?,?,?)
+        `).run(receipt.student_id, session, term, amount, method || 'transfer', reference || '', reviewer, note || `Receipt #${receiptId}`);
+
+        const paid = db.prepare(`SELECT COALESCE(SUM(amount),0) AS t FROM fee_transactions WHERE student_id=? AND academic_session=? AND term=?`).get(receipt.student_id, session, term).t;
+        const billed = db.prepare(`SELECT total_billed FROM student_fees WHERE student_id=? AND academic_session=? AND term=?`).get(receipt.student_id, session, term)?.total_billed || 0;
+        const st = paid >= billed ? 'cleared' : paid > 0 ? 'partial' : 'unpaid';
+        db.prepare(`
+          INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status, updated_at)
+          VALUES (?,?,?,?,?,?,datetime('now'))
+          ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
+            total_paid=excluded.total_paid, status=excluded.status, updated_at=excluded.updated_at
+        `).run(receipt.student_id, session, term, billed, paid, st);
+
+        db.prepare(`UPDATE payment_receipts SET status='approved', reviewed_by=?, reviewed_at=datetime('now') WHERE id=?`).run(reviewer, receiptId);
+      })();
+
+      // Diamond: notify parent
+      if ((licenseStatus?.tier || 'Gold') === 'Diamond') {
+        const stu = db.prepare(`SELECT name, parent_phone FROM students WHERE id=?`).get(receipt.student_id);
+        if (stu?.parent_phone) {
+          const fmt = (n) => `₦${Number(n||0).toLocaleString('en-NG')}`;
+          const msg = `✅ *Payment Verified — ${stu.name}*\n\nAmount: *${fmt(amount)}*\nReference: ${reference||'—'}\nTerm: ${term}\n\nYour fee record has been updated. Thank you! 🎓\n_Powered by Nexus School OS_`;
+          db.prepare(`INSERT INTO pending_pulse_messages (phone,message,type,student_id) VALUES (?,?,'general',?)`).run(stu.parent_phone, msg, receipt.student_id);
+        }
+      }
+      if (currentAdminSession) db.prepare(`INSERT INTO audit_logs (admin_id,action,target,details) VALUES (?,'APPROVE_RECEIPT','payment_receipts',?)`).run(currentAdminSession.id, `Receipt #${receiptId}, ₦${amount}`);
+      return { ok: true };
+    } catch (err) { return { ok: false, error: err.message }; }
+  });
+
+  ipcMain.handle('receipts:reject', (event, { receiptId, reason }) => {
+    try {
+      const db = database.getDb();
+      const receipt = db.prepare(`SELECT * FROM payment_receipts WHERE id=?`).get(receiptId);
+      if (!receipt) return { ok: false, error: 'Receipt not found' };
+      const reviewer = currentAdminSession?.username || 'Admin';
+      db.prepare(`UPDATE payment_receipts SET status='rejected', reviewed_by=?, reviewed_at=datetime('now'), rejection_reason=? WHERE id=?`).run(reviewer, reason||'', receiptId);
+      if ((licenseStatus?.tier || 'Gold') === 'Diamond') {
+        const stu = db.prepare(`SELECT name, parent_phone FROM students WHERE id=?`).get(receipt.student_id);
+        if (stu?.parent_phone) {
+          const msg = `⚠️ *Receipt Update — ${stu.name}*\n\nYour submitted receipt could not be verified.\nReason: ${reason || 'Please contact the school office.'}\n\nKindly resubmit a clearer photo or contact the bursar directly.\n_Powered by Nexus School OS_`;
+          db.prepare(`INSERT INTO pending_pulse_messages (phone,message,type,student_id) VALUES (?,?,'general',?)`).run(stu.parent_phone, msg, receipt.student_id);
+        }
+      }
+      return { ok: true };
+    } catch (err) { return { ok: false, error: err.message }; }
   });
 
   // Bind to 0.0.0.0 so the portal is reachable on ALL network interfaces:
