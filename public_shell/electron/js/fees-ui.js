@@ -73,20 +73,28 @@
       "adj-tbody","btn-adj-add",
       "modal-adj","adj-student-select","adj-class-filter","adj-students-datalist","adj-type","adj-amount","adj-description",
       "btn-adj-cancel","btn-adj-submit",
+      // Receipts tab
+      "fees-tab-btn-receipts","fees-tab-receipts","receipts-badge","receipts-empty","receipts-table","receipts-tbody",
+      "receipt-lightbox","receipt-lightbox-img","receipt-lightbox-text",
+      "modal-receipt-approve","receipt-approve-subtitle","receipt-approve-amount","receipt-approve-method",
+      "receipt-approve-ref","receipt-approve-term","receipt-approve-session","receipt-approve-note",
+      "receipt-pdf-helper","receipt-pdf-text",
+      "modal-receipt-reject","receipt-reject-reason","receipts-toast",
     ];
     ids.forEach(id => { $[id] = document.getElementById(id); });
   }
 
   // ── Tab Management ───────────────────────────────────────────────────────────
   window.feesSetTab = function(tabId) {
-    ["roster", "structure", "adjustments"].forEach(t => {
-      const btn = $[`fees-tab-btn-${t}`];
-      const panel = $[`fees-tab-${t}`];
-      if (btn) btn.classList.toggle("active", t === tabId);
+    ["roster", "structure", "adjustments", "receipts"].forEach(t => {
+      const btn   = $[`fees-tab-btn-${t}`] || document.getElementById(`fees-tab-btn-${t}`);
+      const panel = $[`fees-tab-${t}`]     || document.getElementById(`fees-tab-${t}`);
+      if (btn)   btn.classList.toggle("active", t === tabId);
       if (panel) panel.style.display = t === tabId ? (t === 'roster' ? 'block' : 'flex') : 'none';
     });
-    if (tabId === 'structure') _loadStructure();
+    if (tabId === 'structure')   _loadStructure();
     if (tabId === 'adjustments') _loadAdjustments();
+    if (tabId === 'receipts')    receiptsLoad();
   };
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -926,4 +934,240 @@
 
     await _loadRoster();
   };
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RECEIPTS MODULE — Payment Receipt Review (Gold+)
+// ═══════════════════════════════════════════════════════════════════════════════
+(function() {
+  'use strict';
+  let _pendingReceiptId = null;
+  let _pollInterval    = null;
+  const fmt = (n) => n != null ? `₦${Number(n).toLocaleString('en-NG')}` : '—';
+
+  // ── Toast ──────────────────────────────────────────────────────────────────
+  function _toast(msg) {
+    const container = document.getElementById('receipts-toast');
+    if (!container) return;
+    const el = document.createElement('div');
+    el.style.cssText = 'background:var(--bg-panel);border:1px solid var(--glass-border);border-radius:10px;padding:12px 16px;font-size:13px;box-shadow:0 4px 20px rgba(0,0,0,0.4);pointer-events:all;cursor:pointer;max-width:300px;';
+    el.innerHTML = `<span style="margin-right:8px;">📄</span>${msg}`;
+    el.onclick = () => { feesSetTab('receipts'); el.remove(); };
+    container.appendChild(el);
+    setTimeout(() => el.remove(), 6000);
+  }
+
+  // ── Badge ──────────────────────────────────────────────────────────────────
+  function _updateBadge(count) {
+    const badge = document.getElementById('receipts-badge');
+    if (!badge) return;
+    badge.textContent = count;
+    badge.style.display = count > 0 ? 'inline-block' : 'none';
+  }
+
+  // ── Poll every 30s ─────────────────────────────────────────────────────────
+  function _startPolling() {
+    if (_pollInterval) return;
+    _pollInterval = setInterval(async () => {
+      const res = await window.electronAPI.receipts.getCount();
+      if (res?.ok) _updateBadge(res.count);
+    }, 30000);
+  }
+
+  // ── Real-time push from main process ──────────────────────────────────────
+  if (window.electronAPI?.receipts?.onNew) {
+    window.electronAPI.receipts.onNew(({ count, studentName }) => {
+      _updateBadge(count);
+      _toast(`New receipt from ${studentName}'s parent`);
+    });
+  }
+
+  // ── Name match badge ───────────────────────────────────────────────────────
+  function _matchBadge(score) {
+    if (score == null) return '<span style="color:var(--text-dim);font-size:11px;">—</span>';
+    const pct = Math.round(score * 100);
+    const color = pct >= 80 ? '#4CAF50' : pct >= 50 ? '#FFB300' : '#ff4444';
+    const label = pct >= 80 ? '🟢' : pct >= 50 ? '🟡' : '🔴';
+    return `<span style="color:${color};font-size:11px;" title="${pct}% name match">${label} ${pct}%</span>`;
+  }
+
+  // ── Load & render receipts ─────────────────────────────────────────────────
+  window.receiptsLoad = async function() {
+    const res = await window.electronAPI.receipts.getPending();
+    const tbody  = document.getElementById('receipts-tbody');
+    const table  = document.getElementById('receipts-table');
+    const empty  = document.getElementById('receipts-empty');
+    if (!tbody) return;
+
+    const rows = res?.data || [];
+    _updateBadge(rows.length);
+
+    if (!rows.length) {
+      if (table) table.style.display = 'none';
+      if (empty) empty.style.display = 'block';
+      return;
+    }
+    if (empty) empty.style.display = 'none';
+    if (table) table.style.display = 'table';
+
+    tbody.innerHTML = rows.map(r => {
+      const via = r.submitted_via === 'whatsapp'
+        ? '<span style="color:#25D366;font-size:11px;">📱 WhatsApp</span>'
+        : '<span style="color:var(--accent);font-size:11px;">🌐 Portal</span>';
+      const dt = r.created_at ? new Date(r.created_at).toLocaleDateString('en-NG') : '—';
+      const hasImg = r.file_type && r.file_type.startsWith('image/');
+      const hasPdf = r.file_type === 'application/pdf';
+      return `<tr>
+        <td><div style="font-weight:600;">${r.student_name}</div><div style="font-size:11px;color:var(--text-dim);">${r.class_name}</div></td>
+        <td>${via}</td>
+        <td style="font-weight:600;">${fmt(r.extracted_amount)}</td>
+        <td style="font-size:11px;color:var(--text-dim);">${r.extracted_reference || '—'}</td>
+        <td style="font-size:11px;">${r.extracted_payer_name || '—'}</td>
+        <td>${_matchBadge(r.name_match_score)}</td>
+        <td style="font-size:11px;color:var(--text-dim);">${dt}</td>
+        <td style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${hasImg ? `<button class="tbl-action-btn" style="color:#00e5ff;border-color:rgba(0,229,255,0.3);" onclick="receiptsViewImg(${r.id})">👁️ View</button>` : ''}
+          ${hasPdf && r.pdf_raw_text ? `<button class="tbl-action-btn" style="color:#00e5ff;border-color:rgba(0,229,255,0.3);" onclick="receiptsViewPdf(${r.id})">📄 View</button>` : ''}
+          <button class="tbl-action-btn" style="color:#4CAF50;border-color:rgba(76,175,80,0.3);" onclick="receiptsOpenApprove(${r.id})">✅ Approve</button>
+          <button class="tbl-action-btn" onclick="receiptsOpenReject(${r.id})">❌ Reject</button>
+        </td>
+      </tr>`;
+    }).join('');
+
+    _startPolling();
+  };
+
+  // ── Lightbox helpers ───────────────────────────────────────────────────────
+  window.receiptsViewImg = async function(receiptId) {
+    const res = await window.electronAPI.receipts.getPending();
+    const r = (res?.data||[]).find(x => x.id === receiptId);
+    if (!r) return;
+    const lb  = document.getElementById('receipt-lightbox');
+    const img = document.getElementById('receipt-lightbox-img');
+    const txt = document.getElementById('receipt-lightbox-text');
+    img.src = `data:${r.file_type};base64,${r.file_data_b64}`;
+    img.style.display = 'block';
+    txt.style.display = 'none';
+    lb.style.display = 'flex';
+  };
+
+  window.receiptsViewPdf = async function(receiptId) {
+    const res = await window.electronAPI.receipts.getPending();
+    const r = (res?.data||[]).find(x => x.id === receiptId);
+    if (!r) return;
+    const lb  = document.getElementById('receipt-lightbox');
+    const img = document.getElementById('receipt-lightbox-img');
+    const txt = document.getElementById('receipt-lightbox-text');
+    txt.textContent = r.pdf_raw_text || '(no text)';
+    txt.style.display = 'block';
+    img.style.display = 'none';
+    lb.style.display = 'flex';
+  };
+
+  // ── Open Approve modal ─────────────────────────────────────────────────────
+  window.receiptsOpenApprove = async function(receiptId) {
+    _pendingReceiptId = receiptId;
+    const res = await window.electronAPI.receipts.getPending();
+    const r = (res?.data||[]).find(x => x.id === receiptId);
+    if (!r) return;
+
+    const subtitle = document.getElementById('receipt-approve-subtitle');
+    if (subtitle) subtitle.textContent = `${r.student_name} · ${r.class_name} · via ${r.submitted_via}`;
+
+    // Pre-fill if Diamond AI data available
+    const amtEl = document.getElementById('receipt-approve-amount');
+    const refEl = document.getElementById('receipt-approve-ref');
+    if (amtEl) amtEl.value = r.extracted_amount || '';
+    if (refEl) refEl.value = r.extracted_reference || '';
+
+    // Pre-fill term/session from receipt context
+    const termEl    = document.getElementById('receipt-approve-term');
+    const sessionEl = document.getElementById('receipt-approve-session');
+    if (termEl && r.term)             termEl.value = r.term;
+    if (sessionEl && r.academic_session) sessionEl.value = r.academic_session;
+
+    // PDF copy-helper
+    const helper = document.getElementById('receipt-pdf-helper');
+    const pdfTxt = document.getElementById('receipt-pdf-text');
+    if (helper && pdfTxt) {
+      if (r.pdf_raw_text) {
+        pdfTxt.value = r.pdf_raw_text;
+        helper.style.display = 'block';
+      } else {
+        helper.style.display = 'none';
+      }
+    }
+
+    const modal = document.getElementById('modal-receipt-approve');
+    if (modal) modal.style.display = 'flex';
+  };
+
+  // ── Approve action ─────────────────────────────────────────────────────────
+  window.receiptsApprove = async function() {
+    if (!_pendingReceiptId) return;
+    const amount  = parseFloat(document.getElementById('receipt-approve-amount')?.value);
+    const method  = document.getElementById('receipt-approve-method')?.value || 'transfer';
+    const ref     = document.getElementById('receipt-approve-ref')?.value || '';
+    const term    = document.getElementById('receipt-approve-term')?.value || '';
+    const session = document.getElementById('receipt-approve-session')?.value || '';
+    const note    = document.getElementById('receipt-approve-note')?.value || '';
+
+    if (!amount || isNaN(amount)) {
+      alert('Please enter the payment amount.');
+      return;
+    }
+
+    const btn = document.getElementById('receipt-approve-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+
+    const res = await window.electronAPI.receipts.approve({
+      receiptId: _pendingReceiptId, amount, method, reference: ref, note, term, session
+    });
+
+    if (btn) { btn.disabled = false; btn.textContent = '✅ Approve & Record'; }
+
+    if (res?.ok) {
+      document.getElementById('modal-receipt-approve').style.display = 'none';
+      _pendingReceiptId = null;
+      await receiptsLoad();
+    } else {
+      alert('Error: ' + (res?.error || 'Unknown error'));
+    }
+  };
+
+  // ── Open Reject modal ──────────────────────────────────────────────────────
+  window.receiptsOpenReject = function(receiptId) {
+    _pendingReceiptId = receiptId;
+    const el = document.getElementById('receipt-reject-reason');
+    if (el) el.value = '';
+    const modal = document.getElementById('modal-receipt-reject');
+    if (modal) modal.style.display = 'flex';
+  };
+
+  // ── Reject action ──────────────────────────────────────────────────────────
+  window.receiptsReject = async function() {
+    if (!_pendingReceiptId) return;
+    const reason = document.getElementById('receipt-reject-reason')?.value || '';
+    const btn = document.getElementById('receipt-reject-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+
+    const res = await window.electronAPI.receipts.reject({ receiptId: _pendingReceiptId, reason });
+
+    if (btn) { btn.disabled = false; btn.textContent = '❌ Reject'; }
+
+    if (res?.ok) {
+      document.getElementById('modal-receipt-reject').style.display = 'none';
+      _pendingReceiptId = null;
+      await receiptsLoad();
+    } else {
+      alert('Error: ' + (res?.error || 'Unknown error'));
+    }
+  };
+
+  // Kick off initial badge count on page load
+  window.addEventListener('load', async () => {
+    const res = await window.electronAPI?.receipts?.getCount?.();
+    if (res?.ok) _updateBadge(res.count);
+    _startPolling();
+  });
 })();

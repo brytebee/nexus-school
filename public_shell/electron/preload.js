@@ -83,6 +83,13 @@ const nexusAPI = {
         getSettings:     ()       => ipcRenderer.invoke('fees:get-settings'),
         saveSettings:    (patch)  => ipcRenderer.invoke('fees:save-settings',     patch),
     },
+    receipts: {
+        getPending:  ()       => ipcRenderer.invoke('receipts:get-pending'),
+        getCount:    ()       => ipcRenderer.invoke('receipts:get-count'),
+        approve:     (data)   => ipcRenderer.invoke('receipts:approve',  data),
+        reject:      (data)   => ipcRenderer.invoke('receipts:reject',   data),
+        onNew:       (cb)     => ipcRenderer.on('receipt:new', (_e, v)  => cb(v)),
+    },
     // Phase 3.2: Sovereign Portal (Nexus Mask Architecture)
     portal: {
         getInfo: () => ipcRenderer.invoke('portal:get-info'),
