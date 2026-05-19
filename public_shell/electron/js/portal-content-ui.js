@@ -185,12 +185,32 @@ function editPolicy(data) {
 
 // ── TABS ──────────────────────────────────────────────────────────────
 function switchPcTab(tab) {
-    document.querySelectorAll('.pc-tab').forEach(t => t.classList.remove('active'));
+    // Hide all content panels
     document.querySelectorAll('.pc-tab-content').forEach(c => c.style.display = 'none');
-    
-    document.getElementById('pc-tab-'+tab).classList.add('active');
-    document.getElementById('pc-content-'+tab).style.display = 'block';
-    
+
+    // Reset all tab buttons to inactive style
+    document.querySelectorAll('.pc-tab').forEach(t => {
+        t.classList.remove('active');
+        t.style.background = 'transparent';
+        t.style.color      = 'var(--text-dim)';
+        t.style.borderLeft = 'none';
+        t.style.fontWeight = '400';
+    });
+
+    // Activate the selected tab button
+    const activeBtn = document.getElementById('pc-tab-' + tab);
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+        activeBtn.style.background  = 'rgba(255,255,255,0.1)';
+        activeBtn.style.color       = '#fff';
+        activeBtn.style.borderLeft  = '3px solid var(--accent-gold, #FFD700)';
+        activeBtn.style.fontWeight  = '600';
+    }
+
+    // Show the selected content panel
+    const panel = document.getElementById('pc-content-' + tab);
+    if (panel) panel.style.display = 'block';
+
     hideNewsEditor();
     hidePolicyEditor();
 }
@@ -217,6 +237,137 @@ document.addEventListener('DOMContentLoaded', () => {
         if(origShowView) origShowView(viewId);
         if(viewId === 'portal-content') {
             loadPortalContent();
+            pcLoadSettings();
         }
     };
 });
+
+// ── SETTINGS PANEL ────────────────────────────────────────────────────
+
+/** In-memory settings state for the panel session */
+let _pcSettings = {
+    sections:   [], // [{ id, icon, label, order }]  — custom additional sections
+    categories: [], // [{ id, label }]               — custom article categories
+};
+
+/** Built-in sections that cannot be removed */
+const PC_BUILTIN_SECTIONS = [
+    { id: 'news',     icon: '📢', label: 'News Articles',   builtin: true },
+    { id: 'policies', icon: '📋', label: 'School Policies', builtin: true },
+];
+
+/** Built-in categories that cannot be removed */
+const PC_BUILTIN_CATEGORIES = [
+    { id: 'general',        label: 'General Notice' },
+    { id: 'pta',            label: 'PTA' },
+    { id: 'fees',           label: 'Fees & Payments' },
+    { id: 'infrastructure', label: 'Infrastructure' },
+];
+
+async function pcLoadSettings() {
+    try {
+        const res = await window.nexusAPI.invoke('portal-content:get-settings');
+        if (res && res.ok && res.data) {
+            _pcSettings = res.data;
+        }
+    } catch(e) {
+        // Settings not saved yet — use defaults
+    }
+    if (!_pcSettings.sections)   _pcSettings.sections   = [];
+    if (!_pcSettings.categories) _pcSettings.categories = [];
+    pcPopulateCategorySelects();
+}
+
+window.pcOpenSettings = function() {
+    pcRenderSections();
+    pcRenderCategories();
+    document.getElementById('pc-settings-panel').style.transform   = 'translateX(0)';
+    document.getElementById('pc-settings-backdrop').style.display  = 'block';
+};
+
+window.pcCloseSettings = function() {
+    document.getElementById('pc-settings-panel').style.transform   = 'translateX(100%)';
+    document.getElementById('pc-settings-backdrop').style.display  = 'none';
+};
+
+function pcRenderSections() {
+    const list = document.getElementById('pc-sections-list');
+    if (!list) return;
+    const all = [...PC_BUILTIN_SECTIONS, ..._pcSettings.sections];
+    list.innerHTML = all.map(s => `
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;">
+          <span style="font-size:16px;flex:0 0 auto;">${s.icon || '📄'}</span>
+          <span style="flex:1;font-size:13px;color:${s.builtin ? 'var(--text-dim)' : '#fff'};">${s.label}${s.builtin ? ' <span style="font-size:10px;opacity:0.5;">(built-in)</span>' : ''}</span>
+          ${!s.builtin ? `<button onclick="pcRemoveSection('${s.id}')" style="background:transparent;border:none;color:#ff6b6b;cursor:pointer;font-size:16px;padding:0 4px;" title="Remove">×</button>` : ''}
+        </div>
+    `).join('');
+}
+
+function pcRenderCategories() {
+    const list = document.getElementById('pc-categories-list');
+    if (!list) return;
+    const all = [...PC_BUILTIN_CATEGORIES, ..._pcSettings.categories];
+    list.innerHTML = all.map(c => `
+        <div style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:20px;font-size:12px;color:${PC_BUILTIN_CATEGORIES.find(b => b.id === c.id) ? 'var(--text-dim)' : '#fff'};">
+          ${c.label}
+          ${!PC_BUILTIN_CATEGORIES.find(b => b.id === c.id) ? `<button onclick="pcRemoveCategory('${c.id}')" style="background:transparent;border:none;color:#ff6b6b;cursor:pointer;font-size:13px;line-height:1;padding:0 0 0 4px;">×</button>` : ''}
+        </div>
+    `).join('');
+}
+
+window.pcAddSection = function() {
+    const label = document.getElementById('pc-new-section-label')?.value.trim();
+    const icon  = document.getElementById('pc-new-section-icon')?.value.trim() || '📄';
+    if (!label) { document.getElementById('pc-new-section-label')?.focus(); return; }
+    const id = 'custom_' + label.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    if (_pcSettings.sections.find(s => s.id === id)) return;
+    _pcSettings.sections.push({ id, icon, label });
+    document.getElementById('pc-new-section-label').value = '';
+    document.getElementById('pc-new-section-icon').value  = '';
+    pcRenderSections();
+};
+
+window.pcRemoveSection = function(id) {
+    _pcSettings.sections = _pcSettings.sections.filter(s => s.id !== id);
+    pcRenderSections();
+};
+
+window.pcAddCategory = function() {
+    const label = document.getElementById('pc-new-category-label')?.value.trim();
+    if (!label) { document.getElementById('pc-new-category-label')?.focus(); return; }
+    const id = 'cat_' + label.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    if (_pcSettings.categories.find(c => c.id === id)) return;
+    if (PC_BUILTIN_CATEGORIES.find(c => c.label.toLowerCase() === label.toLowerCase())) return;
+    _pcSettings.categories.push({ id, label });
+    document.getElementById('pc-new-category-label').value = '';
+    pcRenderCategories();
+};
+
+window.pcRemoveCategory = function(id) {
+    _pcSettings.categories = _pcSettings.categories.filter(c => c.id !== id);
+    pcRenderCategories();
+};
+
+window.pcSaveSettings = async function() {
+    try {
+        await window.nexusAPI.invoke('portal-content:save-settings', _pcSettings);
+        pcPopulateCategorySelects();
+        pcCloseSettings();
+        if (typeof Swal !== 'undefined') {
+            Swal.fire({ icon: 'success', title: 'Saved', text: 'Portal sections updated.', timer: 1500, showConfirmButton: false });
+        }
+    } catch(e) {
+        if (typeof Swal !== 'undefined') {
+            Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to save settings.' });
+        }
+    }
+};
+
+/** Keeps the category <select> in the article editor in sync with current settings */
+function pcPopulateCategorySelects() {
+    const sel = document.getElementById('pc-news-category');
+    if (!sel) return;
+    const all = [...PC_BUILTIN_CATEGORIES, ..._pcSettings.categories];
+    sel.innerHTML = all.map(c => `<option value="${c.id}">${c.label}</option>`).join('');
+}
+

@@ -99,12 +99,60 @@ async function startPulse() {
   console.log("[Pulse Bot] Starting...");
   sendStatus("starting");
 
+  // ── Resolve Chromium path for packaged Electron app ───────────────────────
+  // Puppeteer's bundled Chromium path changes when asar-packed.
+  // Priority: system Chrome → Puppeteer bundled → let Puppeteer auto-detect.
+  function resolveChromiumPath() {
+    const { app } = require("electron");
+
+    // System Chrome paths by platform
+    const systemPaths = {
+      darwin: [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+      ],
+      win32: [
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+      ],
+      linux: [
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/chromium",
+      ],
+    };
+
+    const candidates = systemPaths[process.platform] ?? [];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        console.log(`[Pulse Bot] Using system Chrome: ${p}`);
+        return p;
+      }
+    }
+
+    // Puppeteer bundled Chromium — path differs between dev and packaged
+    try {
+      const puppeteer = require("puppeteer");
+      const chromePath = puppeteer.executablePath();
+      if (chromePath && fs.existsSync(chromePath)) {
+        console.log(`[Pulse Bot] Using Puppeteer Chromium: ${chromePath}`);
+        return chromePath;
+      }
+    } catch (_) {}
+
+    console.warn("[Pulse Bot] No Chromium found — Puppeteer will auto-detect (may fail if packaged).");
+    return undefined;
+  }
+
+  const chromiumPath = resolveChromiumPath();
+
   _authPath = path.join(os.homedir(), ".nexus_pulse_auth");
   try {
     client = new Client({
       authStrategy: new LocalAuth({ dataPath: _authPath }),
       puppeteer: {
         headless: true,
+        executablePath: chromiumPath,
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
       },
     });

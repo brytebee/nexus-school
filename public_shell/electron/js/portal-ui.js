@@ -145,7 +145,36 @@ function copyPortalLink() {
  * Opens the portal locally in the default browser for admin preview.
  */
 function openLocalPortal() {
-    const urlEl = document.getElementById("portal-local-url");
-    const url = urlEl ? urlEl.textContent : (_portalInfo?.realUrl || "http://localhost:3002/portal");
-    window.open(url, "_blank");
+    const urlEl = document.getElementById('portal-local-url');
+    const url = urlEl ? urlEl.textContent : (_portalInfo?.realUrl || 'http://localhost:3002/portal');
+    window.open(url, '_blank');
+}
+
+/**
+ * Downloads the rendered portal QR code as a PNG image.
+ * Uses the canvas element that QRCode.js renders inside #portal-qr-container.
+ */
+function downloadPortalQR() {
+    const container = document.getElementById('portal-qr-container');
+    if (!container) return;
+
+    // QRCode.js renders a <canvas> inside the container
+    const canvas = container.querySelector('canvas');
+    if (!canvas) {
+        if (typeof showToast === 'function') showToast('QR code not ready yet.', 'error');
+        return;
+    }
+
+    // Build a filename using school name
+    const schoolName = (_portalInfo?.schoolName || 'Nexus')
+        .split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+    const filename = `nexus-portal-qr-${schoolName}.png`;
+
+    // Convert canvas → PNG data URL → anchor download
+    const link = document.createElement('a');
+    link.download = filename;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+
+    if (typeof showToast === 'function') showToast(`QR saved as ${filename}`);
 }
