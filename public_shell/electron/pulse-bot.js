@@ -6,14 +6,26 @@
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const { database } = require("../../private_engine");
 const path = require("path");
-const os = require("os");
+const os   = require("os");
+const fs   = require("fs");
 const QRCode = require("qrcode");
 
+// Suppress Puppeteer "Execution context was destroyed" noise that fires
+// when WhatsApp LOGOUT causes a page navigation mid-inject. This is expected
+// and harmless — the bot self-recovers by clearing the stale auth.
+process.on("unhandledRejection", (reason) => {
+  if (reason?.message?.includes("Execution context was destroyed")) return;
+  if (reason?.message?.includes("Session closed")) return;
+  console.error("[Pulse Bot] Unhandled rejection:", reason);
+});
+
 // ─── Module-level WA client state ─────────────────────────────────────────────
-let client = null;
-let mainWindowRef = null;
-let isReady = false;
-let qrCodeData = null;
+let client          = null;
+let mainWindowRef   = null;
+let isReady         = false;
+let qrCodeData      = null;
+let _authPath       = null; // set when startPulse() runs
+let _initInProgress = false; // true while client.initialize() is pending
 
 // ─── Conversation Session Manager ─────────────────────────────────────────────
 // Key: last-10-digit phone string  |  Value: Session object
@@ -27,9 +39,10 @@ const SESSION_TTL_MS = 5 * 60 * 1000; // 5 minutes inactivity
 const _jidPhoneCache = new Map();
 
 const STATE = Object.freeze({
-  MENU: "MENU",
-  SCOPE: "SCOPE",
-  TERM_SELECT: "TERM_SELECT",
+  MENU:            "MENU",
+  SCOPE:           "SCOPE",
+  TERM_SELECT:     "TERM_SELECT",
+  AWAITING_RECEIPT:"AWAITING_RECEIPT",
 });
 
 function createSession(students, termConfig, schoolName) {
@@ -86,12 +99,60 @@ async function startPulse() {
   console.log("[Pulse Bot] Starting...");
   sendStatus("starting");
 
+  // ── Resolve Chromium path for packaged Electron app ───────────────────────
+  // Puppeteer's bundled Chromium path changes when asar-packed.
+  // Priority: system Chrome → Puppeteer bundled → let Puppeteer auto-detect.
+  function resolveChromiumPath() {
+    const { app } = require("electron");
+
+    // System Chrome paths by platform
+    const systemPaths = {
+      darwin: [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+      ],
+      win32: [
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+      ],
+      linux: [
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/chromium",
+      ],
+    };
+
+    const candidates = systemPaths[process.platform] ?? [];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        console.log(`[Pulse Bot] Using system Chrome: ${p}`);
+        return p;
+      }
+    }
+
+    // Puppeteer bundled Chromium — path differs between dev and packaged
+    try {
+      const puppeteer = require("puppeteer");
+      const chromePath = puppeteer.executablePath();
+      if (chromePath && fs.existsSync(chromePath)) {
+        console.log(`[Pulse Bot] Using Puppeteer Chromium: ${chromePath}`);
+        return chromePath;
+      }
+    } catch (_) {}
+
+    console.warn("[Pulse Bot] No Chromium found — Puppeteer will auto-detect (may fail if packaged).");
+    return undefined;
+  }
+
+  const chromiumPath = resolveChromiumPath();
+
+  _authPath = path.join(os.homedir(), ".nexus_pulse_auth");
   try {
-    const authPath = path.join(os.homedir(), ".nexus_pulse_auth");
     client = new Client({
-      authStrategy: new LocalAuth({ dataPath: authPath }),
+      authStrategy: new LocalAuth({ dataPath: _authPath }),
       puppeteer: {
         headless: true,
+        executablePath: chromiumPath,
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
       },
     });
@@ -128,8 +189,26 @@ async function startPulse() {
 
     client.on("disconnected", (reason) => {
       console.log("[Pulse Bot] Disconnected:", reason);
-      sendStatus("disconnected");
-      destroyPulse();
+      const userMsg = reason === "LOGOUT"
+        ? "WhatsApp session was logged out. Click \"Start Bot\" to scan a fresh QR."
+        : null;
+      sendStatus("disconnected", userMsg);
+
+      if (reason === "LOGOUT" && _authPath) {
+        // Clear the stale LocalAuth folder so next start shows a fresh QR
+        try {
+          if (fs.existsSync(_authPath)) {
+            fs.rmSync(_authPath, { recursive: true, force: true });
+            console.log("[Pulse Bot] Stale auth session cleared — next start will show QR.");
+          }
+        } catch (clearErr) {
+          console.error("[Pulse Bot] Could not clear stale auth:", clearErr.message);
+        }
+      }
+
+      // Delay destroy so client.initialize() can settle before Puppeteer tears down
+      const delay = _initInProgress ? 3000 : 0;
+      setTimeout(() => destroyPulse(), delay);
     });
 
     client.on("message", async (msg) => {
@@ -140,10 +219,20 @@ async function startPulse() {
       }
     });
 
-    await client.initialize();
+    _initInProgress = true;
+    try {
+      await client.initialize();
+    } finally {
+      _initInProgress = false;
+    }
   } catch (err) {
-    console.error("[Pulse Bot] Failed to initialize:", err);
-    sendStatus("error", err.message);
+    _initInProgress = false;
+    // Suppress context-destroyed noise from LOGOUT — handled by disconnected event
+    if (!err?.message?.includes("Execution context was destroyed") &&
+        !err?.message?.includes("Session closed")) {
+      console.error("[Pulse Bot] Failed to initialize:", err);
+      sendStatus("error", err.message);
+    }
     destroyPulse();
   }
 }
@@ -368,7 +457,50 @@ function queryAttendance(db, studentId, academicSession, term) {
     `SELECT date, term ${base}${termClause} AND status='Absent' ORDER BY date`
   ).all(...args);
 
-  return { present, total, absentRows };
+  let tier = process.env.DEV_MOCK_TIER || "Gold";
+  try {
+    const s = db.prepare("SELECT value FROM app_settings WHERE key='license_payload'").get();
+    if (s) tier = JSON.parse(s.value).tier;
+  } catch(e) {}
+
+  let subjectAggRows = [];
+  if (tier === "Diamond") {
+     const subBase = "FROM subject_attendance_agg WHERE student_id=? AND academic_session=?";
+     subjectAggRows = db.prepare(
+       `SELECT subject_name, total_classes, classes_attended, term ${subBase}${termClause} ORDER BY subject_name`
+     ).all(...args);
+  }
+
+  return { present, total, absentRows, subjectAggRows, tier };
+}
+
+// ─── Fee Gate Config (mirrors main.js isStudentFeeGated) ──────────────────────
+function _getPulseFeeGateConfig(db) {
+  try {
+    const raw = db.prepare("SELECT value FROM app_settings WHERE key = 'fee_settings'").get()?.value;
+    const s = raw ? JSON.parse(raw) : {};
+    return {
+      enabled:   s.fee_gate_enabled !== false,
+      mode:      s.fee_gate_mode      || 'fixed',
+      threshold: Number(s.fee_gate_threshold) || 0,
+    };
+  } catch { return { enabled: true, mode: 'fixed', threshold: 0 }; }
+}
+
+function _isPulseFeeGated(db, studentId, session, termOrNull) {
+  const cfg = _getPulseFeeGateConfig(db);
+  if (!cfg.enabled) return { gated: false, balance: 0 };
+  const balRow = termOrNull
+    ? db.prepare(`SELECT COALESCE(SUM(total_billed-total_paid),0) AS bal FROM student_fees WHERE student_id=? AND academic_session=? AND term=?`).get(studentId, session, termOrNull)
+    : db.prepare(`SELECT COALESCE(SUM(total_billed-total_paid),0) AS bal FROM student_fees WHERE student_id=? AND academic_session=?`).get(studentId, session);
+  const balance = balRow?.bal || 0;
+  if (balance <= 0) return { gated: false, balance: 0 };
+  if (cfg.mode === 'percent') {
+    const billedRow = db.prepare(`SELECT COALESCE(SUM(total_billed),0) AS b FROM student_fees WHERE student_id=? AND academic_session=?`).get(studentId, session);
+    const b = billedRow?.b || 0;
+    return { gated: b > 0 && (balance / b * 100) >= cfg.threshold, balance };
+  }
+  return { gated: cfg.threshold === 0 ? balance > 0 : balance >= cfg.threshold, balance };
 }
 
 // ─── Response Builders ─────────────────────────────────────────────────────────
@@ -383,6 +515,29 @@ async function sendResults(msg, session, termOverride = null) {
   let text = `📊 *Academic Results*\n_Period: ${periodLabel}_\n${DIV}\n\n`;
 
   for (const student of students) {
+    // ── Fee Gate (Gold / Diamond only — Silver is exempt) ──────────────────
+    let tier = 'Gold';
+    try {
+      const s = db.prepare("SELECT value FROM app_settings WHERE key='license_payload'").get();
+      if (s) tier = JSON.parse(s.value).tier || 'Gold';
+    } catch(e) {}
+    if (tier !== 'Silver') {
+      try {
+        // year scope = check ALL terms; otherwise check active term only
+        const termForGate = scope === 'year' ? null : activeTerm;
+        const gate = _isPulseFeeGated(db, student.id, termConfig.academic_session, termForGate);
+        if (gate.gated) {
+          const fmt = (n) => Number(n||0).toLocaleString('en-NG', {minimumFractionDigits:0});
+          text += `👤 *${student.name}* — ${student.class_name}\n`;
+          text += `🔒 *Results Withheld — Outstanding Fee Balance*\n`;
+          text += `   Balance: *\u20a6${fmt(gate.balance)}*\n`;
+          text += `Please contact the school bursar to clear fees and unlock your results.\n\n`;
+          continue;
+        }
+      } catch(feeErr) {
+        console.warn('[Pulse] Fee gate check failed (non-fatal):', feeErr.message);
+      }
+    }
     const records = queryResults(db, student.id, termConfig.academic_session, scope === "year" ? null : activeTerm);
 
     text += `👤 *${student.name}*\n🏫 ${student.class_name}\n`;
@@ -436,7 +591,7 @@ async function sendAttendance(msg, session, termOverride = null) {
   let text = `📅 *Attendance Record*\n_Period: ${periodLabel}_\n${DIV}\n\n`;
 
   for (const student of students) {
-    const { present, total, absentRows } = queryAttendance(
+    const { present, total, absentRows, subjectAggRows, tier } = queryAttendance(
       db, student.id, termConfig.academic_session,
       scope === "year" ? null : activeTerm
     );
@@ -453,7 +608,6 @@ async function sendAttendance(msg, session, termOverride = null) {
 
     text += `${emoji} *${present}/${total} days present* (${pct.toFixed(1)}%)\n`;
 
-    // Missed dates breakdown
     if (absentRows.length > 0) {
       text += `\n📌 *Days Absent (${absentRows.length}):*\n`;
 
@@ -479,6 +633,23 @@ async function sendAttendance(msg, session, termOverride = null) {
       text += `✅ _No absences recorded!_\n`;
     }
 
+    if (tier === "Diamond" && subjectAggRows && subjectAggRows.length > 0) {
+      text += `\n🔬 *Subject-Level Engagement:*\n`;
+      let currentTerm = "";
+      for (const row of subjectAggRows) {
+         if (scope === "year" && row.term !== currentTerm) {
+            currentTerm = row.term;
+            text += `_${currentTerm}:_\n`;
+         }
+         const subPct = row.total_classes > 0 ? (row.classes_attended / row.total_classes) * 100 : 0;
+         text += `  • ${row.subject_name}: *${subPct.toFixed(0)}%*\n`;
+      }
+    } else if (tier !== "Diamond") {
+      // Upsell info requested in plan (though maybe not strictly explicit queries only)
+      // We will only append it if they are not diamond and have no subject rows
+      text += `\n_Note: Granular subject-level tracking is available on the Diamond tier. Contact the school office for deeper insights._\n`;
+    }
+
     text += `\n`;
   }
 
@@ -490,7 +661,7 @@ async function sendAttendance(msg, session, termOverride = null) {
 // Reads from the `student_fees` table (populated by the Financial Hub) so the
 // balance is always accurate — NOT from the stale `students.fee_status` text
 // column, which is never updated when a payment is recorded via the Hub.
-async function sendFeeStatus(msg, session) {
+async function sendFeeStatus(msg, session, matchable) {
   const db = database.getDb();
   const { students, termConfig, schoolName } = session;
 
@@ -528,16 +699,38 @@ async function sendFeeStatus(msg, session) {
     text += `\n`;
   }
 
-  text += `${DIV}\n_For payment enquiries, please contact the school office._\n_Powered by Nexus Pulse_ 🎓`;
+  // Show school bank accounts if configured
+  try {
+    const settingsRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'fee_settings'`).get();
+    const settings = settingsRow ? JSON.parse(settingsRow.value) : {};
+    const accounts = settings.bank_accounts || [];
+    if (accounts.length) {
+      text += `${DIV}\n🏦 *Payment Accounts*\n\n`;
+      accounts.forEach(a => {
+        text += `*${a.bank}*\n${a.number} — ${a.name}\n\n`;
+      });
+      // Prompt for receipt upload (Diamond: AI analysis; Gold: manual review)
+      text += `${DIV}\n📤 *Submit Proof of Payment*\nReply to this message with a clear *photo or screenshot* of your transfer receipt and our team will verify and update your record.\n\n_Reply 0 to return to the main menu_`;
+      // Put the session into AWAITING_RECEIPT state
+      session.state = STATE.AWAITING_RECEIPT;
+      if (matchable) setSession(matchable, session);
+    } else {
+      text += `${DIV}\n_For payment enquiries, please contact the school office._\n_Powered by Nexus Pulse_ 🎓`;
+    }
+  } catch (_) {
+    text += `${DIV}\n_For payment enquiries, please contact the school office._\n_Powered by Nexus Pulse_ 🎓`;
+  }
+
   await msg.reply(text);
 }
 
 // ─── Main Message Handler (State Machine) ──────────────────────────────────────
 async function handleMessage(msg) {
-  if (!msg.from || !msg.body) return;
+  // Allow media messages even when body is empty (needed for receipt photo uploads)
+  if (!msg.from || (!msg.body && !msg.hasMedia)) return;
   if (msg.from.includes("@g.us") || msg.from === "status@broadcast") return;
 
-  const text = msg.body.trim();
+  const text = (msg.body || '').trim();
   const numericInput = /^[123]$/.test(text) ? parseInt(text, 10) : null;
 
   // ── Resolve phone ────────────────────────────────────────────────────────────
@@ -601,10 +794,9 @@ async function handleMessage(msg) {
 
     session.menuChoice = choice;
 
-    // Fee status has no period — deliver immediately
+    // Fee status has no period — deliver immediately (keep session for AWAITING_RECEIPT)
     if (choice === "fees") {
-      clearSession(matchable);
-      await sendFeeStatus(msg, session);
+      await sendFeeStatus(msg, session, matchable);
       return;
     }
 
@@ -651,6 +843,132 @@ async function handleMessage(msg) {
     else await sendAttendance(msg, session, chosenTerm);
     return;
   }
+  // ── STATE: AWAITING_RECEIPT — parent is expected to send a media file ─────────
+  if (session.state === STATE.AWAITING_RECEIPT) {
+    // Allow "0" to cancel
+    if (text === '0') {
+      clearSession(matchable);
+      await msg.reply(buildMainMenu(session.schoolName));
+      return;
+    }
+    // Non-media text while waiting — re-prompt
+    if (!msg.hasMedia) {
+      await msg.reply(`📤 Please send a *photo or screenshot* of your bank transfer receipt, or reply *0* to return to the main menu.`);
+      return;
+    }
+
+    // Download media
+    let media;
+    try { media = await msg.downloadMedia(); } catch(e) {
+      await msg.reply(`⚠️ Could not receive the image. Please try again or contact the school office.`);
+      return;
+    }
+
+    clearSession(matchable);
+
+    const db = database.getDb();
+    const termConfig = session.termConfig;
+
+    // Get tier
+    let tier = 'Gold';
+    try {
+      const ls = db.prepare(`SELECT value FROM app_settings WHERE key='license_payload'`).get();
+      if (ls) tier = JSON.parse(ls.value).tier || 'Gold';
+    } catch(_) {}
+
+    // Build base64
+    const fileDataB64 = media.data; // already base64 from wwebjs
+    const fileType    = media.mimetype || 'image/jpeg';
+
+    // Extract PDF text if applicable
+    let pdfRawText = null;
+    if (fileType === 'application/pdf') {
+      try {
+        const { extractPdfText } = require('./receipt-analysis');
+        const pr = await extractPdfText(fileDataB64);
+        pdfRawText = pr.ok ? pr.text : null;
+      } catch(_) {}
+    }
+
+    // Diamond: AI analysis
+    let aiFields = {};
+    if (tier === 'Diamond') {
+      try {
+        const { analyzeReceiptAI, fuzzyNameMatch } = require('./receipt-analysis');
+        const keyRow = db.prepare(`SELECT value FROM app_settings WHERE key='gemini_api_key'`).get();
+        const gemKey = keyRow?.value || null;
+        if (gemKey) {
+          const ai = await analyzeReceiptAI(fileDataB64, fileType, gemKey);
+          if (ai.ok) {
+            aiFields = {
+              extracted_amount:     ai.amount,
+              extracted_reference:  ai.reference,
+              extracted_date:       ai.date,
+              extracted_payer_name: ai.payerName,
+              extracted_bank:       ai.bank,
+              extracted_confidence: ai.confidence,
+              ai_raw_response:      ai.rawResponse,
+            };
+            // Name match against first student found
+            const firstStu = db.prepare(`SELECT parent_name FROM students WHERE id=?`).get(session.students[0]?.id);
+            if (firstStu?.parent_name && ai.payerName)
+              aiFields.name_match_score = fuzzyNameMatch(firstStu.parent_name, ai.payerName);
+          }
+        }
+      } catch(e) { console.warn('[Pulse] AI receipt analysis failed:', e.message); }
+    }
+
+    // Insert receipt for each student linked to this parent
+    const ins = db.prepare(`
+      INSERT INTO payment_receipts
+        (student_id, submitted_via, file_data_b64, file_type,
+         extracted_amount, extracted_reference, extracted_date, extracted_payer_name,
+         extracted_bank, extracted_confidence, name_match_score,
+         pdf_raw_text, ai_raw_response, academic_session, term, status)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending')
+    `);
+
+    for (const stu of session.students) {
+      try {
+        ins.run(
+          stu.id, 'whatsapp', fileDataB64, fileType,
+          aiFields.extracted_amount     ?? null, aiFields.extracted_reference  ?? null,
+          aiFields.extracted_date       ?? null, aiFields.extracted_payer_name ?? null,
+          aiFields.extracted_bank       ?? null, aiFields.extracted_confidence ?? null,
+          aiFields.name_match_score     ?? null,
+          pdfRawText, aiFields.ai_raw_response ?? null,
+          termConfig.academic_session, termConfig.term
+        );
+      } catch(_) {}
+    }
+
+    // Notify hub
+    try {
+      const { mainWindow: mw } = require('electron').app._windows || {};
+      // Use global mainWindowRef set at initPulseBot
+      if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+        const pending = db.prepare(`SELECT COUNT(*) as c FROM payment_receipts WHERE status='pending'`).get().c;
+        mainWindowRef.webContents.send('receipt:new', { count: pending, studentName: session.students[0]?.name || 'A parent' });
+      }
+    } catch(_) {}
+
+    // Reply based on tier
+    const fmt = (n) => `₦${Number(n||0).toLocaleString('en-NG')}`;
+    if (tier === 'Diamond' && aiFields.extracted_amount != null) {
+      const confPct = Math.round((aiFields.extracted_confidence || 0) * 100);
+      let reply = `✅ *Receipt Received*\n${DIV}\n\n`;
+      if (aiFields.extracted_amount)     reply += `💰 Amount:    *${fmt(aiFields.extracted_amount)}*\n`;
+      if (aiFields.extracted_bank)       reply += `🏦 Bank:      ${aiFields.extracted_bank}\n`;
+      if (aiFields.extracted_reference)  reply += `📋 Reference: ${aiFields.extracted_reference}\n`;
+      if (aiFields.extracted_date)       reply += `📅 Date:      ${aiFields.extracted_date}\n`;
+      if (aiFields.extracted_payer_name) reply += `👤 Payer:     ${aiFields.extracted_payer_name}\n`;
+      reply += `\n_Our admin team will verify and update your fees record. You will receive a confirmation message once approved._\n_Powered by Nexus Pulse_ 🎓`;
+      await msg.reply(reply);
+    } else {
+      await msg.reply(`✅ *Receipt Received!*\n\nOur admin team will verify and update your fee record.\n_You will be notified once approved._\n\n_Powered by Nexus Pulse_ 🎓`);
+    }
+    return;
+  }
 }
 
 // ─── Module Exports ────────────────────────────────────────────────────────────
@@ -666,9 +984,10 @@ module.exports = {
   },
   sendOTP: async (phone, pin, schoolName) => {
     if (!client || !isReady) throw new Error("WhatsApp bot not ready");
-    // Normalize phone to E.164
+    // Normalize phone to E.164 robustly
     let target = phone.replace(/\D/g, "");
-    if (target.startsWith("0")) target = "234" + target.slice(1);
+    if (target.length === 10) target = "234" + target;
+    else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
     if (!target.includes("@c.us")) target += "@c.us";
     
     const message = `🔐 *Nexus Security Challenge*\n\nYour access PIN for *${schoolName}* is: *${pin}*\n\nThis PIN is valid for 12 hours. Do not share this code with anyone.`;
@@ -677,7 +996,8 @@ module.exports = {
   sendAttendanceAlert: async (phone, studentName, schoolName, date) => {
     if (!client || !isReady) return; // Silent fail for background alerts
     let target = phone.replace(/\D/g, "");
-    if (target.startsWith("0")) target = "234" + target.slice(1);
+    if (target.length === 10) target = "234" + target;
+    else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
     if (!target.includes("@c.us")) target += "@c.us";
 
     const formattedDate = date ? new Date(date).toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long' }) : 'today';
@@ -688,7 +1008,8 @@ module.exports = {
   sendFeeReminder: async (phone, studentName, schoolName, balance) => {
     if (!client || !isReady) return;
     let target = phone.replace(/\D/g, "");
-    if (target.startsWith("0")) target = "234" + target.slice(1);
+    if (target.length === 10) target = "234" + target;
+    else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
     if (!target.includes("@c.us")) target += "@c.us";
 
     const message = `💳 *Nexus Pulse: Fee Reminder*\n\nHello! This is a friendly reminder from *${schoolName}* regarding *${studentName}'s* outstanding balance.\n\n*Current Balance:* ₦${balance.toLocaleString()}\n\nPlease kindly clear this balance at your earliest convenience to avoid any disruption to academic activities.\n\n_Thank you for your partnership._`;
@@ -698,7 +1019,8 @@ module.exports = {
   sendMorningBriefing: async (phone, schoolName, stats) => {
     if (!client || !isReady) return;
     let target = phone.replace(/\D/g, "");
-    if (target.startsWith("0")) target = "234" + target.slice(1);
+    if (target.length === 10) target = "234" + target;
+    else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
     if (!target.includes("@c.us")) target += "@c.us";
 
     const date = new Date().toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -712,7 +1034,8 @@ module.exports = {
   sendRawMessage: async (phone, message) => {
     if (!client || !isReady) throw new Error('WhatsApp bot not connected');
     let target = phone.replace(/\D/g, "");
-    if (target.startsWith("0")) target = "234" + target.slice(1);
+    if (target.length === 10) target = "234" + target;
+    else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
     if (!target.includes("@c.us")) target += "@c.us";
     await client.sendMessage(target, message);
   }

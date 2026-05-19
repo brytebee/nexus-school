@@ -15,6 +15,33 @@
           });
         }
 
+        // ── The Vault: Idle Lock Timer ────────────────────────────────────────
+        let idleTime = 0;
+        const IDLE_TIMEOUT_MS = 1800000; // 30 minutes
+        
+        function resetIdleTimer() {
+          idleTime = 0;
+        }
+
+        // Listen for activity
+        document.addEventListener('mousemove', resetIdleTimer);
+        document.addEventListener('keydown', resetIdleTimer);
+        document.addEventListener('click', resetIdleTimer);
+        document.addEventListener('scroll', resetIdleTimer);
+
+        // Check idle time every second
+        setInterval(() => {
+          idleTime += 1000;
+          // Skip lock if a long-running background task is active (e.g. Scholar extraction)
+          if (window._nexusBusy) { idleTime = 0; return; }
+          if (idleTime >= IDLE_TIMEOUT_MS) {
+            // Lock the system
+            if (window.electronAPI.auth && window.electronAPI.auth.lock) {
+              window.electronAPI.auth.lock();
+            }
+          }
+        }, 1000);
+
         // ── QR Payload ────────────────────────────────────────────────────────
         window.electronAPI.onQrPayload((payload) => {
           renderQR(payload);
@@ -255,25 +282,108 @@
           });
 
         // ── License Status Enforcement ─────────────────────────────────────────
-        if (window.electronAPI.onLicenseStatus) {
-            window.electronAPI.onLicenseStatus(async (status) => {
-                window.currentLicenseTier = status.tier || "Silver";
-                window.currentLicenseData = status;
-                if (typeof window.applyFeatureMasking === "function") window.applyFeatureMasking();
-                
-                if (status.locked) {
-                    document.getElementById("license-lock-screen").style.display = "flex";
-                    document.getElementById("lock-message").textContent = status.message || "Your Sovereign Shield license has expired.";
-                    const hwid = await window.electronAPI.getHardwareId();
-                    document.getElementById("lock-hardware-id").textContent = hwid;
-                } else {
-                    document.getElementById("license-lock-screen").style.display = "none";
+        const LOCK_MESSAGES = {
+            no_license:        { icon: '🔑', title: 'No License Found',      msg: 'Please purchase a Nexus School OS license and import your license.nexus file to get started.', ctaType: 'renew' },
+            expired:           { icon: '📅', title: 'License Expired',        msg: 'Your subscription term has ended. Renew online to restore full access.',                          ctaType: 'renew' },
+            tampered:          { icon: '⛔', title: 'Tampered License',       msg: 'Your license file has been modified. Please import a fresh license from your portal.',            ctaType: 'renew' },
+            hardware_mismatch: { icon: '💻', title: 'Device Mismatch',        msg: 'This license is bound to a different computer. Contact support to transfer your license.',         ctaType: 'support' },
+            clock_rollback:    { icon: '🕐', title: 'Clock Tampering',        msg: 'Your system clock was rolled back. Please correct your system date and restart.',                 ctaType: 'support' },
+        };
+
+        const _applyLicenseStatus = async (status) => {
+            if (!status) return;
+            window.currentLicenseTier = status.tier || 'Silver';
+            window.currentLicenseData = status;
+            if (typeof window.applyFeatureMasking === 'function') window.applyFeatureMasking();
+
+            const overlay = document.getElementById('license-lock-overlay');
+
+            if (status.locked) {
+                // Determine which lock state to show
+                const reason   = status.reason || (status.message === 'NO_LICENSE' ? 'no_license' : 'expired');
+                const lockInfo = LOCK_MESSAGES[reason] || LOCK_MESSAGES.expired;
+
+                document.getElementById('lock-icon').textContent            = lockInfo.icon;
+                document.getElementById('lock-title').textContent           = lockInfo.title;
+                document.getElementById('license-lock-message').textContent = lockInfo.msg;
+
+                const ctaRenew   = document.getElementById('lock-ctas-renew');
+                const ctaSupport = document.getElementById('lock-ctas-support');
+                if (ctaRenew)   ctaRenew.style.display   = lockInfo.ctaType === 'renew'   ? 'flex' : 'none';
+                if (ctaSupport) ctaSupport.style.display  = lockInfo.ctaType === 'support' ? 'flex' : 'none';
+
+                if (overlay) overlay.style.display = 'flex';
+            } else {
+                if (overlay) overlay.style.display = 'none';
+
+                // Show activation banner if license not yet hardware-bound
+                if (status.needs_activation) {
+                    const ab = document.getElementById('activate-banner');
+                    if (ab) ab.style.display = 'flex';
                 }
+
+                // Show grace banner
+                if (status.in_grace) {
+                    const gb = document.getElementById('grace-banner');
+                    if (gb) gb.style.display = 'flex';
+                }
+
+                // Server revoked mid-session — show amber but don't hard lock
+                if (status.server_revoked) {
+                    const gb = document.getElementById('grace-banner');
+                    if (gb) {
+                        gb.querySelector('p').innerHTML = '<strong>Server Warning</strong> — Your license has been flagged by the server. Please contact support.';
+                        gb.style.display = 'flex';
+                    }
+                }
+            }
+        };
+
+        // ── License file import helper (used by lock screen buttons) ──────────
+        window.nexusImportLicense = async function() {
+            const result = await window.nexusAPI?.license?.importFile?.();
+            if (result?.ok) {
+                await Swal.fire({ icon: 'success', title: 'License Imported', text: 'Restarting to apply…', timer: 2000, showConfirmButton: false, background: '#0d1235', color: '#fff' });
+                window.location.reload();
+            } else if (result?.reason !== 'cancelled') {
+                Swal.fire({ icon: 'error', title: 'Import Failed', text: result?.reason || 'Unknown error.', background: '#0d1235', color: '#fff' });
+            }
+        };
+
+        // Eager initial hydration
+        if (window.electronAPI.getLicenseStatus) {
+            window.electronAPI.getLicenseStatus().then(_applyLicenseStatus).catch(() => {
+                window.currentLicenseTier = window.currentLicenseTier || 'Silver';
+            });
+        }
+        // Reactive listener for mid-session status changes (heartbeat, revocation)
+        if (window.electronAPI.onLicenseStatus) {
+            window.electronAPI.onLicenseStatus(_applyLicenseStatus);
+        }
+
+        // ── Auto-updater listeners ─────────────────────────────────────────────
+        if (window.nexusAPI?.updater) {
+            window.nexusAPI.updater.onAvailable((info) => {
+                const banner = document.getElementById('update-banner');
+                const text   = document.getElementById('update-banner-text');
+                if (banner) banner.style.display = 'flex';
+                if (text)   text.textContent = `Update v${info?.version ?? ''} is downloading in the background…`;
+            });
+            window.nexusAPI.updater.onDownloaded((info) => {
+                const text = document.getElementById('update-banner-text');
+                const btn  = document.getElementById('btn-restart-install');
+                if (text) text.textContent = `v${info?.version ?? 'new'} is ready — restart to install.`;
+                if (btn)  btn.style.display = 'inline-block';
             });
         }
 
-        // ── Settings Persistence ──────────────────────────────────────────────
-        // ── Boot: load identity + stats ───────────────────────────────────────
+        // ── Navigate-to (from app menu) ────────────────────────────────────────
+        if (window.nexusAPI?.on) {
+            window.nexusAPI.on('navigate-to', (viewId) => {
+                if (typeof showView === 'function') showView(viewId);
+            });
+        }
+
         if (window.electronAPI.getIdentity) {
           window.electronAPI.getIdentity().then((id) => {
             if (id) applyIdentityToUI(id);
@@ -321,6 +431,16 @@
         // ── Init Module Listeners ─────────────────────────────────────────────
         if (typeof initSettingsListeners === "function") initSettingsListeners();
         if (typeof initSyncListeners === "function") initSyncListeners();
+
+        // ── Restore last active view after lock/unlock ─────────────────────
+        try {
+          const lastView = localStorage.getItem('nexus_last_view');
+          if (lastView && lastView !== 'dashboard' && typeof showView === 'function') {
+            setTimeout(() => {
+              try { showView(lastView); } catch(_) { /* fallback to dashboard */ }
+            }, 500);
+          }
+        } catch(_) {}
       }
       
       // Global Support Backdoor

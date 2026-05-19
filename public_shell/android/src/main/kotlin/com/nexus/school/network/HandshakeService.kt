@@ -36,7 +36,8 @@ data class QrPayload(
 @Serializable
 data class SchoolConfig(
     val name: String? = null,
-    val themePrimary: String? = null,
+    val primary_color: String? = null,   // normalised field sent by server since handshake fix
+    val themePrimary: String? = null,    // legacy field from QR payload config — kept for compat
     val themeSecondary: String? = null,
     val logoBase64: String? = null,
     val address: String? = null,

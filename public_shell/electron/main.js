@@ -15,8 +15,9 @@ const { database, server, reports } = require("../../private_engine");
 const scholar = require("../../private_engine/src/scholar");
 const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, handleCSVUpload, clearData } = server;
 const address = require("address");
-const pulseBot = require('./pulse-bot.js');
+const pulseBot     = require('./pulse-bot.js');
 const pulseExporter = require('./pulse-exporter.js');
+const receiptAnalysis = require('./receipt-analysis.js');
 const express = require('express');
 const { Bonjour } = require('bonjour-service');
 const bonjour = new Bonjour();
@@ -24,11 +25,28 @@ const bonjour = new Bonjour();
 // Set app name BEFORE createWindow so Menu.buildFromTemplate picks it up correctly
 app.setName("NexusSchoolOS");
 
+// ── Single-instance lock: prevents duplicate processes fighting over ports ──
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  // Another instance is already running — bring it to front and quit this one
+  console.warn('[Nexus] Duplicate instance detected. Quitting.');
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    // Someone tried to launch a second instance — focus our window
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
 if (!app) {
   console.error(
     "[CRITICAL] Electron 'app' is undefined. Ensure you are running with 'electron .'",
   );
 }
+
 
 let mainWindow;
 
@@ -50,6 +68,10 @@ let identityFilePath = "";
 let qrPayload = null;
 let licenseStatus = { locked: false, message: "" };
 
+// Synchronous getter — renderer calls this at boot to pre-populate tier
+// before the reactive `license-status` push event arrives.
+ipcMain.handle('license:get-status', () => licenseStatus);
+
 // ── ALL ipcMain.handle registrations (ONCE at module scope) ──────────────────
 
 ipcMain.on("pulse:start", () => {
@@ -61,6 +83,19 @@ ipcMain.on("pulse:start", () => {
 });
 ipcMain.on("pulse:stop", () => pulseBot.destroyPulse());
 ipcMain.handle("pulse:status", () => pulseBot.getPulseStatus());
+
+// ── CBT ENGINE IPC ───────────────────────────────────────────────────────────
+require('./cbt-ipc-handlers')(database);
+
+// ── ATTENDANCE ENGINE IPC (V2.3) ─────────────────────────────────────────────
+// Pass a lightweight enqueue helper so the Guardian Shield can WhatsApp parents
+require('./attendance-ipc-handlers')(database, (phone, message, studentId) => {
+    try {
+        database.getDb().prepare(
+            "INSERT INTO pending_pulse_messages (phone, message, type, student_id) VALUES (?, ?, 'guardian_alert', ?)"
+        ).run(phone, message, studentId);
+    } catch(e) { console.error('[Guardian Shield] Enqueue failed:', e.message); }
+});
 
 // ── NEXUS SCHOLAR IPC ────────────────────────────────────────────────────────
 ipcMain.handle("scholar:get-stats", () => scholar.getStats());
@@ -105,22 +140,172 @@ let currentAdminSession = null;
 
 ipcMain.handle('auth:get-admins', () => {
     const db = database.getDb();
-    return db.prepare('SELECT id, name, role FROM admin_users WHERE is_active = 1 ORDER BY role DESC, name ASC').all();
+    // Use role_level instead of role string, username instead of name.
+    return db.prepare('SELECT id, username, role_level, avatar FROM admin_users ORDER BY role_level DESC, username ASC').all();
 });
 
 ipcMain.handle('auth:verify-pin', (event, { adminId, pin }) => {
     const db = database.getDb();
-    const admin = db.prepare('SELECT * FROM admin_users WHERE id = ? AND is_active = 1').get(adminId);
-    if (!admin) return { ok: false };
-    const pinHash = crypto.createHash('sha256').update(String(pin)).digest('hex');
-    if (pinHash !== admin.pin_hash) return { ok: false };
-    currentAdminSession = { id: admin.id, name: admin.name, role: admin.role, loginAt: Date.now() };
-    db.prepare("UPDATE admin_users SET last_login = datetime('now') WHERE id = ?").run(admin.id);
-    console.log(`[Auth] Session opened: ${admin.name} (${admin.role})`);
-    return { ok: true, name: admin.name, role: admin.role };
+    const admin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(adminId);
+    if (!admin) return { ok: false, error: 'Admin not found' };
+    
+    // For simplicity in the Vault, the hash is base64 of the pin.
+    const pinHash = Buffer.from(String(pin)).toString('base64');
+    if (pinHash !== admin.secret_hash) return { ok: false, error: 'Incorrect PIN' };
+    
+    currentAdminSession = { id: admin.id, username: admin.username, role_level: admin.role_level, loginAt: Date.now() };
+    console.log(`[Auth] Session opened: ${admin.username} (Level ${admin.role_level})`);
+    
+    // Log the login event
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'LOGIN', 'SYSTEM', 'Session initialized')").run(admin.id);
+    
+    return { ok: true, username: admin.username, role_level: admin.role_level };
+});
+
+ipcMain.handle('auth:logout', () => {
+    if (currentAdminSession) {
+        const db = database.getDb();
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'LOGOUT', 'SYSTEM', 'Session terminated')").run(currentAdminSession.id);
+    }
+    currentAdminSession = null;
+    console.log(`[Auth] Session closed.`);
+    return { ok: true };
+});
+
+const pendingOTPs = {};
+
+ipcMain.handle('auth:forgot-password', (event, { adminId }) => {
+    const db = database.getDb();
+    const admin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(adminId);
+    if (!admin) return { ok: false, error: 'Admin not found' };
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    pendingOTPs[adminId] = { otp, expiresAt: Date.now() + 10 * 60000 }; // 10 min expiry
+
+    // Phone is stored in identityPacket.principalPhone (loaded from identity.json at boot)
+    // NOT in app_settings — so we read it directly from the in-memory packet.
+    const phone = identityPacket?.principalPhone?.trim() || null;
+
+    if (!phone && process.env.DEV_MODE !== 'true') {
+        return { ok: false, error: 'School contact phone not configured. Go to Settings → School Identity and save the Principal phone first.' };
+    }
+
+    const message = `*Nexus School OS - Emergency Access*\n\nAdmin: ${admin.username}\nYour OTP is: *${otp}*\n\nThis OTP expires in 10 minutes.`;
+
+    // Only queue WhatsApp message if we have a real phone number
+    // (in DEV_MODE with no phone configured, we skip the queue to avoid NOT NULL crash)
+    if (phone) {
+        try {
+            db.prepare(`
+                INSERT INTO pending_pulse_messages (phone, message, type, status)
+                VALUES (?, ?, 'otp', 'pending')
+            `).run(phone, message);
+        } catch (e) {
+            console.warn('[OTP] Could not queue WhatsApp message:', e.message);
+        }
+    }
+
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'OTP_REQUESTED', 'SYSTEM', 'Emergency OTP requested via Pulse')").run(adminId);
+
+    const result = { ok: true };
+    if (process.env.DEV_MODE === 'true') result.devOtp = otp;
+    return result;
+});
+
+
+ipcMain.handle('auth:verify-otp-login', (event, { adminId, otp }) => {
+    const db = database.getDb();
+    const admin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(adminId);
+    if (!admin) return { ok: false, error: 'Admin not found' };
+
+    const record = pendingOTPs[adminId];
+    if (!record) return { ok: false, error: 'No OTP requested' };
+    if (Date.now() > record.expiresAt) {
+        delete pendingOTPs[adminId];
+        return { ok: false, error: 'OTP expired' };
+    }
+    if (record.otp !== otp) return { ok: false, error: 'Invalid OTP' };
+
+    // Login successful
+    delete pendingOTPs[adminId];
+    currentAdminSession = { id: admin.id, username: admin.username, role_level: admin.role_level, loginAt: Date.now() };
+    console.log(`[Auth] Session opened via OTP: ${admin.username} (Level ${admin.role_level})`);
+    
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'LOGIN', 'SYSTEM', 'Session initialized via Emergency OTP')").run(admin.id);
+    
+    return { ok: true, username: admin.username, role_level: admin.role_level };
+});
+
+// auth:change-pin — called after OTP verify to let admin set a new PIN/password
+ipcMain.handle('auth:change-pin', (event, { adminId, newPin, authType }) => {
+    try {
+        const db = database.getDb();
+        const admin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(adminId);
+        if (!admin) return { ok: false, error: 'Admin not found' };
+        if (!newPin || newPin.trim().length < 4) return { ok: false, error: 'PIN must be at least 4 characters.' };
+        const newHash = Buffer.from(newPin.trim()).toString('base64');
+        db.prepare('UPDATE admin_users SET secret_hash = ?, auth_type = ? WHERE id = ?')
+          .run(newHash, authType || admin.auth_type || 'pin', adminId);
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'PIN_CHANGED', 'SYSTEM', 'Admin changed credentials via Emergency OTP flow')").run(adminId);
+        console.log(`[Auth] PIN changed for admin ID ${adminId}`);
+        return { ok: true };
+    } catch (e) {
+        console.error('[Auth] change-pin error:', e);
+        return { ok: false, error: e.message };
+    }
+});
+
+// auth:create-admin — Super-admins can add new staff accounts
+ipcMain.handle('auth:create-admin', (event, { username, pin, roleLevel, displayName }) => {
+    try {
+        const db = database.getDb();
+        if (!username?.trim() || !pin?.trim()) return { ok: false, error: 'Username and PIN are required.' };
+        const exists = db.prepare('SELECT id FROM admin_users WHERE username = ?').get(username.trim());
+        if (exists) return { ok: false, error: `Username "${username.trim()}" is already taken.` };
+        if (pin.trim().length < 4) return { ok: false, error: 'PIN must be at least 4 characters.' };
+        const hash = Buffer.from(pin.trim()).toString('base64');
+        const result = db.prepare(`INSERT INTO admin_users (username, secret_hash, auth_type, role_level) VALUES (?, ?, 'pin', ?)`).run(username.trim(), hash, parseInt(roleLevel) || 1);
+        if (currentAdminSession) db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'CREATE_ADMIN', 'admin_users', ?)").run(currentAdminSession.id, `Created: ${username.trim()} (Level ${roleLevel || 1})`);
+        return { ok: true, id: result.lastInsertRowid };
+    } catch (e) { return { ok: false, error: e.message }; }
+});
+
+// auth:delete-admin — Remove a staff account (cannot delete self or last super-admin)
+ipcMain.handle('auth:delete-admin', (event, { adminId }) => {
+    try {
+        const db = database.getDb();
+        const target = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(adminId);
+        if (!target) return { ok: false, error: 'Admin not found.' };
+        if (currentAdminSession?.id === adminId) return { ok: false, error: 'You cannot delete your own account.' };
+        const superCount = db.prepare('SELECT COUNT(*) as c FROM admin_users WHERE role_level = 9').get().c;
+        if (target.role_level === 9 && superCount <= 1) return { ok: false, error: 'Cannot delete the only Super Admin account.' };
+        db.prepare('DELETE FROM admin_users WHERE id = ?').run(adminId);
+        if (currentAdminSession) db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'DELETE_ADMIN', 'admin_users', ?)").run(currentAdminSession.id, `Deleted: ${target.username}`);
+        return { ok: true };
+    } catch (e) { return { ok: false, error: e.message }; }
+});
+
+// cbt:scholar-extract — reads Gemini key from DB; uses AI if available, regex fallback otherwise
+ipcMain.handle('cbt:scholar-extract', async (event, { fileData, fileName }) => {
+    const db = database.getDb();
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'gemini_api_key'").get();
+    const apiKey = row?.value || null;
+    return await scholar.extractQuestions(fileData, fileName, 15, apiKey);
 });
 
 ipcMain.handle('auth:get-session', () => currentAdminSession);
+
+ipcMain.handle('auth:get-audit-logs', () => {
+    const db = database.getDb();
+    return db.prepare(`
+        SELECT a.id, a.action, a.target, a.details, a.timestamp, u.username as admin_name 
+        FROM audit_logs a 
+        LEFT JOIN admin_users u ON a.admin_id = u.id 
+        ORDER BY a.timestamp DESC 
+        LIMIT 100
+    `).all();
+});
 
 // auth:unlock — fired by lock.html after PIN accepted. Loads the main app.
 ipcMain.on('auth:unlock', () => {
@@ -128,6 +313,17 @@ ipcMain.on('auth:unlock', () => {
     const targetFile = process.env.USE_REACT_UI === 'true' ? 'renderer.html' : 'index.html';
     mainWindow.loadFile(targetFile);
     console.log(`[Auth] Lock screen dismissed. Loading ${targetFile}.`);
+});
+
+ipcMain.on('auth:lock', () => {
+    if (!mainWindow) return;
+    if (currentAdminSession) {
+        const db = database.getDb();
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'LOCK', 'SYSTEM', 'Idle timeout triggered lock')").run(currentAdminSession.id);
+        currentAdminSession = null;
+    }
+    mainWindow.loadFile('lock.html');
+    console.log(`[Auth] System locked due to idle timeout.`);
 });
 
 
@@ -145,19 +341,31 @@ ipcMain.handle('fee-structure:get-all', (event, { className } = {}) => {
 
 ipcMain.handle('fee-structure:upsert-item', (event, { id, className, itemName, amount, term }) => {
     const db = database.getDb();
+    const adminId = currentAdminSession ? currentAdminSession.id : null;
+    
     if (id) {
         db.prepare('UPDATE fee_structures SET class_name=?, item_name=?, amount=?, term=? WHERE id=?')
           .run(className, itemName, amount, term || 'All Terms', id);
+        
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'UPDATE_FEE_ITEM', 'fee_structures', ?)").run(adminId, `Updated ${itemName} for ${className} (₦${amount})`);
         return { ok: true, id };
     }
     const result = db.prepare('INSERT OR REPLACE INTO fee_structures (class_name, item_name, amount, term) VALUES (?,?,?,?)')
       .run(className, itemName, amount, term || 'All Terms');
+      
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'ADD_FEE_ITEM', 'fee_structures', ?)").run(adminId, `Added ${itemName} for ${className} (₦${amount})`);
     return { ok: true, id: result.lastInsertRowid };
 });
 
 ipcMain.handle('fee-structure:delete-item', (event, id) => {
     const db = database.getDb();
+    const item = db.prepare('SELECT * FROM fee_structures WHERE id = ?').get(id);
     db.prepare('DELETE FROM fee_structures WHERE id = ?').run(id);
+    
+    if (item) {
+        const adminId = currentAdminSession ? currentAdminSession.id : null;
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'DELETE_FEE_ITEM', 'fee_structures', ?)").run(adminId, `Deleted ${item.item_name} for ${item.class_name}`);
+    }
     return { ok: true };
 });
 
@@ -183,6 +391,9 @@ ipcMain.handle('fee-structure:apply-to-class', (event, { className, academicSess
           total_billed = excluded.total_billed, updated_at = datetime('now')
     `);
     db.transaction(() => { for (const s of students) upsert.run(s.id, session, activeTerm, total); })();
+
+    const adminId = currentAdminSession ? currentAdminSession.id : null;
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'BULK_APPLY_FEES', 'student_fees', ?)").run(adminId, `Applied ₦${total.toLocaleString()} to ${students.length} students in ${className}`);
 
     console.log(`[Fee Structure] Applied ₦${total.toLocaleString()} to ${students.length} students in ${className}`);
     return { ok: true, count: students.length, totalBilled: total };
@@ -228,11 +439,19 @@ ipcMain.handle('fee-structure:add-adjustment', (event, data) => {
             WHERE student_id = ? AND academic_session = ? AND term = ?
         `).run(amount, studentId, session, term);
     })();
+    const adminId = currentAdminSession ? currentAdminSession.id : null;
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'ADD_FEE_ADJUSTMENT', 'fee_adjustments', ?)").run(adminId, `Added ${adjustmentType} of ₦${amount} for student ${studentId}`);
     return { ok: true };
 });
 
 ipcMain.handle('fee-structure:delete-adjustment', (event, id) => {
-    database.getDb().prepare('DELETE FROM fee_adjustments WHERE id = ?').run(id);
+    const db = database.getDb();
+    const adj = db.prepare('SELECT * FROM fee_adjustments WHERE id = ?').get(id);
+    db.prepare('DELETE FROM fee_adjustments WHERE id = ?').run(id);
+    if (adj) {
+        const adminId = currentAdminSession ? currentAdminSession.id : null;
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'DELETE_FEE_ADJUSTMENT', 'fee_adjustments', ?)").run(adminId, `Deleted adjustment ID ${id} for student ${adj.student_id}`);
+    }
     return { ok: true };
 });
 
@@ -588,26 +807,26 @@ ipcMain.handle("update-teacher-full", (event, { id, name, phone, email, signatur
 });
 
 // ── Form-based Student Entry (mobile adds/edits; this is a DB stub) ───────────
-ipcMain.handle("add-student-form", (event, { id, name, class_name, subjects, reg_no, gender, dob, photo, parent_email, parent_phone, fee_status }) => {
+ipcMain.handle("add-student-form", (event, { id, name, class_name, subjects, reg_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status }) => {
   try {
     const db = database.getDb();
     db.transaction(() => {
-      // 1. Upsert Student (with extended V2 profile fields)
       db.prepare(`
-        INSERT INTO students (id, name, class_name, reg_no, gender, dob, photo, parent_email, parent_phone, fee_status)
-        VALUES (@id, @name, @class_name, @reg_no, @gender, @dob, @photo, @parent_email, @parent_phone, @fee_status)
+        INSERT INTO students (id, name, class_name, reg_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status)
+        VALUES (@id, @name, @class_name, @reg_no, @gender, @dob, @photo, @parent_email, @parent_phone, @parent_name, @fee_status)
         ON CONFLICT(id) DO UPDATE SET
           name=excluded.name, class_name=excluded.class_name,
           reg_no=excluded.reg_no, gender=excluded.gender, dob=excluded.dob,
           photo=COALESCE(excluded.photo, photo),
           parent_email=excluded.parent_email, parent_phone=excluded.parent_phone,
+          parent_name=excluded.parent_name,
           fee_status=excluded.fee_status
       `).run({ id, name, class_name,
         reg_no: reg_no || '', gender: gender || '', dob: dob || '',
         photo: photo || null, parent_email: parent_email || '',
-        parent_phone: parent_phone || '', fee_status: fee_status || 'cleared'
+        parent_phone: parent_phone || '', parent_name: parent_name || null,
+        fee_status: fee_status || 'cleared'
       });
-      // 2. Refresh subject enrollment
       db.prepare("DELETE FROM student_subjects WHERE student_id = ?").run(id);
       if (subjects && subjects.length > 0) {
         const stmt = db.prepare("INSERT INTO student_subjects (student_id, subject) VALUES (?, ?)");
@@ -622,31 +841,30 @@ ipcMain.handle("add-student-form", (event, { id, name, class_name, subjects, reg
 });
 
 // ── Form-based Student Update (“Edit” path) ──────────────────────────────────────
-ipcMain.handle("update-student", (event, { id, name, class_name, subjects, reg_no, gender, dob, photo, parent_email, parent_phone, fee_status }) => {
+ipcMain.handle("update-student", (event, { id, name, class_name, subjects, reg_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status }) => {
   try {
     const db = database.getDb();
     db.transaction(() => {
-      // photo only updated when explicitly provided (avoids wiping existing photo on minor edits)
       if (photo !== undefined && photo !== null) {
         db.prepare(`
           UPDATE students SET name=@name, class_name=@class_name,
             reg_no=@reg_no, gender=@gender, dob=@dob, photo=@photo,
-            parent_email=@parent_email, parent_phone=@parent_phone,
+            parent_email=@parent_email, parent_phone=@parent_phone, parent_name=@parent_name,
             fee_status=@fee_status
           WHERE id=@id
         `).run({ id, name, class_name, reg_no: reg_no||'', gender: gender||'', dob: dob||'',
                  photo, parent_email: parent_email||'', parent_phone: parent_phone||'',
-                 fee_status: fee_status||'cleared' });
+                 parent_name: parent_name||null, fee_status: fee_status||'cleared' });
       } else {
         db.prepare(`
           UPDATE students SET name=@name, class_name=@class_name,
             reg_no=@reg_no, gender=@gender, dob=@dob,
-            parent_email=@parent_email, parent_phone=@parent_phone,
+            parent_email=@parent_email, parent_phone=@parent_phone, parent_name=@parent_name,
             fee_status=@fee_status
           WHERE id=@id
         `).run({ id, name, class_name, reg_no: reg_no||'', gender: gender||'', dob: dob||'',
                  parent_email: parent_email||'', parent_phone: parent_phone||'',
-                 fee_status: fee_status||'cleared' });
+                 parent_name: parent_name||null, fee_status: fee_status||'cleared' });
       }
       // Replace subject enrollment
       db.prepare("DELETE FROM student_subjects WHERE student_id = ?").run(id);
@@ -720,7 +938,48 @@ ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = ""
     return { ok: false, error: err.message, data: [], total: 0 };
   }
 });
+// ── Subject Consistency Engine ────────────────────────────────────────────────
+ipcMain.handle("subjects:get-canonical-list", () => {
+  try {
+    const db = database.getDb();
+    // Return all distinct subjects taught by any teacher, or full allocations if needed.
+    // To fix stale lists, we return the canonical mapping.
+    const allocations = db.prepare("SELECT teacher_id, class_name, subject FROM teacher_allocations").all();
+    return { ok: true, data: allocations };
+  } catch (err) {
+    console.error("[Subjects] Failed to get canonical list:", err);
+    return { ok: false, error: err.message, data: [] };
+  }
+});
 
+ipcMain.handle("subjects:get-sync-warnings", () => {
+  try {
+    const db = database.getDb();
+    const warnings = db.prepare(`
+      SELECT w.id, w.device_id, w.teacher_id, w.student_id, w.mismatched_subject, w.timestamp, 
+             t.name as teacher_name, s.name as student_name
+      FROM sync_warnings w
+      LEFT JOIN teachers t ON w.teacher_id = t.id
+      LEFT JOIN students s ON w.student_id = s.id
+      ORDER BY w.timestamp DESC LIMIT 50
+    `).all();
+    return { ok: true, data: warnings };
+  } catch (err) {
+    console.error("[Subjects] Failed to get sync warnings:", err);
+    return { ok: false, error: err.message, data: [] };
+  }
+});
+
+ipcMain.handle("subjects:clear-sync-warnings", () => {
+  try {
+    const db = database.getDb();
+    db.prepare("DELETE FROM sync_warnings").run();
+    return { ok: true };
+  } catch (err) {
+    console.error("[Subjects] Failed to clear sync warnings:", err);
+    return { ok: false, error: err.message };
+  }
+});
 
 // ── Directory: Delete Teacher ─────────────────────────────────────────────────
 ipcMain.handle("delete-teacher", (event, { id }) => {
@@ -822,6 +1081,34 @@ const _parseFeeSettings = (db) => {
   const raw = db.prepare("SELECT value FROM app_settings WHERE key = 'fee_settings'").get()?.value;
   try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
 };
+
+/**
+ * isStudentFeeGated — checks if a student's results should be withheld.
+ * termOrNull: pass the active term string for single-term check, or null for ALL terms in the session.
+ * Returns { gated: bool, balance: number }
+ */
+function isStudentFeeGated(db, studentId, session, termOrNull) {
+  const s = _parseFeeSettings(db);
+  const enabled   = s.fee_gate_enabled !== false; // default on
+  const mode      = s.fee_gate_mode      || 'fixed';
+  const threshold = Number(s.fee_gate_threshold) || 0;
+  if (!enabled) return { gated: false, balance: 0 };
+
+  const balRow = termOrNull
+    ? db.prepare(`SELECT COALESCE(SUM(total_billed - total_paid), 0) AS bal FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?`).get(studentId, session, termOrNull)
+    : db.prepare(`SELECT COALESCE(SUM(total_billed - total_paid), 0) AS bal FROM student_fees WHERE student_id = ? AND academic_session = ?`).get(studentId, session);
+  const balance = balRow?.bal || 0;
+  if (balance <= 0) return { gated: false, balance: 0 };
+
+  if (mode === 'percent') {
+    const billedRow = db.prepare(`SELECT COALESCE(SUM(total_billed), 0) AS b FROM student_fees WHERE student_id = ? AND academic_session = ?`).get(studentId, session);
+    const totalBilled = billedRow?.b || 0;
+    if (totalBilled <= 0) return { gated: false, balance };
+    return { gated: (balance / totalBilled * 100) >= threshold, balance };
+  }
+  // fixed mode: threshold 0 = any positive balance
+  return { gated: threshold === 0 ? balance > 0 : balance >= threshold, balance };
+}
 
 /**
  * fees:get-roster — students LEFT-JOINed with student_fees for a given term.
@@ -1078,6 +1365,11 @@ ipcMain.handle("get-student-attendance-report", async (event, { student_id }) =>
 // ── V2: Query Results (dynamic scope filtering) ───────────────────────────────
 ipcMain.handle("query-results", (event, { scope, session, term, class_name, subject, teacher_id, student_id }) => {
   console.log(`[Diagnostic] query-results: scope=${scope}, session=${session}, term=${term}`);
+  // ── Silver plan: only 'all' scope permitted ──────────────────────────────
+  const _qrTier = licenseStatus?.tier || 'Silver';
+  if (_qrTier === 'Silver' && scope && scope !== 'all') {
+    return { ok: false, error: 'Generating individual, class, or subject reports requires a Gold or Diamond plan. Contact your Nexus Partner to upgrade.', results: [] };
+  }
   try {
     const db = database.getDb();
 
@@ -1291,6 +1583,10 @@ ipcMain.handle("save-domain-scores", (event, { student_id, session, term, domain
       }
     });
     run();
+    
+    const adminId = currentAdminSession ? currentAdminSession.id : null;
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'UPDATE_DOMAIN_SCORES', 'student_domains', ?)").run(adminId, `Updated affective/psychomotor scores for ${student_id} (${term})`);
+    
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -1314,6 +1610,10 @@ ipcMain.handle("save-teacher-remark", (event, { student_id, teacher_id, session,
         principal_remark = excluded.principal_remark,
         teacher_id = COALESCE(excluded.teacher_id, teacher_remarks.teacher_id)
     `).run({ student_id, teacher_id: teacher_id || null, session, term, remark: remark || "", principal_remark: principal_remark || "" });
+    
+    const adminId = currentAdminSession ? currentAdminSession.id : null;
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'UPDATE_REMARKS', 'teacher_remarks', ?)").run(adminId, `Updated remarks for ${student_id} (${term})`);
+    
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -1608,10 +1908,21 @@ ipcMain.handle("generate-reports", async (event, payload) => {
     const db = database.getDb();
     if (payload.students) {
       for (const s of payload.students) {
-        // Fee Shield Check
-        const feeStatus = db.prepare(`SELECT status FROM fee_transactions WHERE student_id = ? AND academic_session = ? AND term = ? ORDER BY id DESC LIMIT 1`).get(s.id, termConfig?.academic_session, termConfig?.term);
-        // If no record exists, assume unpaid unless otherwise specified
-        s.feeStatus = feeStatus ? feeStatus.status : 'unpaid';
+        // Fee Shield Check — status lives in student_fees, not fee_transactions
+        try {
+          const feeStatus = db.prepare(
+            `SELECT status FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ? LIMIT 1`
+          ).get(s.id, termConfig?.academic_session, termConfig?.term);
+          s.feeStatus = feeStatus?.status ?? 'unpaid';
+        } catch (feeErr) {
+          s.feeStatus = 'unpaid'; // non-fatal — proceed without fee status
+        }
+
+        // Subject Attendance Aggregation (Diamond Tier)
+        try {
+            const subAtt = db.prepare(`SELECT subject_name, total_classes, classes_attended FROM subject_attendance_agg WHERE student_id = ? AND academic_session = ? AND term = ?`).all(s.id, termConfig?.academic_session, termConfig?.term);
+            if (subAtt && subAtt.length > 0) s.subject_attendance_agg = subAtt;
+        } catch (e) { /* ignore if table not ready */ }
       }
     }
 
@@ -1729,21 +2040,36 @@ function createWindow() {
     console.error("Failed to load/save identity.json or initialize DB", err);
   }
 
-  // Remove default native menu bar
+  // ── Auto-updater (electron-updater + GitHub Releases) ───────────────────────
+  // Only active in production builds. Silently downloads; user triggers install.
+  let _updaterAvailable = false;
+  try {
+    const { autoUpdater } = require('electron-updater');
+    autoUpdater.autoDownload    = true;  // download silently in background
+    autoUpdater.autoInstallOnAppQuit = false; // let the user trigger install
+    autoUpdater.on('update-available',  (info) => { _updaterAvailable = true;  mainWindow?.webContents.send('update-available',  info); });
+    autoUpdater.on('update-downloaded', (info) => { mainWindow?.webContents.send('update-downloaded', info); });
+    autoUpdater.on('download-progress', (p)    => { mainWindow?.webContents.send('update-progress',   p);    });
+    autoUpdater.on('error',             (err)  => { mainWindow?.webContents.send('update-error', err.message); });
+    // Check 30s after launch so it doesn't compete with app startup
+    setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch {} }, 30_000);
+    ipcMain.handle('updater:check',   () => autoUpdater.checkForUpdates());
+    ipcMain.handle('updater:install', () => { autoUpdater.quitAndInstall(false, true); });
+  } catch (e) {
+    // electron-updater not yet installed — no-op
+    ipcMain.handle('updater:check',   () => ({ available: false }));
+    ipcMain.handle('updater:install', () => {});
+  }
+
+  // ── App menu ─────────────────────────────────────────────────────────────────
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       {
-        label: "NexusSchoolOS",
+        label: 'NexusSchoolOS',
         submenu: [
           {
-            label: "About",
-            click: () => {
-              dialog.showMessageBox({
-                title: "About NexusSchoolOS",
-                message: "NexusSchoolOS is a school management system.",
-                buttons: ["OK"],
-              });
-            },
+            label: 'About NexusSchoolOS',
+            click: () => mainWindow?.webContents.send('navigate-to', 'about'),
           },
           { type: 'separator' },
           { role: 'quit' }
@@ -1752,17 +2078,36 @@ function createWindow() {
       {
         label: 'Edit',
         submenu: [
-          { role: 'undo' },
-          { role: 'redo' },
-          { type: 'separator' },
-          { role: 'cut' },
-          { role: 'copy' },
-          { role: 'paste' },
-          { role: 'delete' },
-          { role: 'selectall' }
+          { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+          { role: 'cut'  }, { role: 'copy' }, { role: 'paste'     },
+          { role: 'delete' }, { role: 'selectall' }
         ]
-      }
-    ]),
+      },
+      {
+        label: 'Help',
+        submenu: [
+          {
+            label: 'Check for Updates',
+            click: async () => {
+              try {
+                const { autoUpdater } = require('electron-updater');
+                autoUpdater.checkForUpdates();
+              } catch {
+                dialog.showMessageBox(mainWindow, {
+                  title:   'Updates',
+                  message: 'Auto-updater not available in this build.',
+                  buttons: ['OK'],
+                });
+              }
+            },
+          },
+          {
+            label: 'Open Portal',
+            click: () => shell.openExternal(process.env.NEXUSOS_PORTAL_URL || 'https://nexusos.com.ng/portal'),
+          },
+        ],
+      },
+    ])
   );
 
   // Load Icon
@@ -1970,7 +2315,7 @@ function createWindow() {
       const matchable = phone.replace(/\D/g, "").slice(-10);
       
       const students = db.prepare("SELECT id, name, class_name FROM students WHERE parent_phone LIKE ?").all(`%${matchable}`);
-      if (!students.length) return res.json({ ok: false, error: 'No students found for this number.' });
+      if (!students.length) return res.json({ ok: false, error: `No students found for this number. Ensure it matches the number registered at the school (last 10 digits used: ${matchable}).` });
 
       const pin = Math.floor(1000 + Math.random() * 9000).toString();
       const expiry = Date.now() + (12 * 60 * 60 * 1000); // 12 Hours
@@ -2065,18 +2410,338 @@ function createWindow() {
         WHERE student_id = ? AND academic_session = ? AND term = ?
       `).get(id, termConfig.academic_session, termConfig.term) || { total_billed: 0, total_paid: 0 };
 
+      // ── Fee Gate (Gold / Diamond only — Silver has no financial module) ────
+      const _portalTier = licenseStatus?.tier || 'Silver';
+      let resultsBlocked = false;
+      let resultsBlockedMsg = '';
+      let resultsBlockedBalance = 0;
+      if (_portalTier !== 'Silver') {
+        try {
+          const gateResult = isStudentFeeGated(db, id, termConfig.academic_session, termConfig.term);
+          if (gateResult.gated) {
+            resultsBlocked = true;
+            resultsBlockedBalance = gateResult.balance;
+            resultsBlockedMsg = `Your child's academic results are currently withheld pending fee clearance. Outstanding balance: ₦${Number(gateResult.balance).toLocaleString('en-NG')}. Please contact the school bursar to resolve this.`;
+          }
+        } catch (feeGateErr) {
+          console.warn('[Portal] Fee gate check failed (non-fatal):', feeGateErr.message);
+        }
+      }
+
+      // Pull bank account details from settings (Gold+)
+      let bankAccounts = [];
+      try {
+        const fsr = db.prepare(`SELECT value FROM app_settings WHERE key='fee_settings'`).get();
+        if (fsr) bankAccounts = JSON.parse(fsr.value).bank_accounts || [];
+      } catch(_) {}
+
       res.json({
         ok: true,
         schoolName,
         termConfig,
         student,
-        results,
+        results: resultsBlocked ? [] : results,
+        resultsBlocked,
+        resultsBlockedMsg,
+        resultsBlockedBalance,
         attendance,
-        fees
+        fees,
+        bankAccounts
       });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
+  });
+
+  // ── Ensure portal content tables exist (idempotent) ─────────────────────────
+  try {
+    const _db = database.getDb();
+    _db.exec(`
+      CREATE TABLE IF NOT EXISTS portal_news (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL, body TEXT NOT NULL,
+        category TEXT DEFAULT 'general', is_published INTEGER DEFAULT 1,
+        created_at TEXT, updated_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS portal_policies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL, body TEXT NOT NULL,
+        order_num INTEGER DEFAULT 0, is_published INTEGER DEFAULT 1,
+        created_at TEXT, updated_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS payment_receipts (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id           TEXT    NOT NULL,
+        submitted_via        TEXT    NOT NULL DEFAULT 'portal',
+        file_data_b64        TEXT,
+        file_type            TEXT,
+        extracted_amount     REAL,
+        extracted_reference  TEXT,
+        extracted_date       TEXT,
+        extracted_payer_name TEXT,
+        extracted_bank       TEXT,
+        extracted_confidence REAL,
+        name_match_score     REAL,
+        pdf_raw_text         TEXT,
+        ai_raw_response      TEXT,
+        status               TEXT    NOT NULL DEFAULT 'pending',
+        reviewed_by          TEXT,
+        reviewed_at          DATETIME,
+        rejection_reason     TEXT,
+        academic_session     TEXT,
+        term                 TEXT,
+        created_at           DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch (_) {}
+
+  // ── Public portal content endpoints ──────────────────────────────────────────
+  portalApp.get('/portal/api/news', (req, res) => {
+    try {
+      const db = database.getDb();
+      const rows = db.prepare(
+        'SELECT id,title,body,category,created_at FROM portal_news WHERE is_published=1 ORDER BY id DESC'
+      ).all();
+      res.json({ ok: true, news: rows });
+    } catch (e) { res.json({ ok: false, news: [], error: e.message }); }
+  });
+
+  portalApp.get('/portal/api/policies', (req, res) => {
+    try {
+      const db = database.getDb();
+      const rows = db.prepare(
+        'SELECT id,title,body,order_num FROM portal_policies WHERE is_published=1 ORDER BY order_num ASC, id ASC'
+      ).all();
+      res.json({ ok: true, policies: rows });
+    } catch (e) { res.json({ ok: false, policies: [], error: e.message }); }
+  });
+
+  // ── Admin content CRUD (IPC — only accessible from Electron window) ───────────
+  ipcMain.handle('portal-content:get-all', () => {
+    const db = database.getDb();
+    return {
+      news:     db.prepare('SELECT * FROM portal_news     ORDER BY id DESC').all(),
+      policies: db.prepare('SELECT * FROM portal_policies ORDER BY order_num ASC, id ASC').all()
+    };
+  });
+
+  ipcMain.handle('portal-content:save-news', (_, item) => {
+    const db  = database.getDb();
+    const now = new Date().toISOString();
+    if (item.id) {
+      db.prepare('UPDATE portal_news SET title=?,body=?,category=?,is_published=?,updated_at=? WHERE id=?')
+        .run(item.title, item.body, item.category||'general', item.is_published??1, now, item.id);
+    } else {
+      db.prepare('INSERT INTO portal_news (title,body,category,is_published,created_at,updated_at) VALUES (?,?,?,?,?,?)')
+        .run(item.title, item.body, item.category||'general', item.is_published??1, now, now);
+    }
+    return { ok: true };
+  });
+
+  ipcMain.handle('portal-content:delete-news', (_, id) => {
+    database.getDb().prepare('DELETE FROM portal_news WHERE id=?').run(id);
+    return { ok: true };
+  });
+
+  ipcMain.handle('portal-content:save-policy', (_, item) => {
+    const db  = database.getDb();
+    const now = new Date().toISOString();
+    if (item.id) {
+      db.prepare('UPDATE portal_policies SET title=?,body=?,order_num=?,is_published=?,updated_at=? WHERE id=?')
+        .run(item.title, item.body, item.order_num||0, item.is_published??1, now, item.id);
+    } else {
+      db.prepare('INSERT INTO portal_policies (title,body,order_num,is_published,created_at,updated_at) VALUES (?,?,?,?,?,?)')
+        .run(item.title, item.body, item.order_num||0, item.is_published??1, now, now);
+    }
+    return { ok: true };
+  });
+
+  ipcMain.handle('portal-content:delete-policy', (_, id) => {
+    database.getDb().prepare('DELETE FROM portal_policies WHERE id=?').run(id);
+    return { ok: true };
+  });
+
+  ipcMain.handle('portal-content:get-settings', () => {
+    try {
+      const row = database.getDb()
+        .prepare("SELECT value FROM nexus_sys WHERE key='portal_content_settings'")
+        .get();
+      if (row?.value) return { ok: true, data: JSON.parse(row.value) };
+      return { ok: true, data: { sections: [], categories: [] } };
+    } catch(e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('portal-content:save-settings', (_, settings) => {
+    try {
+      const json = JSON.stringify(settings);
+      database.getDb().prepare(`
+        INSERT INTO nexus_sys (key, value) VALUES ('portal_content_settings', ?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value
+      `).run(json);
+      return { ok: true };
+    } catch(e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  // ── Receipt Upload — accepts JSON body with base64 file (Gold+: portal) ───
+  portalApp.post('/portal/api/receipt-upload', async (req, res) => {
+    try {
+      const { token, studentId, fileDataB64, fileType, session: termSession, term } = req.body;
+      const tokenRecord = activeTokens.get(token);
+      if (!tokenRecord || Date.now() > tokenRecord.expiry)
+        return res.status(401).json({ ok: false, error: 'Session expired. Please log in again.' });
+      if (!tokenRecord.students.some(s => s.id === studentId))
+        return res.status(403).json({ ok: false, error: 'Unauthorised.' });
+      // ~2MB base64 cap (base64 is ~4/3 of binary size)
+      const maxB64 = Math.ceil(2 * 1024 * 1024 * 1.4);
+      if (!fileDataB64 || fileDataB64.length > maxB64)
+        return res.status(413).json({ ok: false, error: 'File exceeds 2 MB limit.' });
+
+      const db       = database.getDb();
+      const keyRow   = db.prepare(`SELECT value FROM app_settings WHERE key = 'gemini_api_key'`).get();
+      const gemKey   = keyRow?.value || null;
+      const tier     = licenseStatus?.tier || 'Gold';
+
+      // PDF text — always extract if applicable (offline, free)
+      let pdfRawText = null;
+      if (fileType === 'application/pdf') {
+        const pr = await receiptAnalysis.extractPdfText(fileDataB64);
+        pdfRawText = pr.ok ? pr.text : null;
+      }
+
+      // AI extraction — Diamond only
+      let aiFields = {};
+      let extractedAmount = null;
+      if (tier === 'Diamond' && gemKey) {
+        const ai = await receiptAnalysis.analyzeReceiptAI(fileDataB64, fileType, gemKey);
+        if (ai.ok) {
+          aiFields = {
+            extracted_amount:     ai.amount,
+            extracted_reference:  ai.reference,
+            extracted_date:       ai.date,
+            extracted_payer_name: ai.payerName,
+            extracted_bank:       ai.bank,
+            extracted_confidence: ai.confidence,
+            ai_raw_response:      ai.rawResponse,
+          };
+          const stu = db.prepare(`SELECT parent_name FROM students WHERE id = ?`).get(studentId);
+          if (stu?.parent_name && ai.payerName)
+            aiFields.name_match_score = receiptAnalysis.fuzzyNameMatch(stu.parent_name, ai.payerName);
+          extractedAmount = ai.amount;
+        }
+      }
+
+      const ins = db.prepare(`
+        INSERT INTO payment_receipts
+          (student_id, submitted_via, file_data_b64, file_type,
+           extracted_amount, extracted_reference, extracted_date, extracted_payer_name,
+           extracted_bank, extracted_confidence, name_match_score,
+           pdf_raw_text, ai_raw_response, academic_session, term, status)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+      const row = ins.run(
+        studentId, 'portal', fileDataB64, fileType,
+        aiFields.extracted_amount     ?? null, aiFields.extracted_reference  ?? null,
+        aiFields.extracted_date       ?? null, aiFields.extracted_payer_name ?? null,
+        aiFields.extracted_bank       ?? null, aiFields.extracted_confidence ?? null,
+        aiFields.name_match_score     ?? null,
+        pdfRawText, aiFields.ai_raw_response ?? null,
+        termSession, term, 'pending'
+      );
+
+      // Real-time push to hub
+      const pending = db.prepare(`SELECT COUNT(*) as c FROM payment_receipts WHERE status='pending'`).get().c;
+      const stuName = db.prepare(`SELECT name FROM students WHERE id=?`).get(studentId)?.name || 'A parent';
+      if (mainWindow && !mainWindow.isDestroyed())
+        mainWindow.webContents.send('receipt:new', { count: pending, studentName: stuName });
+
+      res.json({ ok: true, receiptId: row.lastInsertRowid, extractedAmount, pdfText: pdfRawText });
+    } catch (err) {
+      console.error('[Portal] receipt-upload error:', err);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── Admin IPC: Payment Receipts ────────────────────────────────────────────────
+  ipcMain.handle('receipts:get-pending', () => {
+    try {
+      const db = database.getDb();
+      return { ok: true, data: db.prepare(`
+        SELECT r.*, s.name AS student_name, s.class_name, s.parent_name AS registered_parent_name
+        FROM payment_receipts r
+        JOIN students s ON r.student_id = s.id
+        WHERE r.status = 'pending'
+        ORDER BY r.created_at DESC
+      `).all() };
+    } catch (e) { return { ok: false, error: e.message, data: [] }; }
+  });
+
+  ipcMain.handle('receipts:get-count', () => {
+    try {
+      const c = database.getDb().prepare(`SELECT COUNT(*) as c FROM payment_receipts WHERE status='pending'`).get().c;
+      return { ok: true, count: c };
+    } catch { return { ok: false, count: 0 }; }
+  });
+
+  ipcMain.handle('receipts:approve', async (event, { receiptId, amount, method, reference, note, term, session }) => {
+    try {
+      const db      = database.getDb();
+      const receipt = db.prepare(`SELECT * FROM payment_receipts WHERE id=?`).get(receiptId);
+      if (!receipt) return { ok: false, error: 'Receipt not found' };
+      const reviewer = currentAdminSession?.username || 'Admin';
+
+      db.transaction(() => {
+        db.prepare(`
+          INSERT INTO fee_transactions
+            (student_id, academic_session, term, amount, payment_method, reference_number, recorded_by, note)
+          VALUES (?,?,?,?,?,?,?,?)
+        `).run(receipt.student_id, session, term, amount, method || 'transfer', reference || '', reviewer, note || `Receipt #${receiptId}`);
+
+        const paid = db.prepare(`SELECT COALESCE(SUM(amount),0) AS t FROM fee_transactions WHERE student_id=? AND academic_session=? AND term=?`).get(receipt.student_id, session, term).t;
+        const billed = db.prepare(`SELECT total_billed FROM student_fees WHERE student_id=? AND academic_session=? AND term=?`).get(receipt.student_id, session, term)?.total_billed || 0;
+        const st = paid >= billed ? 'cleared' : paid > 0 ? 'partial' : 'unpaid';
+        db.prepare(`
+          INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status, updated_at)
+          VALUES (?,?,?,?,?,?,datetime('now'))
+          ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
+            total_paid=excluded.total_paid, status=excluded.status, updated_at=excluded.updated_at
+        `).run(receipt.student_id, session, term, billed, paid, st);
+
+        db.prepare(`UPDATE payment_receipts SET status='approved', reviewed_by=?, reviewed_at=datetime('now') WHERE id=?`).run(reviewer, receiptId);
+      })();
+
+      // Diamond: notify parent
+      if ((licenseStatus?.tier || 'Gold') === 'Diamond') {
+        const stu = db.prepare(`SELECT name, parent_phone FROM students WHERE id=?`).get(receipt.student_id);
+        if (stu?.parent_phone) {
+          const fmt = (n) => `₦${Number(n||0).toLocaleString('en-NG')}`;
+          const msg = `✅ *Payment Verified — ${stu.name}*\n\nAmount: *${fmt(amount)}*\nReference: ${reference||'—'}\nTerm: ${term}\n\nYour fee record has been updated. Thank you! 🎓\n_Powered by Nexus School OS_`;
+          db.prepare(`INSERT INTO pending_pulse_messages (phone,message,type,student_id) VALUES (?,?,'general',?)`).run(stu.parent_phone, msg, receipt.student_id);
+        }
+      }
+      if (currentAdminSession) db.prepare(`INSERT INTO audit_logs (admin_id,action,target,details) VALUES (?,'APPROVE_RECEIPT','payment_receipts',?)`).run(currentAdminSession.id, `Receipt #${receiptId}, ₦${amount}`);
+      return { ok: true };
+    } catch (err) { return { ok: false, error: err.message }; }
+  });
+
+  ipcMain.handle('receipts:reject', (event, { receiptId, reason }) => {
+    try {
+      const db = database.getDb();
+      const receipt = db.prepare(`SELECT * FROM payment_receipts WHERE id=?`).get(receiptId);
+      if (!receipt) return { ok: false, error: 'Receipt not found' };
+      const reviewer = currentAdminSession?.username || 'Admin';
+      db.prepare(`UPDATE payment_receipts SET status='rejected', reviewed_by=?, reviewed_at=datetime('now'), rejection_reason=? WHERE id=?`).run(reviewer, reason||'', receiptId);
+      if ((licenseStatus?.tier || 'Gold') === 'Diamond') {
+        const stu = db.prepare(`SELECT name, parent_phone FROM students WHERE id=?`).get(receipt.student_id);
+        if (stu?.parent_phone) {
+          const msg = `⚠️ *Receipt Update — ${stu.name}*\n\nYour submitted receipt could not be verified.\nReason: ${reason || 'Please contact the school office.'}\n\nKindly resubmit a clearer photo or contact the bursar directly.\n_Powered by Nexus School OS_`;
+          db.prepare(`INSERT INTO pending_pulse_messages (phone,message,type,student_id) VALUES (?,?,'general',?)`).run(stu.parent_phone, msg, receipt.student_id);
+        }
+      }
+      return { ok: true };
+    } catch (err) { return { ok: false, error: err.message }; }
   });
 
   // Bind to 0.0.0.0 so the portal is reachable on ALL network interfaces:
@@ -2105,97 +2770,222 @@ function createWindow() {
 
   ipcMain.handle("get-hardware-id", () => hardwareId);
 
+  // ── Ed25519 public key embedded at build time (matches NEXUS_LICENSE_SIGNING_KEY) ──
+  // To rotate: regenerate keypair, update this hex, re-issue all licenses.
+  const NEXUS_PUBLIC_KEY_HEX = process.env.NEXUS_LICENSE_PUBLIC_KEY ||
+    '3a963a04b3da96bd402eb5d8a4ffd200e8c695f9fa4633c789649fa188db0daa'; // generated 2026-05-19
+
+  // ── Nigerian Secondary School Calendar (offline expiry — must match nexus-api/src/lib/calendar.ts) ──
+  const NIGERIAN_CALENDAR = {
+    '2024/2025': { T1:{ start:'2024-09-09', end:'2024-12-14' }, T2:{ start:'2025-01-06', end:'2025-04-05' }, T3:{ start:'2025-04-28', end:'2025-07-19' } },
+    '2025/2026': { T1:{ start:'2025-09-08', end:'2025-12-13' }, T2:{ start:'2026-01-05', end:'2026-04-04' }, T3:{ start:'2026-04-27', end:'2026-07-18' } },
+    '2026/2027': { T1:{ start:'2026-09-07', end:'2026-12-12' }, T2:{ start:'2027-01-04', end:'2027-04-03' }, T3:{ start:'2027-04-26', end:'2027-07-17' } },
+  };
+  const GRACE_MS = 14 * 24 * 60 * 60 * 1000;
+
+  function getTermWindow(key) {
+    const [session, term] = key.split('-');
+    return NIGERIAN_CALENDAR[session]?.[term] ?? null;
+  }
+
+  /** Returns 'active' | 'grace' | 'expired' — no internet needed */
+  function checkCalendarStatus(licensedTerms, nowMs = Date.now()) {
+    let latestEnd = 0;
+    const windows = licensedTerms.map(getTermWindow).filter(Boolean);
+    // Check if now falls within any licensed term
+    for (const w of windows) {
+      const s = new Date(w.start + 'T00:00:00Z').getTime();
+      const e = new Date(w.end   + 'T23:59:59Z').getTime();
+      if (nowMs >= s && nowMs <= e) return 'active';
+      if (e > latestEnd) latestEnd = e;
+    }
+    // Check holiday windows between consecutive licensed terms
+    const sorted = windows.sort((a,b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const hStart = new Date(sorted[i].end   + 'T23:59:59Z').getTime();
+      const hEnd   = new Date(sorted[i+1].start + 'T00:00:00Z').getTime();
+      if (nowMs > hStart && nowMs < hEnd) return 'active';
+    }
+    if (latestEnd === 0) return 'expired';
+    if (nowMs <= latestEnd + GRACE_MS) return 'grace';
+    return 'expired';
+  }
+
+  /** Verify tweetnacl-style Ed25519 token: base64url(payload).base64url(sig) */
+  function verifyNexusToken(token) {
+    const b64urlDecode = s => Buffer.from(s.replace(/-/g,'+').replace(/_/g,'/'),'base64');
+    const parts = token.split('.');
+    if (parts.length !== 2) throw new Error('Malformed token');
+    const payloadBytes = b64urlDecode(parts[0]);
+    const sigBytes     = b64urlDecode(parts[1]);
+    const pubKey = Buffer.from(NEXUS_PUBLIC_KEY_HEX, 'hex');
+    if (pubKey.length !== 32) throw new Error('Public key not configured');
+    // Use Node crypto to verify Ed25519 detached signature
+    const keyObj = crypto.createPublicKey({ key: pubKey, format: 'raw', type: 'spki' });
+    const valid = crypto.verify(null, payloadBytes, keyObj, sigBytes);
+    if (!valid) throw new Error('Invalid signature');
+    return JSON.parse(payloadBytes.toString('utf8'));
+  }
+
+  // Heartbeat cache (Gold/Diamond) — stored in nexus_sys.json
+  let heartbeatCache = { valid_until: 0, term_status: 'active' };
+
   try {
-    const userDataPath = app.getPath("userData");
-    const licensePath = path.join(userDataPath, "license.nexus");
-    const sysConfPath = path.join(userDataPath, "nexus_sys.json");
-    
+    const userDataPath = app.getPath('userData');
+    const licensePath  = path.join(userDataPath, 'license.nexus');
+    const sysConfPath  = path.join(userDataPath, 'nexus_sys.json');
+
     // Developer Override
-    if (process.env.DEV_MODE === "true") {
-      console.log("[Security] DEV_MODE active. Bypassing Hardware/Clock locks.");
-      licenseStatus = { 
-        locked: false, 
-        message: "DEV_MODE_ACTIVE",
-        student_count: 999999,
-        expires_at: Date.now() + 10000000000
-      };
-      licenseStatus.tier = process.env.DEV_MOCK_TIER || "Diamond";
-      setSchoolLicense({ payload: JSON.stringify({ tier: licenseStatus.tier, student_count: licenseStatus.student_count, expires_at: licenseStatus.expires_at }) });
+    if (process.env.DEV_MODE === 'true') {
+      console.log('[Security] DEV_MODE active. Bypassing all license checks.');
+      licenseStatus = { locked: false, message: 'DEV_MODE_ACTIVE', student_count: 999999, tier: process.env.DEV_MOCK_TIER || 'Diamond' };
+      setSchoolLicense({ payload: JSON.stringify(licenseStatus) });
     } else {
-      // 1. Time-Drift Guard (Anti-Rollback)
-      let lastRunTimestamp = 0;
+      // 1. Anti-rollback guard
+      let lastRunTs = 0;
+      let sysConf   = {};
       if (fs.existsSync(sysConfPath)) {
-        const sysConf = JSON.parse(fs.readFileSync(sysConfPath, "utf-8"));
-        lastRunTimestamp = sysConf.last_run_timestamp || 0;
+        try { sysConf = JSON.parse(fs.readFileSync(sysConfPath, 'utf-8')); } catch {}
+        lastRunTs            = sysConf.last_run_timestamp || 0;
+        heartbeatCache       = sysConf.heartbeat_cache   || heartbeatCache;
+      }
+      if (Date.now() < (lastRunTs - 60_000)) {
+        licenseStatus = { locked: true, message: 'System clock tampering detected. Contact your administrator.' };
+      } else {
+        sysConf.last_run_timestamp = Date.now();
+        fs.writeFileSync(sysConfPath, JSON.stringify(sysConf));
       }
 
-      if (Date.now() < (lastRunTimestamp - 60000)) { // 1 min buffer for marginal OS sync
-          console.error("[Security] FATAL: System Clock Rollback Detected!");
-          licenseStatus = { locked: true, message: "System Clock Tampering Detected. Access Blocked." };
-      } else {
-          fs.writeFileSync(sysConfPath, JSON.stringify({ last_run_timestamp: Date.now() }));
-      }
-
-      // 2. Load Nexus Public Key
-      const PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAU//Zax5arKg2zRA+d4F+kE6H19E977fhJrU/rNqcdw8=
------END PUBLIC KEY-----`;
-      const publicKey = crypto.createPublicKey(PUBLIC_KEY_PEM);
-
-      // 3. Verify License
-      if (!fs.existsSync(licensePath)) {
-        licenseStatus = { locked: true, message: "No Valid License Found. Please contact your Nexus Partner." };
-      } else {
-        const licenseDisk = JSON.parse(fs.readFileSync(licensePath, "utf-8"));
-        const isValidSignature = crypto.verify(
-          null,
-          Buffer.from(licenseDisk.payload),
-          publicKey,
-          Buffer.from(licenseDisk.signature, "hex"),
-        );
-
-        if (!isValidSignature) {
-          licenseStatus = {
-            locked: true,
-            message: "Tampering Detected. Cryptographic signature invalid. Contact Administrator.",
-          };
+      // 2. License file check
+      if (!licenseStatus.locked) {
+        if (!fs.existsSync(licensePath)) {
+          licenseStatus = { locked: true, message: 'NO_LICENSE', reason: 'no_license' };
         } else {
-          const payloadDecoded = JSON.parse(licenseDisk.payload);
-          licenseStatus.tier = payloadDecoded.tier || "Silver";
-          
-          // Hardware Check
-          if (payloadDecoded.hardware_id && payloadDecoded.hardware_id !== hardwareId) {
-             licenseStatus = { locked: true, message: "License Device Mismatch. Token bound to different hardware." };
-             console.error("[Security] License Tampering: Motherboard swap detected.");
-          } else if (Date.now() > payloadDecoded.expires_at) {
-            licenseStatus = {
-              locked: true,
-              message: `License Expired. Your ${payloadDecoded.tier} tier has lapsed. Contact Administrator.`,
-            };
-          } else {
-            if (!licenseStatus.locked) {
-               console.log(`[License Engine] Valid ${payloadDecoded.tier} License. Limit: ${payloadDecoded.student_count} students.`);
-               licenseStatus = { 
-                 locked: false, 
-                 message: "VALID",
-                 student_count: payloadDecoded.student_count,
-                 expires_at: payloadDecoded.expires_at 
-               };
-               licenseStatus.tier = payloadDecoded.tier || "Silver";
-               // Tell the Hub Engine the active max limit
-               setSchoolLicense(licenseDisk);
+          try {
+            const token   = fs.readFileSync(licensePath, 'utf-8').trim();
+            const payload = verifyNexusToken(token);
+
+            // 3. Hardware binding check
+            if (payload.hardware_id && payload.hardware_id !== hardwareId) {
+              licenseStatus = { locked: true, message: 'License is bound to a different device. Contact support.', reason: 'hardware_mismatch' };
+
+            // 4. Provisional (not yet hardware-bound) — allow but prompt
+            } else if (!payload.hardware_id) {
+              licenseStatus = {
+                locked: false, message: 'PROVISIONAL', tier: payload.tier,
+                student_count: payload.student_cap, licensed_terms: payload.licensed_terms,
+                needs_activation: true,
+              };
+              setSchoolLicense({ payload: JSON.stringify(payload) });
+
+            } else {
+              // 5. Calendar-based expiry (offline — Silver always uses this)
+              const calStatus = checkCalendarStatus(payload.licensed_terms || []);
+
+              // 6. For Gold/Diamond: also check heartbeat cache (server-authoritative clock)
+              let effectiveStatus = calStatus;
+              const tier = (payload.tier || 'Silver').toLowerCase();
+              if ((tier === 'gold' || tier === 'diamond') && heartbeatCache.valid_until > Date.now()) {
+                effectiveStatus = heartbeatCache.term_status;
+              }
+
+              if (effectiveStatus === 'expired') {
+                licenseStatus = {
+                  locked: true,
+                  message: 'License expired. Please renew to continue.',
+                  reason: 'expired',
+                  tier: payload.tier,
+                };
+              } else {
+                const isGrace = effectiveStatus === 'grace';
+                licenseStatus = {
+                  locked:        false,
+                  message:       isGrace ? 'GRACE' : 'VALID',
+                  tier:          payload.tier,
+                  student_count: payload.student_cap,
+                  licensed_terms: payload.licensed_terms,
+                  in_grace:      isGrace,
+                  needs_activation: false,
+                };
+                setSchoolLicense({ payload: JSON.stringify(payload) });
+                console.log(`[License] ✅ ${payload.tier} (${effectiveStatus}) — ${payload.student_cap} students`);
+
+                // 7. Schedule heartbeat for Gold/Diamond (non-blocking)
+                if (tier === 'gold' || tier === 'diamond') {
+                  _scheduleHeartbeat(token, hardwareId, payload.school_id, sysConfPath);
+                }
+              }
             }
+          } catch (verifyErr) {
+            console.error('[License] Verification error:', verifyErr.message);
+            licenseStatus = { locked: true, message: 'License file is corrupted or tampered.', reason: 'tampered' };
           }
         }
       }
     }
   } catch (e) {
-    console.error("[License Engine] Failure:", e);
-    licenseStatus = {
-      locked: true,
-      message: "License vault corrupted. Re-install required.",
-    };
+    console.error('[License Engine] Failure:', e);
+    licenseStatus = { locked: true, message: 'License vault corrupted. Re-install required.', reason: 'internal_error' };
   }
+
+  // ── Heartbeat helper (Gold/Diamond — sends weekly ping to nexus-api) ─────────
+  function _scheduleHeartbeat(token, hwId, schoolId, sysConfPath) {
+    const API_BASE = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
+    async function doHeartbeat() {
+      try {
+        const res = await fetch(`${API_BASE}/api/license/validate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, hardware_id: hwId, school_id: schoolId }),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        // Cache the heartbeat result
+        let sysConf = {};
+        if (fs.existsSync(sysConfPath)) { try { sysConf = JSON.parse(fs.readFileSync(sysConfPath,'utf-8')); } catch {} }
+        sysConf.heartbeat_cache = { valid_until: data.heartbeat_valid_until || 0, term_status: data.term_status || 'active' };
+        fs.writeFileSync(sysConfPath, JSON.stringify(sysConf));
+        // If server says expired/revoked, show banner but don't hard-lock mid-session
+        if (!data.valid && mainWindow) {
+          mainWindow.webContents.send('license-status', { ...licenseStatus, server_revoked: true });
+        }
+      } catch { /* offline — use cached heartbeat */ }
+    }
+    // First check: 2 minutes after boot (not blocking)
+    setTimeout(doHeartbeat, 2 * 60 * 1000);
+    // Weekly refresh
+    setInterval(doHeartbeat, 7 * 24 * 60 * 60 * 1000);
+  }
+
+  // ── Import license file (used by lock screen + About page) ───────────────────
+  ipcMain.handle('license:import', async () => {
+    const { dialog } = require('electron');
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title:       'Select your license.nexus file',
+      buttonLabel: 'Import License',
+      filters:     [{ name: 'Nexus License', extensions: ['nexus'] }],
+      properties:  ['openFile'],
+    });
+    if (result.canceled || !result.filePaths[0]) return { ok: false, reason: 'cancelled' };
+    try {
+      const src = result.filePaths[0];
+      const userDataPath = app.getPath('userData');
+      const dest = path.join(userDataPath, 'license.nexus');
+      fs.copyFileSync(src, dest);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: e.message };
+    }
+  });
+
+  // ── Activate online — opens browser with hardware ID pre-filled ───────────────
+  ipcMain.handle('license:activate-online', () => {
+    const { shell } = require('electron');
+    const portalBase = process.env.NEXUSOS_PORTAL_URL || 'https://nexusos.com.ng/portal';
+    shell.openExternal(`${portalBase}/activate?hwid=${encodeURIComponent(hardwareId)}`);
+    return { ok: true };
+  });
 
 
 
@@ -2369,6 +3159,8 @@ if (app) {
   app.on("will-quit", () => {
     // Release all keyboard shortcuts so they don't linger in other apps
     globalShortcut.unregisterAll();
+    // Release mDNS/Bonjour service so macOS doesn't increment the hostname
+    try { bonjour.unpublishAll(() => bonjour.destroy()); } catch(_) {}
   });
 } else {
   console.warn(
