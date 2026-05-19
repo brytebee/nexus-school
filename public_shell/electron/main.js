@@ -2040,21 +2040,36 @@ function createWindow() {
     console.error("Failed to load/save identity.json or initialize DB", err);
   }
 
-  // Remove default native menu bar
+  // ── Auto-updater (electron-updater + GitHub Releases) ───────────────────────
+  // Only active in production builds. Silently downloads; user triggers install.
+  let _updaterAvailable = false;
+  try {
+    const { autoUpdater } = require('electron-updater');
+    autoUpdater.autoDownload    = true;  // download silently in background
+    autoUpdater.autoInstallOnAppQuit = false; // let the user trigger install
+    autoUpdater.on('update-available',  (info) => { _updaterAvailable = true;  mainWindow?.webContents.send('update-available',  info); });
+    autoUpdater.on('update-downloaded', (info) => { mainWindow?.webContents.send('update-downloaded', info); });
+    autoUpdater.on('download-progress', (p)    => { mainWindow?.webContents.send('update-progress',   p);    });
+    autoUpdater.on('error',             (err)  => { mainWindow?.webContents.send('update-error', err.message); });
+    // Check 30s after launch so it doesn't compete with app startup
+    setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch {} }, 30_000);
+    ipcMain.handle('updater:check',   () => autoUpdater.checkForUpdates());
+    ipcMain.handle('updater:install', () => { autoUpdater.quitAndInstall(false, true); });
+  } catch (e) {
+    // electron-updater not yet installed — no-op
+    ipcMain.handle('updater:check',   () => ({ available: false }));
+    ipcMain.handle('updater:install', () => {});
+  }
+
+  // ── App menu ─────────────────────────────────────────────────────────────────
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       {
-        label: "NexusSchoolOS",
+        label: 'NexusSchoolOS',
         submenu: [
           {
-            label: "About",
-            click: () => {
-              dialog.showMessageBox({
-                title: "About NexusSchoolOS",
-                message: "NexusSchoolOS is a school management system.",
-                buttons: ["OK"],
-              });
-            },
+            label: 'About NexusSchoolOS',
+            click: () => mainWindow?.webContents.send('navigate-to', 'about'),
           },
           { type: 'separator' },
           { role: 'quit' }
@@ -2063,17 +2078,36 @@ function createWindow() {
       {
         label: 'Edit',
         submenu: [
-          { role: 'undo' },
-          { role: 'redo' },
-          { type: 'separator' },
-          { role: 'cut' },
-          { role: 'copy' },
-          { role: 'paste' },
-          { role: 'delete' },
-          { role: 'selectall' }
+          { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+          { role: 'cut'  }, { role: 'copy' }, { role: 'paste'     },
+          { role: 'delete' }, { role: 'selectall' }
         ]
-      }
-    ]),
+      },
+      {
+        label: 'Help',
+        submenu: [
+          {
+            label: 'Check for Updates',
+            click: async () => {
+              try {
+                const { autoUpdater } = require('electron-updater');
+                autoUpdater.checkForUpdates();
+              } catch {
+                dialog.showMessageBox(mainWindow, {
+                  title:   'Updates',
+                  message: 'Auto-updater not available in this build.',
+                  buttons: ['OK'],
+                });
+              }
+            },
+          },
+          {
+            label: 'Open Portal',
+            click: () => shell.openExternal(process.env.NEXUSOS_PORTAL_URL || 'https://nexusos.com.ng/portal'),
+          },
+        ],
+      },
+    ])
   );
 
   // Load Icon
@@ -2527,6 +2561,31 @@ function createWindow() {
     return { ok: true };
   });
 
+  ipcMain.handle('portal-content:get-settings', () => {
+    try {
+      const row = database.getDb()
+        .prepare("SELECT value FROM nexus_sys WHERE key='portal_content_settings'")
+        .get();
+      if (row?.value) return { ok: true, data: JSON.parse(row.value) };
+      return { ok: true, data: { sections: [], categories: [] } };
+    } catch(e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('portal-content:save-settings', (_, settings) => {
+    try {
+      const json = JSON.stringify(settings);
+      database.getDb().prepare(`
+        INSERT INTO nexus_sys (key, value) VALUES ('portal_content_settings', ?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value
+      `).run(json);
+      return { ok: true };
+    } catch(e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
   // ── Receipt Upload — accepts JSON body with base64 file (Gold+: portal) ───
   portalApp.post('/portal/api/receipt-upload', async (req, res) => {
     try {
@@ -2711,97 +2770,222 @@ function createWindow() {
 
   ipcMain.handle("get-hardware-id", () => hardwareId);
 
+  // ── Ed25519 public key embedded at build time (matches NEXUS_LICENSE_SIGNING_KEY) ──
+  // To rotate: regenerate keypair, update this hex, re-issue all licenses.
+  const NEXUS_PUBLIC_KEY_HEX = process.env.NEXUS_LICENSE_PUBLIC_KEY ||
+    '3a963a04b3da96bd402eb5d8a4ffd200e8c695f9fa4633c789649fa188db0daa'; // generated 2026-05-19
+
+  // ── Nigerian Secondary School Calendar (offline expiry — must match nexus-api/src/lib/calendar.ts) ──
+  const NIGERIAN_CALENDAR = {
+    '2024/2025': { T1:{ start:'2024-09-09', end:'2024-12-14' }, T2:{ start:'2025-01-06', end:'2025-04-05' }, T3:{ start:'2025-04-28', end:'2025-07-19' } },
+    '2025/2026': { T1:{ start:'2025-09-08', end:'2025-12-13' }, T2:{ start:'2026-01-05', end:'2026-04-04' }, T3:{ start:'2026-04-27', end:'2026-07-18' } },
+    '2026/2027': { T1:{ start:'2026-09-07', end:'2026-12-12' }, T2:{ start:'2027-01-04', end:'2027-04-03' }, T3:{ start:'2027-04-26', end:'2027-07-17' } },
+  };
+  const GRACE_MS = 14 * 24 * 60 * 60 * 1000;
+
+  function getTermWindow(key) {
+    const [session, term] = key.split('-');
+    return NIGERIAN_CALENDAR[session]?.[term] ?? null;
+  }
+
+  /** Returns 'active' | 'grace' | 'expired' — no internet needed */
+  function checkCalendarStatus(licensedTerms, nowMs = Date.now()) {
+    let latestEnd = 0;
+    const windows = licensedTerms.map(getTermWindow).filter(Boolean);
+    // Check if now falls within any licensed term
+    for (const w of windows) {
+      const s = new Date(w.start + 'T00:00:00Z').getTime();
+      const e = new Date(w.end   + 'T23:59:59Z').getTime();
+      if (nowMs >= s && nowMs <= e) return 'active';
+      if (e > latestEnd) latestEnd = e;
+    }
+    // Check holiday windows between consecutive licensed terms
+    const sorted = windows.sort((a,b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const hStart = new Date(sorted[i].end   + 'T23:59:59Z').getTime();
+      const hEnd   = new Date(sorted[i+1].start + 'T00:00:00Z').getTime();
+      if (nowMs > hStart && nowMs < hEnd) return 'active';
+    }
+    if (latestEnd === 0) return 'expired';
+    if (nowMs <= latestEnd + GRACE_MS) return 'grace';
+    return 'expired';
+  }
+
+  /** Verify tweetnacl-style Ed25519 token: base64url(payload).base64url(sig) */
+  function verifyNexusToken(token) {
+    const b64urlDecode = s => Buffer.from(s.replace(/-/g,'+').replace(/_/g,'/'),'base64');
+    const parts = token.split('.');
+    if (parts.length !== 2) throw new Error('Malformed token');
+    const payloadBytes = b64urlDecode(parts[0]);
+    const sigBytes     = b64urlDecode(parts[1]);
+    const pubKey = Buffer.from(NEXUS_PUBLIC_KEY_HEX, 'hex');
+    if (pubKey.length !== 32) throw new Error('Public key not configured');
+    // Use Node crypto to verify Ed25519 detached signature
+    const keyObj = crypto.createPublicKey({ key: pubKey, format: 'raw', type: 'spki' });
+    const valid = crypto.verify(null, payloadBytes, keyObj, sigBytes);
+    if (!valid) throw new Error('Invalid signature');
+    return JSON.parse(payloadBytes.toString('utf8'));
+  }
+
+  // Heartbeat cache (Gold/Diamond) — stored in nexus_sys.json
+  let heartbeatCache = { valid_until: 0, term_status: 'active' };
+
   try {
-    const userDataPath = app.getPath("userData");
-    const licensePath = path.join(userDataPath, "license.nexus");
-    const sysConfPath = path.join(userDataPath, "nexus_sys.json");
-    
+    const userDataPath = app.getPath('userData');
+    const licensePath  = path.join(userDataPath, 'license.nexus');
+    const sysConfPath  = path.join(userDataPath, 'nexus_sys.json');
+
     // Developer Override
-    if (process.env.DEV_MODE === "true") {
-      console.log("[Security] DEV_MODE active. Bypassing Hardware/Clock locks.");
-      licenseStatus = { 
-        locked: false, 
-        message: "DEV_MODE_ACTIVE",
-        student_count: 999999,
-        expires_at: Date.now() + 10000000000
-      };
-      licenseStatus.tier = process.env.DEV_MOCK_TIER || "Diamond";
-      setSchoolLicense({ payload: JSON.stringify({ tier: licenseStatus.tier, student_count: licenseStatus.student_count, expires_at: licenseStatus.expires_at }) });
+    if (process.env.DEV_MODE === 'true') {
+      console.log('[Security] DEV_MODE active. Bypassing all license checks.');
+      licenseStatus = { locked: false, message: 'DEV_MODE_ACTIVE', student_count: 999999, tier: process.env.DEV_MOCK_TIER || 'Diamond' };
+      setSchoolLicense({ payload: JSON.stringify(licenseStatus) });
     } else {
-      // 1. Time-Drift Guard (Anti-Rollback)
-      let lastRunTimestamp = 0;
+      // 1. Anti-rollback guard
+      let lastRunTs = 0;
+      let sysConf   = {};
       if (fs.existsSync(sysConfPath)) {
-        const sysConf = JSON.parse(fs.readFileSync(sysConfPath, "utf-8"));
-        lastRunTimestamp = sysConf.last_run_timestamp || 0;
+        try { sysConf = JSON.parse(fs.readFileSync(sysConfPath, 'utf-8')); } catch {}
+        lastRunTs            = sysConf.last_run_timestamp || 0;
+        heartbeatCache       = sysConf.heartbeat_cache   || heartbeatCache;
+      }
+      if (Date.now() < (lastRunTs - 60_000)) {
+        licenseStatus = { locked: true, message: 'System clock tampering detected. Contact your administrator.' };
+      } else {
+        sysConf.last_run_timestamp = Date.now();
+        fs.writeFileSync(sysConfPath, JSON.stringify(sysConf));
       }
 
-      if (Date.now() < (lastRunTimestamp - 60000)) { // 1 min buffer for marginal OS sync
-          console.error("[Security] FATAL: System Clock Rollback Detected!");
-          licenseStatus = { locked: true, message: "System Clock Tampering Detected. Access Blocked." };
-      } else {
-          fs.writeFileSync(sysConfPath, JSON.stringify({ last_run_timestamp: Date.now() }));
-      }
-
-      // 2. Load Nexus Public Key
-      const PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAU//Zax5arKg2zRA+d4F+kE6H19E977fhJrU/rNqcdw8=
------END PUBLIC KEY-----`;
-      const publicKey = crypto.createPublicKey(PUBLIC_KEY_PEM);
-
-      // 3. Verify License
-      if (!fs.existsSync(licensePath)) {
-        licenseStatus = { locked: true, message: "No Valid License Found. Please contact your Nexus Partner." };
-      } else {
-        const licenseDisk = JSON.parse(fs.readFileSync(licensePath, "utf-8"));
-        const isValidSignature = crypto.verify(
-          null,
-          Buffer.from(licenseDisk.payload),
-          publicKey,
-          Buffer.from(licenseDisk.signature, "hex"),
-        );
-
-        if (!isValidSignature) {
-          licenseStatus = {
-            locked: true,
-            message: "Tampering Detected. Cryptographic signature invalid. Contact Administrator.",
-          };
+      // 2. License file check
+      if (!licenseStatus.locked) {
+        if (!fs.existsSync(licensePath)) {
+          licenseStatus = { locked: true, message: 'NO_LICENSE', reason: 'no_license' };
         } else {
-          const payloadDecoded = JSON.parse(licenseDisk.payload);
-          licenseStatus.tier = payloadDecoded.tier || "Silver";
-          
-          // Hardware Check
-          if (payloadDecoded.hardware_id && payloadDecoded.hardware_id !== hardwareId) {
-             licenseStatus = { locked: true, message: "License Device Mismatch. Token bound to different hardware." };
-             console.error("[Security] License Tampering: Motherboard swap detected.");
-          } else if (Date.now() > payloadDecoded.expires_at) {
-            licenseStatus = {
-              locked: true,
-              message: `License Expired. Your ${payloadDecoded.tier} tier has lapsed. Contact Administrator.`,
-            };
-          } else {
-            if (!licenseStatus.locked) {
-               console.log(`[License Engine] Valid ${payloadDecoded.tier} License. Limit: ${payloadDecoded.student_count} students.`);
-               licenseStatus = { 
-                 locked: false, 
-                 message: "VALID",
-                 student_count: payloadDecoded.student_count,
-                 expires_at: payloadDecoded.expires_at 
-               };
-               licenseStatus.tier = payloadDecoded.tier || "Silver";
-               // Tell the Hub Engine the active max limit
-               setSchoolLicense(licenseDisk);
+          try {
+            const token   = fs.readFileSync(licensePath, 'utf-8').trim();
+            const payload = verifyNexusToken(token);
+
+            // 3. Hardware binding check
+            if (payload.hardware_id && payload.hardware_id !== hardwareId) {
+              licenseStatus = { locked: true, message: 'License is bound to a different device. Contact support.', reason: 'hardware_mismatch' };
+
+            // 4. Provisional (not yet hardware-bound) — allow but prompt
+            } else if (!payload.hardware_id) {
+              licenseStatus = {
+                locked: false, message: 'PROVISIONAL', tier: payload.tier,
+                student_count: payload.student_cap, licensed_terms: payload.licensed_terms,
+                needs_activation: true,
+              };
+              setSchoolLicense({ payload: JSON.stringify(payload) });
+
+            } else {
+              // 5. Calendar-based expiry (offline — Silver always uses this)
+              const calStatus = checkCalendarStatus(payload.licensed_terms || []);
+
+              // 6. For Gold/Diamond: also check heartbeat cache (server-authoritative clock)
+              let effectiveStatus = calStatus;
+              const tier = (payload.tier || 'Silver').toLowerCase();
+              if ((tier === 'gold' || tier === 'diamond') && heartbeatCache.valid_until > Date.now()) {
+                effectiveStatus = heartbeatCache.term_status;
+              }
+
+              if (effectiveStatus === 'expired') {
+                licenseStatus = {
+                  locked: true,
+                  message: 'License expired. Please renew to continue.',
+                  reason: 'expired',
+                  tier: payload.tier,
+                };
+              } else {
+                const isGrace = effectiveStatus === 'grace';
+                licenseStatus = {
+                  locked:        false,
+                  message:       isGrace ? 'GRACE' : 'VALID',
+                  tier:          payload.tier,
+                  student_count: payload.student_cap,
+                  licensed_terms: payload.licensed_terms,
+                  in_grace:      isGrace,
+                  needs_activation: false,
+                };
+                setSchoolLicense({ payload: JSON.stringify(payload) });
+                console.log(`[License] ✅ ${payload.tier} (${effectiveStatus}) — ${payload.student_cap} students`);
+
+                // 7. Schedule heartbeat for Gold/Diamond (non-blocking)
+                if (tier === 'gold' || tier === 'diamond') {
+                  _scheduleHeartbeat(token, hardwareId, payload.school_id, sysConfPath);
+                }
+              }
             }
+          } catch (verifyErr) {
+            console.error('[License] Verification error:', verifyErr.message);
+            licenseStatus = { locked: true, message: 'License file is corrupted or tampered.', reason: 'tampered' };
           }
         }
       }
     }
   } catch (e) {
-    console.error("[License Engine] Failure:", e);
-    licenseStatus = {
-      locked: true,
-      message: "License vault corrupted. Re-install required.",
-    };
+    console.error('[License Engine] Failure:', e);
+    licenseStatus = { locked: true, message: 'License vault corrupted. Re-install required.', reason: 'internal_error' };
   }
+
+  // ── Heartbeat helper (Gold/Diamond — sends weekly ping to nexus-api) ─────────
+  function _scheduleHeartbeat(token, hwId, schoolId, sysConfPath) {
+    const API_BASE = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
+    async function doHeartbeat() {
+      try {
+        const res = await fetch(`${API_BASE}/api/license/validate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, hardware_id: hwId, school_id: schoolId }),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        // Cache the heartbeat result
+        let sysConf = {};
+        if (fs.existsSync(sysConfPath)) { try { sysConf = JSON.parse(fs.readFileSync(sysConfPath,'utf-8')); } catch {} }
+        sysConf.heartbeat_cache = { valid_until: data.heartbeat_valid_until || 0, term_status: data.term_status || 'active' };
+        fs.writeFileSync(sysConfPath, JSON.stringify(sysConf));
+        // If server says expired/revoked, show banner but don't hard-lock mid-session
+        if (!data.valid && mainWindow) {
+          mainWindow.webContents.send('license-status', { ...licenseStatus, server_revoked: true });
+        }
+      } catch { /* offline — use cached heartbeat */ }
+    }
+    // First check: 2 minutes after boot (not blocking)
+    setTimeout(doHeartbeat, 2 * 60 * 1000);
+    // Weekly refresh
+    setInterval(doHeartbeat, 7 * 24 * 60 * 60 * 1000);
+  }
+
+  // ── Import license file (used by lock screen + About page) ───────────────────
+  ipcMain.handle('license:import', async () => {
+    const { dialog } = require('electron');
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title:       'Select your license.nexus file',
+      buttonLabel: 'Import License',
+      filters:     [{ name: 'Nexus License', extensions: ['nexus'] }],
+      properties:  ['openFile'],
+    });
+    if (result.canceled || !result.filePaths[0]) return { ok: false, reason: 'cancelled' };
+    try {
+      const src = result.filePaths[0];
+      const userDataPath = app.getPath('userData');
+      const dest = path.join(userDataPath, 'license.nexus');
+      fs.copyFileSync(src, dest);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: e.message };
+    }
+  });
+
+  // ── Activate online — opens browser with hardware ID pre-filled ───────────────
+  ipcMain.handle('license:activate-online', () => {
+    const { shell } = require('electron');
+    const portalBase = process.env.NEXUSOS_PORTAL_URL || 'https://nexusos.com.ng/portal';
+    shell.openExternal(`${portalBase}/activate?hwid=${encodeURIComponent(hardwareId)}`);
+    return { ok: true };
+  });
 
 
 

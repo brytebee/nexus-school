@@ -170,9 +170,28 @@ const nexusAPI = {
     getAdmins:    ()     => ipcRenderer.invoke('auth:get-admins'),
     createAdmin:  (data) => ipcRenderer.invoke('auth:create-admin', data),
     deleteAdmin:  (data) => ipcRenderer.invoke('auth:delete-admin', data),
+
+    // ── License management ────────────────────────────────────────────
+    license: {
+        importFile:     ()     => ipcRenderer.invoke('license:import'),
+        activateOnline: ()     => ipcRenderer.invoke('license:activate-online'),
+        getStatus:      ()     => ipcRenderer.invoke('license:get-status'),
+        onStatus:       (cb)   => ipcRenderer.on('license-status', (_e, v) => cb(v)),
+    },
+
+    // ── Auto-updater ──────────────────────────────────────────────────
+    updater: {
+        check:          ()     => ipcRenderer.invoke('updater:check'),
+        install:        ()     => ipcRenderer.invoke('updater:install'),
+        onAvailable:    (cb)   => ipcRenderer.on('update-available',  (_e, v) => cb(v)),
+        onDownloaded:   (cb)   => ipcRenderer.on('update-downloaded', (_e, v) => cb(v)),
+        onProgress:     (cb)   => ipcRenderer.on('update-progress',   (_e, v) => cb(v)),
+        onError:        (cb)   => ipcRenderer.on('update-error',      (_e, v) => cb(v)),
+    },
 };
 
 
 // Expose under both names — legacy code uses electronAPI, new code (lock.html etc.) uses nexusAPI
 contextBridge.exposeInMainWorld('electronAPI', nexusAPI);
 contextBridge.exposeInMainWorld('nexusAPI', nexusAPI);
+
