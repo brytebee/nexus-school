@@ -79,6 +79,7 @@
         if (viewId === "settings") hydrateSettingsForm();
         if (viewId === "about") hydrateAboutView();
         if (viewId === "dashboard") refreshDashboardStats();
+        if (viewId === "attendance" && typeof window.initAttendanceView === "function") window.initAttendanceView();
       }
 
       window.applyFeatureMasking = function() {
@@ -197,8 +198,10 @@
         const viewEl = document.getElementById(`view-${viewId}`);
         if (viewEl) viewEl.classList.add("active");
 
-        // ── Step 2: History (unconditional) ────────────────────────────────────
+        // ── Step 2: History + current view tracking (unconditional) ─────────────
         _historyPush(viewId);
+        window._currentViewId = viewId;
+        try { localStorage.setItem('nexus_last_view', viewId); } catch(_) {}
 
         // ── Step 3: Async side effects (isolated — a failure here never ────────
         //            prevents the view from being shown)                         
@@ -218,14 +221,109 @@
         if (viewId === "teachers")       _safe(() => refreshTeachersTable());
         if (viewId === "students")       _safe(() => refreshStudentsTable());
         if (viewId === "sync")           _safe(() => loadTeacherDropdown());
+        if (viewId === "cbt")            _safe(() => { if(window.cbtInit) window.cbtInit() });
         if (viewId === "settings")       _safe(() => hydrateSettingsForm());
         if (viewId === "about")          _safe(() => hydrateAboutView());
-        if (viewId === "dashboard")      _safe(() => refreshDashboardStats());
+        if (viewId === "dashboard")      _safe(() => { refreshDashboardStats(); if (typeof window.initDashboardPipeline === "function") window.initDashboardPipeline(); });
         if (viewId === "printhub")       _safe(() => phInit());
         if (viewId === "result-studio")  _safe(() => rsInit());
         if (viewId === "attendance")     _safe(() => { if (typeof window.attendanceInit === "function") window.attendanceInit(); });
         if (viewId === "fees")           _safe(() => { if (typeof window.feesInit === "function") window.feesInit(); });
         if (viewId === "portal")         _safe(() => { if (typeof initPortalView === "function") initPortalView(); });
-        if (viewId === "pulse")          _safe(() => { if (typeof initPulseView === "function") initPulseView(); });
-        if (viewId === "scholar")        _safe(() => { if (typeof window.scholarInit === "function") window.scholarInit(); });
+        // _injectHelpBtn is retired — the persistent sidebar ? button handles all contextual help
+         if (viewId === "pulse")          _safe(() => { if (typeof initPulseView === "function") initPulseView(); });
+        if (viewId === "scholar")        _safe(() => { if (typeof initScholarView === "function") initScholarView(); });
+        if (viewId === "guardian")       _safe(() => { if (typeof initGuardianView === "function") initGuardianView(); });
       }
+
+      var VIEW_HELP = {
+        dashboard: { icon: '🏠', title: 'Command Center', tier: null, desc: `Your live school overview — everything at a glance.<br><br><strong style="color:#10b981;">Live Stats:</strong> Teacher count, student enrolment, and real-time grade sync events appear as teachers submit scores from their devices.<br><br><strong style="color:#10b981;">⚙️ Academic Pipeline:</strong> Click the gear icon in the top-right to set your class progression order (e.g. JSS1→SS1) and global pass marks.<br><br><strong style="color:#10b981;">Grade Feed:</strong> Every score synced from a teacher's tablet shows as a live card — your real-time audit trail.<br><br><strong style="color:#10b981;">Quick Action:</strong> Click <em>📄 Generate Report Cards</em> once grades appear in the feed.` },
+        teachers:  { icon: '👨‍🏫', title: 'Teacher Registry', tier: null, desc: `Add and manage your entire teaching staff.<br><br><strong style="color:#10b981;">To add a teacher:</strong><br>1. Click <strong>+ Add Teacher</strong><br>2. Enter name, phone number, and host class<br>3. Assign the subjects they teach<br>4. Save — they can now pair their tablet via Sync Hub<br><br><strong style="color:#10b981;">Tip:</strong> A teacher must be registered here before they can receive a QR pairing code. Their phone number is used for Guardian Shield alerts.` },
+        students:  { icon: '🎓', title: 'Student Registry', tier: null, desc: `Enrol and manage every student.<br><br><strong style="color:#10b981;">To add a student:</strong><br>1. Click <strong>+ Add Student</strong><br>2. Enter name, class (e.g. SS2A), and reg number<br>3. Add the <em>parent's WhatsApp number</em> with country code (e.g. 2348012345678)<br>4. Assign their subject list<br><br><strong style="color:#10b981;">Bulk Import:</strong> Click <em>📥 Upload CSV</em> to add hundreds of students at once. CSV columns: Name, Class, Reg No, Parent Phone.` },
+        sync:      { icon: '🔄', title: 'Sync Hub', tier: null, desc: `Pair teacher tablets and receive grade submissions wirelessly.<br><br><strong style="color:#10b981;">To pair a teacher's device:</strong><br>1. Open the <strong>Nexus Teacher App</strong> on their Android tablet<br>2. Tap <em>Pair with School Hub</em><br>3. Point camera at the QR code on this screen<br>4. The teacher appears in the Dashboard feed when paired<br><br><strong style="color:#10b981;">Troubleshooting:</strong> Both devices must be on the same Wi-Fi. If QR expires, reload this screen.` },
+        attendance: { icon: '📋', title: 'Attendance Module', tier: 'Gold', desc: `Two-layer attendance tracking with automated truancy escalation.<br><br><strong style="color:#f59e0b;">Daily Roll Call (Gold):</strong> Mark whole-day presence per class. Select class → pick date → tick each student → Save.<br><br><strong style="color:#f59e0b;">Subject Roll Call (Diamond):</strong> Track attendance per subject per period — ideal for secondary schools.<br><br><strong style="color:#f59e0b;">Truancy Flags:</strong> When absences exceed your threshold, Guardian Shield auto-alerts the parent via WhatsApp (Diamond).<br><br><strong style="color:#f59e0b;">⚙️ Settings:</strong> Click the gear icon to set thresholds, term dates, and alert templates.` },
+        fees:      { icon: '💰', title: 'Financial Hub', tier: 'Gold', desc: `End-to-end fee management from billing to payment recording.<br><br><strong style="color:#f59e0b;">Setup fees:</strong><br>1. Go to <em>Fee Structure</em> → set amounts per class (e.g. SS1: ₦45,000)<br>2. Activate billing for this term — all students are auto-billed<br><br><strong style="color:#f59e0b;">Record a payment:</strong><br>1. Search for the student<br>2. Click <em>Record Payment</em><br>3. Enter amount + date — balance updates instantly<br><br><strong style="color:#f59e0b;">Fee Shield (Diamond):</strong> Blocks report card printing for students with outstanding balances.` },
+        cbt:       { icon: '📎', title: 'CBT Arena', tier: 'Diamond', desc: `Computer-Based Testing — from question bank to live exam, fully offline.<br><br><strong style="color:#00e5ff;">Step 1 — Build a Question Bank:</strong><br>• Click <em>+ Create Bank</em> → name it and pick a subject<br>• Open the bank → click <em>+ Add Question</em> to type questions manually<br>• OR click <em>Upload via Nexus Scholar 🪄</em> to extract MCQs from any PDF/DOCX automatically<br><br><strong style="color:#00e5ff;">Step 2 — Deploy:</strong> Switch to the <em>Deploy</em> tab → pick bank, class, duration → 🚀 Deploy<br><br><strong style="color:#00e5ff;">Step 3 — Monitor:</strong> Watch live student progress from the <em>Live</em> tab.` },
+        printhub:  { icon: '🖨️', title: 'Print Hub', tier: null, desc: `Generate professional report cards and broadsheets.<br><br><strong style="color:#10b981;">Terminal Report Cards:</strong><br>1. Select class and term<br>2. Click <em>Generate PDF</em> — saved to your Documents folder<br>3. Print or share<br><br><strong style="color:#10b981;">Broadsheets:</strong> Class-level subject tables for staff review — select subject and term.<br><br><strong style="color:#10b981;">Tip:</strong> Use <em>Result Studio</em> to design the report card template before printing here.` },
+        'result-studio': { icon: '🎨', title: 'Result Studio', tier: null, desc: `Design your report card template before printing.<br><br><strong style="color:#10b981;">What you can customise:</strong><br>• Header layout — logo, school name, accreditation badge<br>• Grading scale — letter grades, remarks, performance bands<br>• Footer — address, contact, academic year<br>• Principal signature and stamp style<br><br><strong style="color:#10b981;">How:</strong> Adjust controls in the panel → click <em>Preview</em> to see a sample card → go to Print Hub to generate the full batch.` },
+        pulse:     { icon: '📡', title: 'Nexus Pulse', tier: 'Gold', desc: `WhatsApp communication engine — keep parents informed automatically.<br><br><strong style="color:#f59e0b;">One-time setup:</strong><br>1. Scan the WhatsApp QR code with the school's dedicated phone number<br>2. Pulse is now connected and ready<br><br><strong style="color:#f59e0b;">What Pulse sends:</strong><br>• Fee reminders • Attendance alerts (Diamond) • Term digest • Emergency OTPs<br><br><strong style="color:#f59e0b;">Always-On Bridge (Diamond):</strong> Publishes a 24/7 parent portal accessible from anywhere, even when this computer is off.` },
+        guardian:  { icon: '🛡️', title: 'Guardian Shield', tier: 'Gold', desc: `Automated school governance — runs in the background so you don't have to.<br><br><strong style="color:#f59e0b;">What Guardian does:</strong><br>• Sends the Principal a daily WhatsApp briefing every morning<br>• Auto-alerts parents when a student misses too many days<br>• Flags students with overdue fees<br>• Monitors CBT integrity<br><br><strong style="color:#f59e0b;">Configure:</strong> Set briefing time → enter Principal's WhatsApp number → toggle the alerts you want → Save.` },
+        scholar:   { icon: '🧠', title: 'Nexus Scholar', tier: 'Diamond', desc: `AI knowledge base built from your school's own documents.<br><br><strong style="color:#00e5ff;">Upload documents:</strong><br>1. Click <em>Upload Document</em> (PDF, DOCX, or TXT — max 15MB)<br>2. Scholar indexes it in seconds<br>3. Ask questions in plain English: e.g. <em>"What is the fee for SS3?"</em><br>4. Scholar returns the answer from your documents<br><br><strong style="color:#00e5ff;">CBT Integration:</strong> In CBT Arena → open a Question Bank → click <em>Upload via Nexus Scholar</em> to auto-extract MCQs from past question PDFs.` },
+        settings:  { icon: '⚙️', title: 'School Identity Forge', tier: null, desc: `Configure your school's official identity — appears on all reports and the parent portal.<br><br><strong style="color:#10b981;">Set up:</strong><br>• <em>School Name</em> — full official name as on report cards<br>• <em>Logo</em> — PNG/JPG, recommended 200×200px<br>• <em>Address, Motto, Signature</em> — for report footers<br>• <em>Principal Phone</em> — for OTP emergency access and Guardian briefings<br><br><strong style="color:#10b981;">Academic Pipeline:</strong> Set your class progression order (e.g. Nursery 1 → Primary 1 → JSS1) for promotion tracking.<br><br><strong style="color:#10b981;">Important:</strong> Always click <em>Save Identity</em> after changes.` },
+        about:     { icon: 'ℹ️', title: 'About Nexus School OS', tier: null, desc: `Your license status, system information, and support details.<br><br><strong style="color:#10b981;">License info:</strong><br>• <em>Current Tier</em> — Silver (Free), Gold, or Diamond<br>• <em>Student Quota</em> — maximum students your license supports<br>• <em>Expiry Date</em> — when your Sovereign Shield license expires<br><br><strong style="color:#10b981;">To upgrade:</strong><br>1. Copy your <em>Hardware Fingerprint</em> from this screen<br>2. Send it to your Nexus Partner<br>3. Enter the license key they provide to activate.` },
+        'live-quiz':      { icon: '⚡', title: 'Live Quiz System', tier: 'Diamond', desc: 'Kahoot-style real-time quiz — coming in the next release. Teachers project questions; students answer on their phones via a browser. No app install needed.' },
+        analytics:        { icon: '📈', title: 'Analytics Dashboard', tier: 'Diamond', desc: 'At-risk student flagging, subject heatmaps, and grade progression charts — coming in the next release.' },
+        'notes-marketplace': { icon: '📚', title: 'Notes Marketplace', tier: 'Diamond', desc: 'A storefront for teachers to sell study materials to students via the school portal — coming in the next release.' },
+        'skill-mastery':  { icon: '🎯', title: 'Skill Mastery Tracking', tier: 'Diamond', desc: 'IEP-standard competency reports that track what students can do, not just their scores — coming in the next release.' },
+      };
+
+      function _injectHelpBtn(viewId) {
+
+        document.querySelectorAll('.nexus-help-btn').forEach(b => b.remove());
+        const help = VIEW_HELP[viewId];
+        if (!help) return;
+        const viewEl = document.getElementById('view-' + viewId);
+        if (!viewEl) return;
+        const header = viewEl.querySelector('.view-header');
+        if (!header) return;
+
+        const btn = document.createElement('button');
+        btn.className = 'nexus-help-btn';
+        btn.title = 'Help & Feature Info';
+        btn.textContent = '?';
+        btn.style.cssText = 'width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.5);font-size:13px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.2s;margin-left:8px;-webkit-app-region:no-drag;outline:none;';
+        btn.onmouseenter = () => { btn.style.background='rgba(0,229,255,0.15)'; btn.style.borderColor='rgba(0,229,255,0.4)'; btn.style.color='#00e5ff'; };
+        btn.onmouseleave = () => { btn.style.background='rgba(255,255,255,0.06)'; btn.style.borderColor='rgba(255,255,255,0.15)'; btn.style.color='rgba(255,255,255,0.5)'; };
+
+        btn.onclick = () => {
+          const isGold = help.tier === 'Gold';
+          const isDiamond = help.tier === 'Diamond';
+          const tierColor  = isDiamond ? '#00e5ff' : '#ffd700';
+          const tierBg     = isDiamond ? 'rgba(0,229,255,0.1)' : 'rgba(255,215,0,0.1)';
+          const tierBorder = isDiamond ? 'rgba(0,229,255,0.3)' : 'rgba(255,215,0,0.3)';
+          const tierEmoji  = isDiamond ? '💎' : '🥇';
+          const tierBadge  = help.tier
+            ? '<span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:' + tierBg + ';color:' + tierColor + ';border:1px solid ' + tierBorder + ';">' + tierEmoji + ' ' + help.tier + ' Tier</span>'
+            : '<span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:rgba(16,185,129,0.1);color:#10b981;border:1px solid rgba(16,185,129,0.3);">✅ All Plans</span>';
+
+          Swal.fire({
+            html: '<div style="text-align:left;font-family:\'Inter\',sans-serif;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;"><span style="font-size:36px;line-height:1;">' + help.icon + '</span><div><div style="font-size:17px;font-weight:800;color:#fff;margin-bottom:6px;">' + help.title + '</div>' + tierBadge + '</div></div><p style="font-size:13px;color:rgba(255,255,255,0.6);line-height:1.7;margin:0;">' + help.desc + '</p></div>',
+            background: '#0d1235',
+            color: '#fff',
+            showConfirmButton: false,
+            showCloseButton: true,
+            width: 420,
+          });
+        };
+
+        const actionsDiv = header.querySelector('.view-header-actions');
+        if (actionsDiv) actionsDiv.appendChild(btn);
+        else header.appendChild(btn);
+      }
+
+      // ── Persistent nav ? button — shows help for whatever view is active ────
+      window._showNavHelp = function() {
+        const viewId = window._currentViewId || 'dashboard';
+        const help = VIEW_HELP[viewId];
+        if (!help) {
+          Swal.fire({ title: 'No Help Available', text: 'There is no feature guide for this screen yet.', background: '#0d1235', color: '#fff', showCloseButton: true, showConfirmButton: false });
+          return;
+        }
+        const isGold    = help.tier === 'Gold';
+        const isDiamond = help.tier === 'Diamond';
+        const tierColor  = isDiamond ? '#00e5ff' : '#ffd700';
+        const tierBg     = isDiamond ? 'rgba(0,229,255,0.1)' : 'rgba(255,215,0,0.1)';
+        const tierBorder = isDiamond ? 'rgba(0,229,255,0.3)' : 'rgba(255,215,0,0.3)';
+        const tierEmoji  = isDiamond ? '💎' : '🥇';
+        const tierBadge  = help.tier
+          ? '<span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:' + tierBg + ';color:' + tierColor + ';border:1px solid ' + tierBorder + ';">' + tierEmoji + ' ' + help.tier + ' Tier</span>'
+          : '<span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:rgba(16,185,129,0.1);color:#10b981;border:1px solid rgba(16,185,129,0.3);">✅ All Plans</span>';
+        Swal.fire({
+          html: '<div style="text-align:left;font-family:\'Inter\',sans-serif;max-height:55vh;overflow-y:auto;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;"><span style="font-size:36px;line-height:1;">' + help.icon + '</span><div><div style="font-size:17px;font-weight:800;color:#fff;margin-bottom:6px;">' + help.title + '</div>' + tierBadge + '</div></div><div style="font-size:13px;color:rgba(255,255,255,0.65);line-height:1.75;">' + help.desc + '</div></div>',
+          background: '#0d1235',
+          color: '#fff',
+          showConfirmButton: false,
+          showCloseButton: true,
+          width: 460,
+        });
+      };

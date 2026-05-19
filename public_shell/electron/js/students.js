@@ -38,6 +38,7 @@
         const dob = document.getElementById("stu-add-dob").value.trim();
         const parent_email = document.getElementById("stu-add-pemail").value.trim();
         const parent_phone = document.getElementById("stu-add-pphone").value.trim();
+        const parent_name  = document.getElementById("stu-add-pname")?.value.trim() || '';
         const fee_status = document.getElementById("stu-add-fee").value.trim() || 'cleared';
         const log = document.getElementById("stu-add-log");
         const subjects = getCheckedSubjects("stu");
@@ -64,13 +65,14 @@
           dob,
           parent_email,
           parent_phone,
+          parent_name,
           fee_status
         });
 
         if (res.ok) {
           log.style.color = "#4CAF50";
           log.textContent = `✅ ${name} added (${id}).`;
-          ["stu-add-name", "stu-add-class", "stu-add-regno", "stu-add-gender", "stu-add-dob", "stu-add-pemail", "stu-add-pphone"].forEach((f) => {
+          ["stu-add-name", "stu-add-class", "stu-add-regno", "stu-add-gender", "stu-add-dob", "stu-add-pemail", "stu-add-pphone", "stu-add-pname"].forEach((f) => {
             const el = document.getElementById(f);
             if(el) el.value = "";
           });
@@ -84,10 +86,10 @@
         }
       }
 
-      let _studentsPage   = 0;
-      let _studentsLimit  = 15;
-      let _studentsSearch = "";
-      let _studentsTotal  = 0;
+      var _studentsPage   = 0;
+      var _studentsLimit  = 15;
+      var _studentsSearch = "";
+      var _studentsTotal  = 0;
 
       async function refreshStudentsTable() {
         if (!window.electronAPI?.getAllStudents) return;
@@ -204,6 +206,8 @@
       document.getElementById('edit-stu-dob').value = stu.dob || '';
       document.getElementById('edit-stu-pemail').value = stu.parent_email || '';
       document.getElementById('edit-stu-pphone').value = stu.parent_phone || '';
+      const pnameEl = document.getElementById('edit-stu-pname');
+      if (pnameEl) pnameEl.value = stu.parent_name || '';
       document.getElementById('edit-stu-fee').value = stu.fee_status || 'cleared';
       document.getElementById('edit-stu-log').textContent = '';
 
@@ -248,6 +252,7 @@
       const dob        = document.getElementById('edit-stu-dob').value.trim();
       const parent_email = document.getElementById('edit-stu-pemail').value.trim();
       const parent_phone = document.getElementById('edit-stu-pphone').value.trim();
+      const parent_name  = document.getElementById('edit-stu-pname')?.value.trim() || '';
       const fee_status = document.getElementById('edit-stu-fee').value.trim();
       const log        = document.getElementById('edit-stu-log');
       const subjects  = getCheckedSubjects('edit_stu');
@@ -266,7 +271,7 @@
       log.style.color = 'var(--text-dim)';
       log.textContent = 'Saving…';
       const res = await window.electronAPI.updateStudent({ 
-        id, name, class_name, subjects, reg_no, gender, dob, parent_email, parent_phone, fee_status 
+        id, name, class_name, subjects, reg_no, gender, dob, parent_email, parent_phone, parent_name, fee_status 
       });
       if (res.ok) {
         log.style.color = '#4CAF50';

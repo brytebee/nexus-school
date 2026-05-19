@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; img-src 'self' data: blob:;">
   <title>Nexus School OS — Secure Login</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -310,12 +310,17 @@
         <option value="">Loading admins...</option>
       </select>
 
-      <div class="pin-label">Enter PIN</div>
+      <div class="pin-label" id="auth-label">Enter PIN</div>
       <div class="pin-dots" id="pin-dots">
         <div class="pin-dot" id="d0"></div>
         <div class="pin-dot" id="d1"></div>
         <div class="pin-dot" id="d2"></div>
         <div class="pin-dot" id="d3"></div>
+      </div>
+      
+      <div id="password-container" style="display:none; margin-bottom: 24px; width: 100%;">
+        <input type="password" id="password-input" class="admin-select" style="margin-bottom: 10px; background-image: none;" placeholder="Enter password" />
+        <button class="key" id="password-submit-btn" style="width: 100%; height: 45px; background: rgba(0,229,255,0.1); color: #00e5ff; border-color: rgba(0,229,255,0.3);">Login</button>
       </div>
 
       <div class="numpad" id="numpad">
@@ -333,6 +338,10 @@
       </div>
 
       <div class="status-msg" id="status-msg">Incorrect PIN. Try again.</div>
+      
+      <div style="text-align: center; margin-top: 15px;">
+        <button onclick="requestPasswordReset()" style="background:none; border:none; color:var(--text-dim); font-size:11px; text-decoration:underline; cursor:pointer;">Forgot PIN/Password?</button>
+      </div>
     </div>
   </div>
 
@@ -345,6 +354,8 @@
     const api = window.nexusAPI;
     let pin = '';
     const MAX_PIN = 4;
+    let loadedAdmins = [];
+    let currentAuthType = 'pin';
 
     // ── Load school branding ──────────────────────────────────────
     async function loadBranding() {
@@ -377,11 +388,43 @@
         admins.forEach(a => {
           const opt = document.createElement('option');
           opt.value = a.id;
-          opt.textContent = `${a.name} (${a.role.replace('_', ' ')})`;
+          
+          let roleLabel = 'Basic Admin';
+          if (a.role_level === 9) roleLabel = 'Superadmin';
+          else if (a.role_level === 3) roleLabel = 'Bursar/Manager';
+
+          opt.textContent = `${a.username} (${roleLabel})`;
           sel.appendChild(opt);
         });
+        loadedAdmins = admins;
+        handleAdminChange();
+        sel.addEventListener('change', handleAdminChange);
       } catch(e) {
         document.getElementById('admin-select').innerHTML = '<option value="1">Administrator</option>';
+      }
+    }
+
+    function handleAdminChange() {
+      const adminId = document.getElementById('admin-select').value;
+      if (!adminId) return;
+      
+      const admin = loadedAdmins.find(a => a.id == adminId);
+      if (admin && admin.auth_type === 'password') {
+        currentAuthType = 'password';
+        document.getElementById('auth-label').textContent = 'Enter Password';
+        document.getElementById('pin-dots').style.display = 'none';
+        document.getElementById('numpad').style.display = 'none';
+        document.getElementById('password-container').style.display = 'block';
+        document.getElementById('password-input').value = '';
+        document.getElementById('password-input').focus();
+      } else {
+        currentAuthType = 'pin';
+        document.getElementById('auth-label').textContent = 'Enter PIN';
+        document.getElementById('pin-dots').style.display = 'flex';
+        document.getElementById('numpad').style.display = 'grid';
+        document.getElementById('password-container').style.display = 'none';
+        pin = '';
+        updateDots();
       }
     }
 
@@ -408,20 +451,135 @@
       }, 1200);
     }
 
+    async function requestPasswordReset() {
+      const adminId = document.getElementById('admin-select').value;
+      if (!adminId) { showError('Select an administrator first.'); return; }
+
+      // Check if school phone is configured before claiming OTP "dispatched"
+      try {
+        const res = await api.invoke('auth:forgot-password', { adminId: parseInt(adminId) });
+        if (!res.ok) {
+          showError(res.error || 'Failed to generate OTP. Check Pulse settings.');
+          return;
+        }
+
+        // Build an in-page OTP entry panel instead of browser prompt() (blocked in Electron)
+        const otpPanel = document.createElement('div');
+        otpPanel.id = 'otp-panel';
+        otpPanel.style.cssText = `
+          position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:9999;
+          display:flex; align-items:center; justify-content:center; backdrop-filter:blur(8px);
+        `;
+
+        const devHint = res.devOtp
+          ? `<div style="background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3); border-radius:8px; padding:12px 16px; margin-bottom:20px; font-size:12px; color:#f59e0b; text-align:center;">
+               🛠 DEV MODE — OTP: <strong style="font-size:18px; letter-spacing:4px;">${res.devOtp}</strong>
+             </div>`
+          : `<p style="font-size:13px; color:rgba(255,255,255,0.5); margin-bottom:20px; text-align:center;">
+               OTP dispatched via Nexus Pulse WhatsApp to the school's registered number.
+             </p>`;
+
+        otpPanel.innerHTML = `
+          <div style="background:#0d1235; border:1px solid rgba(0,229,255,0.2); border-radius:20px; padding:36px; width:340px; text-align:center; box-shadow:0 24px 80px rgba(0,0,0,0.6);">
+            <div style="font-size:36px; margin-bottom:12px;">🔐</div>
+            <h3 style="font-size:18px; font-weight:700; margin-bottom:8px; color:#fff;">Emergency Access</h3>
+            ${devHint}
+            <input id="otp-input" type="text" maxlength="6" inputmode="numeric" placeholder="Enter 6-digit OTP"
+              style="width:100%; padding:14px; border-radius:10px; border:1px solid rgba(0,229,255,0.3); background:rgba(0,0,0,0.3); color:#fff; font-size:22px; letter-spacing:8px; text-align:center; outline:none; font-family:monospace; margin-bottom:16px;">
+            <button id="otp-submit-btn" style="width:100%; padding:12px; border-radius:10px; background:rgba(0,229,255,0.15); border:1px solid rgba(0,229,255,0.4); color:#00e5ff; font-weight:700; font-size:14px; cursor:pointer; margin-bottom:10px;">Verify OTP</button>
+            <button id="otp-cancel-btn" style="width:100%; padding:8px; border-radius:10px; background:none; border:none; color:rgba(255,255,255,0.3); font-size:12px; cursor:pointer;">Cancel</button>
+          </div>`;
+
+        document.body.appendChild(otpPanel);
+        document.getElementById('otp-input').focus();
+
+        document.getElementById('otp-cancel-btn').onclick = () => otpPanel.remove();
+
+        async function submitOtp() {
+          const otp = document.getElementById('otp-input').value.trim();
+          if (otp.length !== 6) { showError('OTP must be 6 digits.'); return; }
+          const verifyRes = await api.invoke('auth:verify-otp-login', { adminId: parseInt(adminId), otp });
+          if (verifyRes.ok) {
+            otpPanel.remove();
+
+            // ── New PIN creation panel ─────────────────────────────────────────
+            const newPinPanel = document.createElement('div');
+            newPinPanel.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(10px);`;
+            newPinPanel.innerHTML = `
+              <div style="background:#0d1235;border:1px solid rgba(0,229,255,0.25);border-radius:20px;padding:36px;width:360px;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,0.7);">
+                <div style="font-size:40px;margin-bottom:12px;">🔐</div>
+                <h3 style="font-size:18px;font-weight:700;color:#fff;margin-bottom:6px;">Set New Security Code</h3>
+                <p style="font-size:12px;color:rgba(255,255,255,0.45);margin-bottom:22px;">OTP verified. Create a new PIN or password to secure your account.</p>
+                <div style="display:flex;gap:10px;margin-bottom:12px;">
+                  <button id="np-type-pin" onclick="document.getElementById('np-type-pin').style.background='rgba(0,229,255,0.2)';document.getElementById('np-type-pwd').style.background='none';document.getElementById('np-new').maxLength=4;document.getElementById('np-new').inputMode='numeric';document.getElementById('np-confirm').maxLength=4;document.getElementById('np-confirm').inputMode='numeric';document.getElementById('np-hint').textContent='4 digits';" style="flex:1;padding:8px;border-radius:8px;background:rgba(0,229,255,0.2);border:1px solid rgba(0,229,255,0.4);color:#00e5ff;cursor:pointer;font-size:12px;font-weight:700;">4-Digit PIN</button>
+                  <button id="np-type-pwd" onclick="document.getElementById('np-type-pin').style.background='none';document.getElementById('np-type-pwd').style.background='rgba(0,229,255,0.2)';document.getElementById('np-new').maxLength=64;document.getElementById('np-new').inputMode='text';document.getElementById('np-confirm').maxLength=64;document.getElementById('np-confirm').inputMode='text';document.getElementById('np-hint').textContent='8+ characters';" style="flex:1;padding:8px;border-radius:8px;background:none;border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.5);cursor:pointer;font-size:12px;font-weight:700;">Password</button>
+                </div>
+                <p id="np-hint" style="font-size:11px;color:rgba(255,255,255,0.35);margin-bottom:10px;">4 digits</p>
+                <input id="np-new" type="password" maxlength="4" inputmode="numeric" placeholder="New Code" style="width:100%;padding:14px;border-radius:10px;border:1px solid rgba(0,229,255,0.3);background:rgba(0,0,0,0.35);color:#fff;font-size:22px;letter-spacing:8px;text-align:center;outline:none;font-family:monospace;margin-bottom:10px;box-sizing:border-box;">
+                <input id="np-confirm" type="password" maxlength="4" inputmode="numeric" placeholder="Confirm Code" style="width:100%;padding:14px;border-radius:10px;border:1px solid rgba(0,229,255,0.3);background:rgba(0,0,0,0.35);color:#fff;font-size:22px;letter-spacing:8px;text-align:center;outline:none;font-family:monospace;margin-bottom:16px;box-sizing:border-box;">
+                <div id="np-error" style="color:#ef4444;font-size:12px;margin-bottom:10px;min-height:16px;"></div>
+                <button id="np-save-btn" style="width:100%;padding:13px;border-radius:10px;background:linear-gradient(135deg,rgba(0,229,255,0.2),rgba(0,229,255,0.1));border:1px solid rgba(0,229,255,0.4);color:#00e5ff;font-weight:700;font-size:14px;cursor:pointer;margin-bottom:8px;">💾 Save New Code</button>
+              </div>`;
+            document.body.appendChild(newPinPanel);
+            document.getElementById('np-new').focus();
+
+            document.getElementById('np-save-btn').onclick = async () => {
+              const newPin = document.getElementById('np-new').value.trim();
+              const confirm = document.getElementById('np-confirm').value.trim();
+              const errEl = document.getElementById('np-error');
+              errEl.textContent = '';
+              if (!newPin) { errEl.textContent = 'Please enter a new code.'; return; }
+              if (newPin.length < 4) { errEl.textContent = 'Minimum 4 characters.'; return; }
+              if (newPin !== confirm) { errEl.textContent = 'Codes do not match.'; return; }
+              const saveBtn = document.getElementById('np-save-btn');
+              saveBtn.textContent = 'Saving…'; saveBtn.disabled = true;
+              try {
+                const res = await api.invoke('auth:change-pin', { adminId: parseInt(adminId), newPin });
+                if (res.ok) {
+                  newPinPanel.remove();
+                  const s = document.getElementById('status-msg');
+                  s.textContent = '✅ New code saved. Please log in with your new credentials.';
+                  s.className = 'status-msg visible success';
+                } else {
+                  errEl.textContent = res.error || 'Failed to save. Try again.';
+                  saveBtn.textContent = '💾 Save New Code'; saveBtn.disabled = false;
+                }
+              } catch (e) {
+                errEl.textContent = 'Unexpected error: ' + e.message;
+                saveBtn.textContent = '💾 Save New Code'; saveBtn.disabled = false;
+              }
+            };
+          } else {
+            document.getElementById('otp-input').value = '';
+            showError('Invalid or expired OTP.');
+          }
+        }
+
+
+        document.getElementById('otp-submit-btn').onclick = submitOtp;
+        document.getElementById('otp-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitOtp(); });
+
+      } catch (e) {
+        showError('Emergency Access Failed. Try again.');
+      }
+    }
+
     async function tryLogin() {
       const adminId = document.getElementById('admin-select').value;
       if (!adminId) { showError('Select an administrator first.'); return; }
       try {
-        const result = await api.invoke('auth:verify-pin', { adminId: parseInt(adminId), pin });
+        const result = await api.invoke('auth:verify-pin', { adminId: parseInt(adminId), pin: currentAuthType === 'password' ? document.getElementById('password-input').value : pin });
         if (result.ok) {
           const s = document.getElementById('status-msg');
-          s.textContent = `Welcome, ${result.name}`;
+          s.textContent = `Welcome, ${result.username}`;
           s.className = 'status-msg visible success';
-          // Disable numpad during transition
+          // Disable inputs during transition
           document.getElementById('numpad').style.pointerEvents = 'none';
+          document.getElementById('password-input').disabled = true;
+          document.getElementById('password-submit-btn').disabled = true;
           setTimeout(() => api.send('auth:unlock'), 600);
         } else {
-          showError('Incorrect PIN. Try again.');
+          showError(currentAuthType === 'password' ? 'Incorrect Password. Try again.' : 'Incorrect PIN. Try again.');
         }
       } catch(e) {
         showError('Authentication error. Try again.');
@@ -447,11 +605,16 @@
       btn.addEventListener('click', () => pressKey(btn.dataset.val));
     });
     document.getElementById('del-key').addEventListener('click', delKey);
+    document.getElementById('password-submit-btn').addEventListener('click', tryLogin);
 
     // Physical keyboard support
     document.addEventListener('keydown', e => {
-      if (e.key >= '0' && e.key <= '9') pressKey(e.key);
-      else if (e.key === 'Backspace') delKey();
+      if (currentAuthType === 'pin') {
+        if (e.key >= '0' && e.key <= '9') pressKey(e.key);
+        else if (e.key === 'Backspace') delKey();
+      } else {
+        if (e.key === 'Enter') tryLogin();
+      }
     });
 
     // ── Boot ──────────────────────────────────────────────────────

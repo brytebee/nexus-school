@@ -5,15 +5,15 @@
 
       // State
       // ══════════════════════════════════════════════════════════════════════════
-      let cachedPayload = null;
-      let _wizAllocations = []; // staged allocations in teacher form
+      var cachedPayload = null;
+      var _wizAllocations = []; // staged allocations in teacher form
       // State (Global variables)
       var _allTeachers = [];
       var _allStudents = [];
       var devicesMarried = 0;
       var totalGradeEvents = 0;
       var allGradeEvents = [];
-      let _phComponents = [
+      var _phComponents = [
         { key: "CA1", label: "C.A. 1", max: 10 },
         { key: "CA2", label: "C.A. 2", max: 10 },
         { key: "Exam", label: "Exam", max: 80 },
@@ -21,42 +21,39 @@
 
       // ══════════════════════════════════════════════════════════════════════════
       // Nav State
-      let _viewHistory = [];
-      let _historyIdx = -1;
-      let _sidebarCollapsed = false;
+      var _viewHistory = [];
+      var _historyIdx = -1;
+      var _sidebarCollapsed = false;
 
       // Dashboard / Dropdown Metadata
-      let _cachedMetadata = null;
+      var _cachedMetadata = null;
 
       // Result Studio / Bulk Remarks State
-      let _rsResultsCache = [];
-      let _rsResults = [];
-      let _rsLastScope = {};
-      let _rsLastImagePath = null;
-      let _bulkRemarksData = [];
+      var _rsResultsCache = [];
+      var _rsResults = [];
+      var _rsLastScope = {};
+      var _rsLastImagePath = null;
+      var _bulkRemarksData = [];
 
       // Print Hub State
-      let _phResults = [];
-      let _phType = "terminal";
+      var _phResults = [];
+      var _phType = "terminal";
 
       // Settings / Identity State
-      let _currentIdentity = null;
-      let _schoolTier = "Silver";
-      let _stampStyle = "none";
-      let _stampCustomColor = null;
-      let currentLogoBase64 = null;
-      let _stampBase64 = null;
+      // NOTE: currentLogoBase64, _currentIdentity, _schoolTier, _stampStyle,
+      // _stampCustomColor, _stampBase64, _principalSignBase64 are owned by
+      // settings.js — DO NOT redeclare them here.
 
       // Teacher / Student Forms State
-      let _customSubjects = { tch: [], edit_tch: [], edit_stu: [] };
-      let _editTchAllocations = [];
-      let _editTchSignBase64 = null;
-      let _wizTchSignBase64 = null;
+      var _customSubjects = { tch: [], edit_tch: [], edit_stu: [] };
+      var _editTchAllocations = [];
+      var _editTchSignBase64 = null;
+      var _wizTchSignBase64 = null;
 
       // ══════════════════════════════════════════════════════════════════════════
       // Curriculum Presets — subject checkboxes for Add/Edit Teacher & Student
       // ══════════════════════════════════════════════════════════════════════════
-      const CurriculumPresets = {
+      var CurriculumPresets = {
         pri_lower: [
           {
             cat: "Core",
@@ -142,3 +139,7 @@
         ],
       };
 
+
+
+      // ══════════════════════════════════════════════════════════════════════════
+      // Nav State

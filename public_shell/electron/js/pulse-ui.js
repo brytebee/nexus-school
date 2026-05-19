@@ -5,16 +5,35 @@
 
 // ─── One-time listener flag ────────────────────────────────────────────────────
 // ipcRenderer.on() stacks callbacks on every navigation; we register only once.
-let _statusListenerRegistered = false;
-let _cloudListenerRegistered  = false;
+var _statusListenerRegistered = false;
+var _cloudListenerRegistered  = false;
 
 // ─── Entry Point (called by showView('pulse')) ─────────────────────────────────
 async function initPulseView() {
-    console.log("[Pulse UI] Initialising Nexus Pulse view...");
+    console.log("[Pulse UI] Initialising Nexus Pulse view — tier:", window.currentLicenseTier);
+
+    // ── Tier Gate ────────────────────────────────────────────────────────────
+    const tier = window.currentLicenseTier || "Silver";
+    const isGold = tier === "Gold" || tier === "Diamond";
+    const tierGate = document.getElementById("pulse-tier-gate");
+    const botUI    = document.getElementById("pulse-bot-ui");
+    const btnStart = document.getElementById("btn-start-pulse");
+    const btnStop  = document.getElementById("btn-stop-pulse");
+
+    if (tierGate) tierGate.style.display = isGold ? "none" : "block";
+    if (botUI)    botUI.style.display    = isGold ? ""     : "none";
+    if (btnStart) btnStart.style.display = isGold ? ""     : "none";
+    if (btnStop)  btnStop.style.display  = "none"; // always hidden until bot starts
+
+    if (!isGold) {
+        console.log("[Pulse UI] Gold tier required — bot controls hidden.");
+        return; // no further wiring needed
+    }
 
     _wireBotButtons();
     _wireCloudBridge();
     _wireGuardianShieldButtons();
+    _wireSettingsPanel();
 
     // Register status listener exactly once across all navigations
     if (!_statusListenerRegistered) {
@@ -36,7 +55,7 @@ async function initPulseView() {
     // Hydrate Cloud Bridge panel
     await _hydrateCloudStatus();
 
-    // Hydrate Guardian Shield principal phone (lives in view-guardian)
+    // Hydrate Guardian Shield principal phone
     await _hydratePrincipalPhone();
 }
 
@@ -232,7 +251,26 @@ function _onCloudError(message) {
 // ─── Cloud Status Hydration ────────────────────────────────────────────────────
 async function _hydrateCloudStatus() {
     const bridge = document.getElementById("pulse-cloud-bridge");
-    if (bridge) bridge.style.display = "block"; // Always visible; server gates by tier
+    if (!bridge) return;
+
+    // Always make the section visible — the tier check decides what it shows.
+    bridge.style.display = "block";
+
+    if (window.currentLicenseTier !== "Diamond") {
+        bridge.innerHTML = `
+            <div class="empty-state" style="padding: 30px; text-align: center; border: 1px dashed var(--border);">
+                <span style="font-size: 32px; margin-bottom: 15px; display: block;">💎</span>
+                <h3 style="color: var(--text);">Diamond Tier Required</h3>
+                <p style="color: var(--text-dim); margin: 10px 0 20px; font-size: 13px; max-width: 300px; margin-left: auto; margin-right: auto;">
+                    The Always-On Cloud Bridge allows Nexus to answer parent queries 24/7 via Vercel even when your laptop is turned off.
+                </p>
+                <div style="font-size: 11px; background: rgba(0,229,255,0.1); color: var(--accent); display: inline-block; padding: 4px 10px; border-radius: 12px;">
+                    Upgrade to Diamond to unlock
+                </div>
+            </div>
+        `;
+        return;
+    }
 
     try {
         const cs       = await window.electronAPI.pulse.getCloudStatus();
@@ -294,20 +332,68 @@ function _wireGuardianShieldButtons() {
     }
 }
 
+// ─── Settings Panel Wiring ─────────────────────────────────────────────────────
+function _wireSettingsPanel() {
+    // Phone save
+    const btnSavePhone = document.getElementById("btn-pulse-phone-save");
+    if (btnSavePhone) {
+        const fresh = btnSavePhone.cloneNode(true);
+        btnSavePhone.parentNode.replaceChild(fresh, btnSavePhone);
+        fresh.addEventListener("click", async () => {
+            const phone = document.getElementById("principal-phone-pulse")?.value.trim() || "";
+            if (!phone) { alert("Please enter a phone number."); return; }
+            fresh.textContent = "Saving…"; fresh.disabled = true;
+            try {
+                const identity = await window.electronAPI.getIdentity() || {};
+                identity.principalPhone = phone;
+                const res = await window.electronAPI.saveIdentity(identity);
+                if (res?.ok) {
+                    fresh.textContent = "✅ Saved!";
+                    // update guardian shield display too
+                    const disp = document.getElementById("pulse-principal-phone-display");
+                    if (disp) { disp.textContent = phone; disp.style.color = "var(--gold)"; }
+                } else {
+                    fresh.textContent = "❌ Error";
+                }
+            } catch (e) {
+                console.error("[Pulse Settings] Phone save failed:", e);
+                fresh.textContent = "❌ Error";
+            } finally {
+                fresh.disabled = false;
+                setTimeout(() => { fresh.textContent = "Save Phone"; }, 1500);
+            }
+        });
+    }
+
+    // Autostart toggle — read current state from app_settings via identity workaround
+    const toggle = document.getElementById("pulse-autostart-toggle");
+    if (toggle) {
+        const stored = localStorage.getItem("nexus_pulse_autostart");
+        toggle.checked = stored === "true";
+        toggle.addEventListener("change", () => {
+            localStorage.setItem("nexus_pulse_autostart", toggle.checked ? "true" : "false");
+            window.electronAPI.send?.("pulse:set-autostart", toggle.checked);
+        });
+    }
+}
+
 // ─── Principal Phone (Guardian Shield view) ────────────────────────────────────
 async function _hydratePrincipalPhone() {
     if (!window.electronAPI?.getIdentity) return;
     try {
         const identity = await window.electronAPI.getIdentity();
-        const display  = document.getElementById("pulse-principal-phone-display");
-        if (!display) return;
-        if (identity?.principalPhone) {
-            display.textContent = identity.principalPhone;
-            display.style.color = "var(--gold)";
-        } else {
-            display.textContent = "Not Set — Configure in Settings";
-            display.style.color = "var(--text-dim)";
+        const phone = identity?.principalPhone || "";
+
+        // Guardian shield display
+        const display = document.getElementById("pulse-principal-phone-display");
+        if (display) {
+            display.textContent = phone || "Not Set — Configure in Settings";
+            display.style.color = phone ? "var(--gold)" : "var(--text-dim)";
         }
+
+        // Slide-in settings panel input
+        const input = document.getElementById("principal-phone-pulse");
+        if (input && phone) input.value = phone;
     } catch (err) {
         console.error("[Pulse UI] Principal phone hydration failed:", err);
     }

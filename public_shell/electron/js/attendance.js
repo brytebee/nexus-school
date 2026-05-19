@@ -1,6 +1,6 @@
 "use strict";
 
-const attendanceCss = `
+var attendanceCss = `
   .attendance-radios {
     display: inline-flex;
     gap: 8px;
