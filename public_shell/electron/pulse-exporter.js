@@ -1,5 +1,5 @@
 const { google } = require('googleapis');
-const { database } = require('../../private_engine');
+const { database } = require('@nexus/engine');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -290,7 +290,7 @@ class PulseExporter {
             // Resolve the live DB path dynamically from the open connection
             // instead of using a hardcoded __dirname-relative path that breaks
             // in production where the DB lives in Electron's userData directory.
-            const { database } = require('../../private_engine');
+            const { database } = require('@nexus/engine');
             const dbPath = database.getDb().name;
             if (!fs.existsSync(dbPath)) {
                 console.warn('[Pulse Exporter] DB backup skipped: file not found at', dbPath);

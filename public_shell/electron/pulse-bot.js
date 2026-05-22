@@ -4,7 +4,7 @@
 "use strict";
 
 const { Client, LocalAuth } = require("whatsapp-web.js");
-const { database } = require("../../private_engine");
+const { database } = require("@nexus/engine");
 const path = require("path");
 const os   = require("os");
 const fs   = require("fs");
