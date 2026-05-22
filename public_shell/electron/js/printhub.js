@@ -128,7 +128,7 @@
         };
 
         const imgName = imgMap[templateId] || 'classic';
-        const src = `../../private_engine/assets/templates/${imgName}.png`;
+        const src = `node_modules/@nexus/engine/assets/templates/${imgName}.png`;
 
         container.innerHTML = `
           <img

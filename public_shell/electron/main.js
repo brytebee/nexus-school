@@ -11,8 +11,8 @@ const crypto = require("crypto");
 const os = require("os");
 const dgram = require("dgram");
 const Handlebars = require("handlebars");
-const { database, server, reports } = require("../../private_engine");
-const scholar = require("../../private_engine/src/scholar");
+const { database, server, reports } = require("@nexus/engine");
+const scholar = require("@nexus/engine/src/scholar");
 const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, handleCSVUpload, clearData } = server;
 const address = require("address");
 const pulseBot     = require('./pulse-bot.js');
@@ -1951,7 +1951,12 @@ ipcMain.handle("generate-reports", async (event, payload) => {
 
     let html = "";
     let outPath = "";
-    const baseDir = path.join(__dirname, "../../private_engine");
+    let baseDir = path.join(__dirname, "../../private_engine");
+    if (!fs.existsSync(baseDir) || !fs.existsSync(path.join(baseDir, "assets", "templates"))) {
+        try {
+            baseDir = path.dirname(require.resolve("@nexus/engine"));
+        } catch (_) {}
+    }
     
     if (reportType === "portal_card") {
         html = reports.generatePortalCards(payload);
