@@ -27,26 +27,85 @@
     // ── Apply tier gate to the Truancy Radar tab itself ───────────────────────
     function _applyTruancyTabGating() {
         const isDiamond = window.currentLicenseTier === 'Diamond';
-        const isGoldOrAbove = isDiamond || window.currentLicenseTier === 'Gold';
         const btn = document.getElementById('att-tab-btn-truancy');
         if (!btn) return;
 
-        if (!isGoldOrAbove) {
-            // Silver: hide the tab entirely
-            btn.style.display = 'none';
-            return;
-        }
-
-        // Gold: tab is visible but show an inline upgrade notice inside the radar
         if (!isDiamond) {
-            // Add a subtle badge to the tab button
-            if (!btn.querySelector('.radar-tier-badge')) {
+            // Clone strips JS addEventListener listeners but NOT inline onclick attributes.
+            // Explicitly remove onclick so the panel-show handler can't fire alongside the promo.
+            const fresh = btn.cloneNode(true);
+            fresh.removeAttribute('onclick');
+            btn.parentNode.replaceChild(fresh, btn);
+
+            // Add the Diamond tier badge if not present
+            if (!fresh.querySelector('.radar-tier-badge')) {
                 const badge = document.createElement('span');
                 badge.className = 'radar-tier-badge';
                 badge.textContent = '💎';
-                badge.style.cssText = 'font-size:11px; margin-left:6px; opacity:0.7;';
-                btn.appendChild(badge);
+                badge.style.cssText = 'font-size:11px; margin-left:6px; opacity:0.8;';
+                fresh.appendChild(badge);
             }
+
+            // Bind click to SweetAlert promo
+            fresh.addEventListener('click', () => {
+                Swal.fire({
+                    title: '<span style="color:#00E5FF; font-size:24px; font-weight:700;">💎 Diamond Exclusive</span>',
+                    html: `
+                        <div style="text-align: left; padding: 10px 5px; font-family: 'Inter', sans-serif;">
+                            <p style="color: #fff; font-size: 14px; margin-bottom: 15px; line-height: 1.5;">
+                                The <strong>Truancy Radar & Guardian Shield</strong> is exclusive to our <strong>Diamond Tier</strong> partner schools.
+                            </p>
+                            <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 15px;">
+                                <div style="display: flex; gap: 10px; align-items: flex-start;">
+                                    <span style="font-size: 18px;">🚨</span>
+                                    <div>
+                                        <strong style="color: #fff; font-size: 13px;">Subject-Level Tracking</strong>
+                                        <div style="color: #aaa; font-size: 11px; margin-top: 2px;">Track attendance period-by-period rather than once a day.</div>
+                                    </div>
+                                </div>
+                                <div style="display: flex; gap: 10px; align-items: flex-start;">
+                                    <span style="font-size: 18px;">🛡️</span>
+                                    <div>
+                                        <strong style="color: #fff; font-size: 13px;">Guardian Shield Escalation</strong>
+                                        <div style="color: #aaa; font-size: 11px; margin-top: 2px;">Set up automatic alert triggers for Form Teachers, Principals, and Parents.</div>
+                                    </div>
+                                </div>
+                                <div style="display: flex; gap: 10px; align-items: flex-start;">
+                                    <span style="font-size: 18px;">💬</span>
+                                    <div>
+                                        <strong style="color: #fff; font-size: 13px;">Parent WhatsApp Integration</strong>
+                                        <div style="color: #aaa; font-size: 11px; margin-top: 2px;">Instantly notify parents on their mobile phones when a class is skipped.</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `,
+                    confirmButtonText: 'Secure Your Upgrade',
+                    confirmButtonColor: '#00E5FF',
+                    showCancelButton: true,
+                    cancelButtonText: 'Maybe Later',
+                    cancelButtonColor: '#ef4444',
+                    background: '#0b0f19',
+                    color: '#fff',
+                    customClass: {
+                        popup: 'premium-swal-popup',
+                        confirmButton: 'premium-swal-confirm',
+                        cancelButton: 'premium-swal-cancel'
+                    }
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        Swal.fire({
+                            title: 'Upgrade Initiated',
+                            text: 'Please contact the Sovereign operations team or visit your portal at nexusos.com.ng to request an upgrade to Diamond.',
+                            icon: 'success',
+                            confirmButtonText: 'Got it',
+                            confirmButtonColor: '#00E5FF',
+                            background: '#0b0f19',
+                            color: '#fff'
+                        });
+                    }
+                });
+            });
         }
     }
 

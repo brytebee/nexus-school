@@ -6,8 +6,13 @@
 
 const { ipcMain } = require('electron');
 
-module.exports = function registerAttendanceHandlers(database, enqueueWhatsApp) {
+module.exports = function registerAttendanceHandlers(database, enqueueWhatsApp, getLicenseTier) {
     const db = () => database.getDb();
+
+    function isDiamond() {
+        const tier = typeof getLicenseTier === 'function' ? getLicenseTier() : 'Silver';
+        return tier === 'Diamond';
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -94,6 +99,9 @@ module.exports = function registerAttendanceHandlers(database, enqueueWhatsApp) 
     // ── Subject Attendance ────────────────────────────────────────────────────
 
     ipcMain.handle('attendance:save-subject-attendance', (event, { records, date, subject_name, class_name, session, term, marked_by }) => {
+        if (!isDiamond()) {
+            return { ok: false, error: 'Diamond Tier Required' };
+        }
         const database = db();
 
         const insertRaw = database.prepare(`
@@ -140,6 +148,9 @@ module.exports = function registerAttendanceHandlers(database, enqueueWhatsApp) 
     });
 
     ipcMain.handle('attendance:get-subject-attendance', (event, { class_name, subject_name, date }) => {
+        if (!isDiamond()) {
+            return { ok: true, rows: [] };
+        }
         try {
             const rows = db().prepare(`
                 SELECT sa.student_id, s.name as student_name, sa.status, sa.marked_by
@@ -155,6 +166,9 @@ module.exports = function registerAttendanceHandlers(database, enqueueWhatsApp) 
     });
 
     ipcMain.handle('attendance:get-subject-agg', (event, { student_id, session, term }) => {
+        if (!isDiamond()) {
+            return { ok: true, rows: [] };
+        }
         try {
             const rows = db().prepare(`
                 SELECT subject_name, total_classes, classes_attended,
@@ -172,6 +186,9 @@ module.exports = function registerAttendanceHandlers(database, enqueueWhatsApp) 
     // ── Truancy Radar ─────────────────────────────────────────────────────────
 
     ipcMain.handle('attendance:get-truancy-flags', (event, { class_name } = {}) => {
+        if (!isDiamond()) {
+            return { ok: true, rows: [] };
+        }
         try {
             const query = class_name
                 ? `SELECT tf.*, s.name as student_name, s.class_name FROM truancy_flags tf JOIN students s ON s.id = tf.student_id WHERE s.class_name = ? ORDER BY tf.flag_count DESC`
@@ -187,6 +204,9 @@ module.exports = function registerAttendanceHandlers(database, enqueueWhatsApp) 
 
     ipcMain.handle('attendance:get-truancy-report', (event, { date, class_name }) => {
         // Returns students marked present (daily) but absent for ≥1 subject on the same date
+        if (!isDiamond()) {
+            return { ok: true, rows: [] };
+        }
         try {
             const rows = db().prepare(`
                 SELECT DISTINCT s.id, s.name, s.class_name,
@@ -210,6 +230,9 @@ module.exports = function registerAttendanceHandlers(database, enqueueWhatsApp) 
     });
 
     ipcMain.handle('attendance:dismiss-truancy-flag', (event, { student_id }) => {
+        if (!isDiamond()) {
+            return { ok: false, error: 'Diamond Tier Required' };
+        }
         try {
             db().prepare("UPDATE truancy_flags SET flag_count = 0, escalation_step = 0, last_flagged = NULL WHERE student_id = ?").run(student_id);
             return { ok: true };

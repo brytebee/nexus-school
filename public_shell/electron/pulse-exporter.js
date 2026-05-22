@@ -11,12 +11,16 @@ class PulseExporter {
     constructor() {
         this.oAuth2Client = null;
         this.isSyncing = false;
+        this.getLicenseTier = () => "Silver";
     }
 
     /**
      * Initializes the Google OAuth2 client using credentials from DB
      */
     async init() {
+        if (this.getLicenseTier() !== 'Diamond') {
+            return;
+        }
         const db = database.getDb();
         const clientId = db.prepare("SELECT value FROM app_settings WHERE key = 'google_client_id'").get()?.value;
         const clientSecret = db.prepare("SELECT value FROM app_settings WHERE key = 'google_client_secret'").get()?.value;
@@ -214,6 +218,10 @@ class PulseExporter {
      * Exports the encrypted cache and full database backup to Google Drive
      */
     async syncToDrive() {
+        if (this.getLicenseTier() !== 'Diamond') {
+            console.warn("[Pulse Exporter] Sync aborted: Diamond tier required. Current tier:", this.getLicenseTier());
+            return;
+        }
         if (!this.oAuth2Client || this.isSyncing) return;
         this.isSyncing = true;
 
@@ -320,6 +328,10 @@ class PulseExporter {
      * Start periodic sync (e.g., every 30 minutes)
      */
     startPeriodicSync(intervalMs = 30 * 60 * 1000) {
+        if (this.getLicenseTier() !== 'Diamond') {
+            console.warn("[Pulse Exporter] Periodic sync aborted: Diamond tier required.");
+            return;
+        }
         setInterval(() => this.syncToDrive(), intervalMs);
         this.syncToDrive();
     }

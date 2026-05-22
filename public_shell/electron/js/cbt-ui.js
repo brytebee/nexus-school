@@ -122,22 +122,18 @@
     }
 
     // ── QUESTION BANKS ───────────────────────────────────────────────────────
-    async function loadBanks() {
-        const banksContainer = document.getElementById("cbt-banks-container");
-        if (!window.electronAPI || !banksContainer) return;
+    // loadBanks() already handles view-toggle — keep backToBanks as a thin alias
+    window.backToBanks = () => loadBanks();
 
-        // If the shell was overwritten by the studio, rebuild it
-        if (!document.getElementById("cbt-banks-list")) {
-            banksContainer.innerHTML = `
-              <div style="display:flex; justify-content:space-between; margin-bottom:15px; width:100%;">
-                <h3 style="font-size:16px; margin:0;">Question Bank Library</h3>
-                <button class="primary-btn" id="btn-create-bank">+ Create New Bank</button>
-              </div>
-              <div id="cbt-banks-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:15px; width:100%;"></div>
-            `;
-        }
+    async function loadBanks() {
+        const listView = document.getElementById("cbt-banks-list-view");
+        const studioView = document.getElementById("cbt-bank-studio-view");
+        if (listView) listView.style.display = "block";
+        if (studioView) studioView.style.display = "none";
 
         const banksList = document.getElementById("cbt-banks-list");
+        if (!window.electronAPI || !banksList) return;
+
         banksList.innerHTML = `<div style="color:var(--text-dim); text-align:center; padding:40px; grid-column:1/-1;">Loading Banks...</div>`;
         try {
             const banks = await window.electronAPI.cbt.getBanks();
@@ -195,15 +191,18 @@
     });
 
     window.openBankStudio = async (bankId, bankName) => {
-        const banksContainer = document.getElementById('cbt-banks-container');
-        if (!banksContainer) return;
+        const listView = document.getElementById("cbt-banks-list-view");
+        const studioView = document.getElementById("cbt-bank-studio-view");
+        if (listView) listView.style.display = "none";
+        if (!studioView) return;
 
         // Render studio shell
-        banksContainer.innerHTML = `
+        studioView.style.display = "block";
+        studioView.innerHTML = `
           <div style="width:100%;display:flex;flex-direction:column;gap:20px;">
             <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--glass-border);padding-bottom:15px;flex-wrap:wrap;gap:10px;">
               <div>
-                <button onclick="window.cbtInit()" style="background:transparent;border:1px solid var(--border);color:var(--text);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;margin-bottom:8px;">⬅ Back to Banks</button>
+                <button onclick="window.backToBanks()" style="background:transparent;border:1px solid var(--border);color:var(--text);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;margin-bottom:8px;">⬅ Back to Banks</button>
                 <h2 style="margin:0;">${bankName} — Question Studio</h2>
               </div>
               <div style="display:flex;gap:10px;flex-wrap:wrap;">

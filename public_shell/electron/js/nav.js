@@ -276,7 +276,6 @@
         btn.onmouseleave = () => { btn.style.background='rgba(255,255,255,0.06)'; btn.style.borderColor='rgba(255,255,255,0.15)'; btn.style.color='rgba(255,255,255,0.5)'; };
 
         btn.onclick = () => {
-          const isGold = help.tier === 'Gold';
           const isDiamond = help.tier === 'Diamond';
           const tierColor  = isDiamond ? '#00e5ff' : '#ffd700';
           const tierBg     = isDiamond ? 'rgba(0,229,255,0.1)' : 'rgba(255,215,0,0.1)';
@@ -309,7 +308,6 @@
           Swal.fire({ title: 'No Help Available', text: 'There is no feature guide for this screen yet.', background: '#0d1235', color: '#fff', showCloseButton: true, showConfirmButton: false });
           return;
         }
-        const isGold    = help.tier === 'Gold';
         const isDiamond = help.tier === 'Diamond';
         const tierColor  = isDiamond ? '#00e5ff' : '#ffd700';
         const tierBg     = isDiamond ? 'rgba(0,229,255,0.1)' : 'rgba(255,215,0,0.1)';
@@ -325,5 +323,208 @@
           showConfirmButton: false,
           showCloseButton: true,
           width: 460,
+        });
+      };
+
+      // ── Contextual Help & Module Setup Guides (GUIDE-1 / NAV-1) ─────────────
+      const MODULE_GUIDES = {
+        fees: {
+          title: "Financial Hub Setup Guide",
+          tier: "Gold & Diamond Tiers Required",
+          icon: "💳",
+          steps: [
+            {
+              title: "Step 1: Configure Fee Items",
+              desc: "Define global billing components (e.g. Tuition, IT Levy, Books) in the <strong>🏗️ Fee Structure</strong> tab. Set specific, tailored structures for each grade class."
+            },
+            {
+              title: "Step 2: Rollout Term Invoicing",
+              desc: "Generate terminal student bills in one click at the start of each term. All active students inside designated classes are auto-debited."
+            },
+            {
+              title: "Step 3: Record Collections",
+              desc: "Select a student in the <strong>📋 Fee Roster</strong> list, click <strong>Record Payment</strong>, log the details, and automatically generate print-ready, high-fidelity payment receipts."
+            },
+            {
+              title: "Step 4: Secure the Fee Shield (Diamond Exclusive 💎)",
+              desc: "Enable the automated <em>Fee Shield</em> under settings to block students with outstanding debts from printing final terminal report cards."
+            },
+            {
+              title: "Step 5: Active Pulse Reminders (Diamond Exclusive 💎)",
+              desc: "Connect Nexus Pulse to automatically dispatch personalized fee ledger notifications and reminder digests to parent phones via WhatsApp."
+            }
+          ]
+        },
+        cbt: {
+          title: "CBT Arena Deployment Guide",
+          tier: "Diamond Tier Required Only",
+          icon: "💎",
+          steps: [
+            {
+              title: "Step 1: Construct Question Banks",
+              desc: "Navigate to <strong>📚 Question Banks</strong>. Create a subject library card, name the exam, and add questions manually, complete with rich formatting and correct answer selections."
+            },
+            {
+              title: "Step 2: AI Knowledge Extraction via Scholar",
+              desc: "Don't type manually! Use the <strong>Upload via Nexus Scholar 🪄</strong> button to parse past exam PDFs/DOCX and auto-generate 100% accurate multiple-choice questions in 10 seconds."
+            },
+            {
+              title: "Step 3: Deploy Examination Profile",
+              desc: "Click the <strong>🚀 Deploy Exam</strong> tab. Select your subject bank, specify class, set exact time durations, configure question randomisation parameters, and launch."
+            },
+            {
+              title: "Step 4: Offline Invigilation Radar",
+              desc: "Open <strong>📡 Live Invigilation</strong> to track student device browser pings, observe instant score metrics, and catch active tab-switching attempts immediately."
+            }
+          ]
+        },
+        portal: {
+          title: "Parent Portal Broadcast Guide",
+          tier: "Gold (Sync) & Diamond (Live Sync)",
+          icon: "🔐",
+          steps: [
+            {
+              title: "Step 1: Set Up Custom Subdomain Slug",
+              desc: "Open the ⚙️ Portal settings dropdown and type your unique subdomain. For example: <code>royalacademy</code> which maps directly to <code>royalacademy.edu.nexus</code>."
+            },
+            {
+              title: "Step 2: Issue Secure Access Cards",
+              desc: "Print custom Parent Portal Access Cards directly from the Print Hub. Each card prints a secure parent access PIN and QR code for rapid, private smartphone logins."
+            },
+            {
+              title: "Step 3: Auto-generate Parent Credentials",
+              desc: "The system automatically pairs each student's registered parent WhatsApp number with their secure terminal access PIN to safeguard school database entries."
+            },
+            {
+              title: "Step 4: Start Cloud Bridge Broadcasting (Diamond Exclusive 💎)",
+              desc: "Keep the Parent Portal actively synchronized 24/7. Even when your desktop computer is off, our Cloud Bridge preserves terminal grades, records, and invoices securely on the web."
+            }
+          ]
+        },
+        analytics: {
+          title: "Elite Analytics Intelligence Guide",
+          tier: "Diamond Tier Required Only",
+          icon: "📈",
+          steps: [
+            {
+              title: "Step 1: Academic Data Harvesting",
+              desc: "Academic metrics are silently gathered, parsed, and logged from teacher tablet grade synchronisations, attendance rolls, and CBT scoreboards automatically."
+            },
+            {
+              title: "Step 2: At-Risk AI Alert Radar",
+              desc: "The analytics engine automatically identifies and flags students suffering grade drops greater than 15% or sudden attendance dips below 80%."
+            },
+            {
+              title: "Step 3: Curricular Heatmaps",
+              desc: "Spot teaching efficacy and overall student comprehension instantly via high-fidelity, colored performance grids charting classes against specific subjects."
+            },
+            {
+              title: "Step 4: Longitudinal Grade Tracking",
+              desc: "Generate and review long-term progression graphs tracking individual student improvement or decline across the entire academic year."
+            }
+          ]
+        }
+      };
+
+      window.showModuleSetupGuide = function(moduleName) {
+        const guide = MODULE_GUIDES[moduleName];
+        if (!guide) return;
+
+        let currentStep = 0;
+
+        function getHtmlForStep(idx) {
+          const step = guide.steps[idx];
+          const total = guide.steps.length;
+          
+          let indicatorsHtml = "";
+          for (let i = 0; i < total; i++) {
+            const activeStyle = i === idx 
+              ? "background:#00E5FF; box-shadow:0 0 8px #00E5FF; width:24px;" 
+              : "background:rgba(255,255,255,0.15); width:8px;";
+            indicatorsHtml += `<span style="height:8px; border-radius:4px; display:inline-block; transition:all 0.3s; margin:0 3px; ${activeStyle}"></span>`;
+          }
+
+          return `
+            <div style="text-align: left; font-family: 'Inter', sans-serif; display: flex; flex-direction: column; gap: 16px;">
+              <!-- Header with Icon & Tier -->
+              <div style="display: flex; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 14px;">
+                <span style="font-size: 32px;">${guide.icon}</span>
+                <div>
+                  <h3 style="margin: 0; font-size: 16px; color: #fff; font-weight: 800;">${guide.title}</h3>
+                  <span style="font-size: 11px; font-weight: 700; color: #00E5FF; background: rgba(0, 229, 255, 0.08); padding: 2px 8px; border-radius: 12px; border: 1px solid rgba(0, 229, 255, 0.2); display: inline-block; margin-top: 4px;">
+                    ${guide.tier}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Main Step Content Box with animation -->
+              <div id="guide-step-body" style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 20px; min-height: 120px; transition: all 0.2s ease-in-out;">
+                <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #00E5FF; font-weight: 800; margin-bottom: 8px;">
+                  Step ${idx + 1} of ${total}
+                </div>
+                <h4 style="margin: 0 0 8px 0; font-size: 14px; color: #fff; font-weight: 700;">${step.title}</h4>
+                <p style="margin: 0; color: #b0b8c9; font-size: 12.5px; line-height: 1.6;">${step.desc}</p>
+              </div>
+
+              <!-- Navigation Controls -->
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+                <!-- Step progress dots -->
+                <div style="display: flex; align-items: center;">
+                  ${indicatorsHtml}
+                </div>
+
+                <!-- Action Buttons -->
+                <div style="display: flex; gap: 8px;">
+                  <button id="guide-prev-btn" class="primary-btn" style="padding: 6px 12px; font-size: 11px; background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.15); color: #fff; ${idx === 0 ? 'opacity:0.3; cursor:not-allowed;' : 'cursor:pointer;'}" ${idx === 0 ? 'disabled' : ''}>
+                    ⬅ Back
+                  </button>
+                  <button id="guide-next-btn" class="primary-btn" style="padding: 6px 14px; font-size: 11px; background: #00E5FF; color: #0b0f19; font-weight: bold; border: none; cursor: pointer;">
+                    ${idx === guide.steps.length - 1 ? 'Finish 🚀' : 'Next ➡️'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          `;
+        }
+
+        function updateGuidePopup() {
+          const contentEl = Swal.getHtmlContainer();
+          if (contentEl) {
+            contentEl.innerHTML = getHtmlForStep(currentStep);
+            
+            // Wire listeners to new button elements inside HTML
+            const prevBtn = contentEl.querySelector("#guide-prev-btn");
+            const nextBtn = contentEl.querySelector("#guide-next-btn");
+
+            if (prevBtn && currentStep > 0) {
+              prevBtn.onclick = () => {
+                currentStep--;
+                updateGuidePopup();
+              };
+            }
+
+            if (nextBtn) {
+              nextBtn.onclick = () => {
+                if (currentStep < guide.steps.length - 1) {
+                  currentStep++;
+                  updateGuidePopup();
+                } else {
+                  Swal.close();
+                }
+              };
+            }
+          }
+        }
+
+        Swal.fire({
+          html: '<div id="guide-placeholder">Loading Guide...</div>',
+          background: '#0b0f19',
+          color: '#fff',
+          showConfirmButton: false,
+          showCloseButton: true,
+          width: 500,
+          didOpen: () => {
+            updateGuidePopup();
+          }
         });
       };
