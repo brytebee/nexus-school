@@ -158,6 +158,10 @@ function _handleBotStatus({ status, data } = {}) {
 
 // ─── Cloud Bridge Wiring ───────────────────────────────────────────────────────
 function _wireCloudBridge() {
+    if (window.currentLicenseTier !== "Diamond") {
+        console.log("[Pulse UI] Cloud Bridge wiring skipped: Diamond tier required.");
+        return;
+    }
     // "Configure" button toggles the credentials form
     const btnConnect = document.getElementById("btn-connect-google");
     const setupForm  = document.getElementById("cloud-setup-form");

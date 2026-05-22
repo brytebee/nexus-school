@@ -481,6 +481,7 @@
               <p class="view-sub">Parent access gateway · WhatsApp PIN · 12-hour session</p>
             </div>
             <div style="display:flex;gap:10px;align-items:center;">
+              <button class="primary-btn" onclick="window.showModuleSetupGuide('portal')" style="padding:7px 16px; font-size:12px; background:rgba(0,229,255,0.1); border:1px solid rgba(0,229,255,0.3); color:#00e5ff;">💡 Setup Guide</button>
               <div class="pulse-indicator" id="portal-status-badge">
                 <span class="pulse-dot"></span>
                 <span>Broadcasting Live</span>
@@ -2012,6 +2013,7 @@
               <p class="view-sub" id="fees-subtitle">Track student fee balances and automate reminders via Nexus Pulse.</p>
             </div>
             <div style="display:flex;gap:10px;align-items:center;">
+              <button class="primary-btn" onclick="window.showModuleSetupGuide('fees')" style="padding:7px 16px; font-size:12px; background:rgba(0,229,255,0.1); border:1px solid rgba(0,229,255,0.3); color:#00e5ff;">💡 Setup Guide</button>
               <span id="fees-save-indicator" style="font-size:12px;color:var(--text-dim);transition:opacity 0.3s;opacity:0;"></span>
               <button class="primary-btn" id="btn-trigger-fee-pulse" style="display:none; padding:7px 16px; font-size:12px; background:rgba(212,175,55,0.15); border:1px solid rgba(212,175,55,0.4); color:var(--gold);">🚀 Trigger Fee Pulse</button>
               <button class="small-btn" id="btn-fees-settings" title="Financial Hub Settings" onclick="document.getElementById('fees-settings-panel').style.transform='translateX(0)'" style="font-size:16px;padding:6px 10px;background:rgba(255,255,255,0.06);border-color:var(--glass-border);">⚙️</button>
@@ -2551,6 +2553,7 @@
               <p class="view-sub">Advanced Computer Based Testing Engine & Admissions Pipeline.</p>
             </div>
             <div style="display:flex; gap:10px; align-items:center;">
+              <button class="primary-btn" onclick="window.showModuleSetupGuide('cbt')" style="padding:7px 16px; font-size:12px; background:rgba(0,229,255,0.1); border:1px solid rgba(0,229,255,0.3); color:#00e5ff;">💡 Setup Guide</button>
               <div id="cbt-external-balance-display" style="background:rgba(255,215,0,0.1); border:1px solid rgba(255,215,0,0.3); padding:6px 12px; border-radius:20px; font-size:12px; color:#FFD700; font-weight:bold;">
                 Token Balance: <span id="cbt-balance-count">Loading...</span>
               </div>
@@ -2641,13 +2644,21 @@
             
             <!-- Question Banks Studio -->
             <div id="cbt-banks-container" style="display:block;">
-              <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
-                <h3 style="font-size:16px;">Question Bank Library</h3>
-                <button class="primary-btn" id="btn-create-bank">+ Create New Bank</button>
+              <!-- Sub-View 1: Banks List View -->
+              <div id="cbt-banks-list-view" style="display:block; width:100%;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:15px; width:100%;">
+                  <h3 style="font-size:16px; margin:0;">Question Bank Library</h3>
+                  <button class="primary-btn" id="btn-create-bank">+ Create New Bank</button>
+                </div>
+                <div id="cbt-banks-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:15px; width:100%;">
+                  <!-- Dynamically populated -->
+                  <div style="color:var(--text-dim); font-size:13px; text-align:center; padding:40px; border:1px dashed var(--glass-border); border-radius:8px; grid-column:1/-1;">Loading Question Banks...</div>
+                </div>
               </div>
-              <div id="cbt-banks-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:15px;">
-                <!-- Dynamically populated -->
-                <div style="color:var(--text-dim); font-size:13px; text-align:center; padding:40px; border:1px dashed var(--glass-border); border-radius:8px; grid-column:1/-1;">Loading Question Banks...</div>
+
+              <!-- Sub-View 2: Bank Question Studio View -->
+              <div id="cbt-bank-studio-view" style="display:none; width:100%;">
+                <!-- Built dynamically by JS when entering a bank -->
               </div>
             </div>
 
@@ -2718,7 +2729,10 @@
               <h2 class="view-title" style="background:linear-gradient(135deg,#10b981,#3b82f6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">📈 Analytics Dashboard</h2>
               <p class="view-sub">At-risk flagging, subject heatmaps, and grade progression intelligence.</p>
             </div>
-            <span style="font-size:11px; font-weight:700; background:rgba(99,102,241,0.15); color:#818cf8; padding:6px 14px; border-radius:20px; border:1px solid rgba(99,102,241,0.3);">Coming in Next Release</span>
+            <div style="display:flex; gap:10px; align-items:center;">
+              <button class="primary-btn" onclick="window.showModuleSetupGuide('analytics')" style="padding:7px 16px; font-size:12px; background:rgba(0,229,255,0.1); border:1px solid rgba(0,229,255,0.3); color:#00e5ff;">💡 Feature Guide</button>
+              <span style="font-size:11px; font-weight:700; background:rgba(99,102,241,0.15); color:#818cf8; padding:6px 14px; border-radius:20px; border:1px solid rgba(99,102,241,0.3);">Coming in Next Release</span>
+            </div>
           </div>
           <div style="max-width:700px; margin:0 auto; width:100%;">
             <div style="background:rgba(16,185,129,0.06); border:1px solid rgba(16,185,129,0.2); border-radius:16px; padding:32px; margin-bottom:24px; text-align:center;">

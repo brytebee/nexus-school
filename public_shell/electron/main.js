@@ -67,6 +67,7 @@ let identityPacket = {
 let identityFilePath = "";
 let qrPayload = null;
 let licenseStatus = { locked: false, message: "" };
+pulseExporter.getLicenseTier = () => licenseStatus?.tier || "Silver";
 
 // Synchronous getter — renderer calls this at boot to pre-populate tier
 // before the reactive `license-status` push event arrives.
@@ -95,7 +96,7 @@ require('./attendance-ipc-handlers')(database, (phone, message, studentId) => {
             "INSERT INTO pending_pulse_messages (phone, message, type, student_id) VALUES (?, ?, 'guardian_alert', ?)"
         ).run(phone, message, studentId);
     } catch(e) { console.error('[Guardian Shield] Enqueue failed:', e.message); }
-});
+}, () => licenseStatus?.tier || "Silver");
 
 // ── NEXUS SCHOLAR IPC ────────────────────────────────────────────────────────
 ipcMain.handle("scholar:get-stats", () => scholar.getStats());
@@ -567,6 +568,10 @@ ipcMain.on('trigger-fee-reminders', () => {
 // ── Pulse Cloud Bridge (Turn 2) ───────────────────────────────────────────
 
 ipcMain.on("pulse:save-google-creds", async (event, { clientId, clientSecret }) => {
+    if (licenseStatus?.tier !== 'Diamond') {
+        console.warn("[Pulse] Save credentials rejected: Diamond tier required.");
+        return;
+    }
     const db = database.getDb();
     db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('google_client_id', ?)").run(clientId);
     db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('google_client_secret', ?)").run(clientSecret);
@@ -576,6 +581,10 @@ ipcMain.on("pulse:save-google-creds", async (event, { clientId, clientSecret }) 
 });
 
 ipcMain.handle("pulse:get-google-auth-url", async () => {
+    if (licenseStatus?.tier !== 'Diamond') {
+        console.warn("[Pulse] Get Google auth URL rejected: Diamond tier required.");
+        return null;
+    }
     await pulseExporter.init();
     if (!pulseExporter.oAuth2Client) return null;
     return pulseExporter.oAuth2Client.generateAuthUrl({
@@ -586,6 +595,14 @@ ipcMain.handle("pulse:get-google-auth-url", async () => {
 });
 
 ipcMain.handle("pulse:get-cloud-status", () => {
+    if (licenseStatus?.tier !== 'Diamond') {
+        return {
+            isConfigured: false,
+            isSyncing: false,
+            securityKey: null,
+            refreshToken: null
+        };
+    }
     return {
         isConfigured: !!pulseExporter.oAuth2Client,
         isSyncing: pulseExporter.isSyncing,
@@ -594,7 +611,13 @@ ipcMain.handle("pulse:get-cloud-status", () => {
     };
 });
 
-ipcMain.on("pulse:trigger-sync", () => pulseExporter.syncToDrive());
+ipcMain.on("pulse:trigger-sync", () => {
+    if (licenseStatus?.tier !== 'Diamond') {
+        console.warn("[Pulse] Manual sync trigger rejected: Diamond tier required.");
+        return;
+    }
+    pulseExporter.syncToDrive();
+});
 
 ipcMain.handle("get-identity", () => {
   return { ...identityPacket, tier: licenseStatus?.tier || "Silver" };
