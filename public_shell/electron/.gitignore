@@ -22,3 +22,9 @@ demo_keypair.json
 # Temporary / Backup files
 *.zip
 *.log
+
+# E2E test artifacts
+test-results/
+tests/e2e/videos/**/*.webm
+tests/e2e/videos/**/*.json
+tests/e2e/videos/**/error-context.md

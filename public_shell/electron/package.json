@@ -6,7 +6,15 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:report": "playwright show-report test-results/html-report",
+    "test:all": "npm run test && npm run test:e2e",
+    "predist:mac": "npm run test",
+    "predist:win": "npm run test",
+    "predist:all": "npm run test",
+    "prepublish:mac": "npm run test",
+    "prepublish:win": "npm run test",
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
     "dist:all": "electron-builder --mac --win",
@@ -98,13 +106,20 @@
     "mammoth": "^1.12.0",
     "pdf-parse": "^2.4.5",
     "qrcode": "^1.5.4",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
     "whatsapp-web.js": "^1.34.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@tailwindcss/vite": "^4.3.0",
     "@types/node": "^20",
+    "@vitejs/plugin-react": "^6.0.2",
     "electron": "^31.0.0",
     "electron-builder": "25.1.8",
     "electron-rebuild": "^3.2.9",
-    "electron-updater": "6.8.3"
+    "electron-updater": "6.8.3",
+    "vite": "^8.0.14",
+    "vitest": "^4.1.7"
   }
 }
