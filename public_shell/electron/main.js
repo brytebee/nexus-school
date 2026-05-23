@@ -21,6 +21,7 @@ const receiptAnalysis = require('./receipt-analysis.js');
 const express = require('express');
 const { Bonjour } = require('bonjour-service');
 const bonjour = new Bonjour();
+const feeCalculator = require("./src/lib/fee-calculator");
 
 // Set app name BEFORE createWindow so Menu.buildFromTemplate picks it up correctly
 app.setName("NexusSchoolOS");
@@ -1115,22 +1116,16 @@ function isStudentFeeGated(db, studentId, session, termOrNull) {
   const enabled   = s.fee_gate_enabled !== false; // default on
   const mode      = s.fee_gate_mode      || 'fixed';
   const threshold = Number(s.fee_gate_threshold) || 0;
-  if (!enabled) return { gated: false, balance: 0 };
 
   const balRow = termOrNull
     ? db.prepare(`SELECT COALESCE(SUM(total_billed - total_paid), 0) AS bal FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?`).get(studentId, session, termOrNull)
     : db.prepare(`SELECT COALESCE(SUM(total_billed - total_paid), 0) AS bal FROM student_fees WHERE student_id = ? AND academic_session = ?`).get(studentId, session);
   const balance = balRow?.bal || 0;
-  if (balance <= 0) return { gated: false, balance: 0 };
 
-  if (mode === 'percent') {
-    const billedRow = db.prepare(`SELECT COALESCE(SUM(total_billed), 0) AS b FROM student_fees WHERE student_id = ? AND academic_session = ?`).get(studentId, session);
-    const totalBilled = billedRow?.b || 0;
-    if (totalBilled <= 0) return { gated: false, balance };
-    return { gated: (balance / totalBilled * 100) >= threshold, balance };
-  }
-  // fixed mode: threshold 0 = any positive balance
-  return { gated: threshold === 0 ? balance > 0 : balance >= threshold, balance };
+  const billedRow = db.prepare(`SELECT COALESCE(SUM(total_billed), 0) AS b FROM student_fees WHERE student_id = ? AND academic_session = ?`).get(studentId, session);
+  const totalBilled = billedRow?.b || 0;
+
+  return feeCalculator.evaluateFeeGate({ enabled, mode, threshold, balance, totalBilled });
 }
 
 /**
@@ -1181,9 +1176,7 @@ ipcMain.handle("fees:upsert", (event, { student_id, academic_session, term, tota
     const db = database.getDb();
     const billed = Number(total_billed) || 0;
     const paid   = Number(total_paid)   || 0;
-    const status = paid >= billed && billed > 0 ? "cleared"
-                 : paid > 0                     ? "partial"
-                 : "unpaid";
+    const status = feeCalculator.computeFeeStatus(billed, paid);
     db.prepare(`
       INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status, next_due_date, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
@@ -1226,9 +1219,7 @@ ipcMain.handle("fees:record-payment", (event, { student_id, academic_session, te
         WHERE student_id = ? AND academic_session = ? AND term = ?
       `).get(student_id, academic_session, term) || { total_billed: 0 };
 
-      const status = total_paid >= existing.total_billed && existing.total_billed > 0 ? "cleared"
-                   : total_paid > 0                                                    ? "partial"
-                   : "unpaid";
+      const status = feeCalculator.computeFeeStatus(existing.total_billed, total_paid);
 
       db.prepare(`
         INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status, updated_at)
