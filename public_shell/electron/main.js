@@ -2210,7 +2210,7 @@ function createWindow() {
           res.send("Invalid callback.");
       }
   });
-  callbackServer.listen(3005, () => console.log("[Pulse] Google Auth callback server listening on port 3005"));
+  callbackServer.listen(3004, () => console.log("[Pulse] Google Auth callback server listening on port 3004"));
 
   // ── Dev shortcuts: Cmd+R → reload, Cmd+Option+I → DevTools ───────────────
   globalShortcut.register("CommandOrControl+R", () => {
@@ -2332,6 +2332,14 @@ function createWindow() {
     try {
       const db = database.getDb();
       const matchable = phone.replace(/\D/g, "").slice(-10);
+
+      // DEV_MODE: use hardcoded PIN '0000' so E2E tests never depend on WhatsApp
+      if (process.env.DEV_MODE === 'true' && process.env.DEV_PORTAL_BYPASS !== 'false') {
+        const devStudents = db.prepare("SELECT id, name, class_name FROM students WHERE parent_phone LIKE ? OR parent_phone IS NULL OR parent_phone = ''").all(`%${matchable}`);
+        const fallback = devStudents.length ? devStudents : db.prepare("SELECT id, name, class_name FROM students LIMIT 2").all();
+        portalSessions.set(matchable, { pin: '0000', expiry: Date.now() + 60 * 60 * 1000, students: fallback });
+        return res.json({ ok: true, message: '[DEV_MODE] Portal PIN is 0000 — WhatsApp bypassed' });
+      }
       
       const students = db.prepare("SELECT id, name, class_name FROM students WHERE parent_phone LIKE ?").all(`%${matchable}`);
       if (!students.length) return res.json({ ok: false, error: `No students found for this number. Ensure it matches the number registered at the school (last 10 digits used: ${matchable}).` });

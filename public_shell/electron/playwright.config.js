@@ -38,8 +38,10 @@ module.exports = defineConfig({
     // Video is saved for every test regardless of outcome.
     video: {
       mode: 'on',
-      size: { width: 1280, height: 800 },
+      size: { width: 1920, height: 1080 },
     },
+    // Trace configuration for debugging multi-window specs
+    trace: 'on-first-retry',
     // Screenshot on failure for debugging.
     screenshot: 'only-on-failure',
     // Default video output directory (Playwright appends test name automatically).
