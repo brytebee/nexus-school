@@ -24,7 +24,7 @@ class PulseExporter {
         const db = database.getDb();
         const clientId = db.prepare("SELECT value FROM app_settings WHERE key = 'google_client_id'").get()?.value;
         const clientSecret = db.prepare("SELECT value FROM app_settings WHERE key = 'google_client_secret'").get()?.value;
-        const redirectUri = 'http://localhost:3005/google-callback';
+        const redirectUri = 'http://localhost:3004/google-callback';
 
         if (clientId && clientSecret) {
             this.oAuth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);

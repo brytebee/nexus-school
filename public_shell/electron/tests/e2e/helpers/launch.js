@@ -25,21 +25,21 @@ const APP_ROOT = path.resolve(__dirname, '..', '..', '..');
  *
  * @returns {{ app: ElectronApplication, window: Page }}
  */
-async function launchApp(tier = 'Diamond') {
+async function launchApp(tier = 'Diamond', extraEnv = {}) {
   let recordVideo;
   try {
     const info = test.info();
     if (info) {
       recordVideo = {
         dir: info.outputDir,
-        size: { width: 1280, height: 800 }
+        size: { width: 1920, height: 1080 }
       };
     }
   } catch (e) {
     // Fallback if called outside a test context
     recordVideo = {
       dir: path.resolve(__dirname, '..', 'videos'),
-      size: { width: 1280, height: 800 }
+      size: { width: 1920, height: 1080 }
     };
   }
 
@@ -51,6 +51,7 @@ async function launchApp(tier = 'Diamond') {
       DEV_MODE: 'true',
       DEV_AUTO_LOGIN: 'true',
       DEV_MOCK_TIER: tier,
+      ...extraEnv,
     },
   });
 
