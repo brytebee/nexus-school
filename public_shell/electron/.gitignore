@@ -3,6 +3,8 @@ node_modules/
 
 # Build outputs
 dist/
+!dist/videos/
+!dist/videos/**
 nexus-school-os-darwin-arm64/
 nexus-school-os-darwin-x64/
 nexus-school-os-win32-x64/
