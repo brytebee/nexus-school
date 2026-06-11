@@ -69,7 +69,7 @@
           {
             cat: "Core",
             subjects: [
-              "English Studies", "Mathematics", "Nigerian Languages",
+              "English Language", "Mathematics", "Nigerian Languages",
               "Basic Science & Technology", "Physical & Health Education",
               "Basic Digital Literacy", "CRS", "IS", "Nigerian History",
               "Social & Citizenship Studies", "Cultural & Creative Arts (CCA)",
@@ -81,7 +81,7 @@
           {
             cat: "Core",
             subjects: [
-              "English Studies", "Mathematics", "Nigerian Languages",
+              "English Language", "Mathematics", "Nigerian Languages",
               "Intermediate Science", "Physical & Health Education",
               "Digital Technologies", "CRS", "IS", "Nigerian History",
               "Social & Citizenship Studies", "Cultural & Creative Arts (CCA)",

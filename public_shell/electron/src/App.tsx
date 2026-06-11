@@ -1,102 +1,268 @@
-import React, { useState } from 'react';
-import { FeeLedger } from './views/FeeLedger';
-import { ExamClearance } from './views/ExamClearance';
-import { PulseInbox } from './views/PulseInbox';
-import { NexusScholar } from './views/NexusScholar';
+import React, { useState } from "react";
+import { NavSidebar } from "./components/NavSidebar";
+import { HelpDrawer } from "./components/HelpDrawer";
+import { SetupGuideDrawer } from "./components/SetupGuideDrawer";
+import { useIdentity } from "./hooks/useIdentity";
+import { FinancialHub } from "./views/FinancialHub";
+import { ExamClearance } from "./views/ExamClearance";
+import { CbtArena } from "./views/CbtArena";
+import { NexusPulse } from "./views/NexusPulse";
+import { NexusScholar } from "./views/NexusScholar";
+import { About } from "./views/About";
+import { Settings } from "./views/Settings";
+import { Dashboard } from "./views/Dashboard";
+import { Teachers } from "./views/Teachers";
+import { Students } from "./views/Students";
+import { Attendance } from "./views/Attendance";
+import { SyncHub } from "./views/SyncHub";
+import { PrintHub } from "./views/PrintHub";
+import { ResultStudio } from "./views/ResultStudio";
+import { SovereignPortal } from "./views/SovereignPortal";
+import { PortalContent } from "./views/PortalContent";
+import { LiveQuiz } from "./views/LiveQuiz";
+import { AnalyticsDashboard } from "./views/AnalyticsDashboard";
+import { NotesMarketplace } from "./views/NotesMarketplace";
+import { SkillMastery } from "./views/SkillMastery";
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'ledger' | 'scanner' | 'inbox' | 'scholar'>('scholar');
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    return localStorage.getItem("nexus_nav_activeTab") || "dashboard";
+  });
+  const [historyStack, setHistoryStack] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("nexus_nav_historyStack");
+      return saved ? JSON.parse(saved) : ["dashboard"];
+    } catch {
+      return ["dashboard"];
+    }
+  });
+  const [historyIdx, setHistoryIdx] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("nexus_nav_historyIdx");
+      return saved ? parseInt(saved, 10) : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  const [isHelpOpen, setIsHelpOpen] = useState<boolean>(false);
+  const [isGuideOpen, setIsGuideOpen] = useState<boolean>(false);
+  const [guideModule, setGuideModule] = useState<string>("");
+
+  React.useEffect(() => {
+    (window as any).showModuleSetupGuide = (moduleName: string) => {
+      setGuideModule(moduleName);
+      setIsGuideOpen(true);
+    };
+  }, []);
+
+  const { identity } = useIdentity();
+  const schoolName = identity?.name || "Nexus School OS";
+
+  const navigateTo = (viewId: string, pushToHistory = true) => {
+    if (viewId === activeTab) return;
+    setActiveTab(viewId);
+    localStorage.setItem("nexus_nav_activeTab", viewId);
+    if (pushToHistory) {
+      setHistoryStack((prev) => {
+        const nextStack = prev.slice(0, historyIdx + 1);
+        nextStack.push(viewId);
+        const nextIdx = nextStack.length - 1;
+        setHistoryIdx(nextIdx);
+        localStorage.setItem(
+          "nexus_nav_historyStack",
+          JSON.stringify(nextStack),
+        );
+        localStorage.setItem("nexus_nav_historyIdx", nextIdx.toString());
+        return nextStack;
+      });
+    }
+  };
+
+  const handleBack = () => {
+    if (historyIdx > 0) {
+      const nextIdx = historyIdx - 1;
+      setHistoryIdx(nextIdx);
+      const nextTab = historyStack[nextIdx];
+      setActiveTab(nextTab);
+      localStorage.setItem("nexus_nav_activeTab", nextTab);
+      localStorage.setItem("nexus_nav_historyIdx", nextIdx.toString());
+    }
+  };
+
+  const handleForward = () => {
+    if (historyIdx < historyStack.length - 1) {
+      const nextIdx = historyIdx + 1;
+      setHistoryIdx(nextIdx);
+      const nextTab = historyStack[nextIdx];
+      setActiveTab(nextTab);
+      localStorage.setItem("nexus_nav_activeTab", nextTab);
+      localStorage.setItem("nexus_nav_historyIdx", nextIdx.toString());
+    }
+  };
+
+  const renderActiveView = () => {
+    switch (activeTab) {
+      case "dashboard":
+        return <Dashboard onTabChange={(tab) => navigateTo(tab, true)} />;
+      case "teachers":
+        return <Teachers />;
+      case "students":
+        return <Students />;
+      case "attendance":
+        return <Attendance />;
+      case "sync":
+        return <SyncHub />;
+      case "printhub":
+        return <PrintHub onTabChange={(tab) => navigateTo(tab, true)} />;
+      case "result-studio":
+        return <ResultStudio />;
+      case "portal":
+        return <SovereignPortal />;
+      case "portal-content":
+        return <PortalContent />;
+      case "fees":
+        return <FinancialHub />;
+      case "cbt":
+        return <CbtArena onOpenHelp={() => setIsHelpOpen(true)} />;
+      case "pulse":
+        return <NexusPulse />;
+      case "scholar":
+        return <NexusScholar />;
+      case "about":
+        return <About onTabChange={(tab) => navigateTo(tab, true)} />;
+      case "settings":
+        return <Settings />;
+      case "live-quiz":
+        return <LiveQuiz />;
+      case "analytics":
+        return <AnalyticsDashboard onOpenHelp={() => setIsHelpOpen(true)} />;
+      case "notes-marketplace":
+        return <NotesMarketplace />;
+      case "skill-mastery":
+        return <SkillMastery />;
+      default:
+        return (
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-8 border border-dashed border-nexus-border rounded-2xl bg-nexus-panel/40 animate-in fade-in duration-300">
+            <span className="text-4xl mb-4">🏗️</span>
+            <h2 className="text-2xl font-bold text-white mb-2 uppercase tracking-wide">
+              {activeTab} Page
+            </h2>
+            <p className="text-nexus-text-dim max-w-md text-sm leading-relaxed">
+              This component is part of the Phase 2 view migration backlog. It
+              will be loaded natively from the legacy template interface until
+              fully ported to React.
+            </p>
+          </div>
+        );
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-nexus-bg text-nexus-text font-inter p-6 lg:p-12 overflow-y-auto">
-      {/* Hero Section */}
-      <div className="max-w-4xl mx-auto space-y-4 mb-16">
-        <h1 className="text-5xl lg:text-7xl font-extrabold tracking-tight text-white animate-in fade-in slide-in-from-bottom-4 duration-700">
-          Nexus School OS <span className="text-nexus-accent drop-shadow-md">React</span>
-        </h1>
-        <p className="text-lg lg:text-xl text-nexus-text-dim max-w-2xl leading-relaxed">
-          The next-generation frontend is active. Running side-by-side with the legacy system,
-          bringing world-class Silicon Valley aesthetics to enterprise school management.
-        </p>
-      </div>
+    <>
+      <div className="background-glow"></div>
+      <div
+        className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""} flex h-screen w-screen overflow-hidden text-nexus-text font-inter select-none`}
+      >
+        {/* Sidebar Layout */}
+        <NavSidebar
+          activeTab={activeTab}
+          onTabChange={(tab) => navigateTo(tab, true)}
+          isCollapsed={isSidebarCollapsed}
+          onOpenHelp={() => setIsHelpOpen(true)}
+        />
 
-      {/* Action Cards */}
-      <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6 mb-16">
-        
-        <div className="bg-nexus-panel border border-nexus-border rounded-2xl p-8 hover:shadow-2xl hover:shadow-nexus-gold/10 transition-all duration-300 group">
-          <div className="flex items-center gap-4 mb-4">
-            <div className="w-10 h-10 rounded-full bg-nexus-gold/10 flex items-center justify-center text-nexus-gold">
-              🏗️
+        {/* Main Content Area */}
+        <main className="main-content">
+          {/* Custom titlebar: toggle | school name | drag | nav arrows | win controls */}
+          <div className="main-titlebar" id="main-titlebar">
+            {/* Sidebar collapse toggle */}
+            <button
+              className="sidebar-toggle-btn"
+              id="sidebar-toggle-btn"
+              title="Toggle Sidebar"
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            >
+              {isSidebarCollapsed ? (
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                >
+                  <path
+                    d="M6 3l5 5-5 5"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              ) : (
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                >
+                  <rect x="1" y="3" width="14" height="1.5" rx="0.75" />
+                  <rect x="1" y="7.25" width="14" height="1.5" rx="0.75" />
+                  <rect x="1" y="11.5" width="14" height="1.5" rx="0.75" />
+                </svg>
+              )}
+            </button>
+
+            {/* School Name */}
+            <span className="titlebar-school-name" id="titlebar-school-name">
+              {schoolName}
+            </span>
+
+            {/* Drag region fills remaining space */}
+            <div className="titlebar-drag-region" />
+
+            {/* Back/Forward Nav */}
+            <div className="titlebar-nav">
+              <button
+                className="titlebar-nav-btn"
+                id="btn-back"
+                title="Go Back"
+                disabled={historyIdx <= 0}
+                onClick={handleBack}
+              >
+                ←
+              </button>
+              <button
+                className="titlebar-nav-btn"
+                id="btn-forward"
+                title="Go Forward"
+                disabled={historyIdx >= historyStack.length - 1}
+                onClick={handleForward}
+              >
+                →
+              </button>
             </div>
-            <h3 className="text-2xl font-bold tracking-tight text-white group-hover:text-nexus-gold transition-colors">Fee Structure</h3>
           </div>
-          <p className="text-nexus-text-dim text-sm leading-relaxed mb-6">
-            Migrate the tabular fee builder into a highly reusable <code>&lt;DataTable /&gt;</code> component to handle class-level billing natively in React.
-          </p>
-          <button className="bg-white/5 hover:bg-white/10 text-white border border-nexus-border rounded-lg px-5 py-2.5 text-sm font-medium transition-colors w-full">
-            Begin Migration
-          </button>
-        </div>
 
-        <div className="bg-nexus-panel border border-nexus-border rounded-2xl p-8 hover:shadow-2xl hover:shadow-nexus-accent/10 transition-all duration-300 group">
-          <div className="flex items-center gap-4 mb-4">
-            <div className="w-10 h-10 rounded-full bg-nexus-accent/10 flex items-center justify-center text-nexus-accent">
-              📝
-            </div>
-            <h3 className="text-2xl font-bold tracking-tight text-white group-hover:text-nexus-accent transition-colors">CBT Engine</h3>
-          </div>
-          <p className="text-nexus-text-dim text-sm leading-relaxed mb-6">
-            Implement the Diamond-tier Examination client using React Router, enabling a fully isolated, secure testing environment for students.
-          </p>
-          <button className="bg-gradient-to-r from-nexus-accent/80 to-blue-600 hover:from-nexus-accent hover:to-blue-500 text-white rounded-lg px-5 py-2.5 text-sm font-medium transition-colors w-full shadow-lg shadow-nexus-accent/20">
-            Initialize CBT
-          </button>
-        </div>
-
+          {/* View container */}
+          <div className="view active">{renderActiveView()}</div>
+        </main>
       </div>
 
-      {/* Demo of Reusable Component Architecture */}
-      <div className="max-w-4xl mx-auto p-8 border border-nexus-border rounded-2xl bg-black/20">
-        <div className="flex items-center justify-between mb-8 border-b border-nexus-border pb-4">
-          <div>
-            <h2 className="text-2xl font-bold text-white mb-1">Diamond Components Preview</h2>
-            <p className="text-nexus-text-dim text-sm">Live previews of new React views utilizing the Tailwind design system.</p>
-          </div>
-          <div className="flex bg-black/40 rounded-lg p-1 border border-nexus-border">
-            <button 
-              onClick={() => setActiveTab('ledger')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'ledger' ? 'bg-nexus-panel text-white shadow' : 'text-nexus-text-dim hover:text-white'}`}
-            >
-              Fee Ledger
-            </button>
-            <button 
-              onClick={() => setActiveTab('scanner')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'scanner' ? 'bg-nexus-panel text-white shadow' : 'text-nexus-text-dim hover:text-white'}`}
-            >
-              Exam Scanner
-            </button>
-            <button 
-              onClick={() => setActiveTab('inbox')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'inbox' ? 'bg-nexus-panel text-white shadow' : 'text-nexus-text-dim hover:text-white'}`}
-            >
-              Pulse Inbox
-            </button>
-            <button 
-              onClick={() => setActiveTab('scholar')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'scholar' ? 'bg-indigo-600 text-white shadow' : 'text-nexus-text-dim hover:text-white'}`}
-            >
-              Nexus Scholar
-            </button>
-          </div>
-        </div>
-        
-        {activeTab === 'ledger' && <FeeLedger studentId="demo-student-id" session="2025/2026" term="First Term" />}
-        {activeTab === 'scanner' && <ExamClearance />}
-        {activeTab === 'inbox' && <PulseInbox />}
-        {activeTab === 'scholar' && <NexusScholar />}
-      </div>
+      {/* Reusable right slide-in Help Drawer */}
+      <HelpDrawer
+        isOpen={isHelpOpen}
+        onClose={() => setIsHelpOpen(false)}
+        activeTab={activeTab}
+      />
 
-    </div>
+      {/* Reusable right slide-in Setup Guide Drawer */}
+      <SetupGuideDrawer
+        isOpen={isGuideOpen}
+        onClose={() => setIsGuideOpen(false)}
+        moduleName={guideModule}
+      />
+    </>
   );
 }
 

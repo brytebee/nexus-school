@@ -63,6 +63,7 @@ async function injectHighlighter(page) {
         overflow: hidden;
         text-overflow: ellipsis;
         transition: opacity 0.3s ease;
+        pointer-events: none;
       }
 
       #nx-caption.nx-hidden {

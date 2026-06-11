@@ -51,6 +51,7 @@ async function launchApp(tier = 'Diamond', extraEnv = {}) {
       DEV_MODE: 'true',
       DEV_AUTO_LOGIN: 'true',
       DEV_MOCK_TIER: tier,
+      USE_REACT_UI: extraEnv.USE_REACT_UI !== undefined ? extraEnv.USE_REACT_UI : 'false',
       ...extraEnv,
     },
   });
@@ -60,8 +61,9 @@ async function launchApp(tier = 'Diamond', extraEnv = {}) {
   // that can take 20-40 s on a cold start.
   const window = await app.firstWindow({ timeout: 60_000 });
 
-  // Log renderer process exceptions to the terminal
+  // Log renderer process exceptions and console logs to the terminal
   window.on('pageerror', (err) => console.log('RENDERER EXCEPTION:', err.message || err));
+  window.on('console', (msg) => console.log('CONSOLE:', msg.text()));
 
   // Wait for the sidebar nav to be ready — it's the earliest reliable signal
   // that the main index.html has fully booted and the IPC bridge is live.
@@ -72,10 +74,27 @@ async function launchApp(tier = 'Diamond', extraEnv = {}) {
 
 /**
  * Gracefully closes the Electron app and waits for the process to exit.
+ * If it hangs (due to background UDP/HTTP servers), it force-kills the process after 8s.
  * @param {ElectronApplication} app
  */
 async function closeApp(app) {
-  await app.close();
+  try {
+    await Promise.race([
+      app.close(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('App close timed out')), 8000))
+    ]);
+  } catch (e) {
+    console.log('⚠️ App close helper warning:', e.message);
+    try {
+      const proc = app.process();
+      if (proc && typeof proc.kill === 'function') {
+        proc.kill('SIGKILL');
+        console.log('💀 Electron process force-killed successfully.');
+      }
+    } catch (killErr) {
+      console.error('❌ Failed to force-kill Electron process:', killErr.message);
+    }
+  }
 }
 
 module.exports = { launchApp, closeApp };

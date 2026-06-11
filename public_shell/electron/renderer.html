@@ -5,9 +5,13 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://fonts.googleapis.com https://fonts.gstatic.com;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Nexus School OS (React)</title>
+    <!-- Import Google Fonts link to match v1 typography -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <!-- Import existing variables to maintain design consistency without duplicating CSS -->
-    <link rel="stylesheet" href="./css/variables.css" />
-    <link rel="stylesheet" href="./css/theme.css" />
+    <link rel="stylesheet" href="./index.css" />
     <style>
       body {
         margin: 0;
@@ -20,10 +24,10 @@
     </style>
   </head>
   <body>
-    <!-- Titlebar for dragging -->
-    <div style="position: absolute; top: 0; left: 0; width: 100%; height: 38px; -webkit-app-region: drag; z-index: 9999;"></div>
-    
     <div id="root"></div>
+    <script src="libs/qrcode.min.js"></script>
+    <script src="libs/sweetalert2.all.min.js"></script>
+    <script src="js/nav.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

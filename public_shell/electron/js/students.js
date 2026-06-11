@@ -4,12 +4,34 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 
+      async function populateClassSelectors(levelSelectId, armSelectId, currentLevel = '', currentArm = '') {
+        const levelSel = document.getElementById(levelSelectId);
+        const armSel = document.getElementById(armSelectId);
+        if (!levelSel || !armSel) return;
+
+        try {
+          const s = await window.electronAPI.cbt.getSystemSettings();
+          const levels = Array.isArray(s.class_hierarchy) ? s.class_hierarchy : [];
+          const arms = Array.isArray(s.class_arms) ? s.class_arms : [];
+
+          // Populate Levels
+          levelSel.innerHTML = '<option value="">Select Level *</option>' +
+            levels.map(l => `<option value="${l}" ${l === currentLevel ? 'selected' : ''}>${l}</option>`).join('');
+
+          // Populate Arms
+          armSel.innerHTML = '<option value="">Select Arm (None)</option>' +
+            arms.map(a => `<option value="${a}" ${a === currentArm ? 'selected' : ''}>${a}</option>`).join('');
+        } catch(e) {
+          console.warn('[Students] Failed to populate class selectors:', e);
+        }
+      }
+
       function toggleAddStudentForm() {
         const drawer = document.getElementById("add-student-drawer");
         drawer.style.display =
           drawer.style.display === "none" ? "block" : "none";
         if (drawer.style.display === "block") {
-          ["stu-add-name", "stu-add-class", "stu-add-regno", "stu-add-gender", "stu-add-dob", "stu-add-pemail", "stu-add-pphone", "stu-add-fee"].forEach((id) => {
+          ["stu-add-name", "stu-add-regno", "stu-add-gender", "stu-add-dob", "stu-add-pemail", "stu-add-pphone", "stu-add-fee"].forEach((id) => {
             const el = document.getElementById(id);
             if (el) el.value = "";
           });
@@ -17,22 +39,14 @@
           document.getElementById("stu-add-log").textContent = "";
           renderSubjectsPicker("stu", "jss");
 
-          // Extract all known classes for autocomplete
-          const allClassesSet = new Set();
-          _allStudents.forEach(s => { if(s.class_name) allClassesSet.add(s.class_name); });
-          _allTeachers.forEach(t => { 
-            (t.allocations || []).forEach(a => { if(a.class_name) allClassesSet.add(a.class_name); });
-          });
-          const datalist = document.getElementById("stu-class-datalist");
-          if (datalist) {
-            datalist.innerHTML = [...allClassesSet].sort().map(c => `<option value="${c}">`).join('');
-          }
+          populateClassSelectors("stu-add-class-level", "stu-add-class-arm");
         }
       }
 
       async function addStudentFromDirectory() {
         const name = document.getElementById("stu-add-name").value.trim();
-        const class_name = document.getElementById("stu-add-class").value.trim();
+        const class_name = document.getElementById("stu-add-class-level").value.trim();
+        const class_arm = document.getElementById("stu-add-class-arm").value.trim();
         const reg_no = document.getElementById("stu-add-regno").value.trim();
         const gender = document.getElementById("stu-add-gender").value.trim();
         const dob = document.getElementById("stu-add-dob").value.trim();
@@ -45,7 +59,7 @@
 
         if (!name || !class_name) {
           log.style.color = "#ff4444";
-          log.textContent = "⚠ Name and Class are required.";
+          log.textContent = "⚠ Name and Class Level are required.";
           return;
         }
         if (!subjects.length) {
@@ -59,6 +73,7 @@
           id,
           name,
           class_name,
+          class_arm,
           subjects,
           reg_no,
           gender,
@@ -72,7 +87,7 @@
         if (res.ok) {
           log.style.color = "#4CAF50";
           log.textContent = `✅ ${name} added (${id}).`;
-          ["stu-add-name", "stu-add-class", "stu-add-regno", "stu-add-gender", "stu-add-dob", "stu-add-pemail", "stu-add-pphone", "stu-add-pname"].forEach((f) => {
+          ["stu-add-name", "stu-add-regno", "stu-add-gender", "stu-add-dob", "stu-add-pemail", "stu-add-pphone", "stu-add-pname"].forEach((f) => {
             const el = document.getElementById(f);
             if(el) el.value = "";
           });
@@ -144,7 +159,7 @@
           <td style="font-family:monospace;font-size:11px;color:var(--text-dim);">${s.id}</td>
           <td style="font-weight:600;">${s.name}</td>
           <td>
-            <div style="margin-bottom:6px;"><span style="background:rgba(0,229,255,0.08);border:1px solid rgba(0,229,255,0.15);padding:2px 10px;border-radius:5px;font-size:11px;color:var(--accent);">${s.class_name}</span></div>
+            <div style="margin-bottom:6px;"><span style="background:rgba(0,229,255,0.08);border:1px solid rgba(0,229,255,0.15);padding:2px 10px;border-radius:5px;font-size:11px;color:var(--accent);">${s.class_name}${s.class_arm || ''}</span></div>
             <div style="max-width:300px;line-height:1.4;">${subjectsList}</div>
           </td>
           <td style="text-align:right;display:flex;gap:6px;justify-content:flex-end;">
@@ -200,7 +215,6 @@
 
       document.getElementById('edit-stu-id').value = stu.id;
       document.getElementById('edit-stu-name').value = stu.name;
-      document.getElementById('edit-stu-class').value = stu.class_name;
       document.getElementById('edit-stu-regno').value = stu.reg_no || '';
       document.getElementById('edit-stu-gender').value = stu.gender || '';
       document.getElementById('edit-stu-dob').value = stu.dob || '';
@@ -211,12 +225,8 @@
       document.getElementById('edit-stu-fee').value = stu.fee_status || 'cleared';
       document.getElementById('edit-stu-log').textContent = '';
 
-      // Populate class datalist
-      const dl = document.getElementById('edit-stu-class-datalist');
-      const allClasses = new Set();
-      _allStudents.forEach(s => { if(s.class_name) allClasses.add(s.class_name); });
-      _allTeachers.forEach(t => { (t.allocations||[]).forEach(a => { if(a.class_name) allClasses.add(a.class_name); }); });
-      dl.innerHTML = [...allClasses].sort().map(c => '<option value="' + c + '">').join('');
+      // Populate Level and Arm selectors dynamically
+      populateClassSelectors("edit-stu-class-level", "edit-stu-class-arm", stu.class_name, stu.class_arm);
 
       // Pre-tick the student's current subjects
       const currentSubjects = stu.subjects || [];
@@ -246,7 +256,8 @@
     async function saveEditStudent() {
       const id         = document.getElementById('edit-stu-id').value;
       const name       = document.getElementById('edit-stu-name').value.trim();
-      const class_name = document.getElementById('edit-stu-class').value.trim();
+      const class_name = document.getElementById('edit-stu-class-level').value.trim();
+      const class_arm  = document.getElementById('edit-stu-class-arm').value.trim();
       const reg_no     = document.getElementById('edit-stu-regno').value.trim();
       const gender     = document.getElementById('edit-stu-gender').value.trim();
       const dob        = document.getElementById('edit-stu-dob').value.trim();
@@ -259,7 +270,7 @@
 
       if (!name || !class_name) {
         log.style.color = '#ff4444';
-        log.textContent = '⚠ Name and Class are required.';
+        log.textContent = '⚠ Name and Class Level are required.';
         return;
       }
       if (!subjects.length) {
@@ -271,7 +282,7 @@
       log.style.color = 'var(--text-dim)';
       log.textContent = 'Saving…';
       const res = await window.electronAPI.updateStudent({ 
-        id, name, class_name, subjects, reg_no, gender, dob, parent_email, parent_phone, parent_name, fee_status 
+        id, name, class_name, class_arm, subjects, reg_no, gender, dob, parent_email, parent_phone, parent_name, fee_status 
       });
       if (res.ok) {
         log.style.color = '#4CAF50';

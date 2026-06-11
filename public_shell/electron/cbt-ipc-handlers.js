@@ -1,4 +1,5 @@
 const { ipcMain } = require('electron');
+const { normalizePhone } = require('./phone-utils');
 
 module.exports = function registerCBTHandlers(database) {
     // --------------------------------------------------------
@@ -156,21 +157,23 @@ module.exports = function registerCBTHandlers(database) {
     ipcMain.handle("cbt:deploy-exam", (event, examData) => {
         const {
             title, bank_id, class_name, academic_session, term, question_count, duration_minutes, pass_mark_percentage,
-            shuffle_questions, shuffle_options, exam_type, is_promotional, assessment_mapping, security_profile, result_release_policy
+            shuffle_questions, shuffle_options, exam_type, is_promotional, assessment_mapping, security_profile, result_release_policy,
+            pc_count
         } = examData;
 
         const stmt = database.getDb().prepare(`
             INSERT INTO cbt_exams (
                 title, bank_id, class_name, academic_session, term, question_count, duration_minutes, 
                 status, pass_mark_percentage, shuffle_questions, shuffle_options, exam_type, is_promotional,
-                assessment_mapping, security_profile, result_release_policy
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)
+                assessment_mapping, security_profile, result_release_policy, pc_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         
         const info = stmt.run(
             title, bank_id, class_name, academic_session, term, question_count, duration_minutes,
             pass_mark_percentage || 50, shuffle_questions ? 1 : 0, shuffle_options ? 1 : 0, 
-            exam_type, is_promotional ? 1 : 0, assessment_mapping, JSON.stringify(security_profile || {}), result_release_policy
+            exam_type, is_promotional ? 1 : 0, assessment_mapping, JSON.stringify(security_profile || {}), result_release_policy,
+            pc_count ? Number(pc_count) : 30
         );
         return { success: true, id: info.lastInsertRowid };
     });
@@ -182,9 +185,9 @@ module.exports = function registerCBTHandlers(database) {
         return database.getDb().prepare("SELECT * FROM cbt_batches WHERE exam_id = ?").all(exam_id);
     });
 
-    ipcMain.handle("cbt:create-batch", (event, { exam_id, name, start_time, end_time }) => {
-        const stmt = database.getDb().prepare("INSERT INTO cbt_batches (exam_id, name, start_time, end_time, status) VALUES (?, ?, ?, ?, 'pending')");
-        const info = stmt.run(exam_id, name, start_time, end_time);
+    ipcMain.handle("cbt:create-batch", (event, { exam_id, name, exam_date, start_time, end_time }) => {
+        const stmt = database.getDb().prepare("INSERT INTO cbt_batches (exam_id, name, exam_date, start_time, end_time, status) VALUES (?, ?, ?, ?, ?, 'pending')");
+        const info = stmt.run(exam_id, name, exam_date, start_time, end_time);
         return { success: true, id: info.lastInsertRowid };
     });
 
@@ -215,18 +218,20 @@ module.exports = function registerCBTHandlers(database) {
 
     ipcMain.handle("cbt:generate-tokens", (event, { exam_id, batch_id, is_external, target_ids }) => {
         const db = database.getDb();
-        const insertInternal = db.prepare("INSERT OR IGNORE INTO cbt_tokens (exam_id, student_id, batch_id, token, status) VALUES (?, ?, ?, ?, 'unused')");
-        const insertExternal = db.prepare("INSERT OR IGNORE INTO cbt_tokens (exam_id, external_candidate_id, batch_id, token, status) VALUES (?, ?, ?, ?, 'unused')");
+        const insertInternal = db.prepare("INSERT OR IGNORE INTO cbt_tokens (exam_id, student_id, batch_id, token, question_seed, status) VALUES (?, ?, ?, ?, ?, 'unused')");
+        const insertExternal = db.prepare("INSERT OR IGNORE INTO cbt_tokens (exam_id, external_candidate_id, batch_id, token, question_seed, status) VALUES (?, ?, ?, ?, ?, 'unused')");
         
         let count = 0;
         const tx = db.transaction((ids) => {
             for (const id of ids) {
-                const token = Math.random().toString(36).substring(2, 8).toUpperCase(); // 6 char random token
+                const token = Math.random().toString(36).substring(2, 8).toUpperCase(); // 6-char access token
+                const seed  = Math.random().toString(36).substring(2, 6).toUpperCase() +
+                              Math.random().toString(36).substring(2, 6).toUpperCase(); // 8-char question seed
                 if (is_external) {
-                    const res = insertExternal.run(exam_id, id, batch_id, token);
+                    const res = insertExternal.run(exam_id, id, batch_id, token, seed);
                     if (res.changes > 0) count++;
                 } else {
-                    const res = insertInternal.run(exam_id, id, batch_id, token);
+                    const res = insertInternal.run(exam_id, id, batch_id, token, seed);
                     if (res.changes > 0) count++;
                 }
             }
@@ -308,8 +313,8 @@ module.exports = function registerCBTHandlers(database) {
         let hierarchy = [];
         try { hierarchy = JSON.parse(hierarchyStr); } catch(e) {}
 
-        const getStudent = db.prepare("SELECT id, class_name, session_history FROM students WHERE id = ?");
-        const updateStudent = db.prepare("UPDATE students SET class_name = ?, session_history = ? WHERE id = ?");
+        const getStudent = db.prepare("SELECT id, class_name, class_arm, session_history FROM students WHERE id = ?");
+        const updateStudent = db.prepare("UPDATE students SET class_name = ?, class_arm = ?, session_history = ? WHERE id = ?");
         const updateToken = db.prepare("UPDATE cbt_tokens SET status = 'completed' WHERE id = ?");
 
         const tx = db.transaction((ops) => {
@@ -326,25 +331,31 @@ module.exports = function registerCBTHandlers(database) {
                 let history = [];
                 try { history = JSON.parse(student.session_history || '[]'); } catch(e) {}
 
-                // Archive the session
+                // Archive the session (store full class name with arm for records)
+                const fullClassDisplay = student.class_name + (student.class_arm || '');
                 history.push({
                     session: currentSession,
-                    class: student.class_name,
+                    class: fullClassDisplay,
                     action: op.action === 'promote' ? 'Promoted' : 'Held Back',
                     exam_id: exam_id
                 });
 
                 let newClass = student.class_name;
+                let newArm = student.class_arm;
                 if (op.action === 'promote') {
-                    const currentIndex = hierarchy.indexOf(student.class_name);
+                    // Strip spaces for match robustness (matches "SS 1" with "SS1")
+                    const cleanHierarchy = hierarchy.map(h => h.replace(/\s+/g, ''));
+                    const cleanClassName = student.class_name.replace(/\s+/g, '');
+                    const currentIndex = cleanHierarchy.indexOf(cleanClassName);
                     if (currentIndex !== -1 && currentIndex + 1 < hierarchy.length) {
                         newClass = hierarchy[currentIndex + 1];
                     } else if (currentIndex + 1 >= hierarchy.length) {
                         newClass = "Graduated";
+                        newArm = ""; // Clear arm for graduated students
                     }
                 }
 
-                updateStudent.run(newClass, JSON.stringify(history), student.id);
+                updateStudent.run(newClass, newArm, JSON.stringify(history), student.id);
                 if (op.token_id) updateToken.run(op.token_id);
             }
             
@@ -354,6 +365,198 @@ module.exports = function registerCBTHandlers(database) {
 
         tx(overrides);
         return { success: true };
+    });
+
+    ipcMain.handle("cbt:get-students-for-class", (event, { class_name, class_arm }) => {
+        const db = database.getDb();
+        const normClassName = (class_name || '').replace(/\s+/g, '');
+        if (class_arm && class_arm !== 'all') {
+            return db.prepare("SELECT id, name, class_name, class_arm FROM students WHERE replace(class_name, ' ', '') = ? AND class_arm = ?").all(normClassName, class_arm);
+        } else {
+            return db.prepare("SELECT id, name, class_name, class_arm FROM students WHERE replace(class_name, ' ', '') = ?").all(normClassName);
+        }
+    });
+
+    // ────────────────────────────────────────────────────────
+    // DELETE & UPDATE HANDLERS (SUDO / ADMIN SECURED)
+    // ────────────────────────────────────────────────────────
+    ipcMain.handle("cbt:delete-bank", (event, { bank_id }) => {
+        const db = database.getDb();
+        const exam = db.prepare("SELECT id FROM cbt_exams WHERE bank_id = ?").get(bank_id);
+        if (exam) {
+            throw new Error("Cannot delete this bank because it is currently linked to one or more deployed exams. Please delete the exams first.");
+        }
+        db.prepare("DELETE FROM cbt_question_banks WHERE id = ?").run(bank_id);
+        return { success: true };
+    });
+
+    ipcMain.handle("cbt:delete-question", (event, { question_id }) => {
+        database.getDb().prepare("DELETE FROM cbt_questions WHERE id = ?").run(question_id);
+        return { success: true };
+    });
+
+    ipcMain.handle("cbt:delete-exam", (event, { exam_id }) => {
+        database.getDb().prepare("DELETE FROM cbt_exams WHERE id = ?").run(exam_id);
+        return { success: true };
+    });
+
+    ipcMain.handle("cbt:update-bank", (event, { bank_id, name, category, description }) => {
+        database.getDb().prepare(
+            "UPDATE cbt_question_banks SET name = ?, subject = ?, class_category = ?, description = ? WHERE id = ?"
+        ).run(name, category || 'General', category || 'General', description || '', bank_id);
+        return { success: true };
+    });
+
+    ipcMain.handle("cbt:update-question", (event, { id, question_text, option_a, option_b, option_c, option_d, correct_option, marks }) => {
+        database.getDb().prepare(`
+            UPDATE cbt_questions 
+            SET question_text = ?, option_a = ?, option_b = ?, option_c = ?, option_d = ?, correct_option = ?, marks = ?
+            WHERE id = ?
+        `).run(question_text, option_a, option_b, option_c, option_d, correct_option, marks, id);
+    });
+
+    ipcMain.handle("cbt:dispatch-pulse-notifications", async (event, { exam_id, notify_parents, notify_teachers }) => {
+        const db = database.getDb();
+        
+        // 1. Fetch Exam details
+        const exam = db.prepare("SELECT * FROM cbt_exams WHERE id = ?").get(exam_id);
+        if (!exam) {
+            throw new Error("Exam not found");
+        }
+
+        // Fetch dynamic school name
+        const schoolRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_name'").get();
+        const schoolName = schoolRow ? schoolRow.value : "Nexus School";
+
+        let queuedParents = 0;
+        let queuedTeachers = 0;
+
+        // Helper to format timestamps to readable h:mm A (AM/PM)
+        const formatTime = (timeStr) => {
+            if (!timeStr) return '';
+            
+            // Check if it's in HH:MM format (e.g. "07:00" or "14:30")
+            const match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+            if (match) {
+                let hour = parseInt(match[1], 10);
+                const minute = match[2];
+                const ampm = hour >= 12 ? 'PM' : 'AM';
+                hour = hour % 12;
+                hour = hour ? hour : 12; // hour '0' is '12'
+                return `${hour}:${minute} ${ampm}`;
+            }
+
+            // Fallback check for "HH:MM:SS" style
+            const parts = timeStr.split(':');
+            if (parts.length >= 2) {
+                let hour = parseInt(parts[0], 10);
+                const minute = parts[1];
+                if (!isNaN(hour) && minute.length === 2) {
+                    const ampm = hour >= 12 ? 'PM' : 'AM';
+                    hour = hour % 12;
+                    hour = hour ? hour : 12;
+                    return `${hour}:${minute} ${ampm}`;
+                }
+            }
+
+            if (isNaN(Date.parse(timeStr))) return timeStr;
+            
+            const date = new Date(timeStr);
+            let hour = date.getHours();
+            const minute = date.getMinutes().toString().padStart(2, '0');
+            const ampm = hour >= 12 ? 'PM' : 'AM';
+            hour = hour % 12;
+            hour = hour ? hour : 12;
+            return `${hour}:${minute} ${ampm}`;
+        };
+
+        // 2. Parents notification
+        if (notify_parents) {
+            if (exam.exam_type === 'external') {
+                // External candidates - fetch token + batch info
+                const tokens = db.prepare(`
+                    SELECT t.token, c.name as candidate_name, c.guardian_phone as parent_phone, 
+                           b.name as batch_name, b.exam_date as batch_date, b.start_time as batch_start
+                    FROM cbt_tokens t
+                    JOIN cbt_external_candidates c ON t.external_candidate_id = c.id
+                    LEFT JOIN cbt_batches b ON t.batch_id = b.id
+                    WHERE t.exam_id = ?
+                `).all(exam_id);
+
+                const enqueue = db.prepare(`
+                    INSERT INTO pending_pulse_messages (phone, message, type, student_id)
+                    VALUES (?, ?, 'guardian_alert', ?)
+                `);
+
+                db.transaction(() => {
+                    for (const t of tokens) {
+                        const cleanPhone = normalizePhone(t.parent_phone);
+                        if (cleanPhone) {
+                            const dateStr = t.batch_date || 'TBD';
+                            const batchInfo = t.batch_name ? ` (Batch: ${t.batch_name}${t.batch_start ? ' ' + formatTime(t.batch_start) : ''})` : '';
+                            const msg = `Dear Parent/Guardian, candidate ${t.candidate_name} is scheduled for ${exam.title} on ${dateStr}${batchInfo}. Access Token: ${t.token}. Please ensure they arrive on time. - ${schoolName}`;
+                            enqueue.run(cleanPhone, msg, `EXT-${t.candidate_name}`);
+                            queuedParents++;
+                        }
+                    }
+                })();
+            } else {
+                // Internal students - fetch token + batch info
+                const tokens = db.prepare(`
+                    SELECT t.token, s.name as student_name, s.parent_phone, s.id as student_id, 
+                           b.name as batch_name, b.exam_date as batch_date, b.start_time as batch_start, b.end_time as batch_end
+                    FROM cbt_tokens t
+                    JOIN students s ON t.student_id = s.id
+                    LEFT JOIN cbt_batches b ON t.batch_id = b.id
+                    WHERE t.exam_id = ?
+                `).all(exam_id);
+
+                const enqueue = db.prepare(`
+                    INSERT INTO pending_pulse_messages (phone, message, type, student_id)
+                    VALUES (?, ?, 'guardian_alert', ?)
+                `);
+
+                db.transaction(() => {
+                    for (const t of tokens) {
+                        const cleanPhone = normalizePhone(t.parent_phone);
+                        if (cleanPhone) {
+                            const dateStr = t.batch_date || 'TBD';
+                            const batchInfo = t.batch_name ? `Batch: ${t.batch_name}${t.batch_start ? ' (' + formatTime(t.batch_start) + ')' : ''}` : 'Batch: To be assigned';
+                            const msg = `Dear Parent, your child ${t.student_name} is scheduled for the ${exam.title} exam on ${dateStr}. ${batchInfo}. Access Token: ${t.token}. Ensure they are prepared. - ${schoolName}`;
+                            enqueue.run(cleanPhone, msg, t.student_id);
+                            queuedParents++;
+                        }
+                    }
+                })();
+            }
+        }
+
+        // 3. Teachers notification
+        if (notify_teachers) {
+            const teachers = db.prepare("SELECT name, phone FROM teachers WHERE phone IS NOT NULL AND phone != ''").all();
+            
+            // Get unique scheduled dates from all batches of this exam
+            const batches = db.prepare("SELECT DISTINCT exam_date FROM cbt_batches WHERE exam_id = ? ORDER BY exam_date").all(exam_id);
+            const batchDatesStr = batches.length > 0 ? batches.map(b => b.exam_date).filter(Boolean).join(', ') : 'TBD';
+
+            const enqueue = db.prepare(`
+                INSERT INTO pending_pulse_messages (phone, message, type)
+                VALUES (?, ?, 'general')
+            `);
+
+            db.transaction(() => {
+                for (const teacher of teachers) {
+                    const cleanPhone = normalizePhone(teacher.phone);
+                    if (cleanPhone) {
+                        const msg = `Dear ${teacher.name}, you have been assigned invigilation duty for the CBT Exam: "${exam.title}" scheduled for ${batchDatesStr} (Class: ${exam.class_name}). Please log in to view batch details. - ${schoolName}`;
+                        enqueue.run(cleanPhone, msg);
+                        queuedTeachers++;
+                    }
+                }
+            })();
+        }
+
+        return { success: true, parentsCount: queuedParents, teachersCount: queuedTeachers };
     });
 
 };

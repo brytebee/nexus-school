@@ -36,6 +36,9 @@ test.describe('Sovereign Parent Portal Guides', () => {
 
   // ── Method A: DEV_MODE Hardcoded PIN '0000' Bypass ──────────────────────────────
   test('Method A — Sovereign Parent Portal: Parents Lookup via DEV_MODE Bypass', async () => {
+    // Cooldown delay to allow previous Electron processes to free ports
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
     // 1. Launch the Electron app
     const { app, window: electronWindow } = await launchApp('Diamond', { DEV_PORTAL_BYPASS: 'true' });
     await injectHighlighter(electronWindow);
@@ -58,9 +61,11 @@ test.describe('Sovereign Parent Portal Guides', () => {
       }
     });
     const page = await context.newPage();
+    page.on('pageerror', (err) => console.log('SIMULATED PAGE EXCEPTION:', err.message || err));
+    page.on('console', (msg) => console.log('SIMULATED PAGE CONSOLE:', msg.text()));
     
     // ── Step 1: Open the Sovereign Parent Portal ──────────────────────────────────
-    await page.goto('http://localhost:3002/portal');
+    await page.goto('http://127.0.0.1:3002/portal');
     await page.waitForSelector('#view-login', { timeout: 15000 });
     
     // Inject highlighter AFTER page loads / navigation
@@ -118,13 +123,22 @@ test.describe('Sovereign Parent Portal Guides', () => {
     await hideCaption(page);
     
     // Cleanup
-    await context.close();
-    await browser.close();
+    try {
+      await Promise.race([
+        Promise.all([context.close(), browser.close()]),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Browser cleanup timed out')), 5000))
+      ]);
+    } catch (err) {
+      console.log('⚠️ Browser cleanup warning:', err.message);
+    }
     await closeApp(app);
   });
 
   // ── Method B: Real SQLite Database OTP Queue Extraction ────────────────────────
   test('Method B — Sovereign Parent Portal: Parents Lookup via Local DB OTP Extraction', async () => {
+    // Cooldown delay to allow previous Electron processes to free ports
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
     // 1. Launch the Electron app with DEV_PORTAL_BYPASS=false
     const { app, window: electronWindow } = await launchApp('Diamond', { DEV_PORTAL_BYPASS: 'false' });
     await injectHighlighter(electronWindow);
@@ -147,9 +161,11 @@ test.describe('Sovereign Parent Portal Guides', () => {
       }
     });
     const page = await context.newPage();
+    page.on('pageerror', (err) => console.log('SIMULATED PAGE EXCEPTION:', err.message || err));
+    page.on('console', (msg) => console.log('SIMULATED PAGE CONSOLE:', msg.text()));
     
     // ── Step 1: Open the Sovereign Parent Portal ──────────────────────────────────
-    await page.goto('http://localhost:3002/portal');
+    await page.goto('http://127.0.0.1:3002/portal');
     await page.waitForSelector('#view-login', { timeout: 15000 });
     
     // Inject highlighter AFTER page loads / navigation
@@ -192,6 +208,16 @@ test.describe('Sovereign Parent Portal Guides', () => {
     
     // Click Verify PIN
     await clickWithHalo(page, '#btn-verify-pin', '🔓 Unlocking secure student records…');
+    
+    // Check if the "Select Child" screen is displayed (multiple children scenario)
+    try {
+      const childBtn = page.locator('.child-btn >> text=Chidi Abiola');
+      await childBtn.waitFor({ state: 'visible', timeout: 5000 });
+      await clickWithHalo(page, childBtn, '🎓 Selecting student Chidi Abiola…');
+    } catch (e) {
+      console.log("[Sovereign Portal E2E] No child selection screen displayed. Proceeding directly to dashboard.");
+    }
+    
     await page.waitForSelector('#view-dashboard', { timeout: 15000 });
     await page.waitForTimeout(2000);
     
@@ -218,8 +244,14 @@ test.describe('Sovereign Parent Portal Guides', () => {
     await hideCaption(page);
     
     // Cleanup
-    await context.close();
-    await browser.close();
+    try {
+      await Promise.race([
+        Promise.all([context.close(), browser.close()]),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Browser cleanup timed out')), 5000))
+      ]);
+    } catch (err) {
+      console.log('⚠️ Browser cleanup warning:', err.message);
+    }
     await closeApp(app);
   });
 
