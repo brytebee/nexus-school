@@ -747,6 +747,95 @@ async function handleMessage(msg) {
 
   let session = getSession(matchable);
 
+  // ── Intercept msg.reply to log outgoing bot responses ──
+  const originalReply = msg.reply.bind(msg);
+  msg.reply = async function(replyText, ...args) {
+    const response = await originalReply(replyText, ...args);
+    try {
+      const db = database.getDb();
+      const res = db.prepare(`
+        INSERT INTO pulse_inbox (sender_name, sender_phone, content, status, direction)
+        VALUES (?, ?, ?, 'read', 'outgoing')
+      `).run("Nexus Pulse Bot", rawPhone, replyText);
+
+      const newMsgId = res.lastInsertRowid;
+
+      if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+        mainWindowRef.webContents.send("pulse:new-message", {
+          id: newMsgId,
+          sender_name: "Nexus Pulse Bot",
+          sender_phone: rawPhone,
+          content: replyText,
+          received_at: new Date().toISOString(),
+          status: 'read',
+          direction: 'outgoing'
+        });
+      }
+    } catch (err) {
+      console.error("[Pulse Bot] Failed to log outgoing bot response to inbox:", err);
+    }
+    return response;
+  };
+
+  // ── Determine if the incoming message will be handled by the bot ──
+  let isBotHandled = false;
+  if (session) {
+    if (session.state === STATE.MENU && numericInput !== null) {
+      isBotHandled = true;
+    } else if (session.state === STATE.SCOPE && numericInput !== null) {
+      isBotHandled = true;
+    } else if (session.state === STATE.TERM_SELECT && numericInput !== null) {
+      isBotHandled = true;
+    } else if (session.state === STATE.AWAITING_RECEIPT && (text === '0' || msg.hasMedia)) {
+      isBotHandled = true;
+    }
+  }
+
+  const status = isBotHandled ? 'bot_handled' : 'unread';
+  const aiConfidence = isBotHandled ? 100 : 0;
+
+  // ── Log in the inbox ──
+  try {
+    const db = database.getDb();
+    const students = db
+      .prepare("SELECT id, name, parent_name FROM students WHERE parent_phone LIKE ?")
+      .all(`%${matchable}`);
+
+    let senderName = "Unknown Parent";
+    if (students.length > 0) {
+      const parentName = students[0].parent_name;
+      if (parentName) {
+        senderName = parentName;
+      } else {
+        senderName = `Parent of ${students.map(s => s.name).join(", ")}`;
+      }
+    }
+
+    const content = text || (msg.hasMedia ? "[Media Attachment]" : "");
+
+    const res = db.prepare(`
+      INSERT INTO pulse_inbox (sender_name, sender_phone, content, status, ai_confidence, direction)
+      VALUES (?, ?, ?, ?, ?, 'incoming')
+    `).run(senderName, rawPhone, content, status, aiConfidence);
+
+    const newMsgId = res.lastInsertRowid;
+
+    if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+      mainWindowRef.webContents.send("pulse:new-message", {
+        id: newMsgId,
+        sender_name: senderName,
+        sender_phone: rawPhone,
+        content: content,
+        received_at: new Date().toISOString(),
+        status: status,
+        ai_confidence: aiConfidence,
+        direction: 'incoming'
+      });
+    }
+  } catch (dbErr) {
+    console.error("[Pulse Bot] Failed to log incoming message to inbox:", dbErr);
+  }
+
   // ── Any non-numeric input OR new session → show main menu ───────────────────
   if (!session || !numericInput) {
     const db = database.getDb();

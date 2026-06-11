@@ -463,6 +463,24 @@
                 </div>
                 <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">Minimum score for promotion recommendation.</p>
               </div>
+              <!-- Class Arms Configuration -->
+              <div class="card" style="padding:16px; background:rgba(255,255,255,0.02); border:1px solid var(--glass-border);">
+                <h4 style="font-size:11px; font-weight:800; color:var(--text-dim); margin:0 0 12px; letter-spacing:1px;">CLASS ARMS / BRANCHES</h4>
+                <div style="display:flex; gap:8px;">
+                  <input type="text" id="dp-class-arms-input" class="modern-input" placeholder="e.g. A, B, C" style="flex:1;">
+                  <button class="primary-btn" id="dp-btn-save-arms">Save</button>
+                </div>
+                <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">Comma-separated list of arms/streams for class levels.</p>
+              </div>
+              <!-- Academic Terms Configuration -->
+              <div class="card" style="padding:16px; background:rgba(255,255,255,0.02); border:1px solid var(--glass-border);">
+                <h4 style="font-size:11px; font-weight:800; color:var(--text-dim); margin:0 0 12px; letter-spacing:1px;">ACADEMIC TERMS</h4>
+                <div style="display:flex; gap:8px;">
+                  <input type="text" id="dp-terms-input" class="modern-input" placeholder="e.g. First, Second, Third" style="flex:1;">
+                  <button class="primary-btn" id="dp-btn-save-terms">Save</button>
+                </div>
+                <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">Comma-separated list of terms for internal grading/exams.</p>
+              </div>
               <!-- Rollover -->
               <div class="card" style="padding:16px; background:rgba(239,68,68,0.04); border:1px solid rgba(239,68,68,0.2);">
                 <h4 style="font-size:11px; font-weight:800; color:#ef4444; margin:0 0 6px; letter-spacing:1px;">ACADEMIC ROLLOVER</h4>
@@ -1066,15 +1084,13 @@
                 class="modern-input"
                 placeholder="Full Name *"
               />
-              <div style="display:flex; flex-direction:column; gap:0;">
-                <input
-                  id="stu-add-class"
-                  class="modern-input"
-                  placeholder="Class (e.g. JSS1 Gold) *"
-                  list="stu-class-datalist"
-                  style="width: 100%;"
-                />
-                <datalist id="stu-class-datalist"></datalist>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <select id="stu-add-class-level" class="modern-input" style="width: 100%;">
+                  <option value="">Select Level *</option>
+                </select>
+                <select id="stu-add-class-arm" class="modern-input" style="width: 100%;">
+                  <option value="">Select Arm (None)</option>
+                </select>
               </div>
             </div>
 
@@ -3216,9 +3232,13 @@
         </div>
         <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-bottom:10px;">
           <input id="edit-stu-name" class="modern-input" placeholder="Full Name *" />
-          <div style="display:flex;flex-direction:column;gap:0;">
-            <input id="edit-stu-class" class="modern-input" placeholder="Class *" list="edit-stu-class-datalist" />
-            <datalist id="edit-stu-class-datalist"></datalist>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <select id="edit-stu-class-level" class="modern-input" style="width: 100%;">
+              <option value="">Select Level *</option>
+            </select>
+            <select id="edit-stu-class-arm" class="modern-input" style="width: 100%;">
+              <option value="">Select Arm (None)</option>
+            </select>
           </div>
         </div>
         

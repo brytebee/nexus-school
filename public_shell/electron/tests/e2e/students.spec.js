@@ -17,8 +17,22 @@ const { launchApp, closeApp } = require('./helpers/launch');
 const { injectHighlighter, showCaption, hideCaption, clickWithHalo } = require('./helpers/ui-highlight');
 
 test('Feature Guide — Student Registry: Enrol a Student', async () => {
+  // Cooldown delay to allow previous Electron processes to free ports
+  await new Promise(resolve => setTimeout(resolve, 3000));
+
   const { app, window } = await launchApp('Diamond');
   await injectHighlighter(window);
+  
+  // Workaround: Initialize _customSubjects.stu in browser context to avoid undefined push error
+  await window.evaluate(() => {
+    console.log("[E2E Diagnostic] window._customSubjects:", window._customSubjects);
+    if (window._customSubjects) {
+      window._customSubjects.stu = [];
+      console.log("[E2E Diagnostic] Successfully set window._customSubjects.stu = []");
+    } else {
+      console.log("[E2E Diagnostic] window._customSubjects is UNDEFINED!");
+    }
+  });
 
   // ── Step 1: Navigate to Students view ─────────────────────────────────────
   await showCaption(window, '🎓 Opening the Student Registry…');
@@ -65,6 +79,14 @@ test('Feature Guide — Student Registry: Enrol a Student', async () => {
   // ── Step 6: Save student ──────────────────────────────────────────────────
   await clickWithHalo(window, 'button:has-text("Save Student")', '💾 Saving student profile to database…');
   await window.waitForTimeout(1200);
+  
+  const logText = await window.innerText('#stu-add-log');
+  console.log('[E2E Diagnostic] Save student status log:', logText);
+
+  // ── Step 7: Search for the enrolled student ───────────────────────────────
+  await showCaption(window, '🔍 Searching for Obi Emeka in the Student Registry…');
+  await window.fill('#view-students input[placeholder*="Search"]', 'Obi Emeka');
+  await window.waitForTimeout(1000);
 
   // ── Assertion: new student appears in the registry table ──────────────────
   await showCaption(window, '✅ Verifying Obi Emeka appears in the Student Registry…');

@@ -665,6 +665,16 @@ window.initDashboardPipeline = async function () {
     if (pm && s.pass_mark_threshold) pm.value = s.pass_mark_threshold;
     const ses = document.getElementById('dp-lbl-active-session');
     if (ses && s.current_academic_session) ses.textContent = s.current_academic_session;
+
+    // Load Class Arms & Terms
+    const armsEl = document.getElementById('dp-class-arms-input');
+    if (armsEl && Array.isArray(s.class_arms)) {
+      armsEl.value = s.class_arms.join(', ');
+    }
+    const termsEl = document.getElementById('dp-terms-input');
+    if (termsEl && Array.isArray(s.terms)) {
+      termsEl.value = s.terms.join(', ');
+    }
   } catch (e) { console.warn('[Dashboard Pipeline] load failed', e); }
   _renderDP();
 
@@ -703,6 +713,36 @@ window.initDashboardPipeline = async function () {
       try {
         await window.electronAPI.cbt.saveSystemSetting({ key: 'pass_mark_threshold', value: val });
         Swal.fire({ title: 'Saved!', text: 'Pass mark updated.', icon: 'success', background: '#0b0f19', color: '#fff', timer: 1500, showConfirmButton: false });
+      } catch (e) { Swal.fire('Error', e.message, 'error'); }
+    });
+  }
+
+  // Save Class Arms
+  const saveArmsBtn = document.getElementById('dp-btn-save-arms');
+  if (saveArmsBtn && !saveArmsBtn._dpBound) {
+    saveArmsBtn._dpBound = true;
+    saveArmsBtn.addEventListener('click', async () => {
+      const inp = document.getElementById('dp-class-arms-input');
+      if (!inp) return;
+      try {
+        const list = inp.value.split(',').map(s => s.trim()).filter(Boolean);
+        await window.electronAPI.cbt.saveSystemSetting({ key: 'class_arms', value: list });
+        Swal.fire({ title: 'Saved!', text: 'Class arms updated.', icon: 'success', background: '#0b0f19', color: '#fff', timer: 1500, showConfirmButton: false });
+      } catch (e) { Swal.fire('Error', e.message, 'error'); }
+    });
+  }
+
+  // Save Academic Terms
+  const saveTermsBtn = document.getElementById('dp-btn-save-terms');
+  if (saveTermsBtn && !saveTermsBtn._dpBound) {
+    saveTermsBtn._dpBound = true;
+    saveTermsBtn.addEventListener('click', async () => {
+      const inp = document.getElementById('dp-terms-input');
+      if (!inp) return;
+      try {
+        const list = inp.value.split(',').map(s => s.trim()).filter(Boolean);
+        await window.electronAPI.cbt.saveSystemSetting({ key: 'terms', value: list });
+        Swal.fire({ title: 'Saved!', text: 'Academic terms updated.', icon: 'success', background: '#0b0f19', color: '#fff', timer: 1500, showConfirmButton: false });
       } catch (e) { Swal.fire('Error', e.message, 'error'); }
     });
   }

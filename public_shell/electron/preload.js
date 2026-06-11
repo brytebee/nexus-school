@@ -48,6 +48,13 @@ const nexusAPI = {
     // V4 (Phase 0): Limit Engine
     revokeDevice:       (id)     => ipcRenderer.invoke('revoke-device', id),
     onShowUpgradeModal: (callback) => ipcRenderer.on('show-upgrade-modal', (_event, value) => callback(value)),
+    // ── Teacher Access Revocation (Sync Hub) ──────────────────────────────
+    teacher: {
+        getAccessList:  ()       => ipcRenderer.invoke('teacher:get-access-list'),
+        revokeAccess:   (data)   => ipcRenderer.invoke('teacher:revoke-access',  data),
+        restoreAccess:  (data)   => ipcRenderer.invoke('teacher:restore-access', data),
+        onRevokeBroadcast: (cb)  => ipcRenderer.on('teacher-revoke-broadcast', (_e, v) => cb(v)),
+    },
     // Phase 3.1: The Wow Factor (UDP Heartbeats)
     onPulseHeartbeat:   (callback) => ipcRenderer.on('pulse-heartbeat', (_event, value) => callback(value)),
     // V2.2: Dynamic Stamps & Metadata
@@ -77,6 +84,7 @@ const nexusAPI = {
     // Phase 5: Fee Management
     fees: {
         getRoster:       (params) => ipcRenderer.invoke('fees:get-roster',        params),
+        getSummary:      (params) => ipcRenderer.invoke('fees:get-summary',       params),
         upsert:          (params) => ipcRenderer.invoke('fees:upsert',            params),
         recordPayment:   (params) => ipcRenderer.invoke('fees:record-payment',    params),
         getTransactions: (params) => ipcRenderer.invoke('fees:get-transactions',  params),
@@ -141,8 +149,15 @@ const nexusAPI = {
         getSystemSettings: ()    => ipcRenderer.invoke('cbt:get-system-settings'),
         saveSystemSetting: (data)=> ipcRenderer.invoke('cbt:save-system-setting', data),
         finalizePromotionalExam: (data) => ipcRenderer.invoke('cbt:finalize-promotional-exam', data),
+        getStudentsForClass: (data) => ipcRenderer.invoke('cbt:get-students-for-class', data),
         scholarExtract: (data)   => ipcRenderer.invoke('cbt:scholar-extract', data),
         installNexPack: (data)   => ipcRenderer.invoke('cbt:install-nexpack', data),
+        deleteBank:     (data)   => ipcRenderer.invoke('cbt:delete-bank', data),
+        deleteQuestion: (data)   => ipcRenderer.invoke('cbt:delete-question', data),
+        deleteExam:     (data)   => ipcRenderer.invoke('cbt:delete-exam', data),
+        updateBank:     (data)   => ipcRenderer.invoke('cbt:update-bank', data),
+        updateQuestion: (data)   => ipcRenderer.invoke('cbt:update-question', data),
+        dispatchPulseNotifications: (data) => ipcRenderer.invoke('cbt:dispatch-pulse-notifications', data),
     },
     // ── Attendance Engine (V2.3) ─────────────────────────────────────────
     attendance: {

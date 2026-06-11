@@ -74,6 +74,21 @@ pulseExporter.getLicenseTier = () => licenseStatus?.tier || "Silver";
 // before the reactive `license-status` push event arrives.
 ipcMain.handle('license:get-status', () => licenseStatus);
 
+ipcMain.handle('read-guide-file', async (event, filename) => {
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const cleanFilename = path.basename(filename);
+        const guidePath = path.join(__dirname, '..', '..', 'private_engine', 'docs', 'guides', cleanFilename);
+        if (fs.existsSync(guidePath)) {
+            return fs.readFileSync(guidePath, 'utf-8');
+        }
+    } catch (err) {
+        console.error("Failed to read guide file:", err);
+    }
+    return null;
+});
+
 // ── ALL ipcMain.handle registrations (ONCE at module scope) ──────────────────
 
 ipcMain.on("pulse:start", () => {
@@ -84,6 +99,16 @@ ipcMain.on("pulse:start", () => {
     }
 });
 ipcMain.on("pulse:stop", () => pulseBot.destroyPulse());
+ipcMain.on("pulse:set-autostart", (event, enabled) => {
+    try {
+        const db = database.getDb();
+        db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pulse_autostart', ?)")
+          .run(enabled ? 'true' : 'false');
+        console.log(`[Pulse] Auto-start configuration updated to: ${enabled}`);
+    } catch (err) {
+        console.error("[Pulse] Failed to save auto-start configuration:", err);
+    }
+});
 ipcMain.handle("pulse:status", () => pulseBot.getPulseStatus());
 
 // ── CBT ENGINE IPC ───────────────────────────────────────────────────────────
@@ -312,7 +337,7 @@ ipcMain.handle('auth:get-audit-logs', () => {
 // auth:unlock — fired by lock.html after PIN accepted. Loads the main app.
 ipcMain.on('auth:unlock', () => {
     if (!mainWindow) return;
-    const targetFile = process.env.USE_REACT_UI === 'true' ? 'renderer.html' : 'index.html';
+    const targetFile = process.env.USE_REACT_UI === 'true' ? 'dist/renderer.html' : 'index.html';
     mainWindow.loadFile(targetFile);
     console.log(`[Auth] Lock screen dismissed. Loading ${targetFile}.`);
 });
@@ -540,6 +565,66 @@ ipcMain.handle('queue:get-status', () => {
     `).get();
 });
 
+ipcMain.handle('pulse-inbox:get-messages', () => {
+    try {
+        const db = database.getDb();
+        return db.prepare("SELECT * FROM pulse_inbox ORDER BY received_at DESC").all();
+    } catch (e) {
+        console.error("[Inbox] Failed to get messages:", e);
+        return [];
+    }
+});
+
+ipcMain.handle('pulse-inbox:mark-read', (event, id) => {
+    try {
+        const db = database.getDb();
+        db.prepare("UPDATE pulse_inbox SET status = 'read' WHERE id = ?").run(id);
+        return { ok: true };
+    } catch (e) {
+        console.error("[Inbox] Failed to mark read:", e);
+        return { ok: false, error: e.message };
+    }
+});
+
+ipcMain.handle('pulse-inbox:reply', async (event, { id, phone, replyText }) => {
+    try {
+        const db = database.getDb();
+        db.prepare("UPDATE pulse_inbox SET status = 'replied' WHERE id = ?").run(id);
+        
+        // Log manual reply as an outgoing message
+        const res = db.prepare(`
+            INSERT INTO pulse_inbox (sender_name, sender_phone, content, status, direction)
+            VALUES (?, ?, ?, 'read', 'outgoing')
+        `).run("School Admin", phone, replyText);
+
+        const newMsgId = res.lastInsertRowid;
+
+        // Queue it for sending
+        db.prepare(`
+            INSERT INTO pending_pulse_messages (phone, message, type)
+            VALUES (?, ?, 'general')
+        `).run(phone, replyText);
+
+        // Send back to renderer so it renders in the chat bubble list immediately
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("pulse:new-message", {
+                id: newMsgId,
+                sender_name: "School Admin",
+                sender_phone: phone,
+                content: replyText,
+                received_at: new Date().toISOString(),
+                status: 'read',
+                direction: 'outgoing'
+            });
+        }
+
+        return { ok: true };
+    } catch (e) {
+        console.error("[Inbox] Failed to reply:", e);
+        return { ok: false, error: e.message };
+    }
+});
+
 // Overwrite the old trigger-fee-reminders to use the queue instead of direct sends
 ipcMain.removeAllListeners('trigger-fee-reminders');
 ipcMain.on('trigger-fee-reminders', () => {
@@ -723,6 +808,90 @@ ipcMain.handle("set-teacher", (event, { id, name }) => {
   return true;
 });
 
+// ── Teacher Access Revocation ─────────────────────────────────────────────────
+// Lazily adds sync_revoked column if it doesn't exist yet (safe migration).
+function ensureSyncRevokedColumn() {
+  try {
+    const db = database.getDb();
+    const cols = db.prepare("PRAGMA table_info(teachers)").all();
+    if (!cols.some(c => c.name === 'sync_revoked')) {
+      db.prepare("ALTER TABLE teachers ADD COLUMN sync_revoked INTEGER DEFAULT 0").run();
+      console.log('[SyncHub] Added sync_revoked column to teachers table');
+    }
+  } catch (err) {
+    console.error('[SyncHub] ensureSyncRevokedColumn error:', err.message);
+  }
+}
+
+ipcMain.handle("teacher:get-access-list", () => {
+  try {
+    ensureSyncRevokedColumn();
+    const db = database.getDb();
+    const rows = db.prepare(
+      "SELECT id, name, COALESCE(sync_revoked, 0) AS sync_revoked FROM teachers ORDER BY name ASC"
+    ).all();
+    return { ok: true, data: rows };
+  } catch (err) {
+    console.error("[SyncHub] teacher:get-access-list error:", err.message);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("teacher:revoke-access", (event, { teacherId, adminId, pin }) => {
+  try {
+    ensureSyncRevokedColumn();
+    const db = database.getDb();
+
+    // Verify admin PIN first
+    const admin = adminId ? db.prepare("SELECT * FROM admin_users WHERE id = ?").get(adminId) : null;
+    if (!admin) return { ok: false, error: "Admin not found" };
+    const pinHash = Buffer.from(String(pin)).toString("base64");
+    if (pinHash !== admin.secret_hash) return { ok: false, error: "Incorrect PIN" };
+
+    // Execute revocation
+    db.prepare("UPDATE teachers SET sync_revoked = 1 WHERE id = ?").run(teacherId);
+
+    // Broadcast revoke so the sync server can reject this teacher's heartbeats
+    if (mainWindow) mainWindow.webContents.send("teacher-revoke-broadcast", { teacherId });
+
+    // Audit log
+    try {
+      db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'REVOKE_TEACHER_ACCESS', ?, 'Sync access revoked')")
+        .run(admin.id, teacherId);
+    } catch (_) {}
+
+    console.log(`[SyncHub] Teacher ${teacherId} sync access revoked by ${admin.username}`);
+    return { ok: true };
+  } catch (err) {
+    console.error("[SyncHub] teacher:revoke-access error:", err.message);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("teacher:restore-access", (event, { teacherId, adminId, pin }) => {
+  try {
+    ensureSyncRevokedColumn();
+    const db = database.getDb();
+
+    const admin = adminId ? db.prepare("SELECT * FROM admin_users WHERE id = ?").get(adminId) : null;
+    if (!admin) return { ok: false, error: "Admin not found" };
+    const pinHash = Buffer.from(String(pin)).toString("base64");
+    if (pinHash !== admin.secret_hash) return { ok: false, error: "Incorrect PIN" };
+
+    db.prepare("UPDATE teachers SET sync_revoked = 0 WHERE id = ?").run(teacherId);
+    try {
+      db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'RESTORE_TEACHER_ACCESS', ?, 'Sync access restored')")
+        .run(admin.id, teacherId);
+    } catch (_) {}
+
+    console.log(`[SyncHub] Teacher ${teacherId} sync access restored by ${admin.username}`);
+    return { ok: true };
+  } catch (err) {
+    console.error("[SyncHub] teacher:restore-access error:", err.message);
+    return { ok: false, error: err.message };
+  }
+});
+
 // ── DB Stats (for wizard gate logic) ─────────────────────────────────────────
 ipcMain.handle("get-db-stats", () => {
   try {
@@ -831,21 +1000,21 @@ ipcMain.handle("update-teacher-full", (event, { id, name, phone, email, signatur
 });
 
 // ── Form-based Student Entry (mobile adds/edits; this is a DB stub) ───────────
-ipcMain.handle("add-student-form", (event, { id, name, class_name, subjects, reg_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status }) => {
+ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, subjects, reg_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status }) => {
   try {
     const db = database.getDb();
     db.transaction(() => {
       db.prepare(`
-        INSERT INTO students (id, name, class_name, reg_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status)
-        VALUES (@id, @name, @class_name, @reg_no, @gender, @dob, @photo, @parent_email, @parent_phone, @parent_name, @fee_status)
+        INSERT INTO students (id, name, class_name, class_arm, reg_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status)
+        VALUES (@id, @name, @class_name, @class_arm, @reg_no, @gender, @dob, @photo, @parent_email, @parent_phone, @parent_name, @fee_status)
         ON CONFLICT(id) DO UPDATE SET
-          name=excluded.name, class_name=excluded.class_name,
+          name=excluded.name, class_name=excluded.class_name, class_arm=excluded.class_arm,
           reg_no=excluded.reg_no, gender=excluded.gender, dob=excluded.dob,
           photo=COALESCE(excluded.photo, photo),
           parent_email=excluded.parent_email, parent_phone=excluded.parent_phone,
           parent_name=excluded.parent_name,
           fee_status=excluded.fee_status
-      `).run({ id, name, class_name,
+      `).run({ id, name, class_name, class_arm: class_arm || '',
         reg_no: reg_no || '', gender: gender || '', dob: dob || '',
         photo: photo || null, parent_email: parent_email || '',
         parent_phone: parent_phone || '', parent_name: parent_name || null,
@@ -865,28 +1034,28 @@ ipcMain.handle("add-student-form", (event, { id, name, class_name, subjects, reg
 });
 
 // ── Form-based Student Update (“Edit” path) ──────────────────────────────────────
-ipcMain.handle("update-student", (event, { id, name, class_name, subjects, reg_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status }) => {
+ipcMain.handle("update-student", (event, { id, name, class_name, class_arm, subjects, reg_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status }) => {
   try {
     const db = database.getDb();
     db.transaction(() => {
       if (photo !== undefined && photo !== null) {
         db.prepare(`
-          UPDATE students SET name=@name, class_name=@class_name,
+          UPDATE students SET name=@name, class_name=@class_name, class_arm=@class_arm,
             reg_no=@reg_no, gender=@gender, dob=@dob, photo=@photo,
             parent_email=@parent_email, parent_phone=@parent_phone, parent_name=@parent_name,
             fee_status=@fee_status
           WHERE id=@id
-        `).run({ id, name, class_name, reg_no: reg_no||'', gender: gender||'', dob: dob||'',
+        `).run({ id, name, class_name, class_arm: class_arm || '', reg_no: reg_no||'', gender: gender||'', dob: dob||'',
                  photo, parent_email: parent_email||'', parent_phone: parent_phone||'',
                  parent_name: parent_name||null, fee_status: fee_status||'cleared' });
       } else {
         db.prepare(`
-          UPDATE students SET name=@name, class_name=@class_name,
+          UPDATE students SET name=@name, class_name=@class_name, class_arm=@class_arm,
             reg_no=@reg_no, gender=@gender, dob=@dob,
             parent_email=@parent_email, parent_phone=@parent_phone, parent_name=@parent_name,
             fee_status=@fee_status
           WHERE id=@id
-        `).run({ id, name, class_name, reg_no: reg_no||'', gender: gender||'', dob: dob||'',
+        `).run({ id, name, class_name, class_arm: class_arm || '', reg_no: reg_no||'', gender: gender||'', dob: dob||'',
                  parent_email: parent_email||'', parent_phone: parent_phone||'',
                  parent_name: parent_name||null, fee_status: fee_status||'cleared' });
       }
@@ -906,7 +1075,7 @@ ipcMain.handle("update-student", (event, { id, name, class_name, subjects, reg_n
 });
 
 // ── Directory: Get All Teachers (with allocations) ──────────────────────────
-ipcMain.handle("get-all-teachers", (event, { limit = 15, offset = 0, search = "" } = {}) => {
+ipcMain.handle("get-all-teachers", (event, { limit = 15, offset = 0, search = "", minimal = false } = {}) => {
   try {
     const db = database.getDb();
     const query = search ? `%${search}%` : "%";
@@ -920,11 +1089,17 @@ ipcMain.handle("get-all-teachers", (event, { limit = 15, offset = 0, search = ""
       LIMIT ? OFFSET ?
     `).all(query, query, limit, offset);
 
-    const getAllocs = db.prepare(
-      "SELECT class_name, subject FROM teacher_allocations WHERE teacher_id = ? ORDER BY class_name, subject",
-    );
-    for (const t of teachers) {
-      t.allocations = getAllocs.all(t.id);
+    if (!minimal) {
+      const getAllocs = db.prepare(
+        "SELECT class_name, subject FROM teacher_allocations WHERE teacher_id = ? ORDER BY class_name, subject",
+      );
+      for (const t of teachers) {
+        t.allocations = getAllocs.all(t.id);
+      }
+    } else {
+      for (const t of teachers) {
+        t.allocations = [];
+      }
     }
     return { ok: true, data: teachers, total };
   } catch (err) {
@@ -934,26 +1109,38 @@ ipcMain.handle("get-all-teachers", (event, { limit = 15, offset = 0, search = ""
 });
 
 // ── Directory: Get All Students ─────────────────────────────────────────
-ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = "" } = {}) => {
+ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = "", class_name = "", minimal = false } = {}) => {
   try {
     const db = database.getDb();
     const query = search ? `%${search}%` : "%";
 
-    const total = db.prepare("SELECT COUNT(*) as total FROM students WHERE name LIKE ? OR id LIKE ? OR reg_no LIKE ?")
-                    .get(query, query, query).total;
-
-    const students = db.prepare(`
-      SELECT id, name, class_name, reg_no, gender, dob, photo, parent_email, parent_phone, fee_status 
+    let totalSql = "SELECT COUNT(*) as total FROM students WHERE (name LIKE ? OR id LIKE ? OR reg_no LIKE ?)";
+    let selectSql = `
+      SELECT id, name, class_name, COALESCE(class_arm, '') as class_arm, reg_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status 
       FROM students 
-      WHERE name LIKE ? OR id LIKE ? OR reg_no LIKE ?
-      ORDER BY class_name ASC, name ASC
-      LIMIT ? OFFSET ?
-    `).all(query, query, query, limit, offset);
+      WHERE (name LIKE ? OR id LIKE ? OR reg_no LIKE ?)
+    `;
+    const params = [query, query, query];
+    if (class_name) {
+      totalSql += " AND class_name = ?";
+      selectSql += " AND class_name = ?";
+      params.push(class_name);
+    }
+    selectSql += " ORDER BY class_name ASC, name ASC LIMIT ? OFFSET ?";
 
-    // Attach subject enrollment
-    const stmt = db.prepare("SELECT subject FROM student_subjects WHERE student_id = ?");
-    for (const student of students) {
-      student.subjects = stmt.all(student.id).map(row => row.subject);
+    const total = db.prepare(totalSql).get(...params).total;
+    const students = db.prepare(selectSql).all(...params, limit, offset);
+
+    // Attach subject enrollment if not minimal
+    if (!minimal) {
+      const stmt = db.prepare("SELECT subject FROM student_subjects WHERE student_id = ?");
+      for (const student of students) {
+        student.subjects = stmt.all(student.id).map(row => row.subject);
+      }
+    } else {
+      for (const student of students) {
+        student.subjects = [];
+      }
     }
     
     return { ok: true, data: students, total };
@@ -1165,6 +1352,36 @@ ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, 
   } catch (err) {
     console.error("[Fees] get-roster error:", err);
     return { ok: false, error: err.message, data: [], total: 0 };
+  }
+});
+
+/**
+ * fees:get-summary — aggregates outstanding totals and counts across matching students.
+ */
+ipcMain.handle("fees:get-summary", (event, { academic_session, term, search = "" }) => {
+  try {
+    const db = database.getDb();
+    const query = search ? `%${search}%` : "%";
+
+    const summary = db.prepare(`
+      SELECT
+        COALESCE(SUM(CASE WHEN COALESCE(f.total_billed, 0) > COALESCE(f.total_paid, 0) THEN COALESCE(f.total_billed, 0) - COALESCE(f.total_paid, 0) ELSE 0 END), 0) AS outstanding,
+        SUM(CASE WHEN COALESCE(f.total_billed, 0) <= COALESCE(f.total_paid, 0) AND COALESCE(f.total_billed, 0) > 0 THEN 1 ELSE 0 END) AS cleared,
+        SUM(CASE WHEN COALESCE(f.total_paid, 0) > 0 AND COALESCE(f.total_billed, 0) > COALESCE(f.total_paid, 0) THEN 1 ELSE 0 END) AS partial,
+        SUM(CASE WHEN COALESCE(f.total_paid, 0) = 0 AND COALESCE(f.total_billed, 0) > 0 THEN 1 ELSE 0 END) AS unpaid,
+        COUNT(*) AS total
+      FROM students s
+      LEFT JOIN student_fees f
+        ON  f.student_id       = s.id
+        AND f.academic_session = ?
+        AND f.term             = ?
+      WHERE s.name LIKE ? OR s.id LIKE ?
+    `).get(academic_session, term, query, query);
+
+    return { ok: true, data: summary || { outstanding: 0, cleared: 0, partial: 0, unpaid: 0, total: 0 } };
+  } catch (err) {
+    console.error("[Fees] get-summary error:", err);
+    return { ok: false, error: err.message, data: { outstanding: 0, cleared: 0, partial: 0, unpaid: 0, total: 0 } };
   }
 });
 
@@ -2166,7 +2383,7 @@ function createWindow() {
   if (process.env.DEV_AUTO_LOGIN === 'true') {
     currentAdminSession = { id: 1, name: 'Developer', role: 'super_admin', loginAt: Date.now() };
     console.log('[Auth] DEV_AUTO_LOGIN active — skipping lock screen.');
-    bootFile = process.env.USE_REACT_UI === 'true' ? 'renderer.html' : 'index.html';
+    bootFile = process.env.USE_REACT_UI === 'true' ? 'dist/renderer.html' : 'index.html';
   }
   mainWindow.loadFile(bootFile);
 
@@ -2333,42 +2550,84 @@ function createWindow() {
       const db = database.getDb();
       const matchable = phone.replace(/\D/g, "").slice(-10);
 
-      // DEV_MODE: use hardcoded PIN '0000' so E2E tests never depend on WhatsApp
-      if (process.env.DEV_MODE === 'true' && process.env.DEV_PORTAL_BYPASS !== 'false') {
-        const devStudents = db.prepare("SELECT id, name, class_name FROM students WHERE parent_phone LIKE ? OR parent_phone IS NULL OR parent_phone = ''").all(`%${matchable}`);
-        const fallback = devStudents.length ? devStudents : db.prepare("SELECT id, name, class_name FROM students LIMIT 2").all();
-        portalSessions.set(matchable, { pin: '0000', expiry: Date.now() + 60 * 60 * 1000, students: fallback });
-        return res.json({ ok: true, message: '[DEV_MODE] Portal PIN is 0000 — WhatsApp bypassed' });
-      }
-      
-      const students = db.prepare("SELECT id, name, class_name FROM students WHERE parent_phone LIKE ?").all(`%${matchable}`);
-      if (!students.length) return res.json({ ok: false, error: `No students found for this number. Ensure it matches the number registered at the school (last 10 digits used: ${matchable}).` });
-
+      // Generate a real random 4-digit PIN
       const pin = Math.floor(1000 + Math.random() * 9000).toString();
       const expiry = Date.now() + (12 * 60 * 60 * 1000); // 12 Hours
-      
-      portalSessions.set(matchable, { pin, expiry, students });
 
-      // Send via WhatsApp Bot or push to Queue
+      // Query WhatsApp bot status first
+      let botActive = false;
       try {
         const botStatus = await pulseBot.getPulseStatus();
         if (botStatus && botStatus.status === 'ready') {
-          await pulseBot.sendOTP(phone, pin, identityPacket.name || "Nexus School");
-          res.json({ ok: true, message: 'OTP sent via WhatsApp' });
-        } else {
-          // Push to pending queue so worker sends it when bot comes online
-          db.prepare(`
-            INSERT INTO pending_pulse_messages (phone, message, type)
-            VALUES (?, ?, 'otp')
-          `).run(phone, `Nexus Portal Login PIN: ${pin}`);
-          
-          res.json({ ok: true, message: 'WhatsApp delivery queued. Please ensure Nexus Pulse is online.' });
+          botActive = true;
         }
       } catch (e) {
-        console.error("[Portal] WhatsApp failed:", e);
-        res.json({ ok: false, error: 'WhatsApp delivery failed. Message queued.' });
+        console.error("[Portal] Failed to query bot status:", e);
+      }
+
+      if (botActive) {
+        const students = db.prepare("SELECT id, name, class_name FROM students WHERE parent_phone LIKE ?").all(`%${matchable}`);
+        if (!students.length) {
+          return res.json({
+            ok: false,
+            error: `No students found for this number. Ensure it matches the number registered at the school (last 10 digits used: ${matchable}).`
+          });
+        }
+
+        console.log(`[Sovereign Portal] Generated auth PIN: ${pin} for phone: ${phone} (matchable: ${matchable})`);
+        portalSessions.set(matchable, { pin, expiry, students });
+
+        try {
+          await pulseBot.sendOTP(phone, pin, identityPacket.name || "Nexus School");
+          return res.json({ ok: true, message: 'OTP sent via WhatsApp' });
+        } catch (e) {
+          console.error("[Portal] WhatsApp direct send failed. Queueing message...", e);
+          try {
+            db.prepare(`
+              INSERT INTO pending_pulse_messages (phone, message, type)
+              VALUES (?, ?, 'otp')
+            `).run(phone, `Nexus Portal Login PIN: ${pin}`);
+            return res.json({ ok: true, message: 'WhatsApp direct delivery failed. Message queued. Please ensure Nexus Pulse is online.' });
+          } catch (queueErr) {
+            console.error("[Portal] Failed to queue message:", queueErr);
+            return res.json({ ok: false, error: 'Failed to send or queue OTP message.' });
+          }
+        }
+      } else {
+        // Bot is not active
+        if (process.env.DEV_MODE === 'true' && process.env.DEV_PORTAL_BYPASS !== 'false') {
+          const devStudents = db.prepare("SELECT id, name, class_name FROM students WHERE parent_phone LIKE ? OR parent_phone IS NULL OR parent_phone = ''").all(`%${matchable}`);
+          const fallback = devStudents.length ? devStudents : db.prepare("SELECT id, name, class_name FROM students LIMIT 2").all();
+          
+          console.log(`[Sovereign Portal] [DEV_MODE] Bypassing OTP with PIN 0000 for phone: ${phone} (matchable: ${matchable})`);
+          portalSessions.set(matchable, { pin: '0000', expiry: Date.now() + 60 * 60 * 1000, students: fallback });
+          return res.json({ ok: true, message: '[DEV_MODE] Portal PIN is 0000 — WhatsApp bypassed' });
+        } else {
+          const students = db.prepare("SELECT id, name, class_name FROM students WHERE parent_phone LIKE ?").all(`%${matchable}`);
+          if (!students.length) {
+            return res.json({
+              ok: false,
+              error: `No students found for this number. Ensure it matches the number registered at the school (last 10 digits used: ${matchable}).`
+            });
+          }
+
+          console.log(`[Sovereign Portal] Generated auth PIN: ${pin} for phone: ${phone} (matchable: ${matchable})`);
+          portalSessions.set(matchable, { pin, expiry, students });
+
+          try {
+            db.prepare(`
+              INSERT INTO pending_pulse_messages (phone, message, type)
+              VALUES (?, ?, 'otp')
+            `).run(phone, `Nexus Portal Login PIN: ${pin}`);
+            return res.json({ ok: true, message: 'WhatsApp delivery queued. Please ensure Nexus Pulse is online.' });
+          } catch (queueErr) {
+            console.error("[Portal] Failed to queue message:", queueErr);
+            return res.json({ ok: false, error: 'Failed to queue OTP message.' });
+          }
+        }
       }
     } catch (err) {
+      console.error("[Portal] request-otp root error:", err);
       res.json({ ok: false, error: err.message });
     }
   });
@@ -3180,7 +3439,7 @@ if (app) {
   });
 
   app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") app.quit();
+    if (process.platform !== "darwin" || process.env.DEV_MODE === "true") app.quit();
   });
 
   app.on("will-quit", () => {

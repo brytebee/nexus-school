@@ -15,6 +15,9 @@ const { launchApp, closeApp } = require('./helpers/launch');
 const { injectHighlighter, showCaption, hideCaption, clickWithHalo } = require('./helpers/ui-highlight');
 
 test('Feature Guide — Financial Hub: Fees Settings & Roster', async () => {
+  // Cooldown delay to allow previous Electron processes to free ports
+  await new Promise(resolve => setTimeout(resolve, 3000));
+
   const { app, window } = await launchApp('Diamond');
   await injectHighlighter(window);
 
