@@ -15,6 +15,7 @@ interface Student {
   parent_name?: string;
   fee_status?: string;
   subjects?: string[];
+  photo?: string;
 }
 
 export function Students() {
@@ -43,6 +44,7 @@ export function Students() {
   const [parentName, setParentName] = useState('');
   const [feeStatus, setFeeStatus] = useState('cleared');
   const [stagedSubjects, setStagedSubjects] = useState<string[]>([]);
+  const [photo, setPhoto] = useState<string | null>(null);
 
   // Subject Picker State
   const [activePresetTab, setActivePresetTab] = useState<'pri_lower' | 'pri_upper' | 'jss' | 'sss'>('jss');
@@ -58,6 +60,22 @@ export function Students() {
   // Autocomplete for Class
   const [classSuggestions, setClassSuggestions] = useState<string[]>([]);
   const [csvStatus, setCsvStatus] = useState<string | null>(null);
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 1024 * 1024) {
+        setFormLog({ text: '⚠ Image size exceeds 1MB limit. Please upload a smaller photo.', isError: true });
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = (reader.result as string).split(',')[1];
+        setPhoto(base64String);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   // Detail (View) Modal State
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -167,6 +185,7 @@ export function Students() {
     setStagedSubjects([]);
     setCustomSubjects([]);
     setCustomSubjectInput('');
+    setPhoto(null);
     setFormLog(null);
     setIsDrawerOpen(true);
   };
@@ -183,6 +202,7 @@ export function Students() {
     setParentPhone(student.parent_phone || '');
     setParentName(student.parent_name || '');
     setFeeStatus(student.fee_status || 'cleared');
+    setPhoto(student.photo || null);
 
     // Pre-populate subjects
     const currentSubjects = student.subjects || [];
@@ -245,6 +265,7 @@ export function Students() {
         parent_name: parentName,
         fee_status: feeStatus,
         subjects: stagedSubjects,
+        photo,
       };
 
       if (editStudentId) {
@@ -316,7 +337,42 @@ export function Students() {
     {
       header: 'STUDENT NAME',
       accessorKey: 'name',
-      cell: (s) => <span style={{ fontWeight: 'bold', color: 'var(--text-main)', fontSize: '13px' }}>{s.name}</span>,
+      cell: (s) => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {s.photo ? (
+            <img
+              src={`data:image/jpeg;base64,${s.photo}`}
+              alt={s.name}
+              style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
+                objectFit: 'cover',
+                border: '1px solid var(--glass-border)',
+                flexShrink: 0
+              }}
+            />
+          ) : (
+            <div style={{
+              width: '32px',
+              height: '32px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(255, 255, 255, 0.08)',
+              border: '1px solid var(--glass-border)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '12px',
+              color: 'var(--text-dim)',
+              fontWeight: 'bold',
+              flexShrink: 0
+            }}>
+              {s.name ? s.name.charAt(0).toUpperCase() : '?'}
+            </div>
+          )}
+          <span style={{ fontWeight: 'bold', color: 'var(--text-main)', fontSize: '13px' }}>{s.name}</span>
+        </div>
+      ),
     },
     {
       header: 'ENROLLED CLASS & SUBJECTS',
@@ -726,6 +782,72 @@ export function Students() {
 
               {/* Core Details Form Section */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {/* Profile Photo Uploader */}
+                <div style={{ display: 'flex', gap: '16px', alignItems: 'center', background: 'rgba(255, 255, 255, 0.02)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--glass-border)' }}>
+                  {photo ? (
+                    <img
+                      src={`data:image/jpeg;base64,${photo}`}
+                      alt="Student Preview"
+                      style={{
+                        width: '64px',
+                        height: '64px',
+                        borderRadius: '50%',
+                        objectFit: 'cover',
+                        border: '2px solid var(--accent)'
+                      }}
+                    />
+                  ) : (
+                    <div style={{
+                      width: '64px',
+                      height: '64px',
+                      borderRadius: '50%',
+                      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                      border: '2px dashed var(--glass-border)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '11px',
+                      color: 'var(--text-dim)',
+                      fontWeight: 600,
+                      textAlign: 'center',
+                      lineHeight: 1.2
+                    }}>
+                      No Photo
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontWeight: 500 }}>
+                      Passport Photo (JPG/PNG, max 1MB)
+                    </span>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <label
+                        htmlFor="student-photo-upload"
+                        className="secondary-btn"
+                        style={{ cursor: 'pointer', padding: '6px 12px', fontSize: '11px', borderRadius: 'var(--radius-sm)' }}
+                      >
+                        Upload Photo
+                      </label>
+                      <input
+                        type="file"
+                        id="student-photo-upload"
+                        accept="image/*"
+                        onChange={handlePhotoChange}
+                        style={{ display: 'none' }}
+                      />
+                      {photo && (
+                        <button
+                          type="button"
+                          onClick={() => setPhoto(null)}
+                          className="secondary-btn"
+                          style={{ padding: '6px 12px', fontSize: '11px', borderRadius: 'var(--radius-sm)', color: 'var(--danger)', borderColor: 'rgba(239, 68, 68, 0.25)' }}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <label style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block' }}>
                     Full Name *
@@ -1077,6 +1199,45 @@ export function Students() {
 
             {/* Modal Body */}
             <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto' }}>
+
+              {/* Profile Photo Header */}
+              <div style={{ display: 'flex', gap: '16px', alignItems: 'center', background: 'rgba(255, 255, 255, 0.02)', padding: '16px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--glass-border)' }}>
+                {detailStudent.photo ? (
+                  <img
+                    src={`data:image/jpeg;base64,${detailStudent.photo}`}
+                    alt={detailStudent.name}
+                    style={{
+                      width: '64px',
+                      height: '64px',
+                      borderRadius: '50%',
+                      objectFit: 'cover',
+                      border: '2px solid var(--accent)',
+                      flexShrink: 0
+                    }}
+                  />
+                ) : (
+                  <div style={{
+                    width: '64px',
+                    height: '64px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    border: '2px dashed var(--glass-border)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '20px',
+                    color: 'var(--text-dim)',
+                    fontWeight: 'bold',
+                    flexShrink: 0
+                  }}>
+                    {detailStudent.name ? detailStudent.name.charAt(0).toUpperCase() : '?'}
+                  </div>
+                )}
+                <div>
+                  <h4 style={{ margin: 0, fontWeight: 700, color: 'var(--text-main)', fontSize: '15px' }}>{detailStudent.name}</h4>
+                  <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--accent)', fontWeight: 600 }}>{detailStudent.class_name}</p>
+                </div>
+              </div>
 
               {/* Identity Row */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
