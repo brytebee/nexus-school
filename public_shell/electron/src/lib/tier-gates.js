@@ -1,6 +1,7 @@
 // Tier Gates logic - extracted from nav.js
 
 const TIER_LEVELS = {
+  Standalone: 1,
   Silver: 1,
   Gold: 2,
   Diamond: 3

@@ -51,7 +51,8 @@ suspend fun saveGradeEvent(
             val serverInfo = IdentityManager(context).getServerInfo()
             if (serverInfo != null) {
                 val ip = serverInfo.first
-                val teacherName = IdentityManager(context).getTeacherName()
+                val manager = IdentityManager(context)
+                val teacherName = if (manager.getTeacherId() == "STANDALONE_ADMIN") "Admin" else manager.getTeacherName()
                 val msg = """{"teacher": "$teacherName", "action": "Graded $subject", "event": "UPDATE_GRADE"}"""
                 DatagramSocket().use { socket ->
                     val bytes = msg.toByteArray()
@@ -80,15 +81,21 @@ suspend fun saveAddStudentEvent(
     className: String,
     subjects: List<String>,
     photoBase64: String? = null,
+    parentName: String? = null,
     parentEmail: String? = null,
     parentPhone: String? = null,
     regNo: String? = null,
     admissionNo: String? = null,
     gender: String? = null,
-    dob: String? = null
+    dob: String? = null,
+    existingStudentId: String? = null
 ) {
     val db       = SyncDatabase.getDatabase(context)
-    val localId  = "TEMP_${UUID.randomUUID().toString().substring(0, 8).uppercase()}"
+    val localId  = existingStudentId ?: "TEMP_${UUID.randomUUID().toString().substring(0, 8).uppercase()}"
+
+    if (existingStudentId != null) {
+        db.studentDao().deleteStudentById(existingStudentId)
+    }
 
     subjects.forEach { subject ->
         // Persist full record locally (photo + contact stored offline)
@@ -99,6 +106,7 @@ suspend fun saveAddStudentEvent(
                 class_name   = className,
                 subject      = subject,
                 photo_base64 = photoBase64,
+                parent_name  = parentName,
                 parent_email = parentEmail,
                 parent_phone = parentPhone,
                 reg_no       = regNo,
@@ -108,15 +116,17 @@ suspend fun saveAddStudentEvent(
             )
         )
 
-        // Sync payload — photo omitted intentionally (see kdoc above)
-        val emailField = if (parentEmail != null) """, "parent_email": "$parentEmail"""" else ""
-        val phoneField = if (parentPhone != null) """, "parent_phone": "$parentPhone"""" else ""
-        val regNoField = if (regNo != null) """, "reg_no": "$regNo"""" else ""
+        // Sync payload — include photo_base64 when non-null
+        val nameField   = if (parentName  != null) """, "parent_name": "$parentName"""" else ""
+        val emailField  = if (parentEmail != null) """, "parent_email": "$parentEmail"""" else ""
+        val phoneField  = if (parentPhone != null) """, "parent_phone": "$parentPhone"""" else ""
+        val regNoField  = if (regNo != null) """, "reg_no": "$regNo"""" else ""
         val adminNoField = if (admissionNo != null) """, "admission_no": "$admissionNo"""" else ""
         val genderField = if (gender != null) """, "gender": "$gender"""" else ""
         val dobField    = if (dob != null) """, "dob": "$dob"""" else ""
+        val photoField  = if (photoBase64 != null) """, "photo_base64": "$photoBase64"""" else ""
         
-        val payload    = """{"student_id": "$localId", "name": "$studentName", "class_name": "$className", "subject": "$subject"$emailField$phoneField$regNoField$adminNoField$genderField$dobField}"""
+        val payload = """{"student_id": "$localId", "name": "$studentName", "class_name": "$className", "subject": "$subject"$nameField$emailField$phoneField$regNoField$adminNoField$genderField$dobField$photoField}"""
 
         db.syncDao().insertEvent(
             SyncEvent(
@@ -132,7 +142,8 @@ suspend fun saveAddStudentEvent(
     withContext(Dispatchers.IO) {
         try {
             val serverInfo = IdentityManager(context).getServerInfo() ?: return@withContext
-            val teacherName = IdentityManager(context).getTeacherName()
+            val manager = IdentityManager(context)
+            val teacherName = if (manager.getTeacherId() == "STANDALONE_ADMIN") "Admin" else manager.getTeacherName()
             val msg = """{"teacher": "$teacherName", "action": "Registered $studentName (${subjects.size} subjects)", "event": "ADD_STUDENT"}"""
             DatagramSocket().use { socket ->
                 val bytes = msg.toByteArray()
@@ -208,7 +219,8 @@ suspend fun saveAttendanceEvents(
     withContext(Dispatchers.IO) {
         try {
             val serverInfo  = IdentityManager(context).getServerInfo() ?: return@withContext
-            val teacherName = IdentityManager(context).getTeacherName()
+            val manager = IdentityManager(context)
+            val teacherName = if (manager.getTeacherId() == "STANDALONE_ADMIN") "Admin" else manager.getTeacherName()
             val msg = """{"teacher": "$teacherName", "action": "Took Attendance for $className ($date)", "event": "ATTENDANCE_UPDATE"}"""
             DatagramSocket().use { socket ->
                 val bytes = msg.toByteArray()

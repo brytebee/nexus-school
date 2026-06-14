@@ -215,12 +215,16 @@ class HandshakeActivity : AppCompatActivity() {
                     android.widget.Toast.makeText(this@HandshakeActivity, "Syncing with $schoolDisplayName...", android.widget.Toast.LENGTH_SHORT).show()
                 }
 
+                val deviceModel = "${android.os.Build.BRAND} ${android.os.Build.MODEL}"
+                identityManager.saveDeviceModel(deviceModel)
+
                 val response = DeviceResponse(
                     device_id = identityManager.getDeviceId(),
                     teacher_id = identityManager.getTeacherId(),
                     teacher_name = identityManager.getTeacherName(),
                     public_key = identityManager.getPublicKey(),
-                    thermal_status = identityManager.getThermalStatus()
+                    thermal_status = identityManager.getThermalStatus(),
+                    device_model = deviceModel
                 )
 
                 val result = handshakeService.performHandshake(payload.ip, payload.port, response)
@@ -249,9 +253,12 @@ class HandshakeActivity : AppCompatActivity() {
                             var isTorchEnabled by remember { mutableStateOf(false) }
 
                             LaunchedEffect(Unit) {
-                                // Save Master Subject List and Teacher's Assigned Subjects
+                                // Save Master Subject List and per-class subject map
                                 if (result.all_subjects.isNotEmpty()) {
                                     identityManager.saveMasterSubjectList(result.all_subjects)
+                                }
+                                if (result.class_subjects.isNotEmpty()) {
+                                    identityManager.saveClassSubjectsMap(result.class_subjects)
                                 }
                                 val assignedSubjects = students.map { it.subject }.distinct()
                                 identityManager.saveTeacherAssignedSubjects(assignedSubjects)
@@ -331,6 +338,9 @@ class HandshakeActivity : AppCompatActivity() {
                                                     identityManager.saveLogoBase64(config.logoBase64)
                                                     if (config.modules.isNotEmpty()) {
                                                         identityManager.saveTierModules(config.modules)
+                                                    }
+                                                    config.plan_tier?.takeIf { it.isNotBlank() }?.let {
+                                                        identityManager.savePlanTier(it)
                                                     }
                                                     val scoreJson = buildString {
                                                         append("[")

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { generateSessionsList } from '../lib/sessions';
 
 interface GradeEvent {
   event_type: string;
@@ -193,6 +194,11 @@ export function Dashboard({ onTabChange }: DashboardProps = {}) {
     if (!window.electronAPI?.cbt?.saveSystemSetting) return;
     const Swal = (window as any).Swal;
     if (!Swal) return;
+    const sessionOptions: Record<string, string> = {};
+    generateSessionsList().forEach((s) => {
+      sessionOptions[s] = s;
+    });
+
     const confirmResult = await Swal.fire({
       title: '<span style="color:#EF4444; font-size:18px; font-weight:700;">⚠️ End Academic Session?</span>',
       html: '<p style="color:rgba(255,255,255,0.65); font-size:13px; line-height:1.6;">This will rollover the active session and affects the entire grading ledger. This action cannot be undone.</p>',
@@ -207,9 +213,10 @@ export function Dashboard({ onTabChange }: DashboardProps = {}) {
     if (!confirmResult.isConfirmed) return;
     const { value: newSessionInput } = await Swal.fire({
       title: '<span style="color:#fff; font-size:16px; font-weight:700;">New Academic Session</span>',
-      input: 'text',
-      inputLabel: 'Enter the new session (e.g. 2026/2027)',
-      inputPlaceholder: '2026/2027',
+      input: 'select',
+      inputOptions: sessionOptions,
+      inputLabel: 'Select the new session',
+      inputPlaceholder: 'Select session',
       showCancelButton: true,
       confirmButtonText: 'Apply Rollover',
       confirmButtonColor: '#00E5FF',

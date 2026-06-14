@@ -84,8 +84,18 @@
 
       window.applyFeatureMasking = function() {
         const tier = window.currentLicenseTier || "Silver";
-        const tiers = { "Silver": 1, "Gold": 2, "Diamond": 3 };
+        const tiers = { "Standalone": 1, "Silver": 1, "Gold": 2, "Diamond": 3 };
         const currentLevel = tiers[tier] || 1;
+
+        // Hide Teachers tab for Standalone
+        const teachersNavItem = document.querySelector('.nav-item[data-view="teachers"]');
+        if (teachersNavItem) {
+            if (tier === 'Standalone') {
+                teachersNavItem.style.display = 'none';
+            } else {
+                teachersNavItem.style.display = '';
+            }
+        }
 
         // Mask Sidebar Items
         document.querySelectorAll(".nav-item[data-tier]").forEach(item => {
@@ -147,27 +157,52 @@
           let tierIcon = "🥈";
           if (tier === "Gold") tierIcon = "🥇";
           if (tier === "Diamond") tierIcon = "💎";
+          if (tier === "Standalone") tierIcon = "📦";
 
-          const expiryDate = new Date(data.expires_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-          const isExpired = Date.now() > data.expires_at;
+          const upgradeBtn = document.getElementById('about-upgrade-btn');
+          if (upgradeBtn) {
+              if (tier === 'Standalone') {
+                  upgradeBtn.style.display = 'flex';
+              } else {
+                  upgradeBtn.style.display = 'none';
+              }
+          }
 
-          // Note: In a real app we'd fetch actual student count from DB.
-          // For now we'll just show the limit.
-          planInfo.innerHTML = `
-              <div style="display:flex; justify-content:space-between; margin-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:12px;">
-                  <span>Active Tier</span>
-                  <span style="color:#fff; font-weight:bold;">${tierIcon} ${tier}</span>
-              </div>
-              <div style="display:flex; justify-content:space-between; margin-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:12px;">
-                  <span>Student Quota</span>
-                  <span style="color:#fff; font-weight:bold;">Up to ${data.student_count}</span>
-              </div>
-              <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
-                  <span>Valid Until</span>
-                  <span style="${isExpired ? 'color:#ff4444' : 'color:#00e5ff'}; font-weight:bold;">${expiryDate}</span>
-              </div>
-              ${isExpired ? '<div style="color:#ff4444; margin-top:8px; font-weight:bold;">⚠️ License Expired</div>' : ''}
-          `;
+          if (tier === "Standalone") {
+              planInfo.innerHTML = `
+                  <div style="display:flex; justify-content:space-between; margin-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:12px;">
+                      <span>Active Tier</span>
+                      <span style="color:#fff; font-weight:bold;">${tierIcon} ${tier} Pack</span>
+                  </div>
+                  <div style="display:flex; justify-content:space-between; margin-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:12px;">
+                      <span>Device Slots</span>
+                      <span style="color:#fff; font-weight:bold;">2 devices max</span>
+                  </div>
+                  <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+                      <span>Valid Until</span>
+                      <span style="color:#00e5ff; font-weight:bold;">Lifetime (Lifetime Owner)</span>
+                  </div>
+              `;
+          } else {
+              const expiryDate = new Date(data.expires_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+              const isExpired = Date.now() > data.expires_at;
+
+              planInfo.innerHTML = `
+                  <div style="display:flex; justify-content:space-between; margin-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:12px;">
+                      <span>Active Tier</span>
+                      <span style="color:#fff; font-weight:bold;">${tierIcon} ${tier}</span>
+                  </div>
+                  <div style="display:flex; justify-content:space-between; margin-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:12px;">
+                      <span>Student Quota</span>
+                      <span style="color:#fff; font-weight:bold;">Up to ${data.student_count}</span>
+                  </div>
+                  <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+                      <span>Valid Until</span>
+                      <span style="${isExpired ? 'color:#ff4444' : 'color:#00e5ff'}; font-weight:bold;">${expiryDate}</span>
+                  </div>
+                  ${isExpired ? '<div style="color:#ff4444; margin-top:8px; font-weight:bold;">⚠️ License Expired</div>' : ''}
+              `;
+          }
       }
 
       function showView(viewId) {

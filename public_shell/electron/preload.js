@@ -14,6 +14,7 @@ const nexusAPI = {
     resetAppData: () => ipcRenderer.invoke('reset-app-data'),
     getTeachers: () => ipcRenderer.invoke('get-teachers'),
     setTeacher: (data) => ipcRenderer.invoke('set-teacher', data),
+    generateAdminQR: () => ipcRenderer.invoke('generateAdminQR'),
     getDbStats: () => ipcRenderer.invoke('get-db-stats'),
     addTeacherForm: (data) => ipcRenderer.invoke('add-teacher-form', data),
     updateTeacher: (data) => ipcRenderer.invoke('update-teacher', data),
@@ -176,6 +177,11 @@ const nexusAPI = {
         getSyncWarnings:       ()     => ipcRenderer.invoke('subjects:get-sync-warnings'),
         clearSyncWarnings:     ()     => ipcRenderer.invoke('subjects:clear-sync-warnings'),
     },
+    // ── Student Directory Settings ────────────────────────────────────────
+    students: {
+        getSettings:  ()     => ipcRenderer.invoke('students:get-settings'),
+        saveSettings: (data) => ipcRenderer.invoke('students:save-settings', data),
+    },
     // ── Generic bridge (Guardian Shield, etc.) ───────────────────────
     invoke: (channel, data)  => ipcRenderer.invoke(channel, data),
     send:   (channel, data)  => ipcRenderer.send(channel, data),
@@ -202,6 +208,12 @@ const nexusAPI = {
         onDownloaded:   (cb)   => ipcRenderer.on('update-downloaded', (_e, v) => cb(v)),
         onProgress:     (cb)   => ipcRenderer.on('update-progress',   (_e, v) => cb(v)),
         onError:        (cb)   => ipcRenderer.on('update-error',      (_e, v) => cb(v)),
+    },
+
+    // ── Standalone Pack ───────────────────────────────────────────────
+    standalone: {
+        getDevices: () => ipcRenderer.invoke('standalone:get-devices'),
+        revokeDevice: (data) => ipcRenderer.invoke('standalone:revoke-device', data),
     },
 };
 

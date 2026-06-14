@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { generateSessionsList } from '../lib/sessions';
 import { 
   BookOpen, Upload, Search, FileText, Trash2, Edit2, Database, Settings, HelpCircle, 
   QrCode, CheckCircle, XCircle, ShieldAlert, Plus, ArrowLeft, RefreshCw, Key, Info, Play
@@ -2877,14 +2878,17 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
               </div>
               <div>
                 <label className="ph-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)', display: 'block', marginBottom: '6px' }}>Current Academic Session</label>
-                <input 
-                  type="text" 
+                <select 
                   value={academicSession} 
                   onChange={e => setAcademicSession(e.target.value)} 
                   className="modern-input" 
                   style={{ width: '100%', fontSize: '12px' }} 
-                  placeholder="e.g. 2025/2026"
-                />
+                >
+                  <option value="">-- Select Session --</option>
+                  {generateSessionsList().map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>

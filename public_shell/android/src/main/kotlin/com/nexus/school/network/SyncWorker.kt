@@ -21,7 +21,8 @@ data class SyncPayload(
     val device_id: String,
     val teacher_name: String,
     val signature: String,
-    val events: List<com.nexus.school.data.SyncEvent>
+    val events: List<com.nexus.school.data.SyncEvent>,
+    val device_model: String
 )
 
 class SyncWorker(private val context: Context) {
@@ -59,12 +60,14 @@ class SyncWorker(private val context: Context) {
             val signature   = identityManager.signPayload(eventsJson)
             val deviceId    = identityManager.getDeviceId()
             val teacherName = identityManager.getTeacherName()
+            val deviceModel = identityManager.getDeviceModel()
 
             val payload = SyncPayload(
                 device_id    = deviceId,
                 teacher_name = teacherName,
                 signature    = signature,
-                events       = pendingEvents
+                events       = pendingEvents,
+                device_model = deviceModel
             )
 
             Log.d("SyncWorker", "Pushing ${pendingEvents.size} events to $ip:$port")
@@ -109,6 +112,26 @@ class SyncWorker(private val context: Context) {
 
                     if (successfulIds.isNotEmpty()) {
                         db.syncDao().markEventsSynced(successfulIds)
+                    }
+
+                    // ── Refresh score components (grading scheme) ────────────
+                    // Server sends updated score_components on every sync so
+                    // changes (like adding Attendance) don't need a re-pair.
+                    val scoreArr = jsonObject.optJSONArray("score_components")
+                    if (scoreArr != null && scoreArr.length() > 0) {
+                        val scoreJson = buildString {
+                            append("[")
+                            for (i in 0 until scoreArr.length()) {
+                                if (i > 0) append(",")
+                                val c = scoreArr.getJSONObject(i)
+                                append("{\"key\":\"${c.optString("key")}\",")
+                                append("\"label\":\"${c.optString("label")}\",")
+                                append("\"max\":${c.optInt("max", 10)}}")
+                            }
+                            append("]")
+                        }
+                        identityManager.saveScoreComponents(scoreJson)
+                        Log.d("SyncWorker", "Score components refreshed: ${scoreArr.length()} components")
                     }
 
                     if (status == "PARTIAL_LIMIT") {

@@ -121,9 +121,11 @@ class AppLaunchActivity : AppCompatActivity() {
                             fontWeight = FontWeight.ExtraBold,
                             textAlign = TextAlign.Center
                         )
+                        val teacherId = identityManager.getTeacherId()
+                        val welcomeGreeting = if (teacherId == "STANDALONE_ADMIN") "Welcome back, Admin Extension" else "Welcome back, $teacherName"
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Welcome back, $teacherName",
+                            text = welcomeGreeting,
                             color = Color.White.copy(alpha = 0.7f),
                             fontSize = 14.sp,
                             textAlign = TextAlign.Center

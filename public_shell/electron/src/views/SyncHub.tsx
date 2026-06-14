@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useLicense } from '../hooks/useLicense';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Teacher {
@@ -159,6 +160,10 @@ function PinModal({ title, body, danger = true, onConfirm, onClose, admins }: Pi
 // SyncHub
 // ═══════════════════════════════════════════════════════════════════════════════
 export function SyncHub() {
+  const { license } = useLicense();
+  const currentTier = license?.tier || 'Silver';
+  const [deviceSlotsCount, setDeviceSlotsCount] = useState(0);
+
   // ── QR / Pairing state ────────────────────────────────────────────────────
   const [teachers,          setTeachers]          = useState<Teacher[]>([]);
   const [selectedTeacherId, setSelectedTeacherId] = useState('');
@@ -196,16 +201,26 @@ export function SyncHub() {
     } catch (_) {}
   }, []);
 
-  // ── Load teacher access list ──────────────────────────────────────────────
+  // ── Load teacher access list ────────────────------------------------------
   // Falls back to the teachers list (sync_revoked=0) if the new IPC isn't registered yet.
   const loadAccessList = useCallback(async (fallbackTeachers?: Teacher[]) => {
     setLoadingAccess(true);
     try {
-      if (window.electronAPI?.teacher?.getAccessList) {
-        const res = await window.electronAPI.teacher.getAccessList();
-        if (res?.ok && Array.isArray(res.data) && res.data.length > 0) {
-          setAccessList(res.data);
-          return;
+      if (currentTier === 'Standalone') {
+        if (window.electronAPI?.standalone?.getDevices) {
+          const res = await window.electronAPI.standalone.getDevices();
+          if (res?.ok && Array.isArray(res.data)) {
+            setAccessList(res.data);
+            return;
+          }
+        }
+      } else {
+        if (window.electronAPI?.teacher?.getAccessList) {
+          const res = await window.electronAPI.teacher.getAccessList();
+          if (res?.ok && Array.isArray(res.data) && res.data.length > 0) {
+            setAccessList(res.data);
+            return;
+          }
         }
       }
       // Fallback: build from the teachers list with sync_revoked=0
@@ -218,13 +233,28 @@ export function SyncHub() {
     } finally {
       setLoadingAccess(false);
     }
-  }, []);
+  }, [currentTier]);
+
+  const fetchDeviceSlots = useCallback(async () => {
+    if (currentTier === 'Standalone' && window.electronAPI?.getDbStats) {
+      try {
+        const stats = await window.electronAPI.getDbStats();
+        setDeviceSlotsCount(stats.devices || 0);
+      } catch (err) {
+        console.error('[SyncHub] Error loading slots count:', err);
+      }
+    }
+  }, [currentTier]);
 
   // ── Load teachers for QR select (optimised minimal list) ─────────────────
   useEffect(() => {
     const fetchTeachers = async () => {
       if (!window.electronAPI) return;
       try {
+        if (currentTier === 'Standalone') {
+          await loadAccessList();
+          return;
+        }
         // Prefer the scalable paginated handler (minimal=true skips N+1 allocations)
         if (window.electronAPI.getAllTeachers) {
           const res = await window.electronAPI.getAllTeachers({ minimal: true, limit: 500, offset: 0 });
@@ -244,7 +274,8 @@ export function SyncHub() {
     };
     fetchTeachers();
     loadAdmins();
-  }, [loadAccessList, loadAdmins]);
+    fetchDeviceSlots();
+  }, [loadAccessList, loadAdmins, fetchDeviceSlots, currentTier]);
 
   // ── QR IPC listeners ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -256,8 +287,10 @@ export function SyncHub() {
     };
 
     const handleHandshake = (data: any) => {
-      setHandshakeMessage(`📱 ${data?.teacher_name || 'Teacher'} tablet successfully paired!`);
+      setHandshakeMessage(`📱 ${data?.teacher_name || 'Device'} tablet successfully paired!`);
       setTimeout(() => setHandshakeMessage(null), 5000);
+      fetchDeviceSlots();
+      loadAccessList();
     };
 
     window.electronAPI.onQrPayload(handleQrUpdate);
@@ -265,7 +298,7 @@ export function SyncHub() {
 
     // Listen for revoke broadcasts (e.g. from another admin session)
     window.electronAPI.teacher?.onRevokeBroadcast?.(() => loadAccessList(teachers));
-  }, [loadAccessList]);
+  }, [loadAccessList, fetchDeviceSlots, teachers]);
 
   // ── Render QR Code ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -331,23 +364,34 @@ export function SyncHub() {
     if (!pendingAction) return;
     const { teacher, action } = pendingAction;
 
-    const api = action === 'revoke'
-      ? window.electronAPI?.teacher?.revokeAccess
-      : window.electronAPI?.teacher?.restoreAccess;
+    let res;
+    if (currentTier === 'Standalone') {
+      if (action === 'revoke') {
+        if (!window.electronAPI?.standalone?.revokeDevice) throw new Error('IPC handler not available');
+        res = await window.electronAPI.standalone.revokeDevice({ teacherId: teacher.id });
+      } else {
+        throw new Error('Restore is not supported for Standalone. Re-pair the device via QR code.');
+      }
+    } else {
+      const api = action === 'revoke'
+        ? window.electronAPI?.teacher?.revokeAccess
+        : window.electronAPI?.teacher?.restoreAccess;
 
-    if (!api) throw new Error('IPC handler not available');
+      if (!api) throw new Error('IPC handler not available');
+      res = await api({ teacherId: teacher.id, adminId, pin });
+    }
 
-    const res = await api({ teacherId: teacher.id, adminId, pin });
     if (!res?.ok) throw new Error(res?.error || 'Operation failed');
 
     setPendingAction(null);
     showIndicator(
       action === 'revoke'
-        ? `🔒 ${teacher.name}'s sync access revoked`
-        : `✅ ${teacher.name}'s sync access restored`,
+        ? `🔒 Sync access revoked`
+        : `✅ Sync access restored`,
       action === 'revoke' ? '#FF5252' : '#4CAF50',
     );
     await loadAccessList();
+    fetchDeviceSlots();
   };
 
   // ── Filtered access list for search ──────────────────────────────────────
@@ -364,11 +408,13 @@ export function SyncHub() {
       {/* PIN Confirmation Modal */}
       {pendingAction && admins.length > 0 && (
         <PinModal
-          title={pendingAction.action === 'revoke' ? 'Revoke Sync Access' : 'Restore Sync Access'}
+          title={currentTier === 'Standalone' ? 'Revoke Device Access' : (pendingAction.action === 'revoke' ? 'Revoke Sync Access' : 'Restore Sync Access')}
           body={
-            pendingAction.action === 'revoke'
-              ? `You are about to permanently block "${pendingAction.teacher.name}" from syncing with this hub. Enter your admin PIN to confirm.`
-              : `You are restoring sync access for "${pendingAction.teacher.name}". Enter your admin PIN to confirm.`
+            currentTier === 'Standalone'
+              ? `You are about to revoke sync access for this device. This deletes the pairing and frees up a device slot. Synced grades will NOT be deleted. Enter admin PIN to confirm.`
+              : (pendingAction.action === 'revoke'
+                ? `You are about to permanently block "${pendingAction.teacher.name}" from syncing with this hub. Enter your admin PIN to confirm.`
+                : `You are restoring sync access for "${pendingAction.teacher.name}". Enter your admin PIN to confirm.`)
           }
           danger={pendingAction.action === 'revoke'}
           admins={admins}
@@ -413,27 +459,58 @@ export function SyncHub() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--grid-gap)' }}>
           <div style={{ background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-lg)', padding: '22px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: 'var(--text-main)', borderBottom: '1px solid var(--glass-border)', paddingBottom: '12px' }}>
-              Select Staff Profile
+              {currentTier === 'Standalone' ? 'Admin Extension Pairing' : 'Select Staff Profile'}
             </h3>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '11px', color: 'var(--text-dim)', fontWeight: 500 }}>
-                Choose a teacher to generate their custom pairing credentials:
-              </label>
-              <select
-                value={selectedTeacherId}
-                onChange={handleTeacherChange}
-                className="modern-input"
-                style={{ width: '100%' }}
-              >
-                <option value="" disabled>Select teacher to generate QR…</option>
-                {teachers.map(t => (
-                  <option key={t.id} value={t.id} style={{ background: 'var(--bg-dark)', color: 'var(--text-main)' }}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {currentTier === 'Standalone' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '13px', color: 'var(--text-dim)' }}>Plan Level:</span>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#ffd700', background: 'rgba(212,175,55,0.12)', border: '1px solid rgba(212,175,55,0.35)', padding: '2px 8px', borderRadius: '12px' }}>STANDALONE</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '13px', color: 'var(--text-dim)' }}>Device Slots:</span>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#4CAF50' }}>{deviceSlotsCount} / 2 paired</span>
+                </div>
+                <button
+                  onClick={async () => {
+                    if (!window.electronAPI?.generateAdminQR) return;
+                    setGenerating(true);
+                    setQrPayload(null);
+                    try {
+                      await window.electronAPI.generateAdminQR();
+                    } catch (err) {
+                      console.error('[SyncHub] Error generating Admin QR:', err);
+                      setGenerating(false);
+                    }
+                  }}
+                  disabled={generating}
+                  className="primary-btn"
+                  style={{ width: '100%', justifyContent: 'center', padding: '10px 0', marginTop: '4px' }}
+                >
+                  {generating ? '⏳ Generating...' : '📲 Generate Admin QR'}
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '11px', color: 'var(--text-dim)', fontWeight: 500 }}>
+                  Choose a teacher to generate their custom pairing credentials:
+                </label>
+                <select
+                  value={selectedTeacherId}
+                  onChange={handleTeacherChange}
+                  className="modern-input"
+                  style={{ width: '100%' }}
+                >
+                  <option value="" disabled>Select teacher to generate QR…</option>
+                  {teachers.map(t => (
+                    <option key={t.id} value={t.id} style={{ background: 'var(--bg-dark)', color: 'var(--text-main)' }}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', borderTop: '1px solid var(--glass-border)', paddingTop: '16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
@@ -521,8 +598,8 @@ export function SyncHub() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '18px' }}>
           <div>
             <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              🔒 Teacher Sync Access
-              {revokedCount > 0 && (
+              {currentTier === 'Standalone' ? '🔒 Paired Admin Devices' : '🔒 Teacher Sync Access'}
+              {currentTier !== 'Standalone' && revokedCount > 0 && (
                 <span style={{
                   display: 'inline-block', background: 'rgba(255,82,82,0.15)',
                   color: '#FF5252', border: '1px solid rgba(255,82,82,0.3)',
@@ -534,7 +611,9 @@ export function SyncHub() {
               )}
             </h3>
             <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--text-dim)', lineHeight: 1.5 }}>
-              Block or restore individual teacher tablet connections. Revoked teachers cannot sync even with a valid QR code.
+              {currentTier === 'Standalone'
+                ? 'Revoke sync access for individual paired devices. Deleting a device frees up its registration slot.'
+                : 'Block or restore individual teacher tablet connections. Revoked teachers cannot sync even with a valid QR code.'}
             </p>
           </div>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
@@ -549,7 +628,7 @@ export function SyncHub() {
                 type="text"
                 value={searchRevoke}
                 onChange={e => setSearchRevoke(e.target.value)}
-                placeholder="Search teachers…"
+                placeholder={currentTier === 'Standalone' ? 'Search devices…' : 'Search teachers…'}
                 style={{
                   background: 'none', border: 'none', color: 'var(--text-main)',
                   fontSize: '12px', width: '150px', outline: 'none',
@@ -570,11 +649,13 @@ export function SyncHub() {
         {/* Access table */}
         {loadingAccess && accessList.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-dim)', fontSize: '13px' }}>
-            Loading teacher access list…
+            {currentTier === 'Standalone' ? 'Loading connected devices…' : 'Loading teacher access list…'}
           </div>
         ) : filteredAccess.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-dim)', fontSize: '13px' }}>
-            {accessList.length === 0 ? 'No teachers found. Add teachers in the Teachers module first.' : 'No teachers match your search.'}
+            {accessList.length === 0 
+              ? (currentTier === 'Standalone' ? 'No connected devices found. Pair a device by scanning the Admin QR code.' : 'No teachers found. Add teachers in the Teachers module first.') 
+              : (currentTier === 'Standalone' ? 'No devices match your search.' : 'No teachers match your search.')}
           </div>
         ) : (
           <div className="table-container" style={{ maxHeight: '340px', overflowY: 'auto' }}>
@@ -582,7 +663,7 @@ export function SyncHub() {
               <thead>
                 <tr>
                   <th style={{ width: '32px' }}>#</th>
-                  <th>Teacher Name</th>
+                  <th>{currentTier === 'Standalone' ? 'Device Model / ID' : 'Teacher Name'}</th>
                   <th style={{ textAlign: 'center', width: '130px' }}>Sync Status</th>
                   <th style={{ textAlign: 'center', width: '140px' }}>Action</th>
                 </tr>
@@ -618,7 +699,20 @@ export function SyncHub() {
                         </span>
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                        {isRevoked ? (
+                        {currentTier === 'Standalone' ? (
+                          <button
+                            className="small-btn"
+                            onClick={() => setPendingAction({ teacher, action: 'revoke' })}
+                            style={{
+                              fontSize: '11px', padding: '5px 12px',
+                              background: 'rgba(255,82,82,0.08)',
+                              color: '#FF5252',
+                              borderColor: 'rgba(255,82,82,0.3)',
+                            }}
+                          >
+                            🗑️ Delete
+                          </button>
+                        ) : isRevoked ? (
                           <button
                             className="small-btn"
                             onClick={() => setPendingAction({ teacher, action: 'restore' })}

@@ -82,8 +82,88 @@ export function NavSidebar({ activeTab, onTabChange, isCollapsed, onOpenHelp }: 
     const reqTier = item.tier || 'Silver';
     const reqLevel = tiers[reqTier] || 1;
 
+    const getFeaturesHtml = (id: string) => {
+      switch (id) {
+        case 'attendance':
+          return `
+            <div style="margin-bottom:8px;">📅 <strong>Daily Registers</strong>: Take attendance quickly on mobile or desktop.</div>
+            <div style="margin-bottom:8px;">💬 <strong>WhatsApp Alerts</strong>: Send instant absence notifications to parents.</div>
+            <div>📊 <strong>Report Cards</strong>: Automatically print term statistics inline with results.</div>
+          `;
+        case 'pulse':
+          return `
+            <div style="margin-bottom:8px;">🤖 <strong>WhatsApp Bot Integration</strong>: Automatically deliver result PDFs and fees reminders directly to parent phones.</div>
+            <div style="margin-bottom:8px;">📩 <strong>Smart Broadcasts</strong>: Send bulk notifications with a single click.</div>
+            <div>🔄 <strong>Realtime Delivery Logs</strong>: Track message dispatch, reads, and receipts.</div>
+          `;
+        case 'fees':
+          return `
+            <div style="margin-bottom:8px;">💳 <strong>Tuition & Ledger Setup</strong>: Configure fee components, discount rules, and custom payments.</div>
+            <div style="margin-bottom:8px;">🧾 <strong>AI Receipt Processing</strong>: Automatically scan, record, and reconcile incoming receipts.</div>
+            <div>📊 <strong>Cashflow Reports</strong>: View term-by-term revenue, outstanding debts, and forecasts.</div>
+          `;
+        case 'portal':
+        case 'portal-content':
+          return `
+            <div style="margin-bottom:8px;">🌐 <strong>Sovereign Parent Portal</strong>: Give parents secure, remote web access to student results and billings.</div>
+            <div style="margin-bottom:8px;">📰 <strong>Newsletter Publishing</strong>: Design and share newsletters, blogs, and notifications.</div>
+            <div>🔑 <strong>Access Codes Manager</strong>: Instantly generate and print secure login credentials for parents.</div>
+          `;
+        case 'scholar':
+          return `
+            <div style="margin-bottom:8px;">🧠 <strong>AI Academic Assistant</strong>: Automatically draft highly personalized, constructive report card comments.</div>
+            <div style="margin-bottom:8px;">📈 <strong>Cohort Analytics</strong>: Discover performance trends and identify at-risk students before exams.</div>
+            <div>💬 <strong>School Data Copilot</strong>: Interact with your school directory and grades using natural language.</div>
+          `;
+        case 'cbt':
+          return `
+            <div style="margin-bottom:8px;">💎 <strong>Computer-Based Testing</strong>: Host digital term assessments, quizzes, and mock trials.</div>
+            <div style="margin-bottom:8px;">🖥️ <strong>Local Area CBT Server</strong>: Conduct testing offline using tablets/phones connected to the Hub's local hotspot.</div>
+            <div>📥 <strong>Grade Sync Integration</strong>: Auto-import score records into Result Studio upon exam completion.</div>
+          `;
+        default:
+          return `
+            <div>Unlock premium features, automated report delivery, and parent communication tools.</div>
+          `;
+      }
+    };
+
     if (currentLevel < reqLevel) {
-      alert(`This feature requires the ${reqTier} tier. Your current tier is ${currentTier}.`);
+      if (typeof (window as any).Swal !== 'undefined') {
+        const reqColor = reqTier === 'Diamond' ? '#00e5ff' : '#ffd700';
+        const reqShadow = reqTier === 'Diamond' ? 'rgba(0, 229, 255, 0.3)' : 'rgba(212, 175, 55, 0.3)';
+
+        (window as any).Swal.fire({
+          title: `Unlock ${item.label} Module`,
+          html: `
+            <div style="font-size:56px; margin: 16px 0; filter: drop-shadow(0 0 12px ${reqShadow});">🔒</div>
+            <p style="font-size:14px; color:#a5b4fc; line-height:1.6; margin-bottom: 20px;">
+              The <strong>${item.label}</strong> module requires a <strong>Nexus ${reqTier} Plan</strong>.
+            </p>
+            <div style="text-align:left; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:16px; margin-bottom:20px; font-size:13px; color:#cbd5e1; line-height:1.5;">
+              ${getFeaturesHtml(item.id)}
+            </div>
+          `,
+          background: '#0d1235',
+          color: '#fff',
+          showCancelButton: true,
+          confirmButtonColor: reqColor,
+          cancelButtonColor: 'rgba(255,255,255,0.08)',
+          confirmButtonText: '🚀 Upgrade Plan',
+          cancelButtonText: 'Dismiss',
+          customClass: {
+            popup: 'border border-nexus-border rounded-3xl',
+            confirmButton: 'text-black font-bold px-6 py-2 rounded-lg',
+            cancelButton: 'text-white px-6 py-2 rounded-lg'
+          }
+        }).then((result: any) => {
+          if (result.isConfirmed) {
+            onTabChange('about');
+          }
+        });
+      } else {
+        alert(`This feature requires the ${reqTier} tier. Your current tier is ${currentTier}.`);
+      }
       return;
     }
     onTabChange(item.id);
@@ -122,22 +202,32 @@ export function NavSidebar({ activeTab, onTabChange, isCollapsed, onOpenHelp }: 
 
       {/* Navigation list */}
       <ul className="sidebar-nav">
-        {mainNavItems.map((item) => {
+        {mainNavItems
+          .filter(item => !(currentTier === 'Standalone' && item.id === 'teachers'))
+          .map((item) => {
           const reqTier = item.tier || 'Silver';
           const reqLevel = tiers[reqTier] || 1;
           const isLocked = currentLevel < reqLevel;
           const isActive = activeTab === item.id;
+          const lockedClass = isLocked ? `premium-locked-item ${reqTier === 'Diamond' ? 'diamond-locked' : 'gold-locked'}` : '';
 
           return (
             <li
               key={item.id}
               data-view={item.id}
               onClick={() => handleItemClick(item)}
-              className={`nav-item ${isActive ? 'active' : ''} ${isLocked ? 'locked-feature' : ''}`}
+              className={`nav-item ${isActive ? 'active' : ''} ${isLocked ? 'locked-feature' : ''} ${lockedClass}`}
             >
               <span className="nav-icon">{item.icon}</span>
               <span className="nav-label">{item.label}</span>
               
+              {isLocked && (
+                <>
+                  <span className={`nav-tier-badge ${reqTier === 'Diamond' ? 'diamond-badge' : 'gold-badge'}`}>{reqTier}</span>
+                  <span className="lock-wiggle">🔒</span>
+                </>
+              )}
+
               {/* Badges for Teachers and Students */}
               {!isLocked && item.id === 'teachers' && stats.teachers > 0 && (
                 <span className="nav-badge" id={item.badgeId}>{stats.teachers}</span>

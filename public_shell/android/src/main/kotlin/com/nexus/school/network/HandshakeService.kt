@@ -43,7 +43,8 @@ data class SchoolConfig(
     val address: String? = null,
     val motto: String? = null,
     val signature: String? = null,
-    val modules: List<String> = emptyList()
+    val modules: List<String> = emptyList(),
+    val plan_tier: String? = null        // "Standalone", "Silver", "Gold", "Diamond"
 )
 
 @Serializable
@@ -62,6 +63,7 @@ data class HandshakeResponse(
     val students: List<com.nexus.school.data.Student> = emptyList(),
     val score_components: List<ScoreComponent> = emptyList(),
     val all_subjects: List<String> = emptyList(),
+    val class_subjects: Map<String, List<String>> = emptyMap(), // class → subjects for smart picker
     val form_class: String? = null   // null = subject teacher; class name = form/homeroom teacher
 )
 
@@ -71,7 +73,8 @@ data class DeviceResponse(
     val teacher_id: String,
     val teacher_name: String,
     val public_key: String,
-    val thermal_status: String
+    val thermal_status: String,
+    val device_model: String
 )
 
 class HandshakeService {

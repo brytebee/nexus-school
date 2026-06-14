@@ -14,6 +14,11 @@ describe('tier gates engine', () => {
     expect(canAccessView('Silver', 'Gold')).toBe(false);
     expect(canAccessView('Silver', 'Diamond')).toBe(false);
 
+    // Standalone tries to access higher tiers
+    expect(canAccessView('Standalone', 'Gold')).toBe(false);
+    expect(canAccessView('Standalone', 'Diamond')).toBe(false);
+    expect(canAccessView('Standalone', 'Silver')).toBe(true);
+
     // Gold tries to access tiers
     expect(canAccessView('Gold', 'Gold')).toBe(true);
     expect(canAccessView('Gold', 'Diamond')).toBe(false);
@@ -23,3 +28,4 @@ describe('tier gates engine', () => {
     expect(canAccessView('Diamond', 'Diamond')).toBe(true);
   });
 });
+

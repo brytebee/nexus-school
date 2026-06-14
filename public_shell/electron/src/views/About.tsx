@@ -13,6 +13,7 @@ export function About({ onTabChange }: AboutProps) {
   const expiresAt = license?.expires_at || Date.now();
 
   let tierIcon = '🥈';
+  if (currentTier === 'Standalone') tierIcon = '📦';
   if (currentTier === 'Gold') tierIcon = '🥇';
   if (currentTier === 'Diamond') tierIcon = '💎';
 
@@ -123,6 +124,54 @@ export function About({ onTabChange }: AboutProps) {
           >
             {loading ? (
               <div>Loading plan info…</div>
+            ) : currentTier === 'Standalone' ? (
+              <>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    marginBottom: '12px',
+                    borderBottom: '1px solid rgba(255,255,255,0.05)',
+                    paddingBottom: '12px',
+                  }}
+                >
+                  <span>Active Tier</span>
+                  <span style={{ color: '#fff', fontWeight: 'bold' }}>
+                    📦 Standalone Pack
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    marginBottom: '12px',
+                    borderBottom: '1px solid rgba(255,255,255,0.05)',
+                    paddingBottom: '12px',
+                  }}
+                >
+                  <span>Device Slots</span>
+                  <span style={{ color: '#fff', fontWeight: 'bold' }}>
+                    2 devices max
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    marginBottom: '12px',
+                  }}
+                >
+                  <span>Valid Until</span>
+                  <span
+                    style={{
+                      color: '#00e5ff',
+                      fontWeight: 'bold',
+                    }}
+                  >
+                    Lifetime (Lifetime Owner)
+                  </span>
+                </div>
+              </>
             ) : (
               <>
                 <div
@@ -191,8 +240,90 @@ export function About({ onTabChange }: AboutProps) {
           >
             ⚙️ Manage Plan
           </button>
+          {currentTier === 'Standalone' && (
+            <button
+              onClick={() => {
+                if (window.electronAPI?.openExternal) {
+                  window.electronAPI.openExternal('https://nexusos.com.ng/portal');
+                }
+              }}
+              className="primary-btn"
+              style={{
+                marginTop: '10px',
+                background: 'linear-gradient(135deg, #1A237E, #3F51B5)',
+                color: '#fff',
+                boxShadow: 'none',
+                justifyContent: 'center',
+              }}
+            >
+              🚀 Upgrade to a Plan →
+            </button>
+          )}
         </div>
       </div>
+
+      {/* ── Upgrade options banner (Conversion Bridge) ── */}
+      {currentTier !== 'Diamond' && (
+        <div
+          style={{
+            background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.06), rgba(168, 85, 247, 0.06))',
+            border: '1px solid rgba(0, 229, 255, 0.18)',
+            borderRadius: '16px',
+            padding: '24px',
+            marginBottom: '18px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '16px',
+            flexWrap: 'wrap'
+          }}
+        >
+          <div>
+            <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#fff', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              🚀 Unlock the Full Power of Nexus School OS
+            </h4>
+            <p style={{ margin: '6px 0 0', fontSize: '12px', color: 'var(--text-dim)', lineHeight: 1.5, maxWidth: '600px' }}>
+              {currentTier === 'Standalone' ? (
+                'You are currently on the Standalone Pack (limited to 2 admin devices, free templates, and entire school scope). Upgrade to the Silver or Gold plan to enable unlimited teacher devices, daily registers, mobile sync allocations, and sovereign parent portal access.'
+              ) : (
+                'Upgrade your subscription plan to unlock WhatsApp notifications to parents (Nexus Pulse), automated fees payment ledger tracking, computer-based testing (CBT Arena), and AI-generated report card recommendations.'
+              )}
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              if (typeof (window as any).Swal !== 'undefined') {
+                (window as any).Swal.fire({
+                  title: 'Upgrade Request Submitted',
+                  text: 'Please contact your local Nexus Infrastructure partner or account manager to initiate your tier transition.',
+                  icon: 'info',
+                  confirmButtonColor: '#00E5FF',
+                  background: '#0d1235',
+                  color: '#fff'
+                });
+              } else {
+                alert('Contact your local Nexus Infrastructure partner to request an upgrade.');
+              }
+            }}
+            className="primary-btn"
+            style={{
+              background: 'linear-gradient(135deg, #00e5ff, #8b5cf6)',
+              color: '#000',
+              fontWeight: 700,
+              border: 'none',
+              padding: '10px 20px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              boxShadow: 'none',
+              justifyContent: 'center',
+              animation: 'none'
+            }}
+          >
+            Request Upgrade
+          </button>
+        </div>
+      )}
 
       {/* ── Security & Architecture card ── */}
       <div
