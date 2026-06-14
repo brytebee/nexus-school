@@ -175,8 +175,11 @@
                   .join("")
               : '<span style="color:#666;font-style:italic;font-size:11px;">No explicitly enrolled subjects</span>';
 
-          const photoImg = s.photo 
-            ? `<img src="${s.photo}" style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; margin-right: 8px; vertical-align: middle;" />`
+          const photoSrc = s.photo 
+            ? (s.photo.startsWith('data:') ? s.photo : `data:image/jpeg;base64,${s.photo}`)
+            : null;
+          const photoImg = photoSrc 
+            ? `<img src="${photoSrc}" style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; margin-right: 8px; vertical-align: middle;" />`
             : `<div style="width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,0.05); display: inline-flex; align-items: center; justify-content: center; margin-right: 8px; vertical-align: middle; font-size: 12px; color: rgba(255,255,255,0.3);">👤</div>`;
 
           row.innerHTML = `
@@ -254,7 +257,8 @@
       // Load photo preview
       const preview = document.getElementById('edit-stu-photo-preview');
       if (stu.photo) {
-        preview.innerHTML = `<img src="${stu.photo}" style="width: 100%; height: 100%; object-fit: cover;" />`;
+        const photoSrc = stu.photo.startsWith('data:') ? stu.photo : `data:image/jpeg;base64,${stu.photo}`;
+        preview.innerHTML = `<img src="${photoSrc}" style="width: 100%; height: 100%; object-fit: cover;" />`;
         preview.dataset.photo = stu.photo;
       } else {
         preview.innerHTML = `<span style="font-size: 18px; color: rgba(255, 255, 255, 0.4)">📷</span>`;

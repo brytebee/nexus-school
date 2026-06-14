@@ -343,7 +343,7 @@ export function Students() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {s.photo ? (
             <img
-              src={`data:image/jpeg;base64,${s.photo}`}
+              src={s.photo.startsWith('data:') ? s.photo : `data:image/jpeg;base64,${s.photo}`}
               alt={s.name}
               style={{
                 width: '32px',
@@ -788,7 +788,7 @@ export function Students() {
                 <div style={{ display: 'flex', gap: '16px', alignItems: 'center', background: 'rgba(255, 255, 255, 0.02)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--glass-border)' }}>
                   {photo ? (
                     <img
-                      src={`data:image/jpeg;base64,${photo}`}
+                      src={photo.startsWith('data:') ? photo : `data:image/jpeg;base64,${photo}`}
                       alt="Student Preview"
                       style={{
                         width: '64px',
@@ -1207,7 +1207,7 @@ export function Students() {
               <div style={{ display: 'flex', gap: '16px', alignItems: 'center', background: 'rgba(255, 255, 255, 0.02)', padding: '16px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--glass-border)' }}>
                 {detailStudent.photo ? (
                   <img
-                    src={`data:image/jpeg;base64,${detailStudent.photo}`}
+                    src={detailStudent.photo.startsWith('data:') ? detailStudent.photo : `data:image/jpeg;base64,${detailStudent.photo}`}
                     alt={detailStudent.name}
                     style={{
                       width: '64px',
