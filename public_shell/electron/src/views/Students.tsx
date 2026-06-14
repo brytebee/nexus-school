@@ -1181,17 +1181,56 @@ export function Students() {
             <div style={{
               padding: '16px 24px',
               borderBottom: '1px solid var(--glass-border)',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              flexShrink: 0, background: 'rgba(0,0,0,0.15)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '16px',
+              flexShrink: 0,
+              background: 'rgba(0,0,0,0.15)',
             }}>
-              <div>
-                <h3 style={{ fontWeight: 700, color: 'var(--text-main)', fontSize: '14px', margin: 0 }}>
+              {/* Student Photo */}
+              {detailStudent.photo ? (
+                <img
+                  src={detailStudent.photo.startsWith('data:') ? detailStudent.photo : `data:image/jpeg;base64,${detailStudent.photo}`}
+                  alt={detailStudent.name}
+                  style={{
+                    width: '64px',
+                    height: '64px',
+                    borderRadius: '12px',
+                    objectFit: 'cover',
+                    border: '1px solid var(--glass-border)',
+                    flexShrink: 0
+                  }}
+                />
+              ) : (
+                <div style={{
+                  width: '64px',
+                  height: '64px',
+                  borderRadius: '12px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px dashed var(--glass-border)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '20px',
+                  color: 'var(--text-dim)',
+                  fontWeight: 'bold',
+                  flexShrink: 0
+                }}>
+                  {detailStudent.name ? detailStudent.name.charAt(0).toUpperCase() : '?'}
+                </div>
+              )}
+
+              {/* Title & ID */}
+              <div style={{ flexGrow: 1 }}>
+                <h3 style={{ fontWeight: 700, color: 'var(--text-main)', fontSize: '15px', margin: 0 }}>
                   🎓 Student Profile
                 </h3>
-                <p style={{ fontSize: '11px', color: 'var(--text-dim)', margin: '2px 0 0' }}>
+                <p style={{ fontSize: '11px', color: 'var(--text-dim)', margin: '4px 0 0', fontFamily: 'var(--font-mono)' }}>
                   {detailStudent.id}
                 </p>
               </div>
+
+              {/* Close Button */}
               <button
                 onClick={() => setIsDetailModalOpen(false)}
                 style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center' }}
@@ -1202,45 +1241,6 @@ export function Students() {
 
             {/* Modal Body */}
             <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto' }}>
-
-              {/* Profile Photo Header */}
-              <div style={{ display: 'flex', gap: '16px', alignItems: 'center', background: 'rgba(255, 255, 255, 0.02)', padding: '16px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--glass-border)' }}>
-                {detailStudent.photo ? (
-                  <img
-                    src={detailStudent.photo.startsWith('data:') ? detailStudent.photo : `data:image/jpeg;base64,${detailStudent.photo}`}
-                    alt={detailStudent.name}
-                    style={{
-                      width: '64px',
-                      height: '64px',
-                      borderRadius: '50%',
-                      objectFit: 'cover',
-                      border: '2px solid var(--accent)',
-                      flexShrink: 0
-                    }}
-                  />
-                ) : (
-                  <div style={{
-                    width: '64px',
-                    height: '64px',
-                    borderRadius: '50%',
-                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                    border: '2px dashed var(--glass-border)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '20px',
-                    color: 'var(--text-dim)',
-                    fontWeight: 'bold',
-                    flexShrink: 0
-                  }}>
-                    {detailStudent.name ? detailStudent.name.charAt(0).toUpperCase() : '?'}
-                  </div>
-                )}
-                <div>
-                  <h4 style={{ margin: 0, fontWeight: 700, color: 'var(--text-main)', fontSize: '15px' }}>{detailStudent.name}</h4>
-                  <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--accent)', fontWeight: 600 }}>{detailStudent.class_name}</p>
-                </div>
-              </div>
 
               {/* Identity Row */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
