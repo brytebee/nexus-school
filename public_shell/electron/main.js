@@ -1119,7 +1119,7 @@ ipcMain.handle("update-student", (event, { id, name, class_name, class_arm, subj
   try {
     const db = database.getDb();
     db.transaction(() => {
-      if (photo !== undefined && photo !== null) {
+      if (photo !== undefined) {
         db.prepare(`
           UPDATE students SET name=@name, class_name=@class_name, class_arm=@class_arm,
             reg_no=@reg_no, admission_no=@admission_no, gender=@gender, dob=@dob, photo=@photo,
