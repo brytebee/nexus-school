@@ -61,6 +61,8 @@ export function Students() {
   const [classSuggestions, setClassSuggestions] = useState<string[]>([]);
   const [csvStatus, setCsvStatus] = useState<string | null>(null);
 
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -282,7 +284,7 @@ export function Students() {
         }
       } else {
         // Create Mode
-        const id = 'STU-' + crypto.randomUUID().split('-')[0].toUpperCase();
+        const id = 'STU-' + Math.random().toString(36).substring(2, 10).toUpperCase();
         const res = await window.electronAPI.addStudentForm({
           ...payload,
           id,
@@ -820,16 +822,17 @@ export function Students() {
                       Passport Photo (JPG/PNG, max 1MB)
                     </span>
                     <div style={{ display: 'flex', gap: '8px' }}>
-                      <label
-                        htmlFor="student-photo-upload"
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
                         className="secondary-btn"
-                        style={{ cursor: 'pointer', padding: '6px 12px', fontSize: '11px', borderRadius: 'var(--radius-sm)' }}
+                        style={{ padding: '6px 12px', fontSize: '11px', borderRadius: 'var(--radius-sm)' }}
                       >
                         Upload Photo
-                      </label>
+                      </button>
                       <input
                         type="file"
-                        id="student-photo-upload"
+                        ref={fileInputRef}
                         accept="image/*"
                         onChange={handlePhotoChange}
                         style={{ display: 'none' }}
