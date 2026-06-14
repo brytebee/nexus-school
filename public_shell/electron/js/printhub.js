@@ -118,6 +118,7 @@
         // Map template IDs to PNG filenames in assets/templates/
         const imgMap = {
           'clean_slate': 'classic',
+          'class_photo': 'classic',
           'prestige':    'prestige',
           'azure':       'azure',
           'royal':       'royal',

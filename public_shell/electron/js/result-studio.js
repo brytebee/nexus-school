@@ -1,4 +1,7 @@
 "use strict";
+
+const PAID_TEMPLATES = ['prestige', 'azure', 'royal', 'monarch', 'sovereign', 'sterling', 'apex'];
+
 // ══════════════════════════════════════════════════════════════════════════════
 // Nexus School OS — Result Studio
 // ══════════════════════════════════════════════════════════════════════════════

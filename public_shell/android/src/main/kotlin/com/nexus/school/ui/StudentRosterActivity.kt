@@ -45,7 +45,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -55,11 +54,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.biometric.BiometricManager
-import androidx.biometric.BiometricPrompt
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
+import com.nexus.school.ui.components.PhotoCropDialog
+import androidx.exifinterface.media.ExifInterface as AndroidExif
 import com.nexus.school.data.Student
 import com.nexus.school.data.SyncDatabase
 import com.nexus.school.data.SyncEvent
@@ -68,6 +64,7 @@ import com.nexus.school.network.saveAddStudentEvent
 import com.nexus.school.network.saveDeleteStudentEvent
 import com.nexus.school.network.saveGradeEvent
 import com.nexus.school.security.IdentityManager
+import com.nexus.school.NexusApp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -110,36 +107,7 @@ private val WarnAmber   = Color(0xFFFFB300)
 
 class StudentRosterActivity : AppCompatActivity() {
 
-    private var isAppLockedByBiometrics = mutableStateOf(true)
 
-    private fun showBiometricPrompt() {
-        val executor = ContextCompat.getMainExecutor(this)
-        val biometricPrompt = BiometricPrompt(this, executor,
-            object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    super.onAuthenticationError(errorCode, errString)
-                    // If user cancels or fails too many times, app remains locked.
-                }
-
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    super.onAuthenticationSucceeded(result)
-                    isAppLockedByBiometrics.value = false
-                }
-
-                override fun onAuthenticationFailed() {
-                    super.onAuthenticationFailed()
-                }
-            })
-
-        val promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Unlock Nexus Vault")
-            .setSubtitle("Confirm your identity to securely access student grades.")
-            // Allow device credential (PIN/Pattern/Password) for phones without fingerprints
-            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
-            .build()
-
-        biometricPrompt.authenticate(promptInfo)
-    }
 
     @OptIn(ExperimentalFoundationApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -158,19 +126,6 @@ class StudentRosterActivity : AppCompatActivity() {
         val scoreComponents = parseScoreComponents(scoreComponentsJson)
 
         setContent {
-            val lifecycleOwner = LocalLifecycleOwner.current
-            DisposableEffect(lifecycleOwner) {
-                val observer = LifecycleEventObserver { _, event ->
-                    if (event == Lifecycle.Event.ON_RESUME) {
-                        isAppLockedByBiometrics.value = true
-                        showBiometricPrompt()
-                    }
-                }
-                lifecycleOwner.lifecycle.addObserver(observer)
-                onDispose {
-                    lifecycleOwner.lifecycle.removeObserver(observer)
-                }
-            }
 
             val scope = rememberCoroutineScope()
             var students by remember { mutableStateOf<List<Student>>(emptyList()) }
@@ -181,6 +136,9 @@ class StudentRosterActivity : AppCompatActivity() {
             var showSyncWarning by remember { mutableStateOf(false) }
             var honorRollStudents by remember { mutableStateOf<List<com.nexus.school.data.HonorRollItem>>(emptyList()) }
             val studentSyncStatus = remember { mutableStateMapOf<String, Boolean>() }
+            
+            var studentToEdit by remember { mutableStateOf<Student?>(null) }
+            var draftClass by remember { mutableStateOf("") }
 
             // ── Navigation destination & plan metadata ────────────────────────
             var selectedScreen by remember { mutableStateOf(AppScreen.ROSTER) }
@@ -208,7 +166,15 @@ class StudentRosterActivity : AppCompatActivity() {
                     // FIX: Validate selected tab still exists after reload; reset if not
                     if (selectedTab == null || !newTabs.contains(selectedTab)) selectedTab = newTabs.firstOrNull()
 
-                    // Pre-fill sync status from pending events
+                    studentSyncStatus.clear()
+
+                    // 1. Populate from local_scores table (actually graded students)
+                    db.studentDao().getAllScores().forEach { score ->
+                        val key = score.student_id + "_" + score.subject
+                        studentSyncStatus[key] = true
+                    }
+
+                    // 2. Pre-fill sync status from pending events
                     val events = db.syncDao().getPendingEvents()
                     events.forEach { event ->
                         try {
@@ -232,12 +198,6 @@ class StudentRosterActivity : AppCompatActivity() {
                 } ?: emptyList()
             }
 
-            // Subjects the teacher teaches in the currently active class — used by AddStudentSheet
-            val availableSubjectsForCurrentClass = remember(selectedTab, tabs) {
-                selectedTab?.let { (cls, _) ->
-                    tabs.filter { it.first == cls }.map { it.second }
-                } ?: emptyList()
-            }
 
             // State for the 2-step registration flow
             var pendingStudentBio by remember { mutableStateOf<Array<String?>?>(null) }
@@ -294,7 +254,10 @@ class StudentRosterActivity : AppCompatActivity() {
                                 }
                                 // Add Student FAB
                                 FloatingActionButton(
-                                    onClick = { showAddStudentDialog = true },
+                                    onClick = { 
+                                        draftClass = selectedTab?.first ?: ""
+                                        showAddStudentDialog = true 
+                                    },
                                     containerColor = primaryColor,
                                     contentColor = Color.White
                                 ) {
@@ -310,7 +273,9 @@ class StudentRosterActivity : AppCompatActivity() {
                         if (showAddStudentDialog && pendingStudentBio == null) {
                             AddStudentSheet(
                                 primaryColor          = primaryColor,
-                                preselectedClass      = selectedTab?.first ?: "",
+                                preselectedClass      = draftClass,
+                                classList             = tabs.map { it.first }.distinct(),
+                                onClassChange         = { draftClass = it },
                                 planModules           = planModules,
                                 draftName             = draftName, onNameChange = { draftName = it },
                                 draftReg              = draftReg, onRegChange = { draftReg = it },
@@ -436,6 +401,9 @@ class StudentRosterActivity : AppCompatActivity() {
                                                         saveDeleteStudentEvent(this@StudentRosterActivity, student.id)
                                                         dbStateRef++
                                                     }
+                                                },
+                                                onStudentClick = { student ->
+                                                    studentToEdit = student
                                                 }
                                             )
                                         }
@@ -461,27 +429,31 @@ class StudentRosterActivity : AppCompatActivity() {
                     }
                 }
 
-                // \u2500\u2500 Subject Enrollment Full-Screen Overlay (above Scaffold) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+                // ── Subject Enrollment Full-Screen Overlay (above Scaffold) ────────────────
                 if (pendingStudentBio != null) {
-                    val baseSubjects = IdentityManager(this@StudentRosterActivity).getMasterSubjectList()
-                    val masterSubjectsList = if (baseSubjects.isNotEmpty()) baseSubjects else availableSubjectsForCurrentClass
+                    val masterSubjectsList = IdentityManager(this@StudentRosterActivity)
+                        .getSubjectsForClass(draftClass)
+                        .ifEmpty {
+                            tabs.filter { it.first == draftClass }.map { it.second }.distinct()
+                        }
 
                     val bio = pendingStudentBio!!
                     SubjectEnrollmentScreen(
                         primaryColor      = primaryColor,
                         studentName       = bio[0] ?: "",
-                        preselectedClass  = selectedTab?.first ?: "",
+                        preselectedClass  = draftClass,
                         availableSubjects = masterSubjectsList,
                         planModules       = planModules,
                         onBack            = { pendingStudentBio = null; showAddStudentDialog = true },
-                        onRegister        = { subjects, email, phone ->
+                        onRegister        = { subjects, parentName, email, phone ->
                             scope.launch {
                                 saveAddStudentEvent(
                                     context     = this@StudentRosterActivity,
                                     studentName = bio[0] ?: "",
-                                    className   = selectedTab?.first ?: "",
+                                    className   = draftClass,
                                     subjects    = subjects,
                                     photoBase64 = bio[1],
+                                    parentName  = parentName,
                                     parentEmail = email,
                                     parentPhone = phone,
                                     regNo       = bio[2],
@@ -499,6 +471,55 @@ class StudentRosterActivity : AppCompatActivity() {
                                 draftPhotoUri = null
                                 draftBitmap = null
                                 draftPhotoCaptured = false
+                            }
+                        }
+                    )
+                }
+
+                if (studentToEdit != null) {
+                    val student = studentToEdit!!
+                    val enrolledSubjects = students.filter { it.id == student.id }.map { it.subject }
+                    val masterSubjectsList = IdentityManager(this@StudentRosterActivity)
+                        .getSubjectsForClass(student.class_name)
+                        .ifEmpty {
+                            tabs.filter { it.first == student.class_name }.map { it.second }.distinct()
+                        }
+
+                    EditStudentRecordSheet(
+                        primaryColor = primaryColor,
+                        student = student,
+                        scoreComponents = scoreComponents,
+                        allEnrolledSubjects = enrolledSubjects,
+                        masterSubjectsList = masterSubjectsList,
+                        onDismiss = { studentToEdit = null },
+                        onSave = { name, reg, adm, gen, dob, parentName, email, phone, photo, scores, subjects ->
+                            scope.launch {
+                                saveAddStudentEvent(
+                                    context = this@StudentRosterActivity,
+                                    studentName = name,
+                                    className = student.class_name,
+                                    subjects = subjects,
+                                    photoBase64 = photo,
+                                    parentName  = parentName,
+                                    parentEmail = email,
+                                    parentPhone = phone,
+                                    regNo = reg,
+                                    admissionNo = adm,
+                                    gender = gen,
+                                    dob = dob,
+                                    existingStudentId = student.id
+                                )
+
+                                saveGradeEvent(
+                                    context = this@StudentRosterActivity,
+                                    studentId = student.id,
+                                    subject = student.subject,
+                                    compValues = scores,
+                                    components = scoreComponents
+                                )
+
+                                dbStateRef++
+                                studentToEdit = null
                             }
                         }
                     )
@@ -729,7 +750,8 @@ fun StudentList(
     students: List<Student>,
     primaryColor: Color,
     statusMap: Map<String, Boolean>,
-    onDelete: (Student) -> Unit = {}
+    onDelete: (Student) -> Unit = {},
+    onStudentClick: (Student) -> Unit = {}
 ) {
     LazyColumn(
         modifier = Modifier
@@ -748,7 +770,8 @@ fun StudentList(
                     index = idx + 1,
                     primaryColor = primaryColor,
                     isSaved = statusMap[student.id + "_" + student.subject] == true || statusMap[student.id] == true,
-                    onDelete = if (student.id.startsWith("TEMP_")) onDelete else null
+                    onDelete = if (student.id.startsWith("TEMP_")) onDelete else null,
+                    onStudentClick = onStudentClick
                 )
             }
         }
@@ -801,6 +824,29 @@ fun EmptyTabState(tab: Pair<String, String>?) {
     }
 }
 
+// ─── EXIF Rotation Correction ─────────────────────────────────────────────────
+// Camera apps often store rotation as EXIF metadata instead of rotating pixels.
+// This helper reads the tag and physically rotates the bitmap to match.
+fun correctBitmapRotation(
+    bitmap: android.graphics.Bitmap,
+    uri: Uri,
+    context: android.content.Context
+): android.graphics.Bitmap {
+    return try {
+        val stream = context.contentResolver.openInputStream(uri) ?: return bitmap
+        val exif   = AndroidExif(stream)
+        stream.close()
+        val deg = when (exif.getAttributeInt(AndroidExif.TAG_ORIENTATION, AndroidExif.ORIENTATION_NORMAL)) {
+            AndroidExif.ORIENTATION_ROTATE_90  -> 90f
+            AndroidExif.ORIENTATION_ROTATE_180 -> 180f
+            AndroidExif.ORIENTATION_ROTATE_270 -> 270f
+            else -> return bitmap
+        }
+        val m = android.graphics.Matrix().apply { postRotate(deg) }
+        android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, m, true)
+    } catch (e: Exception) { bitmap }
+}
+
 // ─── Focus Mode Pager ─────────────────────────────────────────────────────────
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -816,113 +862,124 @@ fun FocusModePager(
     val scope      = rememberCoroutineScope()
     val context    = LocalContext.current
 
-    // Flat state map: "studentId_subject_componentKey" -> value string
     val gradeState = remember { mutableStateMapOf<String, String>() }
 
-    // FIX: Key on students list so scores reload whenever the class/subject tab changes
     LaunchedEffect(students) {
         val db = SyncDatabase.getDatabase(context)
         db.studentDao().getAllScores().forEach { score ->
-            // Always key as "studentId_subject_componentKey" for subject-specific grading
             val key = "${score.student_id}_${score.subject}_${score.component_key}"
             gradeState[key] = score.score.toString()
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(DeepNavy)) {
-        // ── Focus Mode Toolbar ────────────────────────────────────────────
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.horizontalGradient(listOf(primaryColor, primaryColor.copy(alpha = 0.7f)))
-                )
-                .padding(horizontal = 8.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onClose) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Close", tint = Color.White)
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Focus Mode",
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                selectedTab?.let {
-                    Text(
-                        text = "${it.first}  ·  ${it.second}",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 12.sp
+    Box(modifier = Modifier.fillMaxSize().background(DeepNavy)) {
+        Column(modifier = Modifier.fillMaxSize()) {
+
+            // ── Premium header bar ────────────────────────────────────────────
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                primaryColor.copy(alpha = 0.95f),
+                                primaryColor.copy(alpha = 0.6f),
+                                Color(0xFF111530)
+                            )
+                        )
                     )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 6.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Close", tint = Color.White)
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Focus Mode", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
+                        selectedTab?.let {
+                            Text(
+                                "${it.first}  ·  ${it.second}",
+                                color = Color.White.copy(alpha = 0.65f), fontSize = 11.sp
+                            )
+                        }
+                    }
+                    // Progress chip
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = Color.White.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            "${pagerState.currentPage + 1} / ${students.size}",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
                 }
             }
-            Text(
-                "${pagerState.currentPage + 1} / ${students.size}",
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 13.sp,
-                modifier = Modifier.padding(end = 16.dp)
-            )
-        }
 
-        HorizontalPager(state = pagerState, modifier = Modifier.weight(1f)) { page ->
-            val student    = students[page]
-            val studentId  = student.id
-            val subjectKey = "${studentId}_${student.subject}"
+            HorizontalPager(state = pagerState, modifier = Modifier.weight(1f)) { page ->
+                val student    = students[page]
+                val studentId  = student.id
+                val subjectKey = "${studentId}_${student.subject}"
 
-            // Per-student values: component.key -> current string value
-            val compValues: Map<String, String> = scoreComponents.associate { comp ->
-                comp.key to (gradeState["${subjectKey}_${comp.key}"] ?: "")
-            }
+                val compValues: Map<String, String> = scoreComponents.associate { comp ->
+                    comp.key to (gradeState["${subjectKey}_${comp.key}"] ?: "")
+                }
 
-            StudentFocusCard(
-                student         = student,
-                selectedTab     = selectedTab,
-                primaryColor    = primaryColor,
-                scoreComponents = scoreComponents,
-                compValues      = compValues,
-                onValueChange   = { compKey, value ->
-                    gradeState["${subjectKey}_${compKey}"] = value
-                },
-                onAutoSave = {
-                    scope.launch(Dispatchers.IO) {
-                        saveGradeEvent(
-                            context, studentId, student.subject,
-                            scoreComponents.associate { it.key to (gradeState["${subjectKey}_${it.key}"] ?: "") },
-                            scoreComponents
-                        )
-                        launch(Dispatchers.Main) { onLogSave(studentId, student.subject, true) }
-                    }
-                },
-                onSave = {
-                    scope.launch(Dispatchers.IO) {
-                        saveGradeEvent(
-                            context, studentId, student.subject,
-                            scoreComponents.associate { it.key to (gradeState["${subjectKey}_${it.key}"] ?: "") },
-                            scoreComponents
-                        )
-                        launch(Dispatchers.Main) {
-                            onLogSave(studentId, student.subject, true)
+                StudentFocusCard(
+                    student         = student,
+                    selectedTab     = selectedTab,
+                    primaryColor    = primaryColor,
+                    scoreComponents = scoreComponents,
+                    compValues      = compValues,
+                    onValueChange   = { compKey, value ->
+                        gradeState["${subjectKey}_${compKey}"] = value
+                    },
+                    onAutoSave = {
+                        scope.launch(Dispatchers.IO) {
+                            saveGradeEvent(
+                                context, studentId, student.subject,
+                                scoreComponents.associate { it.key to (gradeState["${subjectKey}_${it.key}"] ?: "") },
+                                scoreComponents
+                            )
+                            launch(Dispatchers.Main) { onLogSave(studentId, student.subject, true) }
+                        }
+                    },
+                    onSave = {
+                        scope.launch(Dispatchers.IO) {
+                            saveGradeEvent(
+                                context, studentId, student.subject,
+                                scoreComponents.associate { it.key to (gradeState["${subjectKey}_${it.key}"] ?: "") },
+                                scoreComponents
+                            )
+                            launch(Dispatchers.Main) {
+                                onLogSave(studentId, student.subject, true)
+                                if (page < students.size - 1) pagerState.animateScrollToPage(page + 1)
+                                else onClose()
+                            }
+                        }
+                    },
+                    onSkip = {
+                        scope.launch {
                             if (page < students.size - 1) pagerState.animateScrollToPage(page + 1)
                             else onClose()
                         }
                     }
-                },
-                onSkip = {
-                    scope.launch {
-                        if (page < students.size - 1) pagerState.animateScrollToPage(page + 1)
-                        else onClose()
-                    }
-                }
-            )
+                )
+            }
         }
     }
 }
 
 // ─── Student Focus Card ───────────────────────────────────────────────────────
-// Full-screen layout: compact header │ scrollable 2-col input grid │ fixed footer
-// Designed to handle 1–10 score components on any phone screen size.
 @Composable
 fun StudentFocusCard(
     student: Student,
@@ -938,7 +995,7 @@ fun StudentFocusCard(
     val total    = scoreComponents.sumOf { compValues[it.key]?.toIntOrNull() ?: 0 }
     val maxTotal = scoreComponents.sumOf { it.max }
 
-    // Debounced auto-save: skips initial composition, fires 650 ms after last keystroke
+    // Auto-save debounce: 650 ms after last keystroke
     var initialized by remember { mutableStateOf(false) }
     val valueSnapshot = scoreComponents.map { it.key to (compValues[it.key] ?: "") }
     LaunchedEffect(valueSnapshot) {
@@ -947,72 +1004,130 @@ fun StudentFocusCard(
         onAutoSave()
     }
 
+    val pct = if (maxTotal > 0) total.toFloat() / maxTotal else 0f
+    val totalColor = when {
+        pct >= 0.7f -> Color(0xFF22C55E)   // green
+        pct >  0f   -> primaryColor
+        else        -> Color(0xFFEF4444)   // red
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
     ) {
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(14.dp))
 
-        // ── Compact student identity chip ────────────────────────────────────
+        // ── Student identity card (matches EditStudentRecordSheet header style) ─
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            color = GlassWhite,
+            shape = RoundedCornerShape(20.dp),
+            color = Color(0xFF1A1F3A),
             border = BorderStroke(1.dp, GlassBorder)
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                modifier = Modifier.padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Mini avatar
+                // Avatar — show decoded photo if available, else initial
+                val photoBitmap = remember(student.photo_base64) {
+                    student.photo_base64?.let {
+                        try {
+                            val bytes = android.util.Base64.decode(it, android.util.Base64.DEFAULT)
+                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        } catch (e: Exception) { null }
+                    }
+                }
+
                 Box(
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(56.dp)
                         .clip(CircleShape)
                         .background(
-                            Brush.verticalGradient(
-                                listOf(primaryColor, primaryColor.copy(alpha = 0.65f))
-                            )
+                            Brush.verticalGradient(listOf(primaryColor, primaryColor.copy(alpha = 0.5f)))
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = student.name.take(1).uppercase(),
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
+                    if (photoBitmap != null) {
+                        Image(
+                            bitmap = photoBitmap.asImageBitmap(),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Text(
+                            text = student.name.take(1).uppercase(),
+                            color = Color.White,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
                 }
-                Spacer(Modifier.width(12.dp))
+
+                Spacer(Modifier.width(14.dp))
+
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = student.name,
                         color = Color.White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.ExtraBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    Spacer(Modifier.height(3.dp))
                     Text(student.id, color = TextMuted, fontSize = 11.sp)
                     selectedTab?.let {
-                        Spacer(Modifier.height(3.dp))
-                        Text(
-                            "${it.first} · ${it.second}",
-                            color = primaryColor,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Spacer(Modifier.height(4.dp))
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = primaryColor.copy(alpha = 0.18f)
+                        ) {
+                            Text(
+                                "${it.first}  ·  ${it.second}",
+                                color = primaryColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                            )
+                        }
                     }
+                }
+
+                // Live total badge
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "$total",
+                        color = totalColor,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    Text("/ $maxTotal", color = TextMuted, fontSize = 11.sp)
                 }
             }
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(14.dp))
 
-        // ── Scrollable 2-column grade input grid ───────────────────────────
-        // Chunks components into rows of 2; odd last component spans its slot only.
-        // With 10 components (worst case) → 5 rows × ~80dp → 400dp, scrollable.
+        // ── Score input section header ────────────────────────────────────────
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "GRADES — ${student.subject.uppercase()}",
+                color = primaryColor,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 0.8.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Text("Auto-saves", color = TextMuted, fontSize = 10.sp)
+        }
+        Spacer(Modifier.height(8.dp))
+
+        // ── Score input grid (2-column, matches EditStudentRecordSheet card style) ─
         val rows = scoreComponents.chunked(2)
         Column(
             modifier = Modifier
@@ -1039,68 +1154,71 @@ fun StudentFocusCard(
                             }
                         )
                     }
-                    // Balance last row when component count is odd
                     if (rowComps.size < 2) Spacer(Modifier.weight(1f))
                 }
             }
-            Spacer(Modifier.height(4.dp)) // breathing room at scroll bottom
+            Spacer(Modifier.height(4.dp))
         }
 
         Spacer(Modifier.height(10.dp))
 
-        // ── Dynamic total bar ────────────────────────────────────────────────
-        val pct = if (maxTotal > 0) total.toFloat() / maxTotal else 0f
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    color = when {
-                        pct >= 0.7f -> Color(0xFF1B4332).copy(alpha = 0.7f)
-                        pct >  0f   -> primaryColor.copy(alpha = 0.18f)
-                        else        -> Color(0xFF7F1D1D).copy(alpha = 0.5f)
-                    },
-                    shape = RoundedCornerShape(14.dp)
-                )
-                .padding(vertical = 14.dp),
-            contentAlignment = Alignment.Center
+        // ── Colour-coded total progress bar ──────────────────────────────────
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            color = totalColor.copy(alpha = if (pct > 0f) 0.15f else 0.08f),
+            border = BorderStroke(1.dp, totalColor.copy(alpha = 0.3f))
         ) {
-            Text(
-                "Total: $total / $maxTotal",
-                color = Color.White,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
+            Row(
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Total", color = TextMuted, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Text(
+                    "$total / $maxTotal",
+                    color = totalColor,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
         }
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
 
-        // ── Navigation row ───────────────────────────────────────────────────
+        // ── Navigation footer ────────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
                 .padding(bottom = 14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(onClick = onSkip) {
-                Text("Skip", color = TextMuted, fontSize = 16.sp)
+            OutlinedButton(
+                onClick = onSkip,
+                modifier = Modifier.weight(1f).height(50.dp),
+                shape = RoundedCornerShape(50),
+                border = BorderStroke(1.dp, GlassBorder),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMuted)
+            ) {
+                Text("Skip", fontSize = 14.sp)
             }
             Button(
-                onClick      = onSave,
-                colors       = ButtonDefaults.buttonColors(containerColor = primaryColor),
-                shape        = RoundedCornerShape(50),
-                contentPadding = PaddingValues(horizontal = 26.dp, vertical = 13.dp)
+                onClick = onSave,
+                modifier = Modifier.weight(2f).height(50.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                shape = RoundedCornerShape(50),
             ) {
-                Text("Save & Next", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text("Save & Next", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(6.dp))
-                Icon(Icons.Default.ArrowForward, contentDescription = null)
+                Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
             }
         }
     }
 }
 
 // ─── Compact Grade Input Card ─────────────────────────────────────────────────
-// Self-contained glass card: label + max badge on top, large numeric input below.
+// Flat style matching the UpdateStudentRecord grade inputs: label+max above, field below.
 @Composable
 fun CompactGradeInputCard(
     modifier: Modifier = Modifier,
@@ -1110,57 +1228,44 @@ fun CompactGradeInputCard(
     primaryColor: Color,
     onValueChange: (String) -> Unit
 ) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(14.dp),
-        color = Color(0x0CFFFFFF),
-        border = BorderStroke(1.dp, GlassBorder)
-    ) {
-        Column(
-            modifier = Modifier.padding(start = 10.dp, top = 8.dp, end = 10.dp, bottom = 4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
+    Column(modifier = modifier) {
+        Text(
+            text = "$label (Max $maxScore)",
+            color = TextMuted,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            textStyle = TextStyle(
+                color = Color.White,
+                fontSize = 18.sp,
+                textAlign = TextAlign.Center,
+                fontWeight = FontWeight.ExtraBold
+            ),
+            placeholder = {
                 Text(
-                    text = label, color = TextMuted, fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold, maxLines = 1,
-                    overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
+                    "0", color = Color.White.copy(alpha = 0.2f),
+                    fontSize = 18.sp, modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
                 )
-                Surface(shape = RoundedCornerShape(50), color = primaryColor.copy(alpha = 0.18f)) {
-                    Text(
-                        "/$maxScore", color = primaryColor, fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                    )
-                }
-            }
-            OutlinedTextField(
-                value = value, onValueChange = onValueChange,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                textStyle = TextStyle(
-                    color = Color.White, fontSize = 20.sp,
-                    textAlign = TextAlign.Center, fontWeight = FontWeight.ExtraBold
-                ),
-                placeholder = {
-                    Text(
-                        "—", color = Color.White.copy(alpha = 0.12f), fontSize = 20.sp,
-                        modifier = Modifier.fillMaxWidth(),
-                        textAlign = TextAlign.Center, fontWeight = FontWeight.Bold
-                    )
-                },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = primaryColor, unfocusedBorderColor = GlassBorder,
-                    focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                    cursorColor = primaryColor
-                )
-            )
-        }
+            },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = primaryColor,
+                unfocusedBorderColor = GlassBorder,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                cursorColor = primaryColor
+            ),
+            shape = RoundedCornerShape(10.dp)
+        )
     }
 }
 
@@ -1172,10 +1277,11 @@ fun StudentRow(
     primaryColor: Color,
     isSaved: Boolean,
     /** Non-null only on TEMP_ (locally-added) students — shows delete control. */
-    onDelete: ((Student) -> Unit)? = null
+    onDelete: ((Student) -> Unit)? = null,
+    onStudentClick: (Student) -> Unit = {}
 ) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable { onStudentClick(student) },
         shape = RoundedCornerShape(14.dp),
         color = GlassWhite,
         border = BorderStroke(1.dp, GlassBorder)
@@ -1223,7 +1329,6 @@ fun StudentRow(
 }
 
 
-// ─── @Preview Annotations (Prompt 5 Verification step) ───────────────────────
 @Preview(showBackground = true, backgroundColor = 0xFF0A0E2E, name = "Tab Bar Preview")
 @Composable
 fun PreviewGroupedSubjectTabBar() {
@@ -1238,6 +1343,434 @@ fun PreviewGroupedSubjectTabBar() {
     MaterialTheme {
         Surface(color = DeepNavy) {
             GroupedSubjectTabBar(tabs = sampleTabs, selectedTab = selected, primaryColor = primaryColor, onTabSelected = { selected = it })
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditStudentRecordSheet(
+    primaryColor: Color,
+    student: Student,
+    scoreComponents: List<ScoreComponent>,
+    allEnrolledSubjects: List<String>,
+    masterSubjectsList: List<String>,
+    onDismiss: () -> Unit,
+    onSave: (
+        name: String,
+        regNo: String?,
+        admissionNo: String?,
+        gender: String?,
+        dob: String?,
+        parentName: String?,
+        parentEmail: String?,
+        parentPhone: String?,
+        photoBase64: String?,
+        scores: Map<String, String>,
+        subjects: List<String>
+    ) -> Unit
+) {
+    val context    = LocalContext.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    var draftName by remember { mutableStateOf(student.name) }
+    var draftReg by remember { mutableStateOf(student.reg_no ?: "") }
+    var draftAdmission by remember { mutableStateOf(student.admission_no ?: "") }
+    var draftGender by remember { mutableStateOf(student.gender ?: "Male") }
+    var draftDob by remember { mutableStateOf(student.dob ?: "") }
+    var parentName  by remember { mutableStateOf(student.parent_name ?: "") }
+    var parentEmail by remember { mutableStateOf(student.parent_email ?: "") }
+    var parentPhone by remember { mutableStateOf(student.parent_phone ?: "") }
+    var draftPhotoBase64 by remember { mutableStateOf(student.photo_base64) }
+    var draftBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var draftPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    var draftPhotoCaptured by remember { mutableStateOf(false) }
+    var bitmapToCropEdit by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+
+    val tempScores = remember { mutableStateMapOf<String, String>() }
+    var selectedSubjects by remember { mutableStateOf(allEnrolledSubjects.toSet()) }
+    // 0 = Scores, 1 = Profile Details, 2 = Enrolled Subjects
+    var currentPage by remember { mutableStateOf(0) }
+
+    // Load photo and scores
+    LaunchedEffect(student.id, student.subject) {
+        if (!student.photo_base64.isNullOrBlank()) {
+            try {
+                val decoded = Base64.decode(student.photo_base64, Base64.DEFAULT)
+                draftBitmap = BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
+                draftPhotoCaptured = true
+            } catch (e: Exception) {}
+        }
+        val db = SyncDatabase.getDatabase(context)
+        val scores = db.studentDao().getScoresForStudent(student.id, student.subject)
+        scores.forEach { score ->
+            tempScores[score.component_key] = score.score.toString()
+        }
+    }
+
+    val doSave: () -> Unit = {
+        val photoEncoded = draftBitmap?.let { bmp ->
+            java.io.ByteArrayOutputStream().also { out ->
+                bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, out)
+            }.run { Base64.encodeToString(toByteArray(), Base64.NO_WRAP) }
+        } ?: draftPhotoBase64
+        onSave(
+            draftName.trim(),
+            draftReg.trim().ifBlank { null },
+            draftAdmission.trim().ifBlank { null },
+            draftGender,
+            draftDob.ifBlank { null },
+            parentName.trim().ifBlank { null },
+            parentEmail.trim().ifBlank { null },
+            parentPhone.trim().ifBlank { null },
+            photoEncoded,
+            tempScores.toMap(),
+            selectedSubjects.toList()
+        )
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        NexusApp.intentInProgress = false
+        val capturedUri = draftPhotoUri
+        if (success && capturedUri != null) {
+            context.contentResolver.openInputStream(capturedUri)?.use { BitmapFactory.decodeStream(it) }
+                ?.let { bmp -> bitmapToCropEdit = correctBitmapRotation(bmp, capturedUri, context) }
+        }
+    }
+
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        NexusApp.intentInProgress = false
+        uri ?: return@rememberLauncherForActivityResult
+        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+            ?.let { bmp -> bitmapToCropEdit = bmp }
+    }
+
+    fun launchCamera() {
+        val imageFile = java.io.File(
+            java.io.File(context.externalCacheDir, "images").also { it.mkdirs() },
+            "student_${System.currentTimeMillis()}.jpg"
+        )
+        val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", imageFile)
+        draftPhotoUri = uri
+        NexusApp.intentInProgress = true
+        cameraLauncher.launch(uri)
+    }
+
+    fun launchGallery() {
+        NexusApp.intentInProgress = true
+        galleryLauncher.launch("image/*")
+    }
+
+    // ─── Crop Dialog ───────────────────────────────────────────────────────────
+    bitmapToCropEdit?.let { rawBitmap ->
+        PhotoCropDialog(
+            bitmap    = rawBitmap,
+            onCrop = { cropped ->
+                draftBitmap = cropped
+                draftPhotoCaptured = true
+                bitmapToCropEdit = null
+            },
+            onDismiss = { bitmapToCropEdit = null }
+        )
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = Color(0xFF111530),
+        contentColor     = Color.White,
+        tonalElevation   = 0.dp,
+        dragHandle = {
+            Box(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp), Alignment.Center) {
+                Box(Modifier.width(40.dp).height(4.dp).clip(RoundedCornerShape(2.dp))
+                    .background(Color.White.copy(alpha = 0.2f)))
+            }
+        }
+    ) {
+        // DatePicker overlays any page
+        if (showDatePicker) {
+            val dpState = rememberDatePickerState()
+            DatePickerDialog(
+                onDismissRequest = { showDatePicker = false },
+                confirmButton = {
+                    TextButton(onClick = {
+                        dpState.selectedDateMillis?.let { millis ->
+                            draftDob = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(millis))
+                        }
+                        showDatePicker = false
+                    }) { Text("OK", color = primaryColor) }
+                },
+                dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("Cancel", color = primaryColor) } }
+            ) { DatePicker(state = dpState) }
+        }
+
+        // ── Page dot indicator ──────────────────────────────────────────────
+        @Composable
+        fun PageDots() {
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                repeat(3) { i ->
+                    Box(Modifier.size(if (i == currentPage) 8.dp else 5.dp).clip(CircleShape)
+                        .background(if (i == currentPage) primaryColor else Color.White.copy(alpha = 0.25f)))
+                }
+            }
+        }
+
+        // ── Page 0: Scores ──────────────────────────────────────────────────
+        if (currentPage == 0) {
+            Column(
+                modifier = Modifier.fillMaxWidth().navigationBarsPadding().imePadding()
+                    .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Header
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Scores", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+                        Text("${student.name}  ·  ${student.class_name}", color = TextMuted, fontSize = 11.sp)
+                    }
+                    PageDots()
+                }
+
+                // Score inputs
+                Surface(shape = RoundedCornerShape(14.dp), color = Color(0xFF1A1F3A),
+                    border = BorderStroke(1.dp, GlassBorder), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Grades: ${student.subject.uppercase()}", color = primaryColor,
+                            fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+                        scoreComponents.chunked(2).forEach { row ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                row.forEach { comp ->
+                                    Column(Modifier.weight(1f)) {
+                                        Text("${comp.label} (Max ${comp.max})", color = TextMuted,
+                                            fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(bottom = 4.dp))
+                                        OutlinedTextField(
+                                            value = tempScores[comp.key] ?: "",
+                                            onValueChange = { v ->
+                                                val f = v.filter { it.isDigit() }
+                                                if (f.isEmpty() || (f.toIntOrNull() ?: 0) <= comp.max) tempScores[comp.key] = f
+                                            },
+                                            modifier = Modifier.fillMaxWidth(), singleLine = true,
+                                            textStyle = TextStyle(color = Color.White, fontSize = 16.sp, textAlign = TextAlign.Center),
+                                            colors = outlinedSheetColors(primaryColor),
+                                            shape = RoundedCornerShape(10.dp),
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                        )
+                                    }
+                                }
+                                if (row.size < 2) Spacer(Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+
+                // Footer
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = { doSave() }, modifier = Modifier.weight(1f).height(50.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                        shape = RoundedCornerShape(14.dp),
+                        enabled = draftName.isNotBlank() && selectedSubjects.isNotEmpty()
+                    ) { Text("Save", fontWeight = FontWeight.Bold) }
+                    OutlinedButton(onClick = { currentPage = 1 }, modifier = Modifier.weight(1f).height(50.dp),
+                        shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, primaryColor)
+                    ) {
+                        Text("Bio Data", color = primaryColor, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.width(4.dp))
+                        Icon(Icons.Default.ArrowForward, null, tint = primaryColor, modifier = Modifier.size(14.dp))
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+
+        // ── Page 1: Profile Details ─────────────────────────────────────────
+        if (currentPage == 1) {
+            Column(
+                modifier = Modifier.fillMaxWidth().navigationBarsPadding().imePadding()
+                    .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Header
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { currentPage = 0 }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.ArrowBack, null, tint = Color.White)
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Profile Details", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+                        Text(student.name, color = TextMuted, fontSize = 11.sp)
+                    }
+                    PageDots()
+                }
+
+                // Photo
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(Modifier.size(90.dp).clip(CircleShape).background(primaryColor.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center) {
+                        if (draftBitmap != null) {
+                            Image(draftBitmap!!.asImageBitmap(), null,
+                                modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+                        } else Icon(Icons.Default.Person, null, tint = primaryColor, modifier = Modifier.size(36.dp))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(shape = RoundedCornerShape(20.dp), color = primaryColor.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.4f)),
+                            modifier = Modifier.clickable { launchCamera() }) {
+                            Row(Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(Icons.Default.CameraAlt, null, tint = primaryColor, modifier = Modifier.size(14.dp))
+                                Text("Camera", color = primaryColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFF2A2F55),
+                            border = BorderStroke(1.dp, GlassBorder),
+                            modifier = Modifier.clickable { launchGallery() }) {
+                            Row(Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(Icons.Default.PhotoLibrary, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(14.dp))
+                                Text("Gallery", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+
+                OutlinedTextField(value = draftName, onValueChange = { draftName = it },
+                    label = { Text("Full Name *", color = TextMuted) }, modifier = Modifier.fillMaxWidth(),
+                    singleLine = true, colors = outlinedSheetColors(primaryColor), shape = RoundedCornerShape(14.dp))
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = draftReg, onValueChange = { draftReg = it },
+                        label = { Text("Reg No *", color = TextMuted) }, modifier = Modifier.weight(1f),
+                        singleLine = true, colors = outlinedSheetColors(primaryColor), shape = RoundedCornerShape(12.dp))
+                    OutlinedTextField(value = draftAdmission, onValueChange = { draftAdmission = it },
+                        label = { Text("Admission No", color = TextMuted) }, modifier = Modifier.weight(1f),
+                        singleLine = true, colors = outlinedSheetColors(primaryColor), shape = RoundedCornerShape(12.dp))
+                }
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Gender", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(4.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("Male", "Female").forEach { g ->
+                                FilterChip(selected = draftGender == g, onClick = { draftGender = g },
+                                    label = { Text(g, fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = primaryColor, selectedLabelColor = Color.White,
+                                        containerColor = GlassWhite, labelColor = TextMuted))
+                            }
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("Date of Birth *", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(4.dp))
+                        OutlinedButton(onClick = { showDatePicker = true },
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, if (draftDob.isBlank()) GlassBorder else primaryColor)) {
+                            Icon(Icons.Default.CalendarMonth, null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (draftDob.isBlank()) "Select" else draftDob, fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                Text("Parent / Guardian", color = TextMuted, fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
+                OutlinedTextField(value = parentName, onValueChange = { parentName = it },
+                    label = { Text("Parent / Guardian Name (optional)", color = TextMuted) },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    colors = outlinedSheetColors(primaryColor), shape = RoundedCornerShape(14.dp))
+                OutlinedTextField(value = parentEmail, onValueChange = { parentEmail = it },
+                    label = { Text("Parent Email", color = TextMuted) }, modifier = Modifier.fillMaxWidth(),
+                    singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                    colors = outlinedSheetColors(primaryColor), shape = RoundedCornerShape(14.dp))
+                OutlinedTextField(value = parentPhone, onValueChange = { parentPhone = it },
+                    label = { Text("Parent Phone", color = TextMuted) }, modifier = Modifier.fillMaxWidth(),
+                    singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    colors = outlinedSheetColors(primaryColor), shape = RoundedCornerShape(14.dp))
+
+                // Footer
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = { doSave() }, modifier = Modifier.weight(1f).height(50.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                        shape = RoundedCornerShape(14.dp),
+                        enabled = draftName.isNotBlank() && selectedSubjects.isNotEmpty()
+                    ) { Text("Save", fontWeight = FontWeight.Bold) }
+                    OutlinedButton(onClick = { currentPage = 2 }, modifier = Modifier.weight(1f).height(50.dp),
+                        shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, primaryColor)) {
+                        Text("Subjects", color = primaryColor, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.width(4.dp))
+                        Icon(Icons.Default.ArrowForward, null, tint = primaryColor, modifier = Modifier.size(14.dp))
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+
+        // ── Page 2: Enrolled Subjects ───────────────────────────────────────
+        if (currentPage == 2) {
+            Column(
+                modifier = Modifier.fillMaxWidth().navigationBarsPadding().imePadding()
+                    .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Header
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { currentPage = 1 }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.ArrowBack, null, tint = Color.White)
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Enrolled Subjects", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+                        Text("${selectedSubjects.size} selected", color = TextMuted, fontSize = 11.sp)
+                    }
+                    PageDots()
+                }
+
+                if (masterSubjectsList.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        masterSubjectsList.chunked(2).forEach { row ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                row.forEach { subject ->
+                                    val isSel = subject in selectedSubjects
+                                    Surface(
+                                        modifier = Modifier.weight(1f).height(50.dp).clickable {
+                                            selectedSubjects = if (isSel) selectedSubjects - subject else selectedSubjects + subject
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (isSel) primaryColor else Color(0xFF1A1F3A),
+                                        border = BorderStroke(1.dp, if (isSel) primaryColor else GlassBorder)
+                                    ) {
+                                        Row(Modifier.fillMaxSize().padding(horizontal = 14.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween) {
+                                            Text(subject, color = Color.White, fontSize = 12.sp,
+                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f))
+                                            if (isSel) Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                        }
+                                    }
+                                }
+                                if (row.size == 1) Spacer(Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+
+                Button(onClick = { doSave() }, modifier = Modifier.fillMaxWidth().height(56.dp),
+                    enabled = draftName.isNotBlank() && selectedSubjects.isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                    shape = RoundedCornerShape(16.dp)) {
+                    Text("Save Updates", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(8.dp))
+            }
         }
     }
 }
@@ -1312,6 +1845,8 @@ fun ClassGroupHeader(className: String, studentCount: Int, students: List<Studen
 fun AddStudentSheet(
     primaryColor: Color,
     preselectedClass: String,
+    classList: List<String>,
+    onClassChange: (String) -> Unit,
     planModules: List<String>,
     draftName: String, onNameChange: (String) -> Unit,
     draftReg: String, onRegChange: (String) -> Unit,
@@ -1320,7 +1855,7 @@ fun AddStudentSheet(
     draftDob: String, onDobChange: (String) -> Unit,
     draftPhotoUri: android.net.Uri?, onPhotoUriChange: (android.net.Uri?) -> Unit,
     draftBitmap: android.graphics.Bitmap?, onBitmapChange: (android.graphics.Bitmap?) -> Unit,
-    draftPhotoCaptured: Boolean, onPhotoCapturedChange: (Boolean) -> Unit,
+    @Suppress("UNUSED_PARAMETER") draftPhotoCaptured: Boolean, onPhotoCapturedChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
     onNext: (name: String, photo: String?, regNo: String?, admissionNo: String?, gender: String?, dob: String?) -> Unit
 ) {
@@ -1338,18 +1873,23 @@ fun AddStudentSheet(
 
     val hasPhotoModule = planModules.any { it.equals("student_photo", ignoreCase = true) }
     val isValid = draftName.isNotBlank() && draftReg.isNotBlank() && draftDob.isNotBlank()
+    var bitmapToCropAdd by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var lastCameraUri by remember { mutableStateOf<Uri?>(null) }
 
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-        if (success && draftPhotoUri != null) {
-            context.contentResolver.openInputStream(draftPhotoUri!!)?.use { stream ->
-                BitmapFactory.decodeStream(stream)
-            }?.let { bmp ->
-                val scale = 400f / maxOf(bmp.width, bmp.height)
-                val resized = if (scale < 1f) android.graphics.Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true) else bmp
-                onBitmapChange(resized)
-                onPhotoCapturedChange(true)
-            }
+        NexusApp.intentInProgress = false
+        val capturedUri = lastCameraUri
+        if (success && capturedUri != null) {
+            context.contentResolver.openInputStream(capturedUri)?.use { BitmapFactory.decodeStream(it) }
+                ?.let { bmp -> bitmapToCropAdd = correctBitmapRotation(bmp, capturedUri, context) }
         }
+    }
+
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        NexusApp.intentInProgress = false
+        uri ?: return@rememberLauncherForActivityResult
+        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+            ?.let { bmp -> bitmapToCropAdd = bmp }
     }
 
     fun launchCamera() {
@@ -1359,7 +1899,27 @@ fun AddStudentSheet(
         )
         val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", imageFile)
         onPhotoUriChange(uri)
+        lastCameraUri = uri
+        NexusApp.intentInProgress = true
         cameraLauncher.launch(uri)
+    }
+
+    fun launchGallery() {
+        NexusApp.intentInProgress = true
+        galleryLauncher.launch("image/*")
+    }
+
+    // Show crop dialog when a raw bitmap is ready
+    bitmapToCropAdd?.let { rawBitmap ->
+        PhotoCropDialog(
+            bitmap    = rawBitmap,
+            onCrop = { cropped ->
+                onBitmapChange(cropped)
+                onPhotoCapturedChange(true)
+                bitmapToCropAdd = null
+            },
+            onDismiss = { bitmapToCropAdd = null }
+        )
     }
 
     ModalBottomSheet(
@@ -1426,13 +1986,52 @@ fun AddStudentSheet(
                 .padding(horizontal = 24.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Title
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Title with Class Dropdown Selection
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.weight(1f)) {
                     Text("Student Bio (1/2)", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
                     Text("Basic identity details", color = TextMuted, fontSize = 11.sp)
                 }
-                if (preselectedClass.isNotBlank()) {
+                if (classList.isNotEmpty()) {
+                    var expanded by remember { mutableStateOf(false) }
+                    Box {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = primaryColor.copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.4f)),
+                            modifier = Modifier.clickable { expanded = !expanded }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(preselectedClass.ifBlank { "Select Class" }, color = primaryColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = if (expanded) Icons.TwoTone.KeyboardArrowUp else Icons.TwoTone.KeyboardArrowDown,
+                                    contentDescription = null,
+                                    tint = primaryColor,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false },
+                            modifier = Modifier.background(Color(0xFF1A1F3A))
+                        ) {
+                            classList.forEach { cls ->
+                                DropdownMenuItem(
+                                    text = { Text(cls, color = Color.White, fontSize = 13.sp) },
+                                    onClick = {
+                                        onClassChange(cls)
+                                        expanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                } else if (preselectedClass.isNotBlank()) {
                     Surface(shape = RoundedCornerShape(20.dp),
                         color = primaryColor.copy(alpha = 0.2f),
                         border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.4f))) {
@@ -1443,27 +2042,66 @@ fun AddStudentSheet(
             }
 
             // Photo
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                Box(contentAlignment = Alignment.BottomEnd) {
-                    Box(
-                        modifier = Modifier.size(90.dp).clip(CircleShape)
-                            .background(primaryColor.copy(alpha = 0.15f))
-                            .clickable {
-                                if (hasPhotoModule) launchCamera()
-                                else android.widget.Toast.makeText(context, "Student photos require the Diamond tier. Upgrade in the Desktop Hub.", android.widget.Toast.LENGTH_LONG).show()
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (draftPhotoCaptured) Text("✅", fontSize = 32.sp)
-                        else Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.Person, null, tint = if (hasPhotoModule) primaryColor else TextMuted, modifier = Modifier.size(36.dp))
+            Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Avatar circle
+                Box(
+                    modifier = Modifier.size(90.dp).clip(CircleShape)
+                        .background(primaryColor.copy(alpha = 0.15f))
+                        .clickable {
+                            if (hasPhotoModule) launchCamera()
+                            else android.widget.Toast.makeText(context, "Student photos require the Diamond tier. Upgrade in the Desktop Hub.", android.widget.Toast.LENGTH_LONG).show()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (draftBitmap != null) {
+                        Image(
+                            bitmap = draftBitmap.asImageBitmap(),
+                            contentDescription = "Student Photo",
+                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.Person, null,
+                                tint = if (hasPhotoModule) primaryColor else TextMuted,
+                                modifier = Modifier.size(36.dp))
                             if (!hasPhotoModule) Text("Silver Plan", color = TextMuted, fontSize = 9.sp)
                         }
                     }
-                    if (hasPhotoModule) {
-                        Box(modifier = Modifier.size(28.dp).clip(CircleShape).background(primaryColor).clickable { launchCamera() },
-                            contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.CameraAlt, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                }
+                // Camera / Gallery row (only shown when the photo module is enabled)
+                if (hasPhotoModule) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = primaryColor.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.4f)),
+                            modifier = Modifier.clickable { launchCamera() }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.CameraAlt, contentDescription = "Camera", tint = primaryColor, modifier = Modifier.size(14.dp))
+                                Text("Camera", color = primaryColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = Color(0xFF2A2F55),
+                            border = BorderStroke(1.dp, GlassBorder),
+                            modifier = Modifier.clickable { launchGallery() }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.PhotoLibrary, contentDescription = "Gallery", tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(14.dp))
+                                Text("Gallery", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
                         }
                     }
                 }
@@ -1561,11 +2199,12 @@ fun SubjectEnrollmentScreen(
     availableSubjects: List<String>,
     planModules: List<String>,
     onBack: () -> Unit,
-    onRegister: (subjects: List<String>, email: String?, phone: String?) -> Unit
+    onRegister: (subjects: List<String>, parentName: String?, email: String?, phone: String?) -> Unit
 ) {
     val requiresParentContact = planModules.any { it.equals("parent_contact", ignoreCase = true) }
 
     var selectedSubjects by remember { mutableStateOf(availableSubjects.toSet()) }
+    var parentName       by remember { mutableStateOf("") }
     var parentEmail      by remember { mutableStateOf("") }
     var parentPhone      by remember { mutableStateOf("") }
     var manualInput      by remember { mutableStateOf("") }
@@ -1688,7 +2327,7 @@ fun SubjectEnrollmentScreen(
                 // Parent Contact
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Parent Contact", color = TextMuted, fontSize = 12.sp,
+                        Text("Parent / Guardian", color = TextMuted, fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                         Surface(shape = RoundedCornerShape(20.dp),
                             color = if (requiresParentContact) WarnAmber.copy(alpha = 0.15f) else GlassWhite) {
@@ -1698,6 +2337,12 @@ fun SubjectEnrollmentScreen(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
                         }
                     }
+                    OutlinedTextField(
+                        value = parentName, onValueChange = { parentName = it },
+                        label = { Text("Parent / Guardian Name (optional)", color = TextMuted) },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        colors = outlinedSheetColors(primaryColor), shape = RoundedCornerShape(14.dp)
+                    )
                     OutlinedTextField(
                         value = parentEmail, onValueChange = { parentEmail = it },
                         label = { Text("Parent Email${if (requiresParentContact) " *" else " (optional)"}", color = TextMuted) },
@@ -1723,7 +2368,7 @@ fun SubjectEnrollmentScreen(
             color = Color(0xFF111530), tonalElevation = 8.dp
         ) {
             Button(
-                onClick = { onRegister(selectedSubjects.toList(), parentEmail.ifBlank { null }, parentPhone.ifBlank { null }) },
+                onClick = { onRegister(selectedSubjects.toList(), parentName.ifBlank { null }, parentEmail.ifBlank { null }, parentPhone.ifBlank { null }) },
                 modifier = Modifier.fillMaxWidth().navigationBarsPadding()
                     .padding(horizontal = 20.dp, vertical = 14.dp).height(56.dp),
                 enabled = isValid,
@@ -1837,12 +2482,14 @@ fun SettingsScreen(onDisconnect: () -> Unit) {
     val schoolName  = remember { identity.getSchoolName() }
     val teacherName = remember { identity.getTeacherName() }
     val serverInfo  = remember { identity.getServerInfo() }
-    val tierModules = remember { identity.getTierModules() }
 
-    val tier = when {
-        tierModules.any { it.equals("custom_result", ignoreCase = true) }  -> "💎 Diamond"
-        tierModules.any { it.equals("parent_contact", ignoreCase = true) } -> "🥇 Gold"
-        else -> "🥈 Silver"
+    val tierRaw = remember { identity.getPlanTier() }
+    val tier = when (tierRaw.lowercase()) {
+        "diamond"    -> "💎 Diamond"
+        "gold"       -> "🥇 Gold"
+        "silver"     -> "🥈 Silver"
+        "standalone" -> "📦 Standalone"
+        else         -> "⭐ $tierRaw"
     }
 
     LazyColumn(

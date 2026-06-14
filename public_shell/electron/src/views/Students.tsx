@@ -50,6 +50,11 @@ export function Students() {
   const [customSubjectInput, setCustomSubjectInput] = useState('');
   const [formLog, setFormLog] = useState<{ text: string; isError: boolean } | null>(null);
 
+  // Settings Panel State
+  const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
+  const [mobileRegLocked, setMobileRegLocked] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+
   // Autocomplete for Class
   const [classSuggestions, setClassSuggestions] = useState<string[]>([]);
   const [csvStatus, setCsvStatus] = useState<string | null>(null);
@@ -106,6 +111,19 @@ export function Students() {
       }
     };
     loadSuggestions();
+  }, []);
+
+  // Load student directory settings on mount
+  useEffect(() => {
+    const loadStudentSettings = async () => {
+      try {
+        const res = await window.electronAPI?.students?.getSettings();
+        if (res?.ok) setMobileRegLocked(res.mobile_registration_locked ?? false);
+      } catch (err) {
+        console.error('Error loading student settings:', err);
+      }
+    };
+    loadStudentSettings();
   }, []);
 
   // Handle CSV Loaded notification
@@ -429,8 +447,56 @@ export function Students() {
           >
             + Add Student
           </button>
+
+          {/* Settings Button */}
+          <button
+            id="btn-students-settings-toggle"
+            onClick={() => setIsSettingsPanelOpen(true)}
+            title="Student Directory Settings"
+            style={{
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid var(--glass-border)',
+              color: 'var(--text-dim)',
+              padding: '8px 10px',
+              borderRadius: 'var(--radius-sm)',
+              cursor: 'pointer',
+              fontSize: '16px',
+              lineHeight: 1,
+              display: 'flex',
+              alignItems: 'center',
+              transition: 'background 0.2s, color 0.2s',
+            }}
+            onMouseOver={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#fff'; }}
+            onMouseOut={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = 'var(--text-dim)'; }}
+          >
+            ⚙️
+          </button>
         </div>
       </div>
+
+      {/* Mobile Registration Lock Banner */}
+      {mobileRegLocked && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          background: 'rgba(239,68,68,0.08)',
+          border: '1px solid rgba(239,68,68,0.3)',
+          padding: '10px 16px',
+          borderRadius: 'var(--radius-sm)',
+          fontSize: '12px',
+          color: '#fca5a5',
+        }}>
+          <span style={{ fontSize: '16px' }}>🔒</span>
+          <span><strong>Mobile student registration is disabled.</strong> Mobile devices cannot add new students while this lock is active. Existing sync and grade updates are unaffected.</span>
+          <button
+            onClick={() => setIsSettingsPanelOpen(true)}
+            style={{ marginLeft: 'auto', background: 'none', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5', padding: '4px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', whiteSpace: 'nowrap' }}
+          >
+            Manage →
+          </button>
+        </div>
+      )}
 
       {csvStatus && (
         <div style={{
@@ -1089,6 +1155,136 @@ export function Students() {
             </div>
           </div>
         </div>
+      )}
+      {/* ── Student Settings Panel ─────────────────────────────────────────── */}
+      {isSettingsPanelOpen && (
+        <>
+          {/* Backdrop */}
+          <div
+            onClick={() => setIsSettingsPanelOpen(false)}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 1999,
+              background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)',
+            }}
+          />
+
+          {/* Panel */}
+          <div style={{
+            position: 'fixed', top: 0, right: 0, width: '380px', height: '100vh',
+            background: 'var(--bg-dark, #0d1128)',
+            borderLeft: '1px solid var(--glass-border)',
+            zIndex: 2000,
+            display: 'flex', flexDirection: 'column',
+            boxShadow: '-12px 0 40px rgba(0,0,0,0.6)',
+            animation: 'slideInRight 0.25s cubic-bezier(0.4,0,0.2,1)',
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '20px 24px 16px',
+              borderBottom: '1px solid var(--glass-border)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              flexShrink: 0,
+            }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--text-main)' }}>⚙️ Student Directory Settings</h3>
+                <p style={{ margin: '4px 0 0', fontSize: '11px', color: 'var(--text-dim)' }}>Configure student management policies.</p>
+              </div>
+              <button
+                onClick={() => setIsSettingsPanelOpen(false)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '20px', lineHeight: 1, padding: '4px' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+
+              {/* Section label */}
+              <p style={{ fontSize: '10px', fontWeight: 700, color: 'var(--accent-gold, #FFD700)', textTransform: 'uppercase', letterSpacing: '0.12em', margin: '0 0 16px' }}>Mobile Companion Controls</p>
+
+              {/* Toggle Row */}
+              <div style={{
+                background: 'rgba(255,255,255,0.03)',
+                border: '1px solid var(--glass-border)',
+                borderRadius: 'var(--radius-md)',
+                padding: '16px 18px',
+                display: 'flex', alignItems: 'flex-start', gap: '14px',
+              }}>
+                {/* Toggle Switch */}
+                <div
+                  onClick={() => setMobileRegLocked(v => !v)}
+                  style={{
+                    width: '40px', height: '22px', borderRadius: '11px', flexShrink: 0, marginTop: '2px',
+                    background: mobileRegLocked ? 'rgba(239,68,68,0.8)' : 'rgba(0,229,255,0.7)',
+                    position: 'relative', cursor: 'pointer',
+                    transition: 'background 0.25s',
+                    boxShadow: mobileRegLocked ? '0 0 10px rgba(239,68,68,0.35)' : '0 0 10px rgba(0,229,255,0.25)',
+                  }}
+                >
+                  <div style={{
+                    position: 'absolute', top: '3px',
+                    left: mobileRegLocked ? '21px' : '3px',
+                    width: '16px', height: '16px', borderRadius: '50%',
+                    background: '#fff',
+                    transition: 'left 0.25s cubic-bezier(0.4,0,0.2,1)',
+                    boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
+                  }} />
+                </div>
+
+                <div style={{ flex: 1 }}>
+                  <p style={{ margin: '0 0 4px', fontSize: '13px', fontWeight: 600, color: 'var(--text-main)' }}>
+                    {mobileRegLocked ? '🔒 Mobile Registration Locked' : '🔓 Mobile Registration Enabled'}
+                  </p>
+                  <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.5 }}>
+                    {mobileRegLocked
+                      ? 'Mobile companion devices cannot add new students. Existing sync, grade updates, and attendance are still allowed.'
+                      : 'Mobile companion devices can register new students into the school database during sync.'}
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ height: '1px', background: 'var(--glass-border)', margin: '24px 0' }} />
+
+              <p style={{ fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
+                <strong style={{ color: 'var(--text-main)' }}>Note:</strong> This only restricts <em>new student registration</em> from mobile. Teachers can still submit grades and sync attendance normally. Changes take effect immediately on the next sync from any mobile device.
+              </p>
+
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              padding: '16px 24px',
+              borderTop: '1px solid var(--glass-border)',
+              flexShrink: 0, display: 'flex', gap: '10px',
+            }}>
+              <button
+                onClick={() => setIsSettingsPanelOpen(false)}
+                className="secondary-btn"
+                style={{ flex: 1, justifyContent: 'center', padding: '11px' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setSettingsSaving(true);
+                  try {
+                    const res = await window.electronAPI?.students?.saveSettings({ mobile_registration_locked: mobileRegLocked });
+                    if (res?.ok) setIsSettingsPanelOpen(false);
+                    else alert('Failed to save settings.');
+                  } finally {
+                    setSettingsSaving(false);
+                  }
+                }}
+                className="primary-btn"
+                style={{ flex: 1, justifyContent: 'center', padding: '11px' }}
+                disabled={settingsSaving}
+              >
+                {settingsSaving ? 'Saving…' : 'Save Settings'}
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

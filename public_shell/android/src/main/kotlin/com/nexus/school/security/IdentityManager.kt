@@ -96,6 +96,14 @@ class IdentityManager(context: Context) {
             .apply()
     }
 
+    fun saveDeviceModel(model: String) {
+        prefs.edit().putString("device_model", model).apply()
+    }
+
+    fun getDeviceModel(): String {
+        return prefs.getString("device_model", android.os.Build.MODEL) ?: android.os.Build.MODEL
+    }
+
     fun getTeacherId(): String {
         return prefs.getString("teacher_id", "TCH-001") ?: "TCH-001"
     }
@@ -163,6 +171,41 @@ class IdentityManager(context: Context) {
         return str.split("|").filter { it.isNotBlank() }
     }
 
+    /**
+     * Saves a map of className → pipe-delimited subjects sent from the Hub handshake.
+     * Stored as JSON so it survives process restarts without a new handshake.
+     */
+    fun saveClassSubjectsMap(classSubjects: Map<String, List<String>>) {
+        val json = org.json.JSONObject()
+        classSubjects.forEach { (cls, subjects) ->
+            json.put(cls, subjects.joinToString("|"))
+        }
+        prefs.edit().putString("class_subjects_map", json.toString()).apply()
+    }
+
+    /**
+     * Returns the subjects registered for [className], or falls back to the flat
+     * master subject list if no class-specific data is available.
+     */
+    fun getSubjectsForClass(className: String): List<String> {
+        val json = try {
+            org.json.JSONObject(prefs.getString("class_subjects_map", "{}") ?: "{}")
+        } catch (e: Exception) { return getMasterSubjectList() }
+
+        val raw = json.optString(className, "")
+        if (raw.isNotBlank()) return raw.split("|").filter { it.isNotBlank() }
+
+        // Level-based fallback: if no exact match, try same level (JSS vs SS)
+        val isJss = className.uppercase().startsWith("JSS") || className.uppercase().startsWith("JS")
+        val levelKey = json.keys().asSequence().firstOrNull { k ->
+            if (isJss) k.uppercase().startsWith("JSS") || k.uppercase().startsWith("JS")
+            else k.uppercase().startsWith("SS")
+        }
+        if (levelKey != null) return json.optString(levelKey, "").split("|").filter { it.isNotBlank() }
+
+        return getMasterSubjectList()
+    }
+
     fun saveTeacherAssignedSubjects(subjects: List<String>) {
         prefs.edit().putString("teacher_assigned_subjects", subjects.joinToString("|")).apply()
     }
@@ -209,6 +252,26 @@ class IdentityManager(context: Context) {
     /** Returns true if the school's license includes this module key. */
     fun isModuleEnabled(moduleKey: String): Boolean {
         return getTierModules().any { it.trim().equals(moduleKey, ignoreCase = true) }
+    }
+
+    /** Persists the plan tier label sent by the server ("Standalone", "Silver", "Gold", "Diamond"). */
+    fun savePlanTier(tier: String) {
+        prefs.edit().putString("plan_tier", tier).apply()
+    }
+
+    /** Returns the saved plan tier, or "Silver" as a safe fallback. */
+    fun getPlanTier(): String {
+        return prefs.getString("plan_tier", null)?.ifBlank { null } ?: inferTierFromModules()
+    }
+
+    private fun inferTierFromModules(): String {
+        val mods = getTierModules()
+        return when {
+            mods.any { it.equals("custom_result", true) }  -> "Diamond"
+            mods.any { it.equals("parent_contact", true) } -> "Gold"
+            mods.isNotEmpty()                               -> "Silver"
+            else                                            -> "Standalone"
+        }
     }
 
     /**

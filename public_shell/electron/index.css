@@ -1923,4 +1923,85 @@ code {
     transform: translateY(-1px) !important;
 }
 
+/* Premium Gating Overhaul */
+.premium-locked-item {
+  position: relative;
+  border: 1px solid transparent;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Default hover (Gold) */
+.premium-locked-item:hover,
+.premium-locked-item.gold-locked:hover {
+  background: rgba(212, 175, 55, 0.05) !important;
+  border-color: rgba(212, 175, 55, 0.25) !important;
+  box-shadow: 0 0 12px rgba(212, 175, 55, 0.1) !important;
+  color: #ffd700 !important;
+}
+
+/* Diamond hover */
+.premium-locked-item.diamond-locked:hover {
+  background: rgba(0, 229, 255, 0.05) !important;
+  border-color: rgba(0, 229, 255, 0.25) !important;
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.1) !important;
+  color: #00e5ff !important;
+}
+
+/* Tier badge base */
+.nav-tier-badge {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-left: auto;
+  margin-right: 6px;
+}
+
+/* Gold Badge (Default) */
+.nav-tier-badge,
+.nav-tier-badge.gold-badge {
+  color: #ffd700;
+  background: rgba(212, 175, 55, 0.12);
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  box-shadow: 0 0 8px rgba(212, 175, 55, 0.08);
+}
+
+.premium-locked-item:hover .nav-tier-badge,
+.premium-locked-item.gold-locked:hover .nav-tier-badge.gold-badge {
+  background: #ffd700;
+  color: #0d1235;
+  box-shadow: 0 0 10px rgba(212, 175, 55, 0.3);
+}
+
+/* Diamond Badge */
+.nav-tier-badge.diamond-badge {
+  color: #00e5ff;
+  background: rgba(0, 229, 255, 0.12);
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.08);
+}
+
+.premium-locked-item.diamond-locked:hover .nav-tier-badge.diamond-badge {
+  background: #00e5ff;
+  color: #0d1235;
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
+}
+
+/* Wiggle animation for lock icon on hover */
+.lock-wiggle {
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+
+.premium-locked-item:hover .lock-wiggle {
+  animation: lockWiggle 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes lockWiggle {
+  0% { transform: rotate(-8deg); }
+  100% { transform: rotate(8deg); }
+}
+
 

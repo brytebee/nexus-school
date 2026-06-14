@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLicense } from '../hooks/useLicense';
 
 interface StudentResult {
   id: string;
@@ -16,6 +17,7 @@ interface StudentResult {
 // Map template IDs → PNG preview filenames (mirrors printhub.js updateTemplatePreview)
 const TEMPLATE_IMG_MAP: Record<string, string> = {
   clean_slate: 'classic',
+  class_photo: 'classic',
   prestige:    'prestige',
   azure:       'azure',
   royal:       'royal',
@@ -28,8 +30,17 @@ const TEMPLATE_IMG_MAP: Record<string, string> = {
 const PAID_TEMPLATES = ['prestige', 'azure', 'royal', 'monarch', 'sovereign', 'sterling', 'apex'];
 
 export function ResultStudio() {
-  const [tier, setTier] = useState('Silver');
+  const { license } = useLicense();
+  const tier = license?.tier || 'Silver';
   const [loading, setLoading] = useState(false);
+
+  const isTemplateLocked = (tpl: string) => {
+    if (tpl === 'clean_slate' || tpl === 'class_photo') return false;
+    if (tier === 'Standalone') return true;
+    if (tier === 'Silver') return ['royal', 'monarch', 'sovereign', 'sterling', 'apex'].includes(tpl);
+    if (tier === 'Gold') return ['sovereign', 'sterling', 'apex'].includes(tpl);
+    return false;
+  };
 
   // Form selections
   const [reportType, setReportType] = useState(() => sessionStorage.getItem('rs_report_type') || 'terminal');
@@ -79,16 +90,15 @@ export function ResultStudio() {
     setLoading(true);
     try {
       const identity = await window.electronAPI.getIdentity();
-      const currentTier = identity?.tier || 'Silver';
-      setTier(currentTier);
-
       if (identity?.themePrimary) setBrandPrimary(identity.themePrimary);
       if (identity?.themeSecondary) setBrandSecondary(identity.themeSecondary);
 
-      if (currentTier === 'Silver') setScope('all');
+      if (tier === 'Silver' || tier === 'Standalone') setScope('all');
 
       const cfg = await window.electronAPI.getTermConfig();
-      if (cfg?.template) setTemplate(cfg.template);
+      if (cfg?.template) {
+        setTemplate(isTemplateLocked(cfg.template) ? 'clean_slate' : cfg.template);
+      }
       if (cfg?.term) setCurrentTerm(cfg.term);
 
       const meta = await window.electronAPI.getUniqueMetadata();
@@ -116,7 +126,7 @@ export function ResultStudio() {
   }, []);
 
   const handleScopeChange = (newScope: string) => {
-    if (tier === 'Silver') { setScope('all'); return; }
+    if (tier === 'Silver' || tier === 'Standalone') { setScope('all'); return; }
     setScope(newScope);
   };
 
@@ -305,7 +315,7 @@ export function ResultStudio() {
               {genStatus}
             </span>
           )}
-          {tier === 'Silver' && (
+          {(tier === 'Silver' || tier === 'Standalone') && (
             <div style={{
               background: 'rgba(255,200,0,0.08)',
               border: '1px solid rgba(255,200,0,0.22)',
@@ -318,7 +328,7 @@ export function ResultStudio() {
               gap: '8px'
             }}>
               <span>⭐</span>
-              <span><strong>Silver Plan</strong> — Scope locked to <em>Entire School</em>. Upgrade to Gold for granular reports.</span>
+              <span><strong>{tier === 'Standalone' ? 'Standalone Pack' : 'Silver Plan'}</strong> — Scope locked to <em>Entire School</em>. Upgrade to Gold for granular reports.</span>
             </div>
           )}
         </div>
@@ -357,13 +367,28 @@ export function ResultStudio() {
                 disabled={reportType === 'portal_card'}
               >
                 <option value="clean_slate">🎨 Classic (Free)</option>
-                <option value="prestige">⭐ Prestige (Silver)</option>
-                <option value="azure">⭐ Azure Edge (Silver)</option>
-                <option value="royal">⭐⭐ Royal (Gold)</option>
-                <option value="monarch">⭐⭐ Monarch (Gold)</option>
-                <option value="sovereign">💎 Sovereign (Diamond)</option>
-                <option value="sterling">💎 Sterling (Diamond)</option>
-                <option value="apex">💎 Apex (Diamond)</option>
+                <option value="class_photo">📷 Class Photo (Free)</option>
+                <option value="prestige" disabled={isTemplateLocked('prestige')}>
+                  {isTemplateLocked('prestige') ? '🔒 ' : ''}⭐ Prestige (Silver)
+                </option>
+                <option value="azure" disabled={isTemplateLocked('azure')}>
+                  {isTemplateLocked('azure') ? '🔒 ' : ''}⭐ Azure Edge (Silver)
+                </option>
+                <option value="royal" disabled={isTemplateLocked('royal')}>
+                  {isTemplateLocked('royal') ? '🔒 ' : ''}⭐⭐ Royal (Gold)
+                </option>
+                <option value="monarch" disabled={isTemplateLocked('monarch')}>
+                  {isTemplateLocked('monarch') ? '🔒 ' : ''}⭐⭐ Monarch (Gold)
+                </option>
+                <option value="sovereign" disabled={isTemplateLocked('sovereign')}>
+                  {isTemplateLocked('sovereign') ? '🔒 ' : ''}💎 Sovereign (Diamond)
+                </option>
+                <option value="sterling" disabled={isTemplateLocked('sterling')}>
+                  {isTemplateLocked('sterling') ? '🔒 ' : ''}💎 Sterling (Diamond)
+                </option>
+                <option value="apex" disabled={isTemplateLocked('apex')}>
+                  {isTemplateLocked('apex') ? '🔒 ' : ''}💎 Apex (Diamond)
+                </option>
               </select>
             </div>
 
@@ -428,20 +453,45 @@ export function ResultStudio() {
 
             {/* Scope */}
             <div className="ph-config-group">
-              <label className="ph-label">Scope</label>
+              <label className="ph-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                Scope
+                {(tier === 'Silver' || tier === 'Standalone') && (
+                  <span style={{ fontSize: '10px', color: '#ffd700', background: 'rgba(212,175,55,0.12)', border: '1px solid rgba(212,175,55,0.3)', padding: '1px 6px', borderRadius: '10px', textTransform: 'uppercase', fontWeight: 800 }}>
+                    🔒 Gated to Entire School
+                  </span>
+                )}
+              </label>
               <select
                 className="modern-input"
-                style={{ width: '100%' }}
+                style={{ 
+                  width: '100%',
+                  opacity: (tier === 'Silver' || tier === 'Standalone') ? 0.7 : 1,
+                  cursor: (tier === 'Silver' || tier === 'Standalone') ? 'not-allowed' : 'default',
+                  borderColor: (tier === 'Silver' || tier === 'Standalone') ? 'rgba(212, 175, 55, 0.2)' : undefined
+                }}
                 value={scope}
                 onChange={e => handleScopeChange(e.target.value)}
-                disabled={tier === 'Silver'}
+                disabled={tier === 'Silver' || tier === 'Standalone'}
               >
                 <option value="all">🏫 Entire School</option>
-                <option value="class">🏷️ By Class</option>
-                <option value="teacher">👩‍🏫 By Teacher</option>
-                <option value="subject">📚 By Subject</option>
-                <option value="student">👤 Single Student</option>
+                <option value="class" disabled={tier === 'Silver' || tier === 'Standalone'}>
+                  {tier === 'Silver' || tier === 'Standalone' ? '🔒 ' : ''}🏷️ By Class
+                </option>
+                <option value="teacher" disabled={tier === 'Silver' || tier === 'Standalone'}>
+                  {tier === 'Silver' || tier === 'Standalone' ? '🔒 ' : ''}👩‍🏫 By Teacher
+                </option>
+                <option value="subject" disabled={tier === 'Silver' || tier === 'Standalone'}>
+                  {tier === 'Silver' || tier === 'Standalone' ? '🔒 ' : ''}📚 By Subject
+                </option>
+                <option value="student" disabled={tier === 'Silver' || tier === 'Standalone'}>
+                  {tier === 'Silver' || tier === 'Standalone' ? '🔒 ' : ''}👤 Single Student
+                </option>
               </select>
+              {(tier === 'Silver' || tier === 'Standalone') && (
+                <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '4px', lineHeight: '1.4' }}>
+                  Scope filtering requires a <strong>Gold Plan</strong> or higher.
+                </div>
+              )}
             </div>
 
             {/* Conditional scope pickers */}

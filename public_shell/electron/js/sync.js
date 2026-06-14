@@ -199,20 +199,59 @@
         document.getElementById("bulk-remarks-overlay").style.display = "none";
     }
 
-    function initSyncListeners() {
+    async function initSyncListeners() {
+        const license = await window.electronAPI.getLicenseStatus();
+        const tier = license?.tier || 'Silver';
+        
         const picker = document.getElementById("teacher-picker");
-        if (picker) {
-          picker.onchange = async (e) => {
-            const sel = e.target.options[e.target.selectedIndex];
-            if (sel.value && window.electronAPI?.setTeacher) {
-              // Reset QR skeleton while waiting for new payload
+        const adminQrBtn = document.getElementById("generate-admin-qr-btn");
+        const deviceSlotsIndicator = document.getElementById("device-slots-indicator");
+        
+        if (tier === 'Standalone') {
+          if (picker) picker.style.display = "none";
+          if (adminQrBtn) {
+            adminQrBtn.style.display = "block";
+            adminQrBtn.onclick = async () => {
               document.getElementById("qr-code").style.display = "none";
               document.getElementById("qr-skeleton").style.display = "flex";
-              await window.electronAPI.setTeacher({
-                id: sel.value,
-                name: sel.dataset.name,
-              });
-            }
-          };
+              await window.electronAPI.generateAdminQR();
+            };
+          }
+          if (deviceSlotsIndicator) {
+            deviceSlotsIndicator.style.display = "block";
+            const stats = await window.electronAPI.getDbStats();
+            const count = stats.devices || 0;
+            deviceSlotsIndicator.textContent = `📲 Device Slots: ${count} / 2 used`;
+          }
+          
+          if (window.electronAPI?.onHandshakeComplete) {
+            window.electronAPI.onHandshakeComplete(async () => {
+              if (deviceSlotsIndicator) {
+                const stats = await window.electronAPI.getDbStats();
+                const count = stats.devices || 0;
+                deviceSlotsIndicator.textContent = `📲 Device Slots: ${count} / 2 used`;
+              }
+            });
+          }
+        } else {
+          if (picker) picker.style.display = "block";
+          if (adminQrBtn) adminQrBtn.style.display = "none";
+          if (deviceSlotsIndicator) deviceSlotsIndicator.style.display = "none";
+          
+          if (picker) {
+            picker.onchange = async (e) => {
+              const sel = e.target.options[e.target.selectedIndex];
+              if (sel.value && window.electronAPI?.setTeacher) {
+                // Reset QR skeleton while waiting for new payload
+                document.getElementById("qr-code").style.display = "none";
+                document.getElementById("qr-skeleton").style.display = "flex";
+                await window.electronAPI.setTeacher({
+                  id: sel.value,
+                  name: sel.dataset.name,
+                });
+              }
+            };
+          }
         }
     }
+

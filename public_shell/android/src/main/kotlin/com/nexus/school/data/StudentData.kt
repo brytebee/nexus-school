@@ -24,6 +24,7 @@ data class Student(
     val subject: String = "General",
     // ── Optional fields — plan-gated on Android, persisted locally ────────────
     val photo_base64: String? = null,
+    val parent_name: String? = null,
     val parent_email: String? = null,
     val parent_phone: String? = null,
     

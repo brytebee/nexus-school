@@ -1071,38 +1071,44 @@
                 >ID auto-generated</span
               >
             </h3>
-            <div
-              style="
-                display: grid;
-                grid-template-columns: 2fr 1fr;
-                gap: 10px;
-                margin-bottom: 10px;
-              "
-            >
-              <input
-                id="stu-add-name"
-                class="modern-input"
-                placeholder="Full Name *"
-              />
-              <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                <select id="stu-add-class-level" class="modern-input" style="width: 100%;">
-                  <option value="">Select Level *</option>
-                </select>
-                <select id="stu-add-class-arm" class="modern-input" style="width: 100%;">
-                  <option value="">Select Arm (None)</option>
-                </select>
+            <div style="display: flex; gap: 16px; margin-bottom: 10px;">
+              <!-- Photo Upload Area -->
+              <div style="position: relative; width: 60px; height: 60px; flex-shrink: 0;">
+                <div id="stu-add-photo-preview" style="width: 100%; height: 100%; border-radius: 8px; border: 1px dashed rgba(255, 215, 0, 0.3); background: rgba(0, 0, 0, 0.2); display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: pointer;" onclick="document.getElementById('stu-add-photo-input').click()">
+                  <span style="font-size: 18px; color: rgba(255, 255, 255, 0.4)">📷</span>
+                </div>
+                <input type="file" id="stu-add-photo-input" accept="image/*" style="display: none;" onchange="handleStudentPhotoUpload(this, 'stu-add-photo-preview')" />
+              </div>
+              
+              <!-- Name & Class Fields -->
+              <div style="flex-grow: 1; display: grid; grid-template-columns: 2fr 1fr; gap: 10px;">
+                <input
+                  id="stu-add-name"
+                  class="modern-input"
+                  placeholder="Full Name *"
+                  style="height: 100%"
+                />
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                  <select id="stu-add-class-level" class="modern-input" style="width: 100%; height: 100%;">
+                    <option value="">Select Level *</option>
+                  </select>
+                  <select id="stu-add-class-arm" class="modern-input" style="width: 100%; height: 100%;">
+                    <option value="">Select Arm (None)</option>
+                  </select>
+                </div>
               </div>
             </div>
 
             <div
               style="
                 display: grid;
-                grid-template-columns: 1fr 1fr 1fr;
+                grid-template-columns: 1fr 1fr 1fr 1fr;
                 gap: 10px;
                 margin-bottom: 10px;
               "
             >
               <input id="stu-add-regno" class="modern-input" placeholder="Reg Number" />
+              <input id="stu-add-admissionno" class="modern-input" placeholder="Admission Number" />
               <select id="stu-add-gender" class="modern-input">
                 <option value="">Gender</option>
                 <option value="M">Male</option>
@@ -1341,6 +1347,7 @@
                   <label class="ph-label" style="margin-bottom:6px;">Report Template</label>
                   <select id="ph-template" class="modern-input" style="width:100%;font-size:11px;" onchange="updateTemplatePreview(this.value, 'ph-template-preview')">
                     <option value="clean_slate">🎨 Classic (Free)</option>
+                    <option value="class_photo">📷 Class Photo (Free)</option>
                     <option value="prestige" data-tier="Silver">⭐ Prestige (Silver)</option>
                     <option value="azure" data-tier="Silver">⭐ Azure Edge (Silver)</option>
                     <option value="royal" data-tier="Gold">⭐⭐ Royal (Gold)</option>
@@ -1464,6 +1471,7 @@
                   <label class="ph-label">Template</label>
                   <select id="rs-template" class="modern-input" style="width:200px;font-size:11px;" onchange="updateTemplatePreview(this.value, 'rs-template-preview'); toggleBrandColorOption(this.value)">
                     <option value="clean_slate">🎨 Classic (Free)</option>
+                    <option value="class_photo">📷 Class Photo (Free)</option>
                     <option value="prestige" data-tier="Silver">⭐ Prestige (Silver)</option>
                     <option value="azure" data-tier="Silver">⭐ Azure Edge (Silver)</option>
                     <option value="royal" data-tier="Gold">⭐⭐ Royal (Gold)</option>
@@ -1680,6 +1688,19 @@
                     Select teacher to generate QR…
                   </option>
                 </select>
+                <button
+                  id="generate-admin-qr-btn"
+                  class="modern-btn"
+                  style="display: none; width: 100%; font-size: 14px; margin-top: 10px;"
+                >
+                  Generate Admin QR
+                </button>
+                <div
+                  id="device-slots-indicator"
+                  style="display: none; margin-top: 12px; font-size: 13px; color: var(--accent); font-weight: 600;"
+                >
+                  📲 Device Slots: 0 / 2 used
+                </div>
               </div>
               <div style="margin-bottom: 20px">
                 <label
@@ -3174,6 +3195,21 @@
               >
                 ⚙️ Manage Plan
               </button>
+              <button
+                id="about-upgrade-btn"
+                onclick="window.electronAPI.openExternal('https://nexusos.com.ng/portal')"
+                class="primary-btn"
+                style="
+                  margin-top: 10px;
+                  background: linear-gradient(135deg, #1A237E, #3F51B5);
+                  color: #fff;
+                  box-shadow: none;
+                  justify-content: center;
+                  display: none;
+                "
+              >
+                🚀 Upgrade to a Plan →
+              </button>
             </div>
           </div>
 
@@ -3230,20 +3266,32 @@
           <h3 style="color:#ffd700;font-size:14px;font-weight:700;">✏️ Edit Student</h3>
           <button onclick="closeEditStudent()" style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;line-height:1;">×</button>
         </div>
-        <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-bottom:10px;">
-          <input id="edit-stu-name" class="modern-input" placeholder="Full Name *" />
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-            <select id="edit-stu-class-level" class="modern-input" style="width: 100%;">
-              <option value="">Select Level *</option>
-            </select>
-            <select id="edit-stu-class-arm" class="modern-input" style="width: 100%;">
-              <option value="">Select Arm (None)</option>
-            </select>
+        <div style="display: flex; gap: 16px; margin-bottom: 10px;">
+          <!-- Photo Upload Area -->
+          <div style="position: relative; width: 60px; height: 60px; flex-shrink: 0;">
+            <div id="edit-stu-photo-preview" style="width: 100%; height: 100%; border-radius: 8px; border: 1px dashed rgba(255, 215, 0, 0.3); background: rgba(0, 0, 0, 0.2); display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: pointer;" onclick="document.getElementById('edit-stu-photo-input').click()">
+              <span style="font-size: 18px; color: rgba(255, 255, 255, 0.4)">📷</span>
+            </div>
+            <input type="file" id="edit-stu-photo-input" accept="image/*" style="display: none;" onchange="handleStudentPhotoUpload(this, 'edit-stu-photo-preview')" />
+          </div>
+          
+          <!-- Name & Class Fields -->
+          <div style="flex-grow: 1; display: grid; grid-template-columns: 2fr 1fr; gap: 10px;">
+            <input id="edit-stu-name" class="modern-input" placeholder="Full Name *" style="height: 100%" />
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <select id="edit-stu-class-level" class="modern-input" style="width: 100%; height: 100%;">
+                <option value="">Select Level *</option>
+              </select>
+              <select id="edit-stu-class-arm" class="modern-input" style="width: 100%; height: 100%;">
+                <option value="">Select Arm (None)</option>
+              </select>
+            </div>
           </div>
         </div>
         
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
           <input id="edit-stu-regno" class="modern-input" placeholder="Reg Number" />
+          <input id="edit-stu-admissionno" class="modern-input" placeholder="Admission Number" />
           <select id="edit-stu-gender" class="modern-input">
             <option value="">Gender</option>
             <option value="M">Male</option>

@@ -74,6 +74,29 @@ pulseExporter.getLicenseTier = () => licenseStatus?.tier || "Silver";
 // before the reactive `license-status` push event arrives.
 ipcMain.handle('license:get-status', () => licenseStatus);
 
+const originalHandle = ipcMain.handle;
+function guardStandalone(handler) {
+    return (event, ...args) => {
+        if (licenseStatus?.tier === 'Standalone') {
+            return { ok: false, error: 'Feature locked. Migrate to a payment plan to enjoy the full features of Nexus School OS.' };
+        }
+        return handler(event, ...args);
+    };
+}
+ipcMain.handle = function(channel, listener) {
+    const gatedChannels = [
+        'pulse:', 'scholar:', 'cbt:', 'portal:', 'portal-content:', 'fee-structure:', 'attendance:', 'queue:', 'pulse-inbox:',
+        'get-daily-attendance', 'save-daily-attendance', 'get-student-attendance-report', 'save-attendance', 'get-attendance'
+    ];
+    const shouldGate = gatedChannels.some(prefix => channel.startsWith(prefix)) &&
+                       channel !== 'cbt:get-system-settings' &&
+                       channel !== 'cbt:save-system-setting';
+    if (shouldGate) {
+        return originalHandle.call(ipcMain, channel, guardStandalone(listener));
+    }
+    return originalHandle.call(ipcMain, channel, listener);
+};
+
 ipcMain.handle('read-guide-file', async (event, filename) => {
     try {
         const fs = require('fs');
@@ -808,6 +831,18 @@ ipcMain.handle("set-teacher", (event, { id, name }) => {
   return true;
 });
 
+ipcMain.handle("generateAdminQR", () => {
+  if (!qrPayload) return false;
+  qrPayload.teacher_id = 'STANDALONE_ADMIN';
+  qrPayload.teacher_name = 'Admin';
+  if (mainWindow) {
+    mainWindow.webContents.send("qr-payload", qrPayload);
+    console.log(`[Electron] QR updated for Standalone Admin`);
+  }
+  return true;
+});
+
+
 // ── Teacher Access Revocation ─────────────────────────────────────────────────
 // Lazily adds sync_revoked column if it doesn't exist yet (safe migration).
 function ensureSyncRevokedColumn() {
@@ -898,13 +933,59 @@ ipcMain.handle("get-db-stats", () => {
     const db = database.getDb();
     const teachers = db.prepare("SELECT COUNT(*) as c FROM teachers").get().c;
     const students = db.prepare("SELECT COUNT(*) as c FROM students").get().c;
-    return { teachers, students };
+    let devices = 0;
+    if (licenseStatus?.tier === 'Standalone') {
+      devices = db.prepare("SELECT COUNT(*) as c FROM connected_devices").get().c;
+    }
+    return { teachers, students, devices };
   } catch (err) {
-    return { teachers: 0, students: 0 };
+    return { teachers: 0, students: 0, devices: 0 };
+  }
+});
+
+// ── Standalone Device Management ──────────────────────────────────────────────
+ipcMain.handle("standalone:get-devices", () => {
+  try {
+    const db = database.getDb();
+    const rows = db.prepare("SELECT device_id as id, device_model as name, label, paired_at FROM connected_devices").all();
+    return { ok: true, data: rows.map(r => ({ id: r.id, name: `${r.name || 'Unknown Device'} (${r.id.substring(0, 8)})`, sync_revoked: 0 })) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("standalone:revoke-device", (event, { teacherId }) => {
+  try {
+    const db = database.getDb();
+    db.prepare("DELETE FROM connected_devices WHERE device_id = ?").run(teacherId);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
   }
 });
 
 // ── Form-based Teacher Entry ──────────────────────────────────────────────────
+function normalizeSubjectName(subject, className) {
+  if (!subject) return "";
+  let norm = subject.trim();
+  if (norm === "Further Maths" || norm === "Further Mathematic") {
+    return "Further Mathematics";
+  }
+  if (norm === "Literature") {
+    return "Literature in English";
+  }
+  if (!className) return norm;
+  const isJSS = className.toUpperCase().startsWith("JS") || className.toUpperCase().startsWith("JSS");
+  const isSSS = className.toUpperCase().startsWith("SS");
+  if (norm === "General Mathematics" && isJSS) {
+    return "Mathematics";
+  }
+  if (norm === "Mathematics" && isSSS) {
+    return "General Mathematics";
+  }
+  return norm;
+}
+
 // allocations: [{ class_name: 'JSS1', subjects: ['Mathematics', 'English'] }, ...]
 ipcMain.handle(
   "add-teacher-form",
@@ -929,7 +1010,7 @@ ipcMain.handle(
             if (!class_name) continue;
             for (const subject of subjects) {
               if (subject.trim())
-                insertAlloc.run(id, class_name, subject.trim());
+                insertAlloc.run(id, class_name, normalizeSubjectName(subject, class_name));
             }
           }
         });
@@ -977,7 +1058,7 @@ ipcMain.handle("update-teacher-full", (event, { id, name, phone, email, signatur
           const { class_name, subjects = [] } = alloc;
           if (!class_name) continue;
           for (const subj of subjects) {
-            if (subj.trim()) ins.run(id, class_name, subj.trim());
+            if (subj.trim()) ins.run(id, class_name, normalizeSubjectName(subj, class_name));
           }
         }
       }
@@ -1000,22 +1081,22 @@ ipcMain.handle("update-teacher-full", (event, { id, name, phone, email, signatur
 });
 
 // ── Form-based Student Entry (mobile adds/edits; this is a DB stub) ───────────
-ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, subjects, reg_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status }) => {
+ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, subjects, reg_no, admission_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status }) => {
   try {
     const db = database.getDb();
     db.transaction(() => {
       db.prepare(`
-        INSERT INTO students (id, name, class_name, class_arm, reg_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status)
-        VALUES (@id, @name, @class_name, @class_arm, @reg_no, @gender, @dob, @photo, @parent_email, @parent_phone, @parent_name, @fee_status)
+        INSERT INTO students (id, name, class_name, class_arm, reg_no, admission_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status)
+        VALUES (@id, @name, @class_name, @class_arm, @reg_no, @admission_no, @gender, @dob, @photo, @parent_email, @parent_phone, @parent_name, @fee_status)
         ON CONFLICT(id) DO UPDATE SET
           name=excluded.name, class_name=excluded.class_name, class_arm=excluded.class_arm,
-          reg_no=excluded.reg_no, gender=excluded.gender, dob=excluded.dob,
+          reg_no=excluded.reg_no, admission_no=excluded.admission_no, gender=excluded.gender, dob=excluded.dob,
           photo=COALESCE(excluded.photo, photo),
           parent_email=excluded.parent_email, parent_phone=excluded.parent_phone,
           parent_name=excluded.parent_name,
           fee_status=excluded.fee_status
       `).run({ id, name, class_name, class_arm: class_arm || '',
-        reg_no: reg_no || '', gender: gender || '', dob: dob || '',
+        reg_no: reg_no || '', admission_no: admission_no || '', gender: gender || '', dob: dob || '',
         photo: photo || null, parent_email: parent_email || '',
         parent_phone: parent_phone || '', parent_name: parent_name || null,
         fee_status: fee_status || 'cleared'
@@ -1023,7 +1104,7 @@ ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, su
       db.prepare("DELETE FROM student_subjects WHERE student_id = ?").run(id);
       if (subjects && subjects.length > 0) {
         const stmt = db.prepare("INSERT INTO student_subjects (student_id, subject) VALUES (?, ?)");
-        for (const subj of subjects) stmt.run(id, subj);
+        for (const subj of subjects) stmt.run(id, normalizeSubjectName(subj, class_name));
       }
     })();
     console.log(`[Form] Student added: ${name} with ${subjects?.length || 0} subjects`);
@@ -1034,28 +1115,28 @@ ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, su
 });
 
 // ── Form-based Student Update (“Edit” path) ──────────────────────────────────────
-ipcMain.handle("update-student", (event, { id, name, class_name, class_arm, subjects, reg_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status }) => {
+ipcMain.handle("update-student", (event, { id, name, class_name, class_arm, subjects, reg_no, admission_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status }) => {
   try {
     const db = database.getDb();
     db.transaction(() => {
       if (photo !== undefined && photo !== null) {
         db.prepare(`
           UPDATE students SET name=@name, class_name=@class_name, class_arm=@class_arm,
-            reg_no=@reg_no, gender=@gender, dob=@dob, photo=@photo,
+            reg_no=@reg_no, admission_no=@admission_no, gender=@gender, dob=@dob, photo=@photo,
             parent_email=@parent_email, parent_phone=@parent_phone, parent_name=@parent_name,
             fee_status=@fee_status
           WHERE id=@id
-        `).run({ id, name, class_name, class_arm: class_arm || '', reg_no: reg_no||'', gender: gender||'', dob: dob||'',
+        `).run({ id, name, class_name, class_arm: class_arm || '', reg_no: reg_no||'', admission_no: admission_no||'', gender: gender||'', dob: dob||'',
                  photo, parent_email: parent_email||'', parent_phone: parent_phone||'',
                  parent_name: parent_name||null, fee_status: fee_status||'cleared' });
       } else {
         db.prepare(`
           UPDATE students SET name=@name, class_name=@class_name, class_arm=@class_arm,
-            reg_no=@reg_no, gender=@gender, dob=@dob,
+            reg_no=@reg_no, admission_no=@admission_no, gender=@gender, dob=@dob,
             parent_email=@parent_email, parent_phone=@parent_phone, parent_name=@parent_name,
             fee_status=@fee_status
           WHERE id=@id
-        `).run({ id, name, class_name, class_arm: class_arm || '', reg_no: reg_no||'', gender: gender||'', dob: dob||'',
+        `).run({ id, name, class_name, class_arm: class_arm || '', reg_no: reg_no||'', admission_no: admission_no||'', gender: gender||'', dob: dob||'',
                  parent_email: parent_email||'', parent_phone: parent_phone||'',
                  parent_name: parent_name||null, fee_status: fee_status||'cleared' });
       }
@@ -1063,13 +1144,36 @@ ipcMain.handle("update-student", (event, { id, name, class_name, class_arm, subj
       db.prepare("DELETE FROM student_subjects WHERE student_id = ?").run(id);
       if (subjects && subjects.length > 0) {
         const stmt = db.prepare("INSERT INTO student_subjects (student_id, subject) VALUES (?, ?)");
-        for (const subj of subjects) stmt.run(id, subj);
+        for (const subj of subjects) stmt.run(id, normalizeSubjectName(subj, class_name));
       }
     })();
     console.log(`[Form] Student ${id} updated: ${name}, ${subjects?.length || 0} subjects.`);
     return { ok: true };
   } catch (err) {
     console.error('[Form] update-student failed:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+// ── Student Directory Settings (mobile registration toggle etc.) ─────────────
+ipcMain.handle('students:get-settings', () => {
+  try {
+    const db = database.getDb();
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'mobile_registration_locked'").get();
+    return { ok: true, mobile_registration_locked: row ? row.value === '1' : false };
+  } catch (err) {
+    console.error('[Students] get-settings error:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('students:save-settings', (_, { mobile_registration_locked }) => {
+  try {
+    const db = database.getDb();
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('mobile_registration_locked', ?)").run(mobile_registration_locked ? '1' : '0');
+    return { ok: true };
+  } catch (err) {
+    console.error('[Students] save-settings error:', err);
     return { ok: false, error: err.message };
   }
 });
@@ -1596,9 +1700,9 @@ ipcMain.handle("get-student-attendance-report", async (event, { student_id }) =>
 // ── V2: Query Results (dynamic scope filtering) ───────────────────────────────
 ipcMain.handle("query-results", (event, { scope, session, term, class_name, subject, teacher_id, student_id }) => {
   console.log(`[Diagnostic] query-results: scope=${scope}, session=${session}, term=${term}`);
-  // ── Silver plan: only 'all' scope permitted ──────────────────────────────
+  // ── Silver / Standalone plan: only 'all' scope permitted ──────────────────
   const _qrTier = licenseStatus?.tier || 'Silver';
-  if (_qrTier === 'Silver' && scope && scope !== 'all') {
+  if ((_qrTier === 'Silver' || _qrTier === 'Standalone') && scope && scope !== 'all') {
     return { ok: false, error: 'Generating individual, class, or subject reports requires a Gold or Diamond plan. Contact your Nexus Partner to upgrade.', results: [] };
   }
   try {
@@ -2389,14 +2493,16 @@ function createWindow() {
 
 
   // Start the message queue worker now that the main window exists
-  startMessageQueueWorker();
-
-  pulseBot.initPulseBot(mainWindow);
-  const dbApp = database.getDb();
-  const autoStart = dbApp.prepare("SELECT value FROM app_settings WHERE key = 'pulse_autostart'").get();
-  if (autoStart && autoStart.value === 'true') {
-    console.log('[Pulse] Auto-start is enabled. Starting bot...');
-    pulseBot.startPulse();
+  const bootTier = licenseStatus?.tier || 'Silver';
+  if (bootTier !== 'Standalone' && bootTier !== 'Silver') {
+    startMessageQueueWorker();
+    pulseBot.initPulseBot(mainWindow);
+    const dbApp = database.getDb();
+    const autoStart = dbApp.prepare("SELECT value FROM app_settings WHERE key = 'pulse_autostart'").get();
+    if (autoStart && autoStart.value === 'true') {
+      console.log('[Pulse] Auto-start is enabled. Starting bot...');
+      pulseBot.startPulse();
+    }
   }
 
   pulseExporter.onSyncError = (message) => {
@@ -2696,12 +2802,12 @@ function createWindow() {
         WHERE student_id = ? AND academic_session = ? AND term = ?
       `).get(id, termConfig.academic_session, termConfig.term) || { total_billed: 0, total_paid: 0 };
 
-      // ── Fee Gate (Gold / Diamond only — Silver has no financial module) ────
+      // ── Fee Gate (Gold / Diamond only — Silver/Standalone have no financial module) ────
       const _portalTier = licenseStatus?.tier || 'Silver';
       let resultsBlocked = false;
       let resultsBlockedMsg = '';
       let resultsBlockedBalance = 0;
-      if (_portalTier !== 'Silver') {
+      if (_portalTier !== 'Silver' && _portalTier !== 'Standalone') {
         try {
           const gateResult = isStudentFeeGated(db, id, termConfig.academic_session, termConfig.term);
           if (gateResult.gated) {

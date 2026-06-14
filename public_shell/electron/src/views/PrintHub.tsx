@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from "react";
+import { useLicense } from "../hooks/useLicense";
+import { generateSessionsList } from "../lib/sessions";
 
 interface GradingComponent {
   key: string;
@@ -34,7 +36,16 @@ interface PrintHubProps {
 }
 
 export function PrintHub({ onTabChange }: PrintHubProps) {
-  const currentTier = window.currentLicenseTier || "Silver";
+  const { license } = useLicense();
+  const currentTier = license?.tier || "Silver";
+
+  const isTemplateLocked = (tpl: string) => {
+    if (tpl === 'clean_slate' || tpl === 'class_photo') return false;
+    if (currentTier === 'Standalone') return true;
+    if (currentTier === 'Silver') return ['royal', 'monarch', 'sovereign', 'sterling', 'apex'].includes(tpl);
+    if (currentTier === 'Gold') return ['sovereign', 'sterling', 'apex'].includes(tpl);
+    return false;
+  };
 
   // Config States
   const [session, setSession] = useState("2025/2026");
@@ -83,6 +94,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
   // Template preview mapping
   const templateImgMap: Record<string, string> = {
     clean_slate: "classic",
+    class_photo: "classic",
     prestige: "prestige",
     azure: "azure",
     royal: "royal",
@@ -127,7 +139,9 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
             );
           if (cfg.attendance_score_weight !== undefined)
             setAttendanceWeight(Number(cfg.attendance_score_weight) || 0);
-          if (cfg.template) setTemplate(cfg.template);
+          if (cfg.template) {
+            setTemplate(isTemplateLocked(cfg.template) ? "clean_slate" : cfg.template);
+          }
 
           if (cfg.grading_scale) {
             const raw = JSON.parse(cfg.grading_scale);
@@ -168,6 +182,22 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
   }, []);
 
   const handleSaveConfig = async () => {
+    if (totalScoreSum > 100) {
+      if (typeof (window as any).Swal !== "undefined") {
+        (window as any).Swal.fire({
+          title: "Invalid Grading Breakdown",
+          text: `The total points of the grading breakdown (${totalScoreSum}) cannot exceed 100.`,
+          icon: "error",
+          confirmButtonColor: "#00E5FF",
+          background: "#0d1235",
+          color: "#fff",
+        });
+      } else {
+        alert(`Error: The total points of the grading breakdown (${totalScoreSum}) cannot exceed 100.`);
+      }
+      return;
+    }
+
     if (!window.electronAPI?.saveTermConfig) return;
     try {
       setSaveStatus("⏳ Saving...");
@@ -403,13 +433,16 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
             >
               <div className="ph-config-group">
                 <label className="ph-label">Academic Session</label>
-                <input
-                  type="text"
+                <select
                   value={session}
                   onChange={(e) => setSession(e.target.value)}
                   className="modern-input"
                   style={{ width: "100%" }}
-                />
+                >
+                  {generateSessionsList().map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
               </div>
 
               <div className="ph-config-group">
@@ -503,7 +536,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
                 Show Affective/Psychomotor
               </label>
 
-              {currentTier !== "Silver" && (
+              {currentTier !== "Silver" && currentTier !== "Standalone" && (
                 <label
                   className="ph-toggle"
                   style={{ cursor: "pointer", userSelect: "none" }}
@@ -852,13 +885,28 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
                   style={{ width: "100%" }}
                 >
                   <option value="clean_slate">🎨 Classic (Free)</option>
-                  <option value="prestige">⭐ Prestige (Silver)</option>
-                  <option value="azure">⭐ Azure Edge (Silver)</option>
-                  <option value="royal">⭐⭐ Royal (Gold)</option>
-                  <option value="monarch">⭐⭐ Monarch (Gold)</option>
-                  <option value="sovereign">💎 Sovereign (Diamond)</option>
-                  <option value="sterling">💎 Sterling (Diamond)</option>
-                  <option value="apex">💎 Apex (Diamond)</option>
+                  <option value="class_photo">📷 Class Photo (Free)</option>
+                  <option value="prestige" disabled={isTemplateLocked('prestige')}>
+                    {isTemplateLocked('prestige') ? '🔒 ' : ''}⭐ Prestige (Silver)
+                  </option>
+                  <option value="azure" disabled={isTemplateLocked('azure')}>
+                    {isTemplateLocked('azure') ? '🔒 ' : ''}⭐ Azure Edge (Silver)
+                  </option>
+                  <option value="royal" disabled={isTemplateLocked('royal')}>
+                    {isTemplateLocked('royal') ? '🔒 ' : ''}⭐⭐ Royal (Gold)
+                  </option>
+                  <option value="monarch" disabled={isTemplateLocked('monarch')}>
+                    {isTemplateLocked('monarch') ? '🔒 ' : ''}⭐⭐ Monarch (Gold)
+                  </option>
+                  <option value="sovereign" disabled={isTemplateLocked('sovereign')}>
+                    {isTemplateLocked('sovereign') ? '🔒 ' : ''}💎 Sovereign (Diamond)
+                  </option>
+                  <option value="sterling" disabled={isTemplateLocked('sterling')}>
+                    {isTemplateLocked('sterling') ? '🔒 ' : ''}💎 Sterling (Diamond)
+                  </option>
+                  <option value="apex" disabled={isTemplateLocked('apex')}>
+                    {isTemplateLocked('apex') ? '🔒 ' : ''}💎 Apex (Diamond)
+                  </option>
                 </select>
               </div>
 
