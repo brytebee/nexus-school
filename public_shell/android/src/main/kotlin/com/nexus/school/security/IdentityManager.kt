@@ -183,6 +183,18 @@ class IdentityManager(context: Context) {
         prefs.edit().putString("class_subjects_map", json.toString()).apply()
     }
 
+    fun getAllClasses(): List<String> {
+        val json = try {
+            org.json.JSONObject(prefs.getString("class_subjects_map", "{}") ?: "{}")
+        } catch (e: Exception) { return emptyList() }
+        val list = mutableListOf<String>()
+        val keys = json.keys()
+        while (keys.hasNext()) {
+            list.add(keys.next())
+        }
+        return list.sorted()
+    }
+
     /**
      * Returns the subjects registered for [className], or falls back to the flat
      * master subject list if no class-specific data is available.

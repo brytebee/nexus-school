@@ -79,6 +79,29 @@ fun defaultScoreComponents() = listOf(
     ScoreComponent(key = "Exam", label = "Exam",   max = 80)
 )
 
+fun sortScoreComponents(components: List<ScoreComponent>): List<ScoreComponent> {
+    return components.sortedWith(Comparator { a, b ->
+        val aKey = a.key.lowercase()
+        val bKey = b.key.lowercase()
+        val isACaOrExam = aKey.startsWith("ca") || aKey.contains("exam")
+        val isBCaOrExam = bKey.startsWith("ca") || bKey.contains("exam")
+        when {
+            isACaOrExam && !isBCaOrExam -> 1
+            !isACaOrExam && isBCaOrExam -> -1
+            isACaOrExam && isBCaOrExam -> {
+                val isAExam = aKey.contains("exam")
+                val isBExam = bKey.contains("exam")
+                when {
+                    isAExam && !isBExam -> 1
+                    !isAExam && isBExam -> -1
+                    else -> aKey.compareTo(bKey)
+                }
+            }
+            else -> aKey.compareTo(bKey)
+        }
+    })
+}
+
 fun parseScoreComponents(json: String): List<ScoreComponent> {
     if (json.isBlank()) return defaultScoreComponents()
     return try {
@@ -91,7 +114,8 @@ fun parseScoreComponents(json: String): List<ScoreComponent> {
                 max   = obj.getInt("max")
             )
         }
-        list.ifEmpty { defaultScoreComponents() }
+        val rawList = list.ifEmpty { defaultScoreComponents() }
+        sortScoreComponents(rawList)
     } catch (e: Exception) {
         defaultScoreComponents()
     }
@@ -274,7 +298,7 @@ class StudentRosterActivity : AppCompatActivity() {
                             AddStudentSheet(
                                 primaryColor          = primaryColor,
                                 preselectedClass      = draftClass,
-                                classList             = tabs.map { it.first }.distinct(),
+                                classList             = (IdentityManager(this@StudentRosterActivity).getAllClasses() + tabs.map { it.first }).distinct().sorted(),
                                 onClassChange         = { draftClass = it },
                                 planModules           = planModules,
                                 draftName             = draftName, onNameChange = { draftName = it },
@@ -2189,6 +2213,53 @@ fun AddStudentSheet(
     }
 }
 
+fun getSubjectCategory(subject: String, className: String): String {
+    val upperClass = className.uppercase()
+    val isJss = upperClass.startsWith("JS") || upperClass.startsWith("JSS") || upperClass.contains("BASIC 7") || upperClass.contains("BASIC 8") || upperClass.contains("BASIC 9")
+    val isPrimary = upperClass.startsWith("PRI") || upperClass.startsWith("PRIMARY") || upperClass.startsWith("NUR") || upperClass.startsWith("BASIC 1") || upperClass.startsWith("BASIC 2") || upperClass.startsWith("BASIC 3") || upperClass.startsWith("BASIC 4") || upperClass.startsWith("BASIC 5") || upperClass.startsWith("BASIC 6")
+
+    if (isJss) {
+        val vocational = listOf(
+            "Arabic Language", "Arabic", "Solar Photovoltaic", "Solar PV", "Fashion Design", "Garment Making",
+            "Livestock Farming", "Beauty and Cosmetology", "Computer Hardware", "GSM Repairs",
+            "Horticulture", "Crop Production"
+        )
+        if (vocational.any { subject.contains(it, ignoreCase = true) }) return "Vocational / Optional"
+        return "Core"
+    } else if (isPrimary) {
+        return "Core"
+    } else { // SSS / SS
+        val science = listOf(
+            "Biology", "Chemistry", "Physics", "Agriculture", "Agricultural Science",
+            "Further Mathematics", "Further Maths", "Physical Education", "Health Education",
+            "Food and Nutrition", "Geography", "Technical Drawing",
+            "Animal Husbandry", "Fisheries"
+        )
+        val humanities = listOf(
+            "History", "Government", "Christian Religious Studies", "CRS", "CRK",
+            "Islamic Studies", "IRK", "Hausa", "Igbo", "Yoruba", "French", "Arabic",
+            "Fine Art", "Music", "Literature in English", "Literature",
+            "Home Management", "Catering Craft"
+        )
+        val business = listOf("Financial Accounting", "Accounting", "Commerce", "Marketing", "Economics")
+        val trade = listOf(
+            "Solar PV", "Solar Photovoltaic", "Fashion Design", "Garment Making", "Livestock Farming",
+            "Beauty and Cosmetology", "Computer Hardware", "GSM Repairs", "Horticulture", "Crop Production",
+            "Catering Craft", "Home Management", "Clothing and Textiles", "Citizenship", "Insurance"
+        )
+
+        // Compulsory Core for SSS
+        val core = listOf("English Language", "General Mathematics", "Mathematics", "Civic Education", "Digital Technologies")
+
+        if (core.any { subject.equals(it, ignoreCase = true) }) return "Core & Compulsory"
+        if (science.any { subject.equals(it, ignoreCase = true) }) return "Science"
+        if (humanities.any { subject.equals(it, ignoreCase = true) }) return "Humanities / Arts"
+        if (business.any { subject.equals(it, ignoreCase = true) }) return "Business"
+        if (trade.any { subject.contains(it, ignoreCase = true) }) return "Trade"
+        return "Core & Compulsory"
+    }
+}
+
 // ─── Subject Enrollment Screen — Step 2: Full Screen ────────────────────────────
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -2202,6 +2273,24 @@ fun SubjectEnrollmentScreen(
     onRegister: (subjects: List<String>, parentName: String?, email: String?, phone: String?) -> Unit
 ) {
     val requiresParentContact = planModules.any { it.equals("parent_contact", ignoreCase = true) }
+
+    val upperClass = preselectedClass.uppercase()
+    val isJss = upperClass.startsWith("JS") || upperClass.startsWith("JSS") || upperClass.contains("BASIC 7") || upperClass.contains("BASIC 8") || upperClass.contains("BASIC 9")
+    val isPrimary = upperClass.startsWith("PRI") || upperClass.startsWith("PRIMARY") || upperClass.startsWith("NUR") || upperClass.startsWith("BASIC 1") || upperClass.startsWith("BASIC 2") || upperClass.startsWith("BASIC 3") || upperClass.startsWith("BASIC 4") || upperClass.startsWith("BASIC 5") || upperClass.startsWith("BASIC 6")
+
+    val categories = when {
+        isJss -> listOf("All", "Core", "Vocational / Optional")
+        isPrimary -> listOf("All", "Core")
+        else -> listOf("All", "Core & Compulsory", "Science", "Humanities / Arts", "Business", "Trade")
+    }
+
+    var selectedCategory by remember { mutableStateOf("All") }
+
+    val filteredSubjects = if (selectedCategory == "All") {
+        availableSubjects
+    } else {
+        availableSubjects.filter { getSubjectCategory(it, preselectedClass) == selectedCategory }
+    }
 
     var selectedSubjects by remember { mutableStateOf(availableSubjects.toSet()) }
     var parentName       by remember { mutableStateOf("") }
@@ -2265,11 +2354,41 @@ fun SubjectEnrollmentScreen(
                     }
                 }
 
+                // Category Filter Tabs
+                if (availableSubjects.isNotEmpty() && categories.size > 1) {
+                    androidx.compose.foundation.lazy.LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    ) {
+                        item {
+                            categories.forEach { category ->
+                                val isSelected = selectedCategory == category
+                                val bg = if (isSelected) primaryColor else Color(0xFF1E2448)
+                                val border = if (isSelected) primaryColor else GlassBorder
+                                Surface(
+                                    modifier = Modifier.clickable { selectedCategory = category }.padding(end = 8.dp),
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = bg,
+                                    border = BorderStroke(1.dp, border)
+                                ) {
+                                    Text(
+                                        text = category,
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Subject grid
-                if (availableSubjects.isNotEmpty()) {
+                if (filteredSubjects.isNotEmpty()) {
                     Text("Tap to toggle subjects", color = TextMuted, fontSize = 11.sp, letterSpacing = 0.5.sp)
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        availableSubjects.chunked(2).forEach { row ->
+                        filteredSubjects.chunked(2).forEach { row ->
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 row.forEach { subject ->
                                     val isSelected = subject in selectedSubjects
@@ -2299,6 +2418,8 @@ fun SubjectEnrollmentScreen(
                             }
                         }
                     }
+                } else if (availableSubjects.isNotEmpty()) {
+                    Text("No subjects found in this category.", color = TextMuted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 12.dp))
                 } else {
                     // Manual subject entry fallback
                     Text("No subjects found for this class. Add manually:", color = TextMuted, fontSize = 12.sp)

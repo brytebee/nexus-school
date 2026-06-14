@@ -2609,7 +2609,8 @@ function createWindow() {
     console.log(`[Gold Portal] Broadcasting as http://${name}.nexus.local`);
   }
 
-  portalApp.use(express.json());
+  portalApp.use(express.json({ limit: '50mb' }));
+  portalApp.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   portalApp.get('/portal', (req, res) => {
     res.sendFile(path.join(__dirname, 'portal.html'));
