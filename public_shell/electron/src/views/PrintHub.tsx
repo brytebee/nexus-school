@@ -8,6 +8,24 @@ interface GradingComponent {
   max: number;
 }
 
+const sortGradingComponents = (comps: GradingComponent[]) => {
+  return [...comps].sort((a, b) => {
+    const aKey = (a.key || a.label || "").toLowerCase();
+    const bKey = (b.key || b.label || "").toLowerCase();
+    const isACaOrExam = aKey.startsWith("ca") || aKey.includes("exam");
+    const isBCaOrExam = bKey.startsWith("ca") || bKey.includes("exam");
+    if (isACaOrExam && !isBCaOrExam) return 1;
+    if (!isACaOrExam && isBCaOrExam) return -1;
+    if (isACaOrExam && isBCaOrExam) {
+      const isAExam = aKey.includes("exam");
+      const isBExam = bKey.includes("exam");
+      if (isAExam && !isBExam) return 1;
+      if (!isAExam && isBExam) return -1;
+    }
+    return aKey.localeCompare(bKey, undefined, { numeric: true, sensitivity: "base" });
+  });
+};
+
 interface TermConfig {
   academic_session?: string;
   term?: string;
@@ -109,9 +127,10 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
   const previewImgSrc = `../node_modules/@nexus/engine/assets/templates/${currentTemplateImg}.png`;
 
   // Total components score
+  const hasAttendanceAccess = currentTier !== "Silver" && currentTier !== "Standalone";
   const totalScoreSum =
     components.reduce((acc, c) => acc + (c.max || 0), 0) +
-    (showAttendance ? Number(attendanceWeight) || 0 : 0);
+    (showAttendance && hasAttendanceAccess ? Number(attendanceWeight) || 0 : 0);
 
   // Load configs & pickers metadata
   useEffect(() => {
@@ -133,9 +152,10 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
             setShowDomains(
               cfg.show_domains !== false && cfg.show_domains !== 0,
             );
+          const hasAtt = currentTier !== "Silver" && currentTier !== "Standalone";
           if (cfg.show_attendance !== undefined)
             setShowAttendance(
-              cfg.show_attendance !== false && cfg.show_attendance !== 0,
+              hasAtt && cfg.show_attendance !== false && cfg.show_attendance !== 0,
             );
           if (cfg.attendance_score_weight !== undefined)
             setAttendanceWeight(Number(cfg.attendance_score_weight) || 0);
@@ -151,7 +171,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
               raw.components &&
               raw.components.length
             ) {
-              setComponents(raw.components);
+              setComponents(sortGradingComponents(raw.components));
             }
           }
         }
@@ -212,6 +232,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
         }
       } catch (_) {}
 
+      const hasAttendanceAccess = currentTier !== "Silver" && currentTier !== "Standalone";
       const config = {
         academic_session: session,
         term,
@@ -220,9 +241,9 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
         term_end_date: termEndDate,
         show_position: showPosition,
         show_domains: showDomains,
-        show_attendance: showAttendance,
-        attendance_score_weight: attendanceWeight,
-        grading_scale: JSON.stringify({ scale: existingScale, components }),
+        show_attendance: hasAttendanceAccess ? showAttendance : false,
+        attendance_score_weight: hasAttendanceAccess ? attendanceWeight : 0,
+        grading_scale: JSON.stringify({ scale: existingScale, components: sortGradingComponents(components) }),
         template,
       };
 
@@ -689,7 +710,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
                 </div>
               ))}
 
-              {showAttendance && (
+              {showAttendance && currentTier !== "Silver" && currentTier !== "Standalone" && (
                 <div
                   style={{
                     display: "flex",

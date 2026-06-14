@@ -97,7 +97,7 @@ suspend fun saveAddStudentEvent(
         db.studentDao().deleteStudentById(existingStudentId)
     }
 
-    subjects.forEach { subject ->
+    subjects.forEachIndexed { index, subject ->
         // Persist full record locally (photo + contact stored offline)
         db.studentDao().insertStudent(
             Student(
@@ -116,7 +116,7 @@ suspend fun saveAddStudentEvent(
             )
         )
 
-        // Sync payload — include photo_base64 when non-null
+        // Sync payload — include photo_base64 ONLY in the first event to prevent massive payload bloat/duplication
         val nameField   = if (parentName  != null) """, "parent_name": "$parentName"""" else ""
         val emailField  = if (parentEmail != null) """, "parent_email": "$parentEmail"""" else ""
         val phoneField  = if (parentPhone != null) """, "parent_phone": "$parentPhone"""" else ""
@@ -124,7 +124,7 @@ suspend fun saveAddStudentEvent(
         val adminNoField = if (admissionNo != null) """, "admission_no": "$admissionNo"""" else ""
         val genderField = if (gender != null) """, "gender": "$gender"""" else ""
         val dobField    = if (dob != null) """, "dob": "$dob"""" else ""
-        val photoField  = if (photoBase64 != null) """, "photo_base64": "$photoBase64"""" else ""
+        val photoField  = if (photoBase64 != null && index == 0) """, "photo_base64": "$photoBase64"""" else ""
         
         val payload = """{"student_id": "$localId", "name": "$studentName", "class_name": "$className", "subject": "$subject"$nameField$emailField$phoneField$regNoField$adminNoField$genderField$dobField$photoField}"""
 
