@@ -179,8 +179,10 @@ const nexusAPI = {
     },
     // ── Student Directory Settings ────────────────────────────────────────
     students: {
-        getSettings:  ()     => ipcRenderer.invoke('students:get-settings'),
-        saveSettings: (data) => ipcRenderer.invoke('students:save-settings', data),
+        getSettings:    ()     => ipcRenderer.invoke('students:get-settings'),
+        saveSettings:   (data) => ipcRenderer.invoke('students:save-settings', data),
+        getGrades:      (data) => ipcRenderer.invoke('get-student-grades',     data),
+        saveGrades:     (data) => ipcRenderer.invoke('save-student-grades',    data),
     },
     // ── Generic bridge (Guardian Shield, etc.) ───────────────────────
     invoke: (channel, data)  => ipcRenderer.invoke(channel, data),

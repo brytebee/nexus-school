@@ -64,8 +64,9 @@ data class HandshakeResponse(
     val students: List<com.nexus.school.data.Student> = emptyList(),
     val score_components: List<ScoreComponent> = emptyList(),
     val all_subjects: List<String> = emptyList(),
-    val class_subjects: Map<String, List<String>> = emptyMap(), // class → subjects for smart picker
-    val form_class: String? = null   // null = subject teacher; class name = form/homeroom teacher
+    val class_subjects: Map<String, List<String>> = emptyMap(),
+    val form_class: String? = null,
+    val scores: List<com.nexus.school.data.StudentScore> = emptyList()  // pre-existing Hub scores
 )
 
 @Serializable

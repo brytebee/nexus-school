@@ -3,7 +3,8 @@
 function computeFeeStatus(billed, paid) {
   const b = Number(billed) || 0;
   const p = Number(paid) || 0;
-  if (p >= b && b > 0) return "cleared";
+  if (b <= 0) return "cleared";           // no billing → always cleared
+  if (p >= b) return "cleared";
   if (p > 0) return "partial";
   return "unpaid";
 }
