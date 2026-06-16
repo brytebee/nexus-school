@@ -166,7 +166,9 @@ class StudentRosterActivity : AppCompatActivity() {
 
             // ── Navigation destination & plan metadata ────────────────────────
             var selectedScreen by remember { mutableStateOf(AppScreen.ROSTER) }
-            val planModules    = remember { IdentityManager(this@StudentRosterActivity).getTierModules() }
+            val identityManager = remember { IdentityManager(this@StudentRosterActivity) }
+            val planModules    = remember { identityManager.getTierModules() }
+            var isLocked by remember { mutableStateOf(identityManager.isRegistrationLocked()) }
 
             // ── Subject×Class matrix state ────────────────────────────────────
             // Build unique "ClassName • Subject" tabs from the loaded dataset
@@ -175,6 +177,7 @@ class StudentRosterActivity : AppCompatActivity() {
             var selectedTab by remember { mutableStateOf<Pair<String, String>?>(null) }
 
             LaunchedEffect(dbStateRef) {
+                isLocked = identityManager.isRegistrationLocked()
                 scope.launch {
                     val db = SyncDatabase.getDatabase(this@StudentRosterActivity)
                     students = db.studentDao().getAllStudents()
@@ -279,13 +282,24 @@ class StudentRosterActivity : AppCompatActivity() {
                                 // Add Student FAB
                                 FloatingActionButton(
                                     onClick = { 
-                                        draftClass = selectedTab?.first ?: ""
-                                        showAddStudentDialog = true 
+                                        if (isLocked) {
+                                            android.widget.Toast.makeText(
+                                                this@StudentRosterActivity,
+                                                "🔒 Registration is locked by the Admin. Sync to refresh status.",
+                                                android.widget.Toast.LENGTH_SHORT
+                                            ).show()
+                                        } else {
+                                            draftClass = selectedTab?.first ?: ""
+                                            showAddStudentDialog = true 
+                                        }
                                     },
-                                    containerColor = primaryColor,
+                                    containerColor = if (isLocked) Color(0xFF757575) else primaryColor,
                                     contentColor = Color.White
                                 ) {
-                                    Icon(Icons.Default.PersonAdd, contentDescription = "Add Student")
+                                    Icon(
+                                        imageVector = if (isLocked) Icons.Default.Lock else Icons.Default.PersonAdd,
+                                        contentDescription = if (isLocked) "Registration Locked" else "Add Student"
+                                    )
                                 }
                             }
                         }
@@ -330,8 +344,8 @@ class StudentRosterActivity : AppCompatActivity() {
                                 icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = WarnAmber) },
                                 title = { Text("Missing Grades") },
                                 text = { Text("$missingCount students in this class/subject do not have grades yet. Sync partial list?") },
-                                 confirmButton = {
-                                    TextButton(onClick = { showSyncWarning = false; triggerSync { top -> honorRollStudents = top } }) {
+                                confirmButton = {
+                                     TextButton(onClick = { showSyncWarning = false; triggerSync(onSyncDone = { dbStateRef++ }, onSuccess = { top -> honorRollStudents = top }) }) {
                                         Text("Sync Anyway", color = primaryColor)
                                     }
                                 },
@@ -379,7 +393,7 @@ class StudentRosterActivity : AppCompatActivity() {
                                         val missing = filteredStudents.count { 
                                             studentSyncStatus[it.id + "_" + it.subject] != true && studentSyncStatus[it.id] != true 
                                         }
-                                        if (missing > 0) showSyncWarning = true else triggerSync { top -> honorRollStudents = top }
+                                        if (missing > 0) showSyncWarning = true else triggerSync(onSyncDone = { dbStateRef++ }, onSuccess = { top -> honorRollStudents = top })
                                     }
                                 )
 
@@ -553,16 +567,37 @@ class StudentRosterActivity : AppCompatActivity() {
         } // Close setContent
     }
 
-    private fun triggerSync(onSuccess: (List<com.nexus.school.data.HonorRollItem>) -> Unit) {
+    private fun triggerSync(onSyncDone: () -> Unit, onSuccess: (List<com.nexus.school.data.HonorRollItem>) -> Unit) {
         val scope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
         scope.launch {
             val worker = com.nexus.school.network.SyncWorker(this@StudentRosterActivity)
-            val success = worker.pushPendingEvents()
-            if (success) {
+            val result = worker.pushPendingEvents()
+            val identityManager = com.nexus.school.security.IdentityManager(this@StudentRosterActivity)
+            if (result.success) {
                 val db = SyncDatabase.getDatabase(this@StudentRosterActivity)
                 val topStudents = db.studentDao().getHonorRoll()
                 launch(Dispatchers.Main) { 
-                    android.widget.Toast.makeText(this@StudentRosterActivity, "✅ Sync Complete!", android.widget.Toast.LENGTH_SHORT).show()
+                    if (result.partialLimit) {
+                        if (identityManager.isRegistrationLocked()) {
+                            android.widget.Toast.makeText(
+                                this@StudentRosterActivity, 
+                                "ℹ️ Sync partial: ${result.failedCount} students not added — registration is locked by Admin.", 
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
+                        } else {
+                            android.widget.Toast.makeText(
+                                this@StudentRosterActivity, 
+                                "ℹ️ Sync partial: ${result.failedCount} students not added — school capacity reached. Contact Admin.", 
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    } else if (result.hadPendingEvents) {
+                        // Only celebrate when real events were actually pushed
+                        android.widget.Toast.makeText(this@StudentRosterActivity, "✅ Sync Complete!", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    // If hadPendingEvents == false this was a silent config-pull
+                    // (lock state / score components refresh) — no toast needed.
+                    onSyncDone()
                     if (topStudents.isNotEmpty()) onSuccess(topStudents) 
                 }
             } else {

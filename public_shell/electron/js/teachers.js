@@ -514,6 +514,7 @@
 
     function closeFormTeacherModal() {
         document.getElementById("form-teacher-overlay").style.display = "none";
+        refreshTeachersTable();
     }
 
     function previewEditTchSign(input) {

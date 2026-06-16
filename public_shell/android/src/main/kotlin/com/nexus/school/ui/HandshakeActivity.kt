@@ -336,6 +336,7 @@ class HandshakeActivity : AppCompatActivity() {
                                                         primaryColorStr
                                                     )
                                                     identityManager.saveLogoBase64(config.logoBase64)
+                                                    identityManager.saveRegistrationLocked(config.registration_locked == true)
                                                     if (config.modules.isNotEmpty()) {
                                                         identityManager.saveTierModules(config.modules)
                                                     }

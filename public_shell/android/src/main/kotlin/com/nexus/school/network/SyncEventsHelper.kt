@@ -144,7 +144,8 @@ suspend fun saveAddStudentEvent(
             val serverInfo = IdentityManager(context).getServerInfo() ?: return@withContext
             val manager = IdentityManager(context)
             val teacherName = if (manager.getTeacherId() == "STANDALONE_ADMIN") "Admin" else manager.getTeacherName()
-            val msg = """{"teacher": "$teacherName", "action": "Registered $studentName (${subjects.size} subjects)", "event": "ADD_STUDENT"}"""
+            val actionMsg = if (existingStudentId != null) "Updated profile of $studentName" else "Registered $studentName (${subjects.size} subjects)"
+            val msg = """{"teacher": "$teacherName", "action": "$actionMsg", "event": "ADD_STUDENT"}"""
             DatagramSocket().use { socket ->
                 val bytes = msg.toByteArray()
                 socket.send(DatagramPacket(bytes, bytes.size, InetAddress.getByName(serverInfo.first), 3001))

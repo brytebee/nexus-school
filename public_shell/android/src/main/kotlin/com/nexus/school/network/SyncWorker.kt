@@ -25,6 +25,13 @@ data class SyncPayload(
     val device_model: String
 )
 
+data class SyncResult(
+    val success: Boolean,
+    val partialLimit: Boolean = false,
+    val failedCount: Int = 0,
+    val hadPendingEvents: Boolean = false  // false = config-pull only; true = real events were queued
+)
+
 class SyncWorker(private val context: Context) {
 
     companion object {
@@ -42,15 +49,19 @@ class SyncWorker(private val context: Context) {
         }
     }
 
-    suspend fun pushPendingEvents(): Boolean {
+    suspend fun pushPendingEvents(): SyncResult {
         val identityManager = IdentityManager(context)
-        val serverInfo = identityManager.getServerInfo() ?: return false
+        val serverInfo = identityManager.getServerInfo() ?: return SyncResult(success = false)
         val (ip, port) = serverInfo
 
         val db = SyncDatabase.getDatabase(context)
         val pendingEvents = db.syncDao().getPendingEvents()
 
-        if (pendingEvents.isEmpty()) return true // Nothing to sync
+        // Always contact the server even when there are no pending events.
+        // This is a "config-pull" — the server response always includes the
+        // authoritative registration_locked flag and score_components, so we
+        // must never skip the round-trip just because the queue is empty.
+        val hadPendingEvents = pendingEvents.isNotEmpty()
 
         return try {
             val eventsJson = Json.encodeToString(
@@ -134,18 +145,16 @@ class SyncWorker(private val context: Context) {
                         Log.d("SyncWorker", "Score components refreshed: ${scoreArr.length()} components")
                     }
 
-                    if (status == "PARTIAL_LIMIT") {
-                        withContext(Dispatchers.Main) {
-                            android.widget.Toast.makeText(
-                                context,
-                                "ℹ️ Sync partial: ${failedEventIds.size} students not added — school capacity reached. Contact Admin.",
-                                android.widget.Toast.LENGTH_LONG
-                            ).show()
-                        }
-                    }
+                    val registrationLocked = jsonObject.optBoolean("registration_locked", false)
+                    identityManager.saveRegistrationLocked(registrationLocked)
 
                     Log.d("SyncWorker", "Sync OK — ${successfulIds.size} events pushed, ${failedEventIds.size} failed.")
-                    true
+                    SyncResult(
+                        success = true,
+                        partialLimit = (status == "PARTIAL_LIMIT"),
+                        failedCount = failedEventIds.size,
+                        hadPendingEvents = hadPendingEvents
+                    )
                 }
 
                 response.status.value == 403 -> {
@@ -168,17 +177,17 @@ class SyncWorker(private val context: Context) {
                             context.startActivity(intent)
                         }
                     }
-                    false
+                    SyncResult(success = false)
                 }
 
                 else -> {
                     Log.e("SyncWorker", "Sync rejected — HTTP ${response.status}")
-                    false
+                    SyncResult(success = false)
                 }
             }
         } catch (e: Exception) {
             Log.e("SyncWorker", "Sync exception", e)
-            false
+            SyncResult(success = false)
         }
     }
 }
