@@ -800,9 +800,9 @@ ipcMain.handle("get-teachers", () => {
     const db = database.getDb();
     const teachers = db
       .prepare(`
-        SELECT t.id, t.name, t.phone, t.email, t.signature, f.class_name as host_class
+        SELECT t.id, t.name, t.phone, t.email, t.signature,
+               (SELECT group_concat(class_name, ', ') FROM form_teachers WHERE teacher_id = t.id) as host_class
         FROM teachers t
-        LEFT JOIN form_teachers f ON t.id = f.teacher_id
         ORDER BY t.name ASC
       `)
       .all();
@@ -1187,9 +1187,10 @@ ipcMain.handle("get-all-teachers", (event, { limit = 15, offset = 0, search = ""
     const total = db.prepare("SELECT COUNT(*) as total FROM teachers WHERE name LIKE ? OR id LIKE ?").get(query, query).total;
 
     const teachers = db.prepare(`
-      SELECT * FROM teachers 
-      WHERE name LIKE ? OR id LIKE ? 
-      ORDER BY name ASC 
+      SELECT t.*, (SELECT group_concat(class_name, ', ') FROM form_teachers WHERE teacher_id = t.id) as host_class
+      FROM teachers t
+      WHERE t.name LIKE ? OR t.id LIKE ? 
+      ORDER BY t.name ASC 
       LIMIT ? OFFSET ?
     `).all(query, query, limit, offset);
 

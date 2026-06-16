@@ -938,7 +938,7 @@ export function Teachers() {
               })}
             </div>
             <div style={{ padding: '16px 24px', borderTop: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.15)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-              <button className="primary-btn" onClick={() => setIsClassHostsOpen(false)}>Done</button>
+              <button className="primary-btn" onClick={() => { setIsClassHostsOpen(false); fetchTeachers(); }}>Done</button>
             </div>
           </div>
         </div>

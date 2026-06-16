@@ -321,6 +321,14 @@ class IdentityManager(context: Context) {
         return prefs.getLong("license_expires_at", Long.MAX_VALUE)
     }
 
+    fun saveRegistrationLocked(locked: Boolean) {
+        prefs.edit().putBoolean("registration_locked", locked).apply()
+    }
+
+    fun isRegistrationLocked(): Boolean {
+        return prefs.getBoolean("registration_locked", false)
+    }
+
     fun clearData() {
         prefs.edit().clear().apply()
     }
