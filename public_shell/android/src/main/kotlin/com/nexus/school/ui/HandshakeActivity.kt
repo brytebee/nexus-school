@@ -270,6 +270,13 @@ class HandshakeActivity : AppCompatActivity() {
                                         progressAmount = i / 10f
                                     }
                                     db.studentDao().insertAll(students)
+                                    // Restore pre-existing Hub scores so the grades sheet
+                                    // is pre-populated immediately after marriage.
+                                    if (result.scores.isNotEmpty()) {
+                                        db.studentDao().clearAllScores()
+                                        db.studentDao().insertScores(result.scores)
+                                        Log.d("Handshake", "Restored ${result.scores.size} score records from Hub")
+                                    }
                                     showProgress = false
                                 }
                             }

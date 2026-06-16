@@ -226,8 +226,8 @@ export function ResultStudio() {
     try {
       const mapped = queryResults.map(student => ({
         ...student,
-        days_attended: student.days_attended || 0,
-        total_days: student.total_days || 0,
+        days_attended: student.attendance?.days_attended ?? student.days_attended ?? 0,
+        total_days:    student.attendance?.total_days    ?? student.total_days    ?? 0,
         remark: student.remark || '',
         principal_remark: student.principal_remark || '',
       }));
@@ -760,7 +760,9 @@ export function ResultStudio() {
                   <thead>
                     <tr>
                       <th>Student Details</th>
-                      <th style={{ width: '150px' }}>Term Attendance</th>
+                      {(tier !== 'Standalone' && tier !== 'Silver') && (
+                        <th style={{ width: '150px' }}>Term Attendance</th>
+                      )}
                       <th>Class Teacher's Remarks</th>
                       <th>Principal's Remarks</th>
                     </tr>
@@ -773,23 +775,25 @@ export function ResultStudio() {
                           <div style={{ fontSize: '10px', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{student.class_name} · Avg: {student.average ?? '—'}%</div>
                         </td>
                         <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <input
-                              type="number"
-                              value={student.days_attended || 0}
-                              onChange={e => setRemarksData(prev => prev.map((s, i) => i === idx ? { ...s, days_attended: parseInt(e.target.value) || 0 } : s))}
-                              className="modern-input"
-                              style={{ width: '52px', textAlign: 'center', fontSize: '12px', padding: '4px 6px' }}
-                            />
-                            <span style={{ color: 'var(--text-dim)' }}>/</span>
-                            <input
-                              type="number"
-                              value={student.total_days || 0}
-                              onChange={e => setRemarksData(prev => prev.map((s, i) => i === idx ? { ...s, total_days: parseInt(e.target.value) || 0 } : s))}
-                              className="modern-input"
-                              style={{ width: '52px', textAlign: 'center', fontSize: '12px', padding: '4px 6px' }}
-                            />
-                          </div>
+                          {(tier !== 'Standalone' && tier !== 'Silver') && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <input
+                                type="number"
+                                value={student.days_attended || 0}
+                                onChange={e => setRemarksData(prev => prev.map((s, i) => i === idx ? { ...s, days_attended: parseInt(e.target.value) || 0 } : s))}
+                                className="modern-input"
+                                style={{ width: '52px', textAlign: 'center', fontSize: '12px', padding: '4px 6px' }}
+                              />
+                              <span style={{ color: 'var(--text-dim)' }}>/</span>
+                              <input
+                                type="number"
+                                value={student.total_days || 0}
+                                onChange={e => setRemarksData(prev => prev.map((s, i) => i === idx ? { ...s, total_days: parseInt(e.target.value) || 0 } : s))}
+                                className="modern-input"
+                                style={{ width: '52px', textAlign: 'center', fontSize: '12px', padding: '4px 6px' }}
+                              />
+                            </div>
+                          )}
                         </td>
                         <td>
                           <textarea

@@ -15,6 +15,12 @@ describe('fee calculator module', () => {
     it('sets unpaid when paid is 0 or less', () => {
       expect(computeFeeStatus(10000, 0)).toBe('unpaid');
     });
+
+    it('sets cleared when billed is 0 or negative (no fee assigned)', () => {
+      expect(computeFeeStatus(0, 0)).toBe('cleared');
+      expect(computeFeeStatus(-100, 0)).toBe('cleared');
+      expect(computeFeeStatus(0, 500)).toBe('cleared');
+    });
   });
 
   describe('computeBalance', () => {

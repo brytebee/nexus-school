@@ -1867,6 +1867,72 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
   }
 });
 
+// ── Admin Grade Viewer ────────────────────────────────────────────────────────
+// Returns all subject scores + breakdowns for a student in the active session/term.
+ipcMain.handle("get-student-grades", (event, { student_id }) => {
+  try {
+    const db = database.getDb();
+    const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
+    if (!termConfig) return { ok: false, error: "Term config not found" };
+    const { academic_session, term } = termConfig;
+
+    const rows = db.prepare(
+      "SELECT subject, score, breakdown FROM student_records WHERE student_id = ? AND academic_session = ? AND term = ? ORDER BY subject ASC"
+    ).all(student_id, academic_session, term);
+
+    const grades = rows.map(r => ({
+      subject: r.subject,
+      score: r.score,
+      breakdown: (() => { try { return JSON.parse(r.breakdown); } catch { return {}; } })(),
+    }));
+
+    return { ok: true, grades, session: academic_session, term };
+  } catch (err) {
+    console.error("[get-student-grades] Error:", err.message);
+    return { ok: false, error: err.message };
+  }
+});
+
+// ── Admin Grade Editor (Sudo-protected on the frontend) ───────────────────────
+// Receives: { student_id, grades: [{ subject, breakdown: { CA1, CA2, Exam, ... } }] }
+// Recomputes the total score from breakdown values and upserts each record.
+ipcMain.handle("save-student-grades", (event, { student_id, grades }) => {
+  try {
+    const db = database.getDb();
+    const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
+    if (!termConfig) return { ok: false, error: "Term config not found" };
+    const { academic_session, term } = termConfig;
+
+    const upsert = db.prepare(`
+      INSERT INTO student_records (student_id, academic_session, term, subject, score, breakdown)
+      VALUES (@student_id, @session, @term, @subject, @score, @breakdown)
+      ON CONFLICT(student_id, academic_session, term, subject)
+      DO UPDATE SET score = excluded.score, breakdown = excluded.breakdown
+    `);
+
+    const saveAll = db.transaction((items) => {
+      for (const item of items) {
+        const bd = item.breakdown || {};
+        const total = Object.values(bd).reduce((sum, v) => sum + (Number(v) || 0), 0);
+        upsert.run({
+          student_id,
+          session: academic_session,
+          term,
+          subject: item.subject,
+          score: total,
+          breakdown: JSON.stringify(bd),
+        });
+      }
+    });
+
+    saveAll(grades);
+    return { ok: true };
+  } catch (err) {
+    console.error("[save-student-grades] Error:", err.message);
+    return { ok: false, error: err.message };
+  }
+});
+
 // ── V2.1: Save Attendance ────────────────────────────────────────────────────
 ipcMain.handle("save-attendance", (event, { student_id, session, term, total_days, days_attended }) => {
   try {

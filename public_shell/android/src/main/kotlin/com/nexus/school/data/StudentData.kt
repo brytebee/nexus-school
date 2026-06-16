@@ -79,6 +79,9 @@ interface StudentDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertScore(score: StudentScore)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertScores(scores: List<StudentScore>)
+
     @Query("SELECT * FROM local_scores WHERE student_id = :studentId AND subject = :subject")
     suspend fun getScoresForStudent(studentId: String, subject: String): List<StudentScore>
 

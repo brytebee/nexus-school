@@ -83,6 +83,14 @@ export function Students() {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [detailStudent, setDetailStudent] = useState<Student | null>(null);
 
+  // Grades Panel State (inside Student Detail Modal)
+  const [gradesData, setGradesData] = useState<{ subject: string; score: number; breakdown: Record<string, number> }[]>([]);
+  const [gradesLoading, setGradesLoading] = useState(false);
+  const [gradesSaving, setGradesSaving] = useState(false);
+  const [gradesEditMode, setGradesEditMode] = useState(false);
+  const [gradesUnlocked, setGradesUnlocked] = useState(false);
+  const [gradesStatus, setGradesStatus] = useState<string | null>(null);
+
   // Fetch student records
   const fetchStudents = async () => {
     if (!window.electronAPI?.getAllStudents) return;
@@ -170,7 +178,58 @@ export function Students() {
   const openDetailModal = (student: Student) => {
     setDetailStudent(student);
     setIsDetailModalOpen(true);
+    // Reset grades panel for the newly opened student
+    setGradesUnlocked(false);
+    setGradesEditMode(false);
+    setGradesData([]);
+    setGradesStatus(null);
   };
+
+  // Fetch grades for the grade panel
+  const fetchGrades = async (studentId: string) => {
+    setGradesLoading(true);
+    try {
+      const res = await (window.electronAPI as any)?.students?.getGrades({ student_id: studentId });
+      if (res?.ok) setGradesData(res.grades);
+    } finally {
+      setGradesLoading(false);
+    }
+  };
+
+  // Prompt for sudo then unlock grades
+  const handleViewGrades = () => {
+    requireSudo(
+      async () => {
+        setGradesUnlocked(true);
+        if (detailStudent) await fetchGrades(detailStudent.id);
+      },
+      'View & Edit Grades',
+      'Admin access is required to view or modify student term grades.',
+    );
+  };
+
+  // Save edited grades back to the Hub
+  const handleSaveGrades = async () => {
+    if (!detailStudent) return;
+    setGradesSaving(true);
+    try {
+      const payload = {
+        student_id: detailStudent.id,
+        grades: gradesData.map(g => ({ subject: g.subject, breakdown: g.breakdown })),
+      };
+      const res = await (window.electronAPI as any)?.students?.saveGrades(payload);
+      if (res?.ok) {
+        setGradesStatus('✅ Grades saved successfully.');
+        setGradesEditMode(false);
+      } else {
+        setGradesStatus('❌ ' + (res?.error || 'Save failed'));
+      }
+    } finally {
+      setGradesSaving(false);
+      setTimeout(() => setGradesStatus(null), 3500);
+    }
+  };
+
 
   // Open drawer for Add Student
   const openAddDrawer = () => {
@@ -1301,6 +1360,111 @@ export function Students() {
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* ── Grades Panel ─────────────────────────────────────────── */}
+            <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: '16px', paddingLeft: '24px', paddingRight: '24px', paddingBottom: '4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                <p style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>
+                  📊 Term Grades
+                </p>
+                {!gradesUnlocked ? (
+                  <button
+                    onClick={handleViewGrades}
+                    className="secondary-btn"
+                    style={{ fontSize: '11px', padding: '4px 12px' }}
+                  >
+                    🔐 View Grades
+                  </button>
+                ) : (
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    {!gradesEditMode ? (
+                      <button onClick={() => setGradesEditMode(true)} className="secondary-btn" style={{ fontSize: '11px', padding: '4px 12px' }}>
+                        ✏️ Edit
+                      </button>
+                    ) : (
+                      <>
+                        <button onClick={() => setGradesEditMode(false)} className="secondary-btn" style={{ fontSize: '11px', padding: '4px 10px' }}>
+                          Cancel
+                        </button>
+                        <button
+                          onClick={handleSaveGrades}
+                          className="primary-btn"
+                          style={{ fontSize: '11px', padding: '4px 12px' }}
+                          disabled={gradesSaving}
+                        >
+                          {gradesSaving ? 'Saving…' : '💾 Save'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {gradesUnlocked && (
+                <>
+                  {gradesStatus && (
+                    <div style={{
+                      marginBottom: '10px', fontSize: '12px', padding: '6px 10px',
+                      borderRadius: 'var(--radius-sm)',
+                      background: gradesStatus.startsWith('✅') ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+                      color: gradesStatus.startsWith('✅') ? 'var(--success)' : 'var(--danger)',
+                    }}>
+                      {gradesStatus}
+                    </div>
+                  )}
+                  {gradesLoading ? (
+                    <p style={{ fontSize: '12px', color: 'var(--text-dim)', marginBottom: '8px' }}>Loading grades…</p>
+                  ) : gradesData.length === 0 ? (
+                    <p style={{ fontSize: '12px', color: 'var(--text-dim)', fontStyle: 'italic', marginBottom: '8px' }}>
+                      No grades recorded for this term.
+                    </p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px' }}>
+                      {gradesData.map((g, gi) => (
+                        <div key={g.subject} style={{
+                          background: 'rgba(255,255,255,0.03)',
+                          border: '1px solid var(--glass-border)',
+                          borderRadius: 'var(--radius-sm)',
+                          padding: '8px 12px',
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: gradesEditMode && Object.keys(g.breakdown).length ? '8px' : 0 }}>
+                            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-main)' }}>{g.subject}</span>
+                            <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>
+                              {g.score ?? '—'}
+                            </span>
+                          </div>
+                          {gradesEditMode && Object.keys(g.breakdown).length > 0 && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                              {Object.entries(g.breakdown).map(([key, val]) => (
+                                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                  <label style={{ fontSize: '10px', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{key}</label>
+                                  <input
+                                    type="number"
+                                    value={val as number}
+                                    min={0}
+                                    onChange={e => {
+                                      const newVal = parseInt(e.target.value) || 0;
+                                      setGradesData(prev => prev.map((gx, gxi) => {
+                                        if (gxi !== gi) return gx;
+                                        const newBd = { ...gx.breakdown, [key]: newVal };
+                                        const newScore = Object.values(newBd).reduce((s, v) => s + (Number(v) || 0), 0);
+                                        return { ...gx, breakdown: newBd, score: newScore };
+                                      }));
+                                    }}
+                                    className="modern-input"
+                                    style={{ width: '48px', textAlign: 'center', fontSize: '11px', padding: '3px 5px' }}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
 
             {/* Modal Footer */}
