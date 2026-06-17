@@ -1877,7 +1877,17 @@ ipcMain.handle("get-student-grades", (event, { student_id }) => {
     const { academic_session, term } = termConfig;
 
     const rows = db.prepare(
-      "SELECT subject, score, breakdown FROM student_records WHERE student_id = ? AND academic_session = ? AND term = ? ORDER BY subject ASC"
+      `SELECT subject, MAX(score) AS score,
+              (SELECT breakdown FROM student_records r2
+               WHERE r2.student_id = r.student_id
+                 AND r2.academic_session = r.academic_session
+                 AND r2.term = r.term
+                 AND r2.subject = r.subject
+               ORDER BY r2.score DESC, r2.rowid DESC LIMIT 1) AS breakdown
+       FROM student_records r
+       WHERE student_id = ? AND academic_session = ? AND term = ?
+       GROUP BY subject
+       ORDER BY subject ASC`
     ).all(student_id, academic_session, term);
 
     const grades = rows.map(r => ({
@@ -2310,14 +2320,22 @@ ipcMain.handle("generate-reports", async (event, payload) => {
     const db = database.getDb();
     if (payload.students) {
       for (const s of payload.students) {
-        // Fee Shield Check — status lives in student_fees, not fee_transactions
-        try {
-          const feeStatus = db.prepare(
-            `SELECT status FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ? LIMIT 1`
-          ).get(s.id, termConfig?.academic_session, termConfig?.term);
-          s.feeStatus = feeStatus?.status ?? 'unpaid';
-        } catch (feeErr) {
-          s.feeStatus = 'unpaid'; // non-fatal — proceed without fee status
+        // Fee Shield: only Gold/Diamond schools have the finance module.
+        // For Standalone/Silver, there is no billing — never show a watermark.
+        const _licTier = licenseStatus?.tier || identityPacket?.planTier || identityPacket?.plan_tier || 'Standalone';
+        const _feeGated = _licTier === 'Gold' || _licTier === 'Diamond';
+        if (!_feeGated) {
+          s.feeStatus = 'cleared';
+        } else {
+          try {
+            const feeRow = db.prepare(
+              `SELECT status FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ? LIMIT 1`
+            ).get(s.id, termConfig?.academic_session, termConfig?.term);
+            // If no fee record exists yet, treat as cleared (billed=0) rather than unpaid
+            s.feeStatus = feeRow?.status ?? 'cleared';
+          } catch (feeErr) {
+            s.feeStatus = 'cleared'; // non-fatal — no finance data = no watermark
+          }
         }
 
         // Subject Attendance Aggregation (Diamond Tier)

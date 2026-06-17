@@ -1298,92 +1298,34 @@ export function Students() {
               </button>
             </div>
 
-            {/* Modal Body */}
-            <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto' }}>
+            {/* ── Modal Body — view switcher ─────────────────────────────── */}
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
-              {/* Identity Row */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                {([
-                  { label: 'Full Name',    value: detailStudent.name },
-                  { label: 'Class',        value: detailStudent.class_name },
-                  { label: 'Reg. Number',  value: detailStudent.reg_no  || '—' },
-                  { label: 'Gender',       value: detailStudent.gender  || '—' },
-                  { label: 'Date of Birth',value: detailStudent.dob     || '—' },
-                  { label: 'Fee Status',   value: detailStudent.fee_status || '—' },
-                ] as { label: string; value: string }[]).map(({ label, value }) => (
-                  <div key={label}>
-                    <p style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>{label}</p>
-                    <p style={{
-                      fontSize: '13px',
-                      color: label === 'Fee Status'
-                        ? (value === 'cleared' ? 'var(--success)' : value === 'partial' ? 'var(--warning)' : 'var(--danger)')
-                        : 'var(--text-main)',
-                      fontWeight: label === 'Full Name' ? 600 : 400,
-                      margin: 0,
-                    }}>{value}</p>
-                  </div>
-                ))}
-              </div>
+              {gradesUnlocked ? (
+                /* ────── Grades View ────── */
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
 
-              {/* Parent / Guardian */}
-              <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: '16px' }}>
-                <p style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '12px' }}>Parent / Guardian</p>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                  {([
-                    { label: 'Guardian Name',  value: detailStudent.parent_name  || '—' },
-                    { label: 'Phone',          value: detailStudent.parent_phone || '—' },
-                    { label: 'Email',          value: detailStudent.parent_email || '—' },
-                  ] as { label: string; value: string }[]).map(({ label, value }) => (
-                    <div key={label}>
-                      <p style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>{label}</p>
-                      <p style={{ fontSize: '13px', color: 'var(--text-main)', margin: 0 }}>{value}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Enrolled Subjects */}
-              <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: '16px' }}>
-                <p style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>
-                  Enrolled Subjects ({detailStudent.subjects?.length || 0})
-                </p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                  {detailStudent.subjects?.length ? detailStudent.subjects.map(sub => (
-                    <span key={sub} style={{
-                      fontSize: '11px', padding: '3px 10px',
-                      background: 'rgba(0,229,255,0.08)',
-                      border: '1px solid rgba(0,229,255,0.25)',
-                      borderRadius: '20px', color: 'var(--accent)',
-                    }}>{sub}</span>
-                  )) : (
-                    <span style={{ fontSize: '12px', color: 'var(--text-dim)', fontStyle: 'italic' }}>No subjects enrolled</span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* ── Grades Panel ─────────────────────────────────────────── */}
-            <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: '16px', paddingLeft: '24px', paddingRight: '24px', paddingBottom: '4px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                <p style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>
-                  📊 Term Grades
-                </p>
-                {!gradesUnlocked ? (
-                  <button
-                    onClick={handleViewGrades}
-                    className="secondary-btn"
-                    style={{ fontSize: '11px', padding: '4px 12px' }}
-                  >
-                    🔐 View Grades
-                  </button>
-                ) : (
-                  <div style={{ display: 'flex', gap: '6px' }}>
+                  {/* Grades Nav Bar */}
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '8px',
+                    padding: '10px 24px', borderBottom: '1px solid var(--glass-border)',
+                    flexShrink: 0, background: 'rgba(0,0,0,0.1)',
+                  }}>
+                    <button
+                      onClick={() => { setGradesUnlocked(false); setGradesEditMode(false); setGradesStatus(null); }}
+                      style={{ background: 'transparent', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px', padding: 0, fontWeight: 600 }}
+                    >
+                      ← Back
+                    </button>
+                    <p style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 auto' }}>
+                      📊 Term Grades
+                    </p>
                     {!gradesEditMode ? (
                       <button onClick={() => setGradesEditMode(true)} className="secondary-btn" style={{ fontSize: '11px', padding: '4px 12px' }}>
                         ✏️ Edit
                       </button>
                     ) : (
-                      <>
+                      <div style={{ display: 'flex', gap: '6px' }}>
                         <button onClick={() => setGradesEditMode(false)} className="secondary-btn" style={{ fontSize: '11px', padding: '4px 10px' }}>
                           Cancel
                         </button>
@@ -1395,75 +1337,152 @@ export function Students() {
                         >
                           {gradesSaving ? 'Saving…' : '💾 Save'}
                         </button>
-                      </>
+                      </div>
                     )}
                   </div>
-                )}
-              </div>
 
-              {gradesUnlocked && (
-                <>
+                  {/* Status banner */}
                   {gradesStatus && (
                     <div style={{
-                      marginBottom: '10px', fontSize: '12px', padding: '6px 10px',
-                      borderRadius: 'var(--radius-sm)',
+                      margin: '10px 24px 0', fontSize: '12px', padding: '6px 10px',
+                      borderRadius: 'var(--radius-sm)', flexShrink: 0,
                       background: gradesStatus.startsWith('✅') ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
                       color: gradesStatus.startsWith('✅') ? 'var(--success)' : 'var(--danger)',
                     }}>
                       {gradesStatus}
                     </div>
                   )}
-                  {gradesLoading ? (
-                    <p style={{ fontSize: '12px', color: 'var(--text-dim)', marginBottom: '8px' }}>Loading grades…</p>
-                  ) : gradesData.length === 0 ? (
-                    <p style={{ fontSize: '12px', color: 'var(--text-dim)', fontStyle: 'italic', marginBottom: '8px' }}>
-                      No grades recorded for this term.
-                    </p>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px' }}>
-                      {gradesData.map((g, gi) => (
-                        <div key={g.subject} style={{
-                          background: 'rgba(255,255,255,0.03)',
-                          border: '1px solid var(--glass-border)',
-                          borderRadius: 'var(--radius-sm)',
-                          padding: '8px 12px',
-                        }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: gradesEditMode && Object.keys(g.breakdown).length ? '8px' : 0 }}>
-                            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-main)' }}>{g.subject}</span>
-                            <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>
-                              {g.score ?? '—'}
-                            </span>
-                          </div>
-                          {gradesEditMode && Object.keys(g.breakdown).length > 0 && (
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                              {Object.entries(g.breakdown).map(([key, val]) => (
-                                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                  <label style={{ fontSize: '10px', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{key}</label>
-                                  <input
-                                    type="number"
-                                    value={val as number}
-                                    min={0}
-                                    onChange={e => {
-                                      const newVal = parseInt(e.target.value) || 0;
-                                      setGradesData(prev => prev.map((gx, gxi) => {
-                                        if (gxi !== gi) return gx;
-                                        const newBd = { ...gx.breakdown, [key]: newVal };
-                                        const newScore = Object.values(newBd).reduce((s, v) => s + (Number(v) || 0), 0);
-                                        return { ...gx, breakdown: newBd, score: newScore };
-                                      }));
-                                    }}
-                                    className="modern-input"
-                                    style={{ width: '48px', textAlign: 'center', fontSize: '11px', padding: '3px 5px' }}
-                                  />
-                                </div>
-                              ))}
+
+                  {/* Scrollable grades list */}
+                  <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px' }}>
+                    {gradesLoading ? (
+                      <p style={{ fontSize: '12px', color: 'var(--text-dim)' }}>Loading grades…</p>
+                    ) : gradesData.length === 0 ? (
+                      <p style={{ fontSize: '12px', color: 'var(--text-dim)', fontStyle: 'italic' }}>
+                        No grades recorded for this term.
+                      </p>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {gradesData.map((g, gi) => (
+                          <div key={g.subject} style={{
+                            background: 'rgba(255,255,255,0.03)',
+                            border: '1px solid var(--glass-border)',
+                            borderRadius: 'var(--radius-sm)',
+                            padding: '8px 12px',
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: gradesEditMode && Object.keys(g.breakdown).length ? '8px' : 0 }}>
+                              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-main)' }}>{g.subject}</span>
+                              <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>
+                                {g.score ?? '—'}
+                              </span>
                             </div>
-                          )}
+                            {gradesEditMode && Object.keys(g.breakdown).length > 0 && (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', overflowY: 'auto', maxHeight: '120px' }}>
+                                {Object.entries(g.breakdown).map(([key, val]) => (
+                                  <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    <label style={{ fontSize: '10px', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{key}</label>
+                                    <input
+                                      type="number"
+                                      value={val as number}
+                                      min={0}
+                                      onChange={e => {
+                                        const newVal = parseInt(e.target.value) || 0;
+                                        setGradesData(prev => prev.map((gx, gxi) => {
+                                          if (gxi !== gi) return gx;
+                                          const newBd = { ...gx.breakdown, [key]: newVal };
+                                          const newScore = Object.values(newBd).reduce((s, v) => s + (Number(v) || 0), 0);
+                                          return { ...gx, breakdown: newBd, score: newScore };
+                                        }));
+                                      }}
+                                      className="modern-input"
+                                      style={{ width: '48px', textAlign: 'center', fontSize: '11px', padding: '3px 5px' }}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+              ) : (
+                /* ────── Details View ────── */
+                <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
+                  {/* Identity Row */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    {([
+                      { label: 'Full Name',    value: detailStudent.name },
+                      { label: 'Class',        value: detailStudent.class_name },
+                      { label: 'Reg. Number',  value: detailStudent.reg_no  || '—' },
+                      { label: 'Gender',       value: detailStudent.gender  || '—' },
+                      { label: 'Date of Birth',value: detailStudent.dob     || '—' },
+                      { label: 'Fee Status',   value: detailStudent.fee_status || '—' },
+                    ] as { label: string; value: string }[]).map(({ label, value }) => (
+                      <div key={label}>
+                        <p style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>{label}</p>
+                        <p style={{
+                          fontSize: '13px',
+                          color: label === 'Fee Status'
+                            ? (value === 'cleared' ? 'var(--success)' : value === 'partial' ? 'var(--warning)' : 'var(--danger)')
+                            : 'var(--text-main)',
+                          fontWeight: label === 'Full Name' ? 600 : 400,
+                          margin: 0,
+                        }}>{value}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Parent / Guardian */}
+                  <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: '16px' }}>
+                    <p style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '12px' }}>Parent / Guardian</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                      {([
+                        { label: 'Guardian Name',  value: detailStudent.parent_name  || '—' },
+                        { label: 'Phone',          value: detailStudent.parent_phone || '—' },
+                        { label: 'Email',          value: detailStudent.parent_email || '—' },
+                      ] as { label: string; value: string }[]).map(({ label, value }) => (
+                        <div key={label}>
+                          <p style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>{label}</p>
+                          <p style={{ fontSize: '13px', color: 'var(--text-main)', margin: 0 }}>{value}</p>
                         </div>
                       ))}
                     </div>
-                  )}
-                </>
+                  </div>
+
+                  {/* Enrolled Subjects */}
+                  <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: '16px' }}>
+                    <p style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>
+                      Enrolled Subjects ({detailStudent.subjects?.length || 0})
+                    </p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {detailStudent.subjects?.length ? detailStudent.subjects.map(sub => (
+                        <span key={sub} style={{
+                          fontSize: '11px', padding: '3px 10px',
+                          background: 'rgba(0,229,255,0.08)',
+                          border: '1px solid rgba(0,229,255,0.25)',
+                          borderRadius: '20px', color: 'var(--accent)',
+                        }}>{sub}</span>
+                      )) : (
+                        <span style={{ fontSize: '12px', color: 'var(--text-dim)', fontStyle: 'italic' }}>No subjects enrolled</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Grades Access Row */}
+                  <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <p style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>
+                      📊 Term Grades
+                    </p>
+                    <button onClick={handleViewGrades} className="secondary-btn" style={{ fontSize: '11px', padding: '4px 12px' }}>
+                      🔐 View Grades
+                    </button>
+                  </div>
+
+                </div>
               )}
             </div>
 
