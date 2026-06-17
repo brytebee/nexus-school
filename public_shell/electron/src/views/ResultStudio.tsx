@@ -77,6 +77,9 @@ export function ResultStudio() {
   const [remarksSaveStatus, setRemarksSaveStatus] = useState('');
   const [currentTerm, setCurrentTerm] = useState('First Term');
 
+  // Report filter options
+  const [skipUngraded, setSkipUngraded] = useState(false);
+
   // Computed brand colors from theme
   const [brandPrimary, setBrandPrimary] = useState('#1A237E');
   const [brandSecondary, setBrandSecondary] = useState('#00E5FF');
@@ -176,9 +179,20 @@ export function ResultStudio() {
       const identity = await window.electronAPI.getIdentity();
       const cfg = await window.electronAPI.getTermConfig();
 
+      // Apply the admin-controlled skip-ungraded filter before generating
+      const studentsToGenerate = skipUngraded
+        ? queryResults.filter(s => (s.average ?? 0) > 0)
+        : queryResults;
+
+      if (!studentsToGenerate.length) {
+        setGenStatus('⚠️ No students to generate — all are ungraded and skip-ungraded is enabled.');
+        setGenerating(false);
+        return;
+      }
+
       const res = await window.electronAPI.generateReports({
         identity,
-        students: queryResults,
+        students: studentsToGenerate,
         termConfig: cfg,
         reportType,
         templateId: template,
@@ -583,21 +597,42 @@ export function ResultStudio() {
             </div>
 
             {queryResults.length > 0 && (
-              <button
-                onClick={handleOpenBulkRemarks}
-                style={{
-                  padding: '8px 16px',
-                  fontSize: '12px',
-                  background: 'rgba(255,255,255,0.05)',
-                  color: '#fff',
-                  border: '1px solid rgba(255,255,255,0.15)',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  width: '100%',
-                }}
-              >
-                ✏️ Edit Bulk Remarks & Attendance
-              </button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {/* Skip-ungraded filter */}
+                <label style={{
+                  display: 'flex', alignItems: 'center', gap: '8px',
+                  fontSize: '11px', color: 'var(--text-dim)', cursor: 'pointer',
+                  padding: '6px 10px',
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid var(--glass-border)',
+                  borderRadius: 'var(--radius-sm)',
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={skipUngraded}
+                    onChange={e => setSkipUngraded(e.target.checked)}
+                    style={{ accentColor: 'var(--accent)', width: '14px', height: '14px' }}
+                  />
+                  <span>Skip students with 0 grades in report</span>
+                  {skipUngraded && (
+                    <span style={{ marginLeft: 'auto', color: 'var(--accent)', fontWeight: 700 }}>
+                      ({queryResults.filter(s => (s.average ?? 0) > 0).length} / {queryResults.length})
+                    </span>
+                  )}
+                </label>
+
+                <button
+                  onClick={handleOpenBulkRemarks}
+                  style={{
+                    padding: '8px 16px', fontSize: '12px',
+                    background: 'rgba(255,255,255,0.05)', color: '#fff',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    borderRadius: '8px', cursor: 'pointer', width: '100%',
+                  }}
+                >
+                  ✏️ Edit Bulk Remarks & Attendance
+                </button>
+              </div>
             )}
 
             {lastImagePath && format === 'image' && (
@@ -724,28 +759,26 @@ export function ResultStudio() {
       {/* ── Bulk Remarks Modal ── */}
       {isRemarksOpen && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(8px)', userSelect: 'none', WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-          <div style={{ background: 'var(--bg-dark)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-xl)', width: '90%', maxWidth: '950px', height: '80vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)' }}>
-            {/* Modal Header */}
-            <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(0, 0, 0, 0.15)', flexShrink: 0 }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: 'var(--text-main)' }}>✏️ Bulk Remarks & Attendance Ledger</h3>
-                <p style={{ margin: '4px 0 0', fontSize: '11px', color: 'var(--text-dim)' }}>Input student remarks and attendance days directly for this report batch.</p>
+          <div style={{ background: 'var(--bg-dark)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-xl)', width: '90%', maxWidth: '950px', height: '82vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)' }}>
+            {/* Modal Header — fixed, not part of scrollable area */}
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(0,0,0,0.2)', flexShrink: 0 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <h3 style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: 'var(--text-main)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>✏️ Bulk Remarks & Attendance Ledger</h3>
+                <p style={{ margin: '3px 0 0', fontSize: '11px', color: 'var(--text-dim)' }}>Input student remarks and attendance days directly for this report batch.</p>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <button
-                  onClick={handleAutoFillRemarks}
-                  className="secondary-btn"
-                  style={{ padding: '6px 12px', fontSize: '11px', borderRadius: 'var(--radius-sm)' }}
-                >
-                  ⚡ Auto-Fill Remarks
-                </button>
-                <button
-                  onClick={() => setIsRemarksOpen(false)}
-                  style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center' }}
-                >
-                  ✕
-                </button>
-              </div>
+              <button
+                onClick={handleAutoFillRemarks}
+                className="secondary-btn"
+                style={{ padding: '5px 11px', fontSize: '11px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap', flexShrink: 0 }}
+              >
+                ⚡ Auto-Fill Remarks
+              </button>
+              <button
+                onClick={() => setIsRemarksOpen(false)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center', flexShrink: 0, padding: '0 4px' }}
+              >
+                ✕
+              </button>
             </div>
 
             {/* Modal Content */}
