@@ -6,7 +6,12 @@ interface Admin {
 }
 
 interface SudoAuthContextType {
-  requireSudo: (onConfirm: () => Promise<void> | void, title?: string, body?: string) => Promise<void>;
+  requireSudo: (
+    onConfirm: () => Promise<void> | void,
+    title?: string,
+    body?: string,
+    destructive?: boolean
+  ) => Promise<void>;
   resetSudo: () => void;
 }
 
@@ -29,6 +34,7 @@ export function SudoAuthProvider({ children }: { children: React.ReactNode }) {
     onConfirm: () => Promise<void> | void;
     title: string;
     body: string;
+    destructive: boolean;
   } | null>(null);
 
   // ── PIN modal state ─────────────────────────────────────────────────────────
@@ -63,20 +69,28 @@ export function SudoAuthProvider({ children }: { children: React.ReactNode }) {
   const requireSudo = async (
     onConfirm: () => Promise<void> | void,
     title = 'Confirm Destructive Action',
-    body = 'This action is irreversible and will permanently destroy data. Are you sure you want to continue?'
+    body = 'This action is irreversible and will permanently destroy data. Are you sure you want to continue?',
+    destructive = true
   ) => {
     const now = Date.now();
     const isSessionValid = lastAuthTime && (now - lastAuthTime < 30 * 60 * 1000); // 30 minutes
 
-    setPendingAction({ onConfirm, title, body });
     setPin('');
     setPinError('');
 
     if (isSessionValid) {
-      // Session still valid — show confirm-only modal (no PIN required)
+      if (!destructive) {
+        // Non-destructive read action (e.g. View Grades) — session is valid,
+        // skip the confirm dialog entirely and call the callback immediately.
+        await onConfirm();
+        return;
+      }
+      // Destructive action within a valid session — show confirm-only modal
+      setPendingAction({ onConfirm, title, body, destructive });
       setIsConfirmOpen(true);
     } else {
       // Session expired — full PIN verification required
+      setPendingAction({ onConfirm, title, body, destructive });
       setIsPinOpen(true);
     }
   };
@@ -180,11 +194,13 @@ export function SudoAuthProvider({ children }: { children: React.ReactNode }) {
                 onClick={handleConfirmOnly}
                 style={{
                   fontSize: '12px', padding: '8px 20px', borderRadius: '8px',
-                  background: 'linear-gradient(135deg, #ef4444, #f87171)',
+                  background: pendingAction.destructive
+                    ? 'linear-gradient(135deg, #ef4444, #f87171)'
+                    : 'linear-gradient(135deg, var(--accent), #00b4d8)',
                   border: 'none', color: '#fff', cursor: 'pointer', fontWeight: 600,
                 }}
               >
-                🗑️ Confirm Delete
+                {pendingAction.destructive ? '🗑️ Confirm Delete' : '✅ Proceed'}
               </button>
             </div>
           </div>
