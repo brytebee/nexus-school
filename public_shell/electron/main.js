@@ -1913,25 +1913,27 @@ ipcMain.handle("save-student-grades", (event, { student_id, grades }) => {
     if (!termConfig) return { ok: false, error: "Term config not found" };
     const { academic_session, term } = termConfig;
 
-    const upsert = db.prepare(`
-      INSERT INTO student_records (student_id, academic_session, term, subject, score, breakdown)
-      VALUES (@student_id, @session, @term, @subject, @score, @breakdown)
-      ON CONFLICT(student_id, academic_session, term, subject)
-      DO UPDATE SET score = excluded.score, breakdown = excluded.breakdown
+    // The student_records UNIQUE key includes `assessment`, so a plain ON CONFLICT
+    // on (student_id, academic_session, term, subject) fails.  Instead, delete all
+    // existing rows for this student/subject/session/term and insert one clean
+    // consolidated row (assessment = 'FULL') that carries the full breakdown JSON.
+    const deleteRow = db.prepare(`
+      DELETE FROM student_records
+      WHERE student_id = ? AND academic_session = ? AND term = ? AND subject = ?
+    `);
+
+    const insertRow = db.prepare(`
+      INSERT INTO student_records
+        (student_id, academic_session, term, subject, assessment, score, breakdown)
+      VALUES (?, ?, ?, ?, 'FULL', ?, ?)
     `);
 
     const saveAll = db.transaction((items) => {
       for (const item of items) {
         const bd = item.breakdown || {};
         const total = Object.values(bd).reduce((sum, v) => sum + (Number(v) || 0), 0);
-        upsert.run({
-          student_id,
-          session: academic_session,
-          term,
-          subject: item.subject,
-          score: total,
-          breakdown: JSON.stringify(bd),
-        });
+        deleteRow.run(student_id, academic_session, term, item.subject);
+        insertRow.run(student_id, academic_session, term, item.subject, total, JSON.stringify(bd));
       }
     });
 
