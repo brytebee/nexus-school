@@ -205,6 +205,7 @@ export function Students() {
       },
       'View & Edit Grades',
       'Admin access is required to view or modify student term grades.',
+      false  // non-destructive — skip confirm dialog within active session
     );
   };
 
