@@ -73,7 +73,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
   const [termEndDate, setTermEndDate] = useState("");
   const [showPosition, setShowPosition] = useState(true);
   const [showDomains, setShowDomains] = useState(true);
-  const [showAttendance, setShowAttendance] = useState(true);
+  const [includeAttendance, setIncludeAttendance] = useState(true);
   const [attendanceWeight, setAttendanceWeight] = useState(10);
   const [template, setTemplate] = useState("clean_slate");
 
@@ -130,7 +130,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
   const hasAttendanceAccess = currentTier !== "Silver" && currentTier !== "Standalone";
   const totalScoreSum =
     components.reduce((acc, c) => acc + (c.max || 0), 0) +
-    (showAttendance && hasAttendanceAccess ? Number(attendanceWeight) || 0 : 0);
+    (includeAttendance && hasAttendanceAccess ? Number(attendanceWeight) || 0 : 0);
 
   // Load configs & pickers metadata
   useEffect(() => {
@@ -138,6 +138,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
       if (!window.electronAPI) return;
       try {
         const cfg = await window.electronAPI.getTermConfig();
+        const hasAtt = currentTier !== "Silver" && currentTier !== "Standalone";
         if (cfg) {
           if (cfg.academic_session) setSession(cfg.academic_session);
           if (cfg.term) setTerm(cfg.term);
@@ -152,13 +153,13 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
             setShowDomains(
               cfg.show_domains !== false && cfg.show_domains !== 0,
             );
-          const hasAtt = currentTier !== "Silver" && currentTier !== "Standalone";
-          if (cfg.show_attendance !== undefined)
-            setShowAttendance(
-              hasAtt && cfg.show_attendance !== false && cfg.show_attendance !== 0,
-            );
-          if (cfg.attendance_score_weight !== undefined)
-            setAttendanceWeight(Number(cfg.attendance_score_weight) || 0);
+
+          const dbAttWeight = cfg.attendance_score_weight !== undefined
+            ? Number(cfg.attendance_score_weight)
+            : 0;
+          setAttendanceWeight(hasAtt ? (dbAttWeight || 10) : 0);
+          setIncludeAttendance(hasAtt && dbAttWeight > 0);
+
           if (cfg.template) {
             setTemplate(isTemplateLocked(cfg.template) ? "clean_slate" : cfg.template);
           }
@@ -172,8 +173,40 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
               raw.components.length
             ) {
               setComponents(sortGradingComponents(raw.components));
+            } else {
+              setComponents(hasAtt ? [
+                { key: "CA1", label: "C.A. 1", max: 10 },
+                { key: "CA2", label: "C.A. 2", max: 10 },
+                { key: "Exam", label: "Exam", max: 70 },
+              ] : [
+                { key: "CA1", label: "C.A. 1", max: 10 },
+                { key: "CA2", label: "C.A. 2", max: 10 },
+                { key: "Exam", label: "Exam", max: 80 },
+              ]);
             }
+          } else {
+            setComponents(hasAtt ? [
+              { key: "CA1", label: "C.A. 1", max: 10 },
+              { key: "CA2", label: "C.A. 2", max: 10 },
+              { key: "Exam", label: "Exam", max: 70 },
+            ] : [
+              { key: "CA1", label: "C.A. 1", max: 10 },
+              { key: "CA2", label: "C.A. 2", max: 10 },
+              { key: "Exam", label: "Exam", max: 80 },
+            ]);
           }
+        } else {
+          setAttendanceWeight(hasAtt ? 10 : 0);
+          setIncludeAttendance(hasAtt);
+          setComponents(hasAtt ? [
+            { key: "CA1", label: "C.A. 1", max: 10 },
+            { key: "CA2", label: "C.A. 2", max: 10 },
+            { key: "Exam", label: "Exam", max: 70 },
+          ] : [
+            { key: "CA1", label: "C.A. 1", max: 10 },
+            { key: "CA2", label: "C.A. 2", max: 10 },
+            { key: "Exam", label: "Exam", max: 80 },
+          ]);
         }
 
         // Get classes
@@ -199,7 +232,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
       }
     };
     loadConfig();
-  }, []);
+  }, [currentTier]);
 
   const handleSaveConfig = async () => {
     if (totalScoreSum > 100) {
@@ -241,8 +274,8 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
         term_end_date: termEndDate,
         show_position: showPosition,
         show_domains: showDomains,
-        show_attendance: hasAttendanceAccess ? showAttendance : false,
-        attendance_score_weight: hasAttendanceAccess ? attendanceWeight : 0,
+        show_attendance: hasAttendanceAccess ? true : false,
+        attendance_score_weight: (hasAttendanceAccess && includeAttendance) ? attendanceWeight : 0,
         grading_scale: JSON.stringify({ scale: existingScale, components: sortGradingComponents(components) }),
         template,
       };
@@ -564,11 +597,11 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
                 >
                   <input
                     type="checkbox"
-                    checked={showAttendance}
-                    onChange={(e) => setShowAttendance(e.target.checked)}
+                    checked={includeAttendance}
+                    onChange={(e) => setIncludeAttendance(e.target.checked)}
                     style={{ marginRight: "6px" }}
                   />
-                  Show Attendance Stats
+                  Include Attendance in Grade Computation
                 </label>
               )}
             </div>
@@ -710,7 +743,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
                 </div>
               ))}
 
-              {showAttendance && currentTier !== "Silver" && currentTier !== "Standalone" && (
+              {includeAttendance && currentTier !== "Silver" && currentTier !== "Standalone" && (
                 <div
                   style={{
                     display: "flex",
@@ -721,11 +754,10 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
                     borderRadius: "8px",
                     padding: "8px 12px",
                     fontSize: "12px",
-                    opacity: 0.8,
                   }}
                 >
-                  <span style={{ flex: 1, fontWeight: 600, color: "#fff" }}>
-                    📅 Attendance Weight
+                  <span style={{ flex: 1, fontWeight: 600, color: "#fff", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span>📅</span> Attendance
                   </span>
                   <input
                     type="number"
@@ -750,6 +782,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
                   <span style={{ color: "var(--text-dim)", fontSize: "10px" }}>
                     pts
                   </span>
+                  <span style={{ width: "20px" }}></span>
                 </div>
               )}
             </div>
