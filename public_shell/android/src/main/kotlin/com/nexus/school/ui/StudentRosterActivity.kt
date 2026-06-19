@@ -169,6 +169,7 @@ class StudentRosterActivity : AppCompatActivity() {
             val identityManager = remember { IdentityManager(this@StudentRosterActivity) }
             val planModules    = remember { identityManager.getTierModules() }
             var isLocked by remember { mutableStateOf(identityManager.isRegistrationLocked()) }
+            var isAttendanceLocked by remember { mutableStateOf(identityManager.isAttendanceLocked()) }
 
             // ── Subject×Class matrix state ────────────────────────────────────
             // Build unique "ClassName • Subject" tabs from the loaded dataset
@@ -178,6 +179,7 @@ class StudentRosterActivity : AppCompatActivity() {
 
             LaunchedEffect(dbStateRef) {
                 isLocked = identityManager.isRegistrationLocked()
+                isAttendanceLocked = identityManager.isAttendanceLocked()
                 scope.launch {
                     val db = SyncDatabase.getDatabase(this@StudentRosterActivity)
                     students = db.studentDao().getAllStudents()
@@ -264,20 +266,31 @@ class StudentRosterActivity : AppCompatActivity() {
                                 // Take Attendance FAB — only visible to the form teacher of this class
                                 if (selectedTab != null &&
                                     IdentityManager(this@StudentRosterActivity).isFormTeacherOf(selectedTab?.first ?: "")) {
-                                    ExtendedFloatingActionButton(
+                                    FloatingActionButton(
                                         onClick = {
-                                            val intent = Intent(this@StudentRosterActivity, AttendanceActivity::class.java).apply {
-                                                putExtra(AttendanceActivity.EXTRA_CLASS_NAME, selectedTab?.first ?: "")
-                                                putExtra(AttendanceActivity.EXTRA_SCHOOL_NAME, schoolName)
-                                                putExtra(AttendanceActivity.EXTRA_PRIMARY_COLOR, primaryColorHex)
+                                            if (isAttendanceLocked) {
+                                                android.widget.Toast.makeText(
+                                                    this@StudentRosterActivity,
+                                                    "🔒 Attendance is locked by the Admin. Sync to refresh status.",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            } else {
+                                                val intent = Intent(this@StudentRosterActivity, AttendanceActivity::class.java).apply {
+                                                    putExtra(AttendanceActivity.EXTRA_CLASS_NAME, selectedTab?.first ?: "")
+                                                    putExtra(AttendanceActivity.EXTRA_SCHOOL_NAME, schoolName)
+                                                    putExtra(AttendanceActivity.EXTRA_PRIMARY_COLOR, primaryColorHex)
+                                                }
+                                                startActivity(intent)
                                             }
-                                            startActivity(intent)
                                         },
-                                        containerColor = Color(0xFF1B5E20),
-                                        contentColor = Color.White,
-                                        icon = { Icon(Icons.Default.Check, contentDescription = "Take Attendance") },
-                                        text = { Text("Attendance", fontWeight = FontWeight.Bold) }
-                                    )
+                                        containerColor = if (isAttendanceLocked) Color(0xFF757575) else Color(0xFF1B5E20),
+                                        contentColor = Color.White
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isAttendanceLocked) Icons.Default.Lock else Icons.Default.Check,
+                                            contentDescription = if (isAttendanceLocked) "Attendance Locked" else "Take Attendance"
+                                        )
+                                    }
                                 }
                                 // Add Student FAB
                                 FloatingActionButton(
@@ -920,6 +933,7 @@ fun FocusModePager(
     val pagerState = rememberPagerState(pageCount = { students.size })
     val scope      = rememberCoroutineScope()
     val context    = LocalContext.current
+    val identityManager = remember { IdentityManager(context) }
 
     val gradeState = remember { mutableStateMapOf<String, String>() }
 
@@ -993,36 +1007,49 @@ fun FocusModePager(
                     comp.key to (gradeState["${subjectKey}_${comp.key}"] ?: "")
                 }
 
+                val isGradesLocked = remember { identityManager.isGradesLocked() }
                 StudentFocusCard(
                     student         = student,
                     selectedTab     = selectedTab,
                     primaryColor    = primaryColor,
                     scoreComponents = scoreComponents,
                     compValues      = compValues,
+                    isLocked        = isGradesLocked,
                     onValueChange   = { compKey, value ->
-                        gradeState["${subjectKey}_${compKey}"] = value
+                        if (!isGradesLocked) {
+                            gradeState["${subjectKey}_${compKey}"] = value
+                        }
                     },
                     onAutoSave = {
-                        scope.launch(Dispatchers.IO) {
-                            saveGradeEvent(
-                                context, studentId, student.subject,
-                                scoreComponents.associate { it.key to (gradeState["${subjectKey}_${it.key}"] ?: "") },
-                                scoreComponents
-                            )
-                            launch(Dispatchers.Main) { onLogSave(studentId, student.subject, true) }
+                        if (!isGradesLocked) {
+                            scope.launch(Dispatchers.IO) {
+                                saveGradeEvent(
+                                    context, studentId, student.subject,
+                                    scoreComponents.associate { it.key to (gradeState["${subjectKey}_${it.key}"] ?: "") },
+                                    scoreComponents
+                                )
+                                launch(Dispatchers.Main) { onLogSave(studentId, student.subject, true) }
+                            }
                         }
                     },
                     onSave = {
-                        scope.launch(Dispatchers.IO) {
-                            saveGradeEvent(
-                                context, studentId, student.subject,
-                                scoreComponents.associate { it.key to (gradeState["${subjectKey}_${it.key}"] ?: "") },
-                                scoreComponents
-                            )
-                            launch(Dispatchers.Main) {
-                                onLogSave(studentId, student.subject, true)
+                        if (isGradesLocked) {
+                            scope.launch {
                                 if (page < students.size - 1) pagerState.animateScrollToPage(page + 1)
                                 else onClose()
+                            }
+                        } else {
+                            scope.launch(Dispatchers.IO) {
+                                saveGradeEvent(
+                                    context, studentId, student.subject,
+                                    scoreComponents.associate { it.key to (gradeState["${subjectKey}_${it.key}"] ?: "") },
+                                    scoreComponents
+                                )
+                                launch(Dispatchers.Main) {
+                                    onLogSave(studentId, student.subject, true)
+                                    if (page < students.size - 1) pagerState.animateScrollToPage(page + 1)
+                                    else onClose()
+                                }
                             }
                         }
                     },
@@ -1046,6 +1073,7 @@ fun StudentFocusCard(
     primaryColor: Color,
     scoreComponents: List<ScoreComponent>,
     compValues: Map<String, String>,
+    isLocked: Boolean = false,
     onValueChange: (String, String) -> Unit,
     onAutoSave: () -> Unit,
     onSave: () -> Unit,
@@ -1058,6 +1086,7 @@ fun StudentFocusCard(
     var initialized by remember { mutableStateOf(false) }
     val valueSnapshot = scoreComponents.map { it.key to (compValues[it.key] ?: "") }
     LaunchedEffect(valueSnapshot) {
+        if (isLocked) return@LaunchedEffect
         if (!initialized) { initialized = true; return@LaunchedEffect }
         delay(650)
         onAutoSave()
@@ -1182,7 +1211,11 @@ fun StudentFocusCard(
                 letterSpacing = 0.8.sp,
                 modifier = Modifier.weight(1f)
             )
-            Text("Auto-saves", color = TextMuted, fontSize = 10.sp)
+            if (isLocked) {
+                Text("🔒 Locked by Admin", color = Color(0xFFEF4444), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            } else {
+                Text("Auto-saves", color = TextMuted, fontSize = 10.sp)
+            }
         }
         Spacer(Modifier.height(8.dp))
 
@@ -1205,6 +1238,7 @@ fun StudentFocusCard(
                             label       = comp.label,
                             maxScore    = comp.max,
                             value       = compValues[comp.key] ?: "",
+                            enabled     = !isLocked,
                             primaryColor = primaryColor,
                             onValueChange = { v ->
                                 if (v.isEmpty() || (v.toIntOrNull() != null && v.toInt() <= comp.max)) {
@@ -1268,7 +1302,7 @@ fun StudentFocusCard(
                 colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
                 shape = RoundedCornerShape(50),
             ) {
-                Text("Save & Next", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(if (isLocked) "Next" else "Save & Next", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(6.dp))
                 Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
             }
@@ -1284,6 +1318,7 @@ fun CompactGradeInputCard(
     label: String,
     maxScore: Int,
     value: String,
+    enabled: Boolean = true,
     primaryColor: Color,
     onValueChange: (String) -> Unit
 ) {
@@ -1301,6 +1336,7 @@ fun CompactGradeInputCard(
             value = value,
             onValueChange = onValueChange,
             modifier = Modifier.fillMaxWidth(),
+            enabled = enabled,
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             textStyle = TextStyle(
@@ -1431,6 +1467,7 @@ fun EditStudentRecordSheet(
 ) {
     val context    = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val isGradesLocked = remember { IdentityManager(context).isGradesLocked() }
 
     var showDatePicker by remember { mutableStateOf(false) }
 
@@ -1588,6 +1625,15 @@ fun EditStudentRecordSheet(
                     Column(Modifier.weight(1f)) {
                         Text("Scores", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
                         Text("${student.name}  ·  ${student.class_name}", color = TextMuted, fontSize = 11.sp)
+                        if (isGradesLocked) {
+                            Text(
+                                "🔒 Locked by Admin",
+                                color = Color(0xFFEF4444),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
                     }
                     PageDots()
                 }
@@ -1608,11 +1654,18 @@ fun EditStudentRecordSheet(
                                         OutlinedTextField(
                                             value = tempScores[comp.key] ?: "",
                                             onValueChange = { v ->
-                                                val f = v.filter { it.isDigit() }
-                                                if (f.isEmpty() || (f.toIntOrNull() ?: 0) <= comp.max) tempScores[comp.key] = f
+                                                if (!isGradesLocked) {
+                                                    val f = v.filter { it.isDigit() }
+                                                    if (f.isEmpty() || (f.toIntOrNull() ?: 0) <= comp.max) tempScores[comp.key] = f
+                                                }
                                             },
+                                            enabled = !isGradesLocked,
                                             modifier = Modifier.fillMaxWidth(), singleLine = true,
-                                            textStyle = TextStyle(color = Color.White, fontSize = 16.sp, textAlign = TextAlign.Center),
+                                            textStyle = TextStyle(
+                                                color = if (isGradesLocked) Color.Gray else Color.White,
+                                                fontSize = 16.sp,
+                                                textAlign = TextAlign.Center
+                                            ),
                                             colors = outlinedSheetColors(primaryColor),
                                             shape = RoundedCornerShape(10.dp),
                                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)

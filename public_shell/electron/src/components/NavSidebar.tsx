@@ -37,6 +37,7 @@ export function NavSidebar({ activeTab, onTabChange, isCollapsed, onOpenHelp }: 
     { id: 'dashboard', label: 'Dashboard', icon: '🏠' },
     { id: 'teachers', label: 'Teachers', icon: '👩‍🏫', badgeId: 'badge-teachers' },
     { id: 'students', label: 'Students', icon: '👥', badgeId: 'badge-students' },
+    { id: 'classes', label: 'Classes', icon: '🏫' },
     { id: 'sync', label: 'Sync Hub', icon: '📲' },
     { id: 'printhub', label: 'Print Hub', icon: '🖨️' },
     { id: 'result-studio', label: 'Result Studio', icon: '📊' },

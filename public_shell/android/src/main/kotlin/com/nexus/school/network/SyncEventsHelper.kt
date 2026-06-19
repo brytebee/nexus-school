@@ -21,6 +21,12 @@ suspend fun saveGradeEvent(
     compValues: Map<String, String>,
     components: List<ScoreComponent>
 ) {
+    val identityManager = IdentityManager(context)
+    if (identityManager.isGradesLocked()) {
+        Log.w("SyncEventsHelper", "saveGradeEvent blocked: Mobile grades are locked.")
+        return
+    }
+
     val db    = SyncDatabase.getDatabase(context)
     val total = components.sumOf { compValues[it.key]?.toIntOrNull() ?: 0 }
     
@@ -188,6 +194,12 @@ suspend fun saveAttendanceEvents(
     date: String,
     records: Map<String, String>   // student_id → status
 ) {
+    val identityManager = IdentityManager(context)
+    if (identityManager.isAttendanceLocked()) {
+        Log.w("SyncEventsHelper", "saveAttendanceEvents blocked: Mobile attendance is locked.")
+        return
+    }
+
     val db = SyncDatabase.getDatabase(context)
 
     val attendanceEntities = records.map { (studentId, status) ->

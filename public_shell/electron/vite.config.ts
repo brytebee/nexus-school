@@ -16,6 +16,14 @@ function copyLibsPlugin() {
         fs.cpSync(srcDir, destDir, { recursive: true });
         console.log('[copy-libs] Successfully copied libs to dist/libs');
       }
+      
+      const srcJsDir = path.resolve(__dirname, 'js');
+      const destJsDir = path.resolve(__dirname, 'dist/js');
+      if (fs.existsSync(srcJsDir)) {
+        fs.mkdirSync(destJsDir, { recursive: true });
+        fs.cpSync(srcJsDir, destJsDir, { recursive: true });
+        console.log('[copy-libs] Successfully copied js to dist/js');
+      }
     }
   };
 }

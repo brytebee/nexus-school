@@ -146,7 +146,18 @@ class SyncWorker(private val context: Context) {
                     }
 
                     val registrationLocked = jsonObject.optBoolean("registration_locked", false)
+                    val gradesLocked       = jsonObject.optBoolean("grades_locked", false)
+                    val attendanceLocked   = jsonObject.optBoolean("attendance_locked", false)
+                    val registrationLockAt = jsonObject.optLong("registration_lock_at", 0L)
+                    val gradesLockAt       = jsonObject.optLong("grades_lock_at", 0L)
+                    val attendanceLockAt   = jsonObject.optLong("attendance_lock_at", 0L)
+
                     identityManager.saveRegistrationLocked(registrationLocked)
+                    identityManager.saveGradesLocked(gradesLocked)
+                    identityManager.saveAttendanceLocked(attendanceLocked)
+                    identityManager.saveRegistrationLockAt(registrationLockAt)
+                    identityManager.saveGradesLockAt(gradesLockAt)
+                    identityManager.saveAttendanceLockAt(attendanceLockAt)
 
                     Log.d("SyncWorker", "Sync OK — ${successfulIds.size} events pushed, ${failedEventIds.size} failed.")
                     SyncResult(

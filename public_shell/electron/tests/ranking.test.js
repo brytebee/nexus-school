@@ -34,6 +34,17 @@ describe('ranking engine', () => {
       expect(ranks.get(1)).toBe('1st');
       expect(ranks.get(2)).toBe('1st');
     });
+
+    it('applies space-insensitive matching to resolved max subjects', () => {
+      const students = [
+        { id: 1, class_name: 'SS1 Gold', subjects: [{ score: 80 }, { score: 80 }] }, 
+        { id: 2, class_name: 'SS1 Gold', subjects: [{ score: 90 }] }, 
+      ];
+      const maxSubjectsMap = { 'SS 1': 10 };
+      const ranks = computeRankMap(students, maxSubjectsMap);
+      expect(ranks.get(1)).toBe('1st');
+      expect(ranks.get(2)).toBe('2nd');
+    });
   });
 
   describe('computeSubjectRankMap', () => {

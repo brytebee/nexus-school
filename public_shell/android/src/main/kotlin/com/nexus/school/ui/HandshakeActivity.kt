@@ -344,6 +344,11 @@ class HandshakeActivity : AppCompatActivity() {
                                                     )
                                                     identityManager.saveLogoBase64(config.logoBase64)
                                                     identityManager.saveRegistrationLocked(config.registration_locked == true)
+                                                    identityManager.saveRegistrationLockAt(config.registration_lock_at ?: 0L)
+                                                    identityManager.saveGradesLocked(config.grades_locked == true)
+                                                    identityManager.saveAttendanceLocked(config.attendance_locked == true)
+                                                    identityManager.saveGradesLockAt(config.grades_lock_at ?: 0L)
+                                                    identityManager.saveAttendanceLockAt(config.attendance_lock_at ?: 0L)
                                                     if (config.modules.isNotEmpty()) {
                                                         identityManager.saveTierModules(config.modules)
                                                     }

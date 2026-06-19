@@ -5,6 +5,29 @@ import {
   QrCode, CheckCircle, XCircle, ShieldAlert, Plus, ArrowLeft, RefreshCw, Key, Info, Play
 } from 'lucide-react';
 import { useSudoAuth } from '../context/SudoAuthContext';
+import { useClassArms } from '../hooks/useClassArms';
+import { Combobox } from '../components/Combobox';
+
+const splitClass = (selected: string, configs: { hierarchy_class: string }[]) => {
+  const sorted = [...configs].sort((a, b) => b.hierarchy_class.length - a.hierarchy_class.length);
+  for (const conf of sorted) {
+    const prefix = conf.hierarchy_class;
+    if (selected === prefix) {
+      return { class_name: prefix, class_arm: '' };
+    }
+    if (selected.startsWith(prefix + ' ')) {
+      return { class_name: prefix, class_arm: selected.substring(prefix.length + 1).trim() };
+    }
+  }
+  const lastSpace = selected.lastIndexOf(' ');
+  if (lastSpace > -1) {
+    return {
+      class_name: selected.substring(0, lastSpace).trim(),
+      class_arm: selected.substring(lastSpace + 1).trim()
+    };
+  }
+  return { class_name: selected, class_arm: '' };
+};
 
 interface CbtArenaProps {
   onOpenHelp?: () => void;
@@ -12,6 +35,20 @@ interface CbtArenaProps {
 
 export function CbtArena({ onOpenHelp }: CbtArenaProps) {
   const { requireSudo } = useSudoAuth();
+  const { configs, fullList } = useClassArms();
+  const cbtClassOptions = React.useMemo(() => {
+    const list: string[] = [];
+    configs.forEach((c) => {
+      // Add the class level itself (e.g. "JSS 1")
+      list.push(c.hierarchy_class);
+      // Add the specific arms (e.g. "JSS 1 Gold")
+      if (c.arms && c.arms.length > 0) {
+        c.arms.forEach(a => list.push(`${c.hierarchy_class} ${a}`));
+      }
+    });
+    return Array.from(new Set(list));
+  }, [configs]);
+
   const [activeTab, setActiveTab] = useState<'banks' | 'deploy' | 'live' | 'clearance' | 'about'>('banks');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [passMark, setPassMark] = useState(50);
@@ -1891,56 +1928,18 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                   </select>
                 </div>
                 
-                <div>
-                  <label className="ph-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)', display: 'block', marginBottom: '6px' }}>Class Level</label>
-                  {classHierarchy.length > 0 ? (
-                    <select
-                      value={deployClassLevel}
-                      onChange={(e) => setDeployClassLevel(e.target.value)}
-                      className="modern-input"
-                      style={{ width: '100%', background: '#0d1235', color: '#fff' }}
-                    >
-                      <option value="" style={{ background: '#0d1235', color: '#fff' }}>-- Select Level --</option>
-                      {classHierarchy.map(level => (
-                        <option key={level} value={level} style={{ background: '#0d1235', color: '#fff' }}>{level}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type="text"
-                      value={deployClassLevel}
-                      onChange={(e) => setDeployClassLevel(e.target.value)}
-                      placeholder="e.g. JSS1 (configure in Settings)"
-                      className="modern-input"
-                      style={{ width: '100%' }}
-                    />
-                  )}
-                </div>
-
-                <div>
-                  <label className="ph-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)', display: 'block', marginBottom: '6px' }}>Class Arm <span style={{ fontWeight: 400, textTransform: 'none', fontSize: '10px', opacity: 0.6 }}>(optional)</span></label>
-                  {classArms.length > 0 ? (
-                    <select
-                      value={deployClassArm}
-                      onChange={(e) => setDeployClassArm(e.target.value)}
-                      className="modern-input"
-                      style={{ width: '100%', background: '#0d1235', color: '#fff' }}
-                    >
-                      <option value="" style={{ background: '#0d1235', color: '#fff' }}>-- All Arms --</option>
-                      {classArms.map(arm => (
-                        <option key={arm} value={arm} style={{ background: '#0d1235', color: '#fff' }}>{arm}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type="text"
-                      value={deployClassArm}
-                      onChange={(e) => setDeployClassArm(e.target.value)}
-                      placeholder="e.g. A (configure Arms in Settings)"
-                      className="modern-input"
-                      style={{ width: '100%' }}
-                    />
-                  )}
+                <div style={{ gridColumn: 'span 2' }}>
+                  <label className="ph-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)', display: 'block', marginBottom: '6px' }}>Target Class</label>
+                  <Combobox
+                    options={cbtClassOptions}
+                    value={deployClassLevel ? (deployClassArm ? `${deployClassLevel} ${deployClassArm}` : deployClassLevel) : ''}
+                    onChange={(selected) => {
+                      const { class_name, class_arm } = splitClass(selected, configs);
+                      setDeployClassLevel(class_name);
+                      setDeployClassArm(class_arm);
+                    }}
+                    placeholder="Select Target Class..."
+                  />
                 </div>
 
                 <div>

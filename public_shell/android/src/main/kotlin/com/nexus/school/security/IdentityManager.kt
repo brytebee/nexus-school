@@ -268,6 +268,14 @@ class IdentityManager(context: Context) {
 
     /** Persists the plan tier label sent by the server ("Standalone", "Silver", "Gold", "Diamond"). */
     fun savePlanTier(tier: String) {
+        // Security: only accept the four canonical tier values.
+        // Anything else is treated as a tamper signal and silently dropped;
+        // inferTierFromModules() will cover the fallback at read-time.
+        val validTiers = setOf("Standalone", "Silver", "Gold", "Diamond")
+        if (tier !in validTiers) {
+            android.util.Log.w("IdentityManager", "savePlanTier: rejected unrecognised tier '$tier' — possible tampering.")
+            return
+        }
         prefs.edit().putString("plan_tier", tier).apply()
     }
 
@@ -325,8 +333,71 @@ class IdentityManager(context: Context) {
         prefs.edit().putBoolean("registration_locked", locked).apply()
     }
 
+    fun saveRegistrationLockAt(timestamp: Long) {
+        prefs.edit().putLong("registration_lock_at", timestamp).apply()
+    }
+
+    fun getRegistrationLockAt(): Long {
+        return prefs.getLong("registration_lock_at", 0L)
+    }
+
     fun isRegistrationLocked(): Boolean {
-        return prefs.getBoolean("registration_locked", false)
+        if (prefs.getBoolean("registration_locked", false)) return true
+        val lockAt = getRegistrationLockAt()
+        if (lockAt > 0 && System.currentTimeMillis() >= lockAt) {
+            return true
+        }
+        return false
+    }
+
+    fun saveGradesLocked(locked: Boolean) {
+        prefs.edit().putBoolean("grades_locked", locked).apply()
+    }
+
+    fun isGradesLockedExplicit(): Boolean {
+        return prefs.getBoolean("grades_locked", false)
+    }
+
+    fun saveAttendanceLocked(locked: Boolean) {
+        prefs.edit().putBoolean("attendance_locked", locked).apply()
+    }
+
+    fun isAttendanceLockedExplicit(): Boolean {
+        return prefs.getBoolean("attendance_locked", false)
+    }
+
+    fun saveGradesLockAt(timestamp: Long) {
+        prefs.edit().putLong("grades_lock_at", timestamp).apply()
+    }
+
+    fun getGradesLockAt(): Long {
+        return prefs.getLong("grades_lock_at", 0L)
+    }
+
+    fun saveAttendanceLockAt(timestamp: Long) {
+        prefs.edit().putLong("attendance_lock_at", timestamp).apply()
+    }
+
+    fun getAttendanceLockAt(): Long {
+        return prefs.getLong("attendance_lock_at", 0L)
+    }
+
+    fun isGradesLocked(): Boolean {
+        if (isGradesLockedExplicit()) return true
+        val lockAt = getGradesLockAt()
+        if (lockAt > 0 && System.currentTimeMillis() >= lockAt) {
+            return true
+        }
+        return false
+    }
+
+    fun isAttendanceLocked(): Boolean {
+        if (isAttendanceLockedExplicit()) return true
+        val lockAt = getAttendanceLockAt()
+        if (lockAt > 0 && System.currentTimeMillis() >= lockAt) {
+            return true
+        }
+        return false
     }
 
     fun clearData() {

@@ -105,6 +105,7 @@ private fun AttendanceScreen(
 ) {
     val context   = LocalContext.current
     val scope     = rememberCoroutineScope()
+    val isAttendanceLocked = remember { IdentityManager(context).isAttendanceLocked() }
 
     // ── State ────────────────────────────────────────────────────────────────
     var selectedDate  by remember { mutableStateOf(LocalDate.now()) }
@@ -198,6 +199,7 @@ private fun AttendanceScreen(
                 className    = className,
                 primaryColor = primaryColor,
                 selectedDate = selectedDate.format(displayFormatter),
+                isLocked     = isAttendanceLocked,
                 onDateClick  = { showDatePicker() },
                 onClose      = onClose
             )
@@ -242,7 +244,13 @@ private fun AttendanceScreen(
                                 index    = index + 1,
                                 student  = student,
                                 status   = currentStatus,
-                                onClick  = { statusMap[student.id] = currentStatus.next() }
+                                onClick  = {
+                                    if (isAttendanceLocked) {
+                                        Toast.makeText(context, "🔒 Attendance registry is locked for editing.", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        statusMap[student.id] = currentStatus.next()
+                                    }
+                                }
                             )
                         }
                     }
@@ -251,21 +259,33 @@ private fun AttendanceScreen(
 
             // ── Save Button ──────────────────────────────────────────────────
             Button(
-                onClick  = { if (!isSaving) saveRegister() },
-                enabled  = !isLoading && !isSaving && uniqueStudents.isNotEmpty(),
+                onClick  = {
+                    if (isAttendanceLocked) {
+                        onClose()
+                    } else if (!isSaving) {
+                        saveRegister()
+                    }
+                },
+                enabled  = isAttendanceLocked || (!isLoading && !isSaving && uniqueStudents.isNotEmpty()),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 16.dp)
                     .height(56.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isAttendanceLocked) Color.Gray else primaryColor
+                ),
                 shape  = RoundedCornerShape(16.dp)
             ) {
                 if (isSaving) {
                     CircularProgressIndicator(color = Color.White, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                 } else {
-                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Save Register", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    if (isAttendanceLocked) {
+                        Text("Close Window", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    } else {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Save Register", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -279,6 +299,7 @@ private fun AttendanceHeader(
     className: String,
     primaryColor: Color,
     selectedDate: String,
+    isLocked: Boolean = false,
     onDateClick: () -> Unit,
     onClose: () -> Unit
 ) {
@@ -313,6 +334,15 @@ private fun AttendanceHeader(
                 fontSize = 22.sp,
                 fontWeight = FontWeight.ExtraBold
             )
+            if (isLocked) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "🔒 Locked by Admin",
+                    color = Color(0xFFFF8A80),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
             Spacer(Modifier.height(12.dp))
             // Date picker chip
             Surface(

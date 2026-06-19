@@ -26,6 +26,12 @@ const VIEW_HELP: Record<string, HelpItem> = {
     tier: null,
     desc: `Enrol and manage every student.<br><br><strong style="color:#10b981;">To add a student:</strong><br>1. Click <strong>+ Add Student</strong><br>2. Enter name, class (e.g. SS2A), and reg number<br>3. Add the <em>parent's WhatsApp number</em> with country code (e.g. 2348012345678)<br>4. Assign their subject list<br><br><strong style="color:#10b981;">Bulk Import:</strong> Click <em>📥 Upload CSV</em> to add hundreds of students at once. CSV columns: Name, Class, Reg No, Parent Phone.`
   },
+  classes: {
+    icon: '🏫',
+    title: 'Class Management',
+    tier: null,
+    desc: `Configure your school's class hierarchy, arms, stable averages, and rollover rules.<br><br><strong style="color:#10b981;">Hierarchy Drag-and-Drop:</strong> Under Global Settings, reorder grade levels to define promotion order. This controls the Academic Rollover sequence.<br><br><strong style="color:#10b981;">Class Cards:</strong> Click any card in the grid to manage its specific arms (e.g. <em>Gold</em>, <em>Silver</em>). Arms define class sections.<br><br><strong style="color:#10b981;">Stable Average (Max Subjects):</strong> Specify the maximum subjects offered by a grade. Student averages and positions will use this value as the denominator instead of individual registered subject counts, ensuring fair rankings.<br><br><strong style="color:#10b981;">Academic Rollover:</strong> Promotes all students to the next grade in the hierarchy at the end of the year.`
+  },
   sync: {
     icon: '🔄',
     title: 'Sync Hub',

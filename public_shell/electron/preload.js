@@ -63,6 +63,18 @@ const nexusAPI = {
     getUniqueMetadata:  ()       => ipcRenderer.invoke('get-unique-metadata'),
     getHardwareId:      ()       => ipcRenderer.invoke('get-hardware-id'),
     
+    classes: {
+        getAll: () => ipcRenderer.invoke('classes:getAll'),
+        getFullList: () => ipcRenderer.invoke('classes:getFullList'),
+        saveConfig: (data) => ipcRenderer.invoke('classes:saveConfig', data),
+        saveArms: (data) => ipcRenderer.invoke('classes:saveArms', data),
+        addArm: (data) => ipcRenderer.invoke('classes:addArm', data),
+        removeArm: (data) => ipcRenderer.invoke('classes:removeArm', data),
+    },
+    dashboard: {
+        getSnapshot: () => ipcRenderer.invoke('dashboard:getSnapshot'),
+    },
+    
     // Gold Phase A: Attendance
     getDailyAttendance: (data)   => ipcRenderer.invoke('get-daily-attendance', data),
     saveDailyAttendance:(data)   => ipcRenderer.invoke('save-daily-attendance', data),

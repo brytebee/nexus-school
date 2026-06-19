@@ -795,6 +795,169 @@ ipcMain.handle("get-classes", () => {
   }
 });
 
+ipcMain.handle("classes:getAll", () => {
+  try {
+    const db = database.getDb();
+    const setting = db.prepare("SELECT value FROM system_settings WHERE key = 'class_hierarchy'").get();
+    const hierarchy = setting ? JSON.parse(setting.value) : [];
+
+    const configs = db.prepare("SELECT hierarchy_class, max_subjects, pass_mark_override FROM class_configs").all();
+    const arms = db.prepare("SELECT hierarchy_class, arm FROM class_arms ORDER BY arm ASC").all();
+    
+    const armsMap = {};
+    arms.forEach(r => {
+      if (!armsMap[r.hierarchy_class]) armsMap[r.hierarchy_class] = [];
+      armsMap[r.hierarchy_class].push(r.arm);
+    });
+
+    const configsMap = {};
+    configs.forEach(c => {
+      configsMap[c.hierarchy_class] = c;
+    });
+
+    return hierarchy.map(cls => {
+      const c = configsMap[cls] || { max_subjects: 0, pass_mark_override: null };
+      return {
+        hierarchy_class: cls,
+        max_subjects: c.max_subjects || 0,
+        pass_mark_override: c.pass_mark_override ?? null,
+        arms: armsMap[cls] || []
+      };
+    });
+  } catch (err) {
+    console.error("Failed to fetch classes:getAll:", err);
+    return [];
+  }
+});
+
+ipcMain.handle("classes:getFullList", () => {
+  try {
+    const db = database.getDb();
+    const setting = db.prepare("SELECT value FROM system_settings WHERE key = 'class_hierarchy'").get();
+    const hierarchy = setting ? JSON.parse(setting.value) : [];
+
+    const arms = db.prepare("SELECT hierarchy_class, arm FROM class_arms ORDER BY arm ASC").all();
+    const armsMap = {};
+    arms.forEach(r => {
+      if (!armsMap[r.hierarchy_class]) armsMap[r.hierarchy_class] = [];
+      armsMap[r.hierarchy_class].push(r.arm);
+    });
+
+    const flatList = [];
+    hierarchy.forEach(cls => {
+      const clsArms = armsMap[cls] || [];
+      if (clsArms.length > 0) {
+        clsArms.forEach(arm => {
+          flatList.push(`${cls} ${arm}`);
+        });
+      } else {
+        flatList.push(cls);
+      }
+    });
+    return flatList;
+  } catch (err) {
+    console.error("Failed to fetch classes:getFullList:", err);
+    return [];
+  }
+});
+
+ipcMain.handle("classes:saveConfig", (event, { hierarchyClass, maxSubjects, passMarkOverride }) => {
+  try {
+    const db = database.getDb();
+    db.prepare(`
+      INSERT INTO class_configs (hierarchy_class, max_subjects, pass_mark_override)
+      VALUES (?, ?, ?)
+      ON CONFLICT(hierarchy_class) DO UPDATE SET
+        max_subjects = excluded.max_subjects,
+        pass_mark_override = excluded.pass_mark_override
+    `).run(hierarchyClass, maxSubjects, passMarkOverride);
+    return { success: true };
+  } catch (err) {
+    console.error("Failed to save class config:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("classes:saveArms", (event, { hierarchyClass, arms }) => {
+  try {
+    const db = database.getDb();
+    db.transaction(() => {
+      db.prepare("DELETE FROM class_arms WHERE hierarchy_class = ?").run(hierarchyClass);
+      if (arms && arms.length > 0) {
+        const insertStmt = db.prepare("INSERT INTO class_arms (hierarchy_class, arm) VALUES (?, ?)");
+        arms.forEach(arm => {
+          if (arm && arm.trim() !== '') {
+            insertStmt.run(hierarchyClass, arm.trim());
+          }
+        });
+      }
+    })();
+    return { success: true };
+  } catch (err) {
+    console.error("Failed to save class arms:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("classes:addArm", (event, { hierarchyClass, arm }) => {
+  try {
+    if (!arm || arm.trim() === '') return { success: false, error: "Arm cannot be empty" };
+    const db = database.getDb();
+    db.prepare("INSERT OR IGNORE INTO class_arms (hierarchy_class, arm) VALUES (?, ?)")
+      .run(hierarchyClass, arm.trim());
+    return { success: true };
+  } catch (err) {
+    console.error("Failed to add arm:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("classes:removeArm", (event, { hierarchyClass, arm }) => {
+  try {
+    const db = database.getDb();
+    db.prepare("DELETE FROM class_arms WHERE hierarchy_class = ? AND arm = ?")
+      .run(hierarchyClass, arm);
+    return { success: true };
+  } catch (err) {
+    console.error("Failed to remove arm:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("dashboard:getSnapshot", async () => {
+  try {
+    const db = database.getDb();
+    const teachers = db.prepare("SELECT COUNT(*) as c FROM teachers").get().c;
+    const students = db.prepare("SELECT COUNT(*) as c FROM students").get().c;
+    const classes = db.prepare("SELECT COUNT(*) as c FROM class_arms").get().c;
+    
+    let devices = 0;
+    try { devices = db.prepare("SELECT COUNT(*) as c FROM connected_devices").get().c; } catch (_) {}
+
+    let grade_events = 0;
+    try { grade_events = db.prepare("SELECT COUNT(*) as c FROM sync_logs").get().c; } catch (_) {}
+
+    let sync_warnings = 0;
+    try { sync_warnings = db.prepare("SELECT COUNT(*) as c FROM sync_warnings").get().c; } catch (_) {}
+
+    let fee_alerts = 0;
+    try { fee_alerts = db.prepare("SELECT COUNT(*) as c FROM student_fees WHERE status IN ('unpaid', 'partial')").get().c; } catch (_) {}
+
+    return {
+      teachers,
+      students,
+      classes,
+      devices,
+      grade_events,
+      sync_warnings,
+      fee_alerts
+    };
+  } catch (err) {
+    console.error("Failed to fetch dashboard:getSnapshot:", err);
+    return { teachers: 0, students: 0, classes: 0, devices: 0, grade_events: 0, sync_warnings: 0, fee_alerts: 0 };
+  }
+});
+
 ipcMain.handle("get-teachers", () => {
   try {
     const db = database.getDb();
@@ -933,13 +1096,14 @@ ipcMain.handle("get-db-stats", () => {
     const db = database.getDb();
     const teachers = db.prepare("SELECT COUNT(*) as c FROM teachers").get().c;
     const students = db.prepare("SELECT COUNT(*) as c FROM students").get().c;
+    const classes = db.prepare("SELECT COUNT(*) as c FROM class_arms").get().c;
     let devices = 0;
     if (licenseStatus?.tier === 'Standalone') {
       devices = db.prepare("SELECT COUNT(*) as c FROM connected_devices").get().c;
     }
-    return { teachers, students, devices };
+    return { teachers, students, classes, devices };
   } catch (err) {
-    return { teachers: 0, students: 0, devices: 0 };
+    return { teachers: 0, students: 0, classes: 0, devices: 0 };
   }
 });
 
@@ -1155,22 +1319,57 @@ ipcMain.handle("update-student", (event, { id, name, class_name, class_arm, subj
   }
 });
 
-// ── Student Directory Settings (mobile registration toggle etc.) ─────────────
+// ── Student Directory Settings (mobile registration, grade, attendance locks) ─────────────
 ipcMain.handle('students:get-settings', () => {
   try {
     const db = database.getDb();
-    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'mobile_registration_locked'").get();
-    return { ok: true, mobile_registration_locked: row ? row.value === '1' : false };
+    const regRow = db.prepare("SELECT value FROM app_settings WHERE key = 'mobile_registration_locked'").get();
+    const gradesRow = db.prepare("SELECT value FROM app_settings WHERE key = 'mobile_grades_locked'").get();
+    const attRow = db.prepare("SELECT value FROM app_settings WHERE key = 'mobile_attendance_locked'").get();
+    const regLockAtRow = db.prepare("SELECT value FROM app_settings WHERE key = 'mobile_registration_lock_at'").get();
+    const gradesLockAtRow = db.prepare("SELECT value FROM app_settings WHERE key = 'mobile_grades_lock_at'").get();
+    const attLockAtRow = db.prepare("SELECT value FROM app_settings WHERE key = 'mobile_attendance_lock_at'").get();
+
+    return {
+      ok: true,
+      mobile_registration_locked: regRow ? regRow.value === '1' : false,
+      mobile_grades_locked: gradesRow ? gradesRow.value === '1' : false,
+      mobile_attendance_locked: attRow ? attRow.value === '1' : false,
+      mobile_registration_lock_at: regLockAtRow ? regLockAtRow.value : null,
+      mobile_grades_lock_at: gradesLockAtRow ? gradesLockAtRow.value : null,
+      mobile_attendance_lock_at: attLockAtRow ? attLockAtRow.value : null
+    };
   } catch (err) {
     console.error('[Students] get-settings error:', err);
     return { ok: false, error: err.message };
   }
 });
 
-ipcMain.handle('students:save-settings', (_, { mobile_registration_locked }) => {
+ipcMain.handle('students:save-settings', (_, data) => {
   try {
     const db = database.getDb();
-    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('mobile_registration_locked', ?)").run(mobile_registration_locked ? '1' : '0');
+    const {
+      mobile_registration_locked,
+      mobile_grades_locked,
+      mobile_attendance_locked,
+      mobile_registration_lock_at,
+      mobile_grades_lock_at,
+      mobile_attendance_lock_at
+    } = data;
+
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('mobile_registration_locked', ?)")
+      .run(mobile_registration_locked ? '1' : '0');
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('mobile_grades_locked', ?)")
+      .run(mobile_grades_locked ? '1' : '0');
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('mobile_attendance_locked', ?)")
+      .run(mobile_attendance_locked ? '1' : '0');
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('mobile_registration_lock_at', ?)")
+      .run(mobile_registration_lock_at || null);
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('mobile_grades_lock_at', ?)")
+      .run(mobile_grades_lock_at || null);
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('mobile_attendance_lock_at', ?)")
+      .run(mobile_attendance_lock_at || null);
+
     return { ok: true };
   } catch (err) {
     console.error('[Students] save-settings error:', err);
@@ -1709,6 +1908,36 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
   try {
     const db = database.getDb();
 
+    // Load max_subjects config once per batch for stable-average denominator
+    const _maxSubjectsMap = {};
+    try {
+      db.prepare("SELECT hierarchy_class, max_subjects FROM class_configs").all()
+        .forEach(c => { _maxSubjectsMap[c.hierarchy_class] = c.max_subjects; });
+    } catch (_) { /* table may not exist on older installs */ }
+    // Prefix-matching helper (class_name may include arm, e.g. "SS1 Gold")
+    const _resolveMax = (cn) => {
+      if (!cn) return null;
+      const normCn = cn.replace(/\s+/g, '').toUpperCase();
+      // 1. Exact normalized match
+      for (const key of Object.keys(_maxSubjectsMap)) {
+        if (normCn === key.replace(/\s+/g, '').toUpperCase()) {
+          return _maxSubjectsMap[key];
+        }
+      }
+      // 2. Longest-prefix match (most specific key first)
+      const keys = Object.keys(_maxSubjectsMap).sort((a, b) => {
+        return b.replace(/\s+/g, '').length - a.replace(/\s+/g, '').length;
+      });
+      for (const key of keys) {
+        const normKey = key.replace(/\s+/g, '').toUpperCase();
+        if (normCn.startsWith(normKey)) {
+          const v = _maxSubjectsMap[key];
+          if (v != null && v > 0) return v;
+        }
+      }
+      return null;
+    };
+
     // Build student roster depending on scope
     let students;
     if (scope === "student" && student_id) {
@@ -1818,7 +2047,10 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
       // Filter out zero-score empty subjects so avg isn't polluted by ungraded subjects
       const gradedSubjects = allSubjectsArray.filter(s => s.score !== null);
       const totalScore = gradedSubjects.reduce((sum, s) => sum + s.score, 0);
-      const avg = gradedSubjects.length ? (totalScore / gradedSubjects.length).toFixed(1) : "—";
+      // Use max_subjects as denominator when configured (stable average)
+      const _maxSubs = _resolveMax(stu.class_name);
+      const _denom = (_maxSubs && _maxSubs > 0) ? _maxSubs : gradedSubjects.length;
+      const avg = gradedSubjects.length ? (totalScore / _denom).toFixed(1) : "—";
 
       const domains = getDomains.all(stu.id, session, term);
       const remark = getRemark.get(stu.id, session, term) || {};
@@ -3317,9 +3549,23 @@ function createWindow() {
 
     // Developer Override
     if (process.env.DEV_MODE === 'true') {
-      console.log('[Security] DEV_MODE active. Bypassing all license checks.');
-      licenseStatus = { locked: false, message: 'DEV_MODE_ACTIVE', student_count: 999999, tier: process.env.DEV_MOCK_TIER || 'Diamond' };
-      setSchoolLicense({ payload: JSON.stringify(licenseStatus) });
+      const DEV_VALID_TIERS = ['Standalone', 'Silver', 'Gold', 'Diamond'];
+      const devTier = process.env.DEV_MOCK_TIER || 'Diamond';
+      if (!DEV_VALID_TIERS.includes(devTier)) {
+        // Unknown tier even in dev → lock so the locked-screen UI can be tested
+        // and the bypass path cannot be exploited in a leaked dev build.
+        console.error(`[Security] DEV_MOCK_TIER '${devTier}' is not a recognised tier — locking.`);
+        licenseStatus = {
+          locked: true,
+          tier:    'INVALID',
+          message: `DEV: Unrecognised tier '${devTier}'. Valid values: Standalone, Silver, Gold, Diamond.`,
+          reason: 'invalid_tier',
+        };
+      } else {
+        console.log(`[Security] DEV_MODE active (tier: ${devTier}). Bypassing expiry/hardware checks.`);
+        licenseStatus = { locked: false, message: 'DEV_MODE_ACTIVE', student_count: 999999, tier: devTier };
+        setSchoolLicense({ payload: JSON.stringify(licenseStatus) });
+      }
     } else {
       // 1. Anti-rollback guard
       let lastRunTs = 0;
@@ -3345,8 +3591,21 @@ function createWindow() {
             const token   = fs.readFileSync(licensePath, 'utf-8').trim();
             const payload = verifyNexusToken(token);
 
+            // 2b. Tier allowlist — must be one of the four canonical values.
+            //     A valid Ed25519 signature with an unknown tier indicates either
+            //     a rogue signing key or a future attack vector; lock immediately.
+            const VALID_TIERS = ['Standalone', 'Silver', 'Gold', 'Diamond'];
+            if (!VALID_TIERS.includes(payload.tier)) {
+              console.error(`[Security] Invalid tier '${payload.tier}' in verified token — locking.`);
+              licenseStatus = {
+                locked: true,
+                tier:    'INVALID',
+                message: 'License contains an unrecognised tier. Possible tampering detected.',
+                reason: 'invalid_tier',
+              };
+
             // 3. Hardware binding check
-            if (payload.hardware_id && payload.hardware_id !== hardwareId) {
+            } else if (payload.hardware_id && payload.hardware_id !== hardwareId) {
               licenseStatus = { locked: true, message: 'License is bound to a different device. Contact support.', reason: 'hardware_mismatch' };
 
             // 4. Provisional (not yet hardware-bound) — allow but prompt
@@ -3399,6 +3658,7 @@ function createWindow() {
           } catch (verifyErr) {
             console.error('[License] Verification error:', verifyErr.message);
             licenseStatus = { locked: true, message: 'License file is corrupted or tampered.', reason: 'tampered' };
+
           }
         }
       }
