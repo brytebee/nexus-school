@@ -920,7 +920,7 @@ export function Teachers() {
                 </p>
               )}
               {fullList.map(cls => {
-                const currentHost = classHosts.find(m => m.class_name === cls)?.teacher_id || '';
+                const currentHost = classHosts.find(m => (m.class_name || '').replace(/\s+/g, '').toUpperCase() === (cls || '').replace(/\s+/g, '').toUpperCase())?.teacher_id || '';
                 return (
                   <div key={cls} style={{ display: 'flex', alignItems: 'center', gap: '14px', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-sm)', padding: '10px 14px' }}>
                     <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)', minWidth: '80px' }}>{cls}</span>

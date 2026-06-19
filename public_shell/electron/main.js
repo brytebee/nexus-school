@@ -431,7 +431,7 @@ ipcMain.handle('fee-structure:apply-to-class', (event, { className, academicSess
         WHERE class_name = ? AND (term = 'All Terms' OR term = ?)
     `).get(className, activeTerm);
 
-    const students = db.prepare('SELECT id FROM students WHERE class_name = ?').all(className);
+    const students = db.prepare("SELECT id FROM students WHERE UPPER(replace(class_name, ' ', '')) = ?").all(className.replace(/\s+/g, '').toUpperCase());
     if (students.length === 0) return { ok: false, error: 'No students in class', count: 0 };
 
     const upsert = db.prepare(`
@@ -554,7 +554,7 @@ function startMessageQueueWorker() {
 ipcMain.handle("pulse:trigger-digest", async (event, { class_name }) => {
   try {
     const db = database.getDb();
-    const students = db.prepare("SELECT id, name, parent_phone FROM students WHERE class_name = ?").all(class_name);
+    const students = db.prepare("SELECT id, name, parent_phone FROM students WHERE UPPER(replace(class_name, ' ', '')) = ?").all(class_name.replace(/\s+/g, '').toUpperCase());
     
     let count = 0;
     const enqueueMsg = db.prepare(`
@@ -1426,9 +1426,10 @@ ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = ""
     `;
     const params = [query, query, query];
     if (class_name) {
-      totalSql += " AND class_name = ?";
-      selectSql += " AND class_name = ?";
-      params.push(class_name);
+      const normClass = class_name.replace(/\s+/g, '').toUpperCase();
+      totalSql += " AND UPPER(replace(class_name, ' ', '')) = ?";
+      selectSql += " AND UPPER(replace(class_name, ' ', '')) = ?";
+      params.push(normClass);
     }
     selectSql += " ORDER BY class_name ASC, name ASC LIMIT ? OFFSET ?";
 
@@ -1805,7 +1806,7 @@ ipcMain.handle("fees:save-settings", (event, patch) => {
 ipcMain.handle("get-daily-attendance", async (event, { class_name, date }) => {
   try {
     const db = database.getDb();
-    const records = db.prepare("SELECT * FROM daily_attendance WHERE class_name = ? AND date = ?").all(class_name, date);
+    const records = db.prepare("SELECT * FROM daily_attendance WHERE UPPER(replace(class_name, ' ', '')) = ? AND date = ?").all(class_name.replace(/\s+/g, '').toUpperCase(), date);
     const config = db.prepare("SELECT term_start_date, term_end_date FROM school_term_config WHERE id = 1").get();
     return { 
       ok: true, 
@@ -1943,7 +1944,7 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
     if (scope === "student" && student_id) {
       students = db.prepare("SELECT * FROM students WHERE id = ?").all(student_id);
     } else if (scope === "class" && class_name) {
-      students = db.prepare("SELECT * FROM students WHERE class_name = ? ORDER BY name ASC").all(class_name);
+      students = db.prepare("SELECT * FROM students WHERE UPPER(replace(class_name, ' ', '')) = ? ORDER BY name ASC").all(class_name.replace(/\s+/g, '').toUpperCase());
     } else if (scope === "teacher" && teacher_id) {
       // Students who are enrolled in at least one of this teacher's allocated subjects.
       // The LEFT JOIN + GROUP BY approach keeps students who have student_subjects rows
@@ -1953,7 +1954,7 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
       // report data is never silently suppressed for legacy records.
       students = db.prepare(`
         SELECT DISTINCT s.* FROM students s
-        JOIN teacher_allocations a ON s.class_name = a.class_name
+        JOIN teacher_allocations a ON UPPER(replace(s.class_name, ' ', '')) = UPPER(replace(a.class_name, ' ', ''))
         WHERE a.teacher_id = ?
           AND (
             -- Student has explicit subject enrollment that matches this teacher's subject
@@ -2203,9 +2204,9 @@ ipcMain.handle("get-attendance", (event, { class_name, session, term }) => {
              (sa.total_days - sa.days_attended) AS days_absent
       FROM student_attendance sa
       JOIN students s ON s.id = sa.student_id
-      WHERE (`+ (class_name ? `s.class_name = @class_name AND ` : '') +`
+      WHERE (`+ (class_name ? `UPPER(replace(s.class_name, ' ', '')) = @class_name AND ` : '') +`
             sa.academic_session = @session AND sa.term = @term)
-    `).all({ class_name: class_name || '', session: session || '2024/2025', term: term || 'First Term' });
+    `).all({ class_name: class_name ? class_name.replace(/\s+/g, '').toUpperCase() : '', session: session || '2024/2025', term: term || 'First Term' });
     return { ok: true, rows };
   } catch (err) {
     console.error('[Attendance] get-attendance failed:', err);

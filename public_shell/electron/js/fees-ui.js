@@ -192,7 +192,7 @@
              const inputEl = document.getElementById("adj-student-select");
              if (inputEl) inputEl.value = "";
              
-             const filtered = cls ? window._adjAllStudents.filter(s => s.class_name === cls) : window._adjAllStudents;
+             const filtered = cls ? window._adjAllStudents.filter(s => (s.class_name || '').replace(/\s+/g, '').toUpperCase() === (cls || '').replace(/\s+/g, '').toUpperCase()) : window._adjAllStudents;
              filtered.forEach(s => {
                 const opt = document.createElement("option");
                 opt.value = s.id;
