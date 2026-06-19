@@ -292,17 +292,10 @@ export function About({ onTabChange }: AboutProps) {
           </div>
           <button
             onClick={() => {
-              if (typeof (window as any).Swal !== 'undefined') {
-                (window as any).Swal.fire({
-                  title: 'Upgrade Request Submitted',
-                  text: 'Please contact your local Nexus Infrastructure partner or account manager to initiate your tier transition.',
-                  icon: 'info',
-                  confirmButtonColor: '#00E5FF',
-                  background: '#0d1235',
-                  color: '#fff'
-                });
+              if (window.electronAPI?.openExternal) {
+                window.electronAPI.openExternal('https://nexusos.com.ng/portal');
               } else {
-                alert('Contact your local Nexus Infrastructure partner to request an upgrade.');
+                window.open('https://nexusos.com.ng/portal', '_blank');
               }
             }}
             className="primary-btn"
@@ -320,7 +313,7 @@ export function About({ onTabChange }: AboutProps) {
               animation: 'none'
             }}
           >
-            Request Upgrade
+            Request Upgrade →
           </button>
         </div>
       )}

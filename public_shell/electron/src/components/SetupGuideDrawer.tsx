@@ -17,7 +17,8 @@ const GUIDE_FILE_MAP: Record<string, string> = {
   'attendance': '11-attendance-mobile.md',
   'students': '10-student-enrolment.md',
   'teachers': '09-teacher-registry.md',
-  'settings': '05-settings-identity-stamp.md'
+  'settings': '05-settings-identity-stamp.md',
+  'classes': '20-class-management.md'
 };
 
 const MODULE_DISPLAY_NAMES: Record<string, { title: string; icon: string; tier: string }> = {
@@ -31,7 +32,8 @@ const MODULE_DISPLAY_NAMES: Record<string, { title: string; icon: string; tier: 
   'attendance': { title: 'Attendance Guide', icon: '📋', tier: 'Gold & Diamond' },
   'students': { title: 'Student Directory Guide', icon: '🎓', tier: 'All Plans' },
   'teachers': { title: 'Teacher Registry Guide', icon: '👨‍🏫', tier: 'All Plans' },
-  'settings': { title: 'Identity settings Guide', icon: '⚙️', tier: 'All Plans' }
+  'settings': { title: 'Identity settings Guide', icon: '⚙️', tier: 'All Plans' },
+  'classes': { title: 'Class Management Guide', icon: '🏫', tier: 'All Plans' }
 };
 
 export function SetupGuideDrawer({ isOpen, onClose, moduleName }: SetupGuideDrawerProps) {

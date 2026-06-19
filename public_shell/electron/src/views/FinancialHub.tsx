@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLicense } from '../hooks/useLicense';
+import { useClassArms } from '../hooks/useClassArms';
+import { Combobox } from '../components/Combobox';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 interface RosterRow {
@@ -76,11 +78,33 @@ const Lbl: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <label className="ph-label">{children}</label>
 );
 
+const splitClass = (selected: string, configs: { hierarchy_class: string }[]) => {
+  const sorted = [...configs].sort((a, b) => b.hierarchy_class.length - a.hierarchy_class.length);
+  for (const conf of sorted) {
+    const prefix = conf.hierarchy_class;
+    if (selected === prefix) {
+      return { class_name: prefix, class_arm: '' };
+    }
+    if (selected.startsWith(prefix + ' ')) {
+      return { class_name: prefix, class_arm: selected.substring(prefix.length + 1).trim() };
+    }
+  }
+  const lastSpace = selected.lastIndexOf(' ');
+  if (lastSpace > -1) {
+    return {
+      class_name: selected.substring(0, lastSpace).trim(),
+      class_arm: selected.substring(lastSpace + 1).trim()
+    };
+  }
+  return { class_name: selected, class_arm: '' };
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // FinancialHub
 // ═══════════════════════════════════════════════════════════════════════════════
 export function FinancialHub() {
   const { license } = useLicense();
+  const { fullList, configs } = useClassArms();
   const tier       = license?.tier || 'Silver';
   const isDiamond  = tier === 'Diamond';
   const isGoldPlus = tier === 'Gold' || tier === 'Diamond';
@@ -93,7 +117,6 @@ export function FinancialHub() {
   const [sessions,        setSessions]        = useState<string[]>([]);
   const [selectedSession, setSelectedSession] = useState('');
   const [selectedTerm,    setSelectedTerm]    = useState('First Term');
-  const [classes,         setClasses]         = useState<string[]>([]);
   const [dbSummary, setDbSummary] = useState<{ outstanding: number; cleared: number; partial: number; unpaid: number; total: number } | null>(null);
   const [searchVal, setSearchVal] = useState('');
   const [adjMatchedStudents, setAdjMatchedStudents] = useState<{ id: string; name: string; class_name: string }[]>([]);
@@ -200,13 +223,12 @@ export function FinancialHub() {
     const boot = async () => {
       if (!window.electronAPI) return;
       try {
-        // 2. Load classes
-        const rawCls = await window.electronAPI.getClasses?.();
-        const cls: string[] = Array.isArray(rawCls) && rawCls.length > 0
-          ? rawCls
-          : ['JSS1','JSS2','JSS3','SS1','SS2','SS3'];
-        setClasses(cls);
-        if (cls.length) setStructClass(cls[0]);
+        // 2. Load classes configuration (handled by useClassArms hook)
+        if (fullList.length > 0) {
+          setStructClass(fullList[0]);
+        } else {
+          setStructClass('JSS 1');
+        }
 
 
 
@@ -256,6 +278,69 @@ export function FinancialHub() {
     return () => clearInterval(poll);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!structClass && fullList.length > 0) {
+      setStructClass(fullList[0]);
+    }
+  }, [fullList, structClass]);
+
+  const handleCopyToAllArms = async () => {
+    if (!structClass || !configs || !structItems.length) return;
+    const { class_name } = splitClass(structClass, configs);
+    const conf = configs.find(c => c.hierarchy_class === class_name);
+    if (!conf) {
+      if (Swal) Swal.fire('Error', 'Class configuration not found.', 'error');
+      else alert('Class configuration not found.');
+      return;
+    }
+    const otherArms = (conf.arms || [])
+      .map(arm => `${class_name} ${arm}`)
+      .filter(armClass => armClass !== structClass);
+
+    if (otherArms.length === 0) {
+      if (Swal) Swal.fire('Info', `No other arms found for class level "${class_name}".`, 'info');
+      else alert(`No other arms found for class level "${class_name}".`);
+      return;
+    }
+
+    const ok = Swal
+      ? (await Swal.fire({
+          title: 'Copy Fee Structure?',
+          text: `Copy all ${structItems.length} fee items from "${structClass}" to other arms: ${otherArms.join(', ')}? This will overwrite existing items on those arms with the same name.`,
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonText: 'Yes, copy',
+          confirmButtonColor: 'var(--gold)',
+          background: '#0A0E2E',
+          color: '#fff'
+        })).isConfirmed
+      : confirm(`Copy fee items from ${structClass} to: ${otherArms.join(', ')}?`);
+
+    if (!ok) return;
+
+    setLoadingStruct(true);
+    try {
+      for (const targetClass of otherArms) {
+        for (const item of structItems) {
+          await window.electronAPI.feeStructure.upsertItem({
+            className: targetClass,
+            itemName: item.item_name,
+            term: item.term,
+            amount: item.amount
+          });
+        }
+      }
+      if (Swal) Swal.fire('Success', `Successfully copied fee structure to: ${otherArms.join(', ')}`, 'success');
+      else alert(`Successfully copied fee structure to: ${otherArms.join(', ')}`);
+    } catch (err) {
+      console.error('Failed to copy fee structure:', err);
+      if (Swal) Swal.fire('Error', 'An error occurred while copying fee structure.', 'error');
+      else alert('An error occurred while copying fee structure.');
+    } finally {
+      setLoadingStruct(false);
+    }
+  };
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ROSTER LOAD
@@ -873,9 +958,12 @@ export function FinancialHub() {
             <div style={{ display:'flex', gap:'12px', alignItems:'center', padding:'16px 20px', borderBottom:'1px solid var(--glass-border)', flexShrink:0, flexWrap:'wrap' }}>
               <div className="ph-config-group">
                 <Lbl>Class</Lbl>
-                <select id="fs-class-select" value={structClass} onChange={e => setStructClass(e.target.value)} className="modern-input" style={{ width:'160px', fontSize:'12px' }}>
-                  {classes.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
+                <Combobox
+                  options={fullList}
+                  value={structClass}
+                  onChange={setStructClass}
+                  style={{ width:'160px' }}
+                />
               </div>
               <div className="ph-config-group">
                 <Lbl>Applies To</Lbl>
@@ -887,6 +975,15 @@ export function FinancialHub() {
                 </select>
               </div>
               <div style={{ marginLeft:'auto', display:'flex', gap:'8px' }}>
+                <button
+                  id="btn-fs-copy-arms"
+                  onClick={handleCopyToAllArms}
+                  disabled={loadingStruct || !structClass || !structItems.length}
+                  className="primary-btn"
+                  style={{ padding:'7px 16px', fontSize:'12px', background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)' }}
+                >
+                  📋 Copy to all arms of {splitClass(structClass, configs).class_name}
+                </button>
                 <button id="btn-fs-load" onClick={loadStructure} disabled={loadingStruct} className="primary-btn" style={{ padding:'7px 16px', fontSize:'12px' }}>
                   {loadingStruct ? '⌛' : 'Load'}
                 </button>
@@ -1188,19 +1285,18 @@ export function FinancialHub() {
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'14px' }}>
                   <div style={{ display:'flex', flexDirection:'column', gap:'6px' }}>
                     <label style={{ fontSize:'11px', fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.6px' }}>Class Filter</label>
-                    <div style={{ position:'relative' }}>
-                      <span style={{ position:'absolute', left:'12px', top:'50%', transform:'translateY(-50%)', fontSize:'14px', pointerEvents:'none', zIndex:1 }}>👥</span>
-                      <select
-                        id="adj-class-filter"
-                        value={adjClass}
-                        onChange={e => { setAdjClass(e.target.value); setAdjStudentStr(''); setAdjStudentId(''); }}
-                        className="modern-input"
-                        style={{ width:'100%', paddingLeft:'34px', fontSize:'13px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:'10px', color:'#fff', height:'42px' }}
-                      >
-                        <option value="">All Classes</option>
-                        {classes.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </div>
+                    <Combobox
+                      options={['All Classes', ...fullList]}
+                      value={adjClass || 'All Classes'}
+                      onChange={val => {
+                        const v = val === 'All Classes' ? '' : val;
+                        setAdjClass(v);
+                        setAdjStudentStr('');
+                        setAdjStudentId('');
+                      }}
+                      placeholder="All Classes"
+                      style={{ width:'100%' }}
+                    />
                   </div>
 
                   <div style={{ display:'flex', flexDirection:'column', gap:'6px' }}>

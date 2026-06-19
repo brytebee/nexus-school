@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useSyncExternalStore } from 'react';
 
 export interface SchoolIdentity {
   name?: string;
@@ -16,18 +16,23 @@ export interface SchoolIdentity {
   tier?: string;
 }
 
+interface StoreState {
+  identity: SchoolIdentity | null;
+  loading: boolean;
+  error: string | null;
+}
+
 // Global shared state for identity hook instances
-let globalIdentity: SchoolIdentity | null = null;
-let globalLoading = true;
-let globalError: string | null = null;
-let hasFetchedOnce = false;
+let storeState: StoreState = {
+  identity: null,
+  loading: true,
+  error: null,
+};
 
-const listeners = new Set<(data: { identity: SchoolIdentity | null; loading: boolean; error: string | null }) => void>();
+const listeners = new Set<() => void>();
 
-function updateGlobalIdentity(identity: SchoolIdentity | null, loading: boolean, error: string | null) {
-  globalIdentity = identity;
-  globalLoading = loading;
-  globalError = error;
+function updateStore(identity: SchoolIdentity | null, loading: boolean, error: string | null) {
+  storeState = { identity, loading, error };
 
   // Apply CSS theme variables dynamically to the document root immediately
   if (identity) {
@@ -51,55 +56,50 @@ function updateGlobalIdentity(identity: SchoolIdentity | null, loading: boolean,
     document.documentElement.style.setProperty("--primary-rgb", `${r}, ${g}, ${b}`);
   }
 
-  listeners.forEach((l) => l({ identity, loading, error }));
+  listeners.forEach((l) => l());
 }
 
-export function useIdentity() {
-  const [state, setState] = useState({
-    identity: globalIdentity,
-    loading: globalLoading,
-    error: globalError,
-  });
+let hasFetchedOnce = false;
 
-  useEffect(() => {
-    const handler = (nextState: typeof state) => {
-      setState(nextState);
-    };
-    listeners.add(handler);
-
-    // Fetch initial identity if never done
-    if (!hasFetchedOnce) {
-      hasFetchedOnce = true;
-      const fetchIdentity = async () => {
-        try {
-          updateGlobalIdentity(globalIdentity, true, null);
-          if (window.nexusAPI?.getIdentity) {
-            const data = await window.nexusAPI.getIdentity();
-            updateGlobalIdentity(data || null, false, null);
-          } else {
-            updateGlobalIdentity(null, false, null);
-          }
-        } catch (err: any) {
-          updateGlobalIdentity(null, false, err.message || 'Failed to fetch identity');
-        }
-      };
-      fetchIdentity();
+const fetchIdentity = async () => {
+  try {
+    updateStore(storeState.identity, true, null);
+    if (window.nexusAPI?.getIdentity) {
+      const data = await window.nexusAPI.getIdentity();
+      updateStore(data || null, false, null);
+    } else {
+      updateStore(null, false, null);
     }
+  } catch (err: any) {
+    updateStore(null, false, err.message || 'Failed to fetch identity');
+  }
+};
 
-    return () => {
-      listeners.delete(handler);
-    };
-  }, []);
+export function useIdentity() {
+  const state = useSyncExternalStore(
+    (onChange) => {
+      listeners.add(onChange);
+      // Fetch initial identity if never done
+      if (!hasFetchedOnce) {
+        hasFetchedOnce = true;
+        fetchIdentity();
+      }
+      return () => {
+        listeners.delete(onChange);
+      };
+    },
+    () => storeState
+  );
 
   const refreshIdentity = async () => {
     try {
-      updateGlobalIdentity(globalIdentity, true, null);
+      updateStore(storeState.identity, true, null);
       if (window.nexusAPI?.getIdentity) {
         const data = await window.nexusAPI.getIdentity();
-        updateGlobalIdentity(data || null, false, null);
+        updateStore(data || null, false, null);
       }
     } catch (err: any) {
-      updateGlobalIdentity(null, false, err.message || 'Failed to fetch identity');
+      updateStore(null, false, err.message || 'Failed to fetch identity');
     }
   };
 
@@ -108,7 +108,7 @@ export function useIdentity() {
       if (window.nexusAPI?.saveIdentity) {
         const res = await window.nexusAPI.saveIdentity(newIdentity);
         if (res && res.ok) {
-          updateGlobalIdentity(res.identity, false, null);
+          updateStore(res.identity, false, null);
           return { ok: true, identity: res.identity };
         } else {
           return { ok: false, error: res?.error || 'Save failed' };
@@ -128,4 +128,3 @@ export function useIdentity() {
     saveIdentity,
   };
 }
-

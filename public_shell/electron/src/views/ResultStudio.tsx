@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useLicense } from "../hooks/useLicense";
+import { useClassArms } from "../hooks/useClassArms";
+import { Combobox } from "../components/Combobox";
 
 interface StudentResult {
   id: string;
@@ -39,6 +41,7 @@ const PAID_TEMPLATES = [
 
 export function ResultStudio() {
   const { license } = useLicense();
+  const { fullList } = useClassArms();
   const tier = license?.tier || "Silver";
   const [loading, setLoading] = useState(false);
 
@@ -64,7 +67,6 @@ export function ResultStudio() {
   const [imgError, setImgError] = useState(false);
 
   // Pickers metadata lists
-  const [classes, setClasses] = useState<string[]>([]);
   const [selectedClass, setSelectedClass] = useState("");
   const [teachers, setTeachers] = useState<{ id: string; name: string }[]>([]);
   const [selectedTeacherId, setSelectedTeacherId] = useState("");
@@ -125,7 +127,6 @@ export function ResultStudio() {
 
       const meta = await window.electronAPI.getUniqueMetadata();
       if (meta) {
-        setClasses(meta.classes || []);
         setSubjects(meta.subjects || []);
       }
 
@@ -689,19 +690,12 @@ export function ResultStudio() {
             {scope === "class" && (
               <div className="ph-config-group">
                 <label className="ph-label">Class</label>
-                <select
-                  className="modern-input"
-                  style={{ width: "100%" }}
+                <Combobox
+                  options={fullList}
                   value={selectedClass}
-                  onChange={(e) => setSelectedClass(e.target.value)}
-                >
-                  <option value="">— Select —</option>
-                  {classes.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setSelectedClass}
+                  placeholder="Select Class..."
+                />
               </div>
             )}
             {scope === "teacher" && (

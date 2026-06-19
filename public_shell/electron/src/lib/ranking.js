@@ -1,25 +1,54 @@
 // Ranking Engine logic - extracted from report-compiler.js
 
-function computeRankMap(studentList) {
+const scoringLib = require('./scoring');
+
+// ── resolveMaxSubjects ────────────────────────────────────────────────────────
+// maxSubjectsMap is keyed by hierarchy_class (e.g. "SS1"), but a student's
+// class_name may include the arm (e.g. "SS1 Gold" or "SS1A"). This helper
+// resolves the correct max_subjects value using longest-prefix matching,
+// mirroring the same helper in report-compiler.js.
+function resolveMaxSubjects(className, maxSubjectsMap) {
+  if (!className || !maxSubjectsMap) return null;
+  const normClassName = className.replace(/\s+/g, '').toUpperCase();
+  // 1. Exact normalized match
+  for (const key of Object.keys(maxSubjectsMap)) {
+    if (normClassName === key.replace(/\s+/g, '').toUpperCase()) {
+      return maxSubjectsMap[key];
+    }
+  }
+  // 2. Longest-prefix match (most specific key first)
+  const keys = Object.keys(maxSubjectsMap).sort((a, b) => {
+    return b.replace(/\s+/g, '').length - a.replace(/\s+/g, '').length;
+  });
+  for (const key of keys) {
+    const normKey = key.replace(/\s+/g, '').toUpperCase();
+    if (normClassName.startsWith(normKey)) {
+      const val = maxSubjectsMap[key];
+      if (val != null && val > 0) return val;
+    }
+  }
+  return null;
+}
+
+function computeRankMap(studentList, maxSubjectsMap = null) {
   const classGroups = new Map();
   studentList.forEach(s => {
     const rawSubs = s.subjects || s.Records || [];
-    const total   = rawSubs.reduce((acc, sub) => {
-      const sc = sub.score ?? sub.Total ?? null;
-      return (sc !== null && sc !== "" && sc !== undefined)
-        ? acc + (Number(sc) || 0) : acc;
-    }, 0);
     const cn = s.class_name || "__all__";
+    const maxSubjects = resolveMaxSubjects(cn, maxSubjectsMap);
+    const { avgScore } = scoringLib.aggregateScores(rawSubs, 100, maxSubjects);
+    const avg = avgScore === "—" ? 0 : (parseFloat(avgScore) || 0);
+
     if (!classGroups.has(cn)) classGroups.set(cn, []);
-    classGroups.get(cn).push({ id: s.id, total });
+    classGroups.get(cn).push({ id: s.id, average: avg });
   });
 
   const rankMap = new Map();
   classGroups.forEach(group => {
-    const sorted = [...group].sort((a, b) => b.total - a.total);
+    const sorted = [...group].sort((a, b) => b.average - a.average);
     let currentRank = 1;
     sorted.forEach((entry, idx) => {
-      if (idx > 0 && entry.total < sorted[idx - 1].total) currentRank = idx + 1;
+      if (idx > 0 && entry.average < sorted[idx - 1].average) currentRank = idx + 1;
       const suffix = currentRank === 1 ? "st"
         : currentRank === 2 ? "nd"
         : currentRank === 3 ? "rd" : "th";

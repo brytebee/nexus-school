@@ -36,6 +36,15 @@ export function Dashboard({ onTabChange }: DashboardProps = {}) {
   const [newClassInput, setNewClassInput] = useState('');
   const [passMark, setPassMark] = useState(50);
   const [activeSession, setActiveSession] = useState('2025/2026');
+  const [snapshot, setSnapshot] = useState<{
+    teachers: number;
+    students: number;
+    classes: number;
+    devices: number;
+    grade_events: number;
+    sync_warnings: number;
+    fee_alerts: number;
+  } | null>(null);
 
   // Drag and Drop State
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -66,6 +75,22 @@ export function Dashboard({ onTabChange }: DashboardProps = {}) {
       console.error('Error fetching settings:', err);
     }
   };
+
+  const fetchSnapshot = async () => {
+    if (!window.electronAPI?.dashboard?.getSnapshot) return;
+    try {
+      const data = await window.electronAPI.dashboard.getSnapshot();
+      setSnapshot(data);
+    } catch (err) {
+      console.error('Error fetching snapshot:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (isSettingsOpen) {
+      fetchSnapshot();
+    }
+  }, [isSettingsOpen]);
 
   useEffect(() => { fetchDbStats(); fetchSettings(); }, []);
 
@@ -403,9 +428,6 @@ export function Dashboard({ onTabChange }: DashboardProps = {}) {
         )}
       </div>
 
-      {/* ══════════════════════════════════════════════
-          Academic Pipeline Drawer  (§9A/9B Slide-in)
-      ══════════════════════════════════════════════ */}
       {isSettingsOpen && (
         <div style={{
           position: 'fixed',
@@ -434,9 +456,9 @@ export function Dashboard({ onTabChange }: DashboardProps = {}) {
             {/* Drawer Header */}
             <div style={{ padding: '20px', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
               <div>
-                <h3 style={{ margin: '0 0 4px', fontSize: '16px', fontWeight: 700, color: 'var(--text-main)' }}>⚙️ Academic Pipeline</h3>
+                <h3 style={{ margin: '0 0 4px', fontSize: '16px', fontWeight: 700, color: 'var(--text-main)' }}>📊 School Snapshot</h3>
                 <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-dim)' }}>
-                  Class hierarchy, pass marks &amp; session management
+                  Live institutional metrics and quick navigation
                 </p>
               </div>
               <button onClick={() => setIsSettingsOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-dim)', fontSize: '24px', cursor: 'pointer', lineHeight: '1', display: 'flex', alignItems: 'center' }}>
@@ -447,241 +469,110 @@ export function Dashboard({ onTabChange }: DashboardProps = {}) {
             {/* Scrollable Content */}
             <div style={{ padding: '20px', flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
-              {/* Class Hierarchy */}
-              <div className="card" style={{ padding: '16px', background: 'rgba(16,185,129,0.04)', border: '1px solid rgba(16,185,129,0.2)' }}>
-                <h4 style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-dim)', margin: '0 0 8px', letterSpacing: '1px' }}>CLASS PROGRESSION HIERARCHY</h4>
-                <p style={{ fontSize: '12px', color: 'var(--text-dim)', marginBottom: '12px', lineHeight: 1.5 }}>
-                  Define class order from lowest to highest. Students are promoted along this track.
-                </p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '10px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
-                  {classHierarchy.map((cls, index) => {
-                    const isDragged = draggedIndex === index;
-                    const isDragOver = dragOverIndex === index;
-                    
-                    return (
-                      <div
-                        key={cls}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, index)}
-                        onDragOver={(e) => handleDragOver(e, index)}
-                        onDragEnd={handleDragEnd}
-                        onDrop={(e) => handleDrop(e, index)}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          background: isDragged 
-                            ? 'rgba(16, 185, 129, 0.15)' 
-                            : isDragOver 
-                              ? 'rgba(0, 229, 255, 0.15)' 
-                              : 'rgba(0,0,0,0.25)',
-                          border: isDragged
-                            ? '1px dashed var(--accent)'
-                            : isDragOver
-                              ? '1px solid var(--accent-cyan)'
-                              : '1px solid var(--glass-border)',
-                          borderRadius: 'var(--radius-sm)',
-                          padding: '8px 12px',
-                          fontSize: '12px',
-                          color: 'var(--text-main)',
-                          cursor: 'grab',
-                          opacity: isDragged ? 0.5 : 1,
-                          transform: isDragged ? 'scale(0.98)' : 'none',
-                          transition: 'all 0.2s ease',
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ 
-                            cursor: 'grab', 
-                            color: 'var(--text-dim)', 
-                            opacity: 0.5, 
-                            fontWeight: 'bold',
-                            fontSize: '14px',
-                            userSelect: 'none',
-                            paddingRight: '4px'
-                          }}>
-                            ⋮⋮
-                          </span>
-                          <span style={{ fontWeight: 600 }}>{index + 1}. {cls}</span>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <button
-                            disabled={index === 0}
-                            onClick={() => handleMoveClass(index, 'up')}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              width: '24px',
-                              height: '24px',
-                              borderRadius: '50%',
-                              background: 'rgba(255,255,255,0.05)',
-                              border: '1px solid rgba(255,255,255,0.1)',
-                              color: 'var(--text-main)',
-                              cursor: index === 0 ? 'not-allowed' : 'pointer',
-                              fontSize: '10px',
-                              opacity: index === 0 ? 0.3 : 0.8,
-                              transition: 'all 0.2s',
-                            }}
-                            onMouseOver={e => {
-                              if (index !== 0) {
-                                e.currentTarget.style.background = 'rgba(0, 229, 255, 0.15)';
-                                e.currentTarget.style.borderColor = 'var(--accent-cyan)';
-                                e.currentTarget.style.color = 'var(--accent-cyan)';
-                              }
-                            }}
-                            onMouseOut={e => {
-                              if (index !== 0) {
-                                e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-                                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
-                                e.currentTarget.style.color = 'var(--text-main)';
-                              }
-                            }}
-                            title="Move Up"
-                          >
-                            ▲
-                          </button>
-                          <button
-                            disabled={index === classHierarchy.length - 1}
-                            onClick={() => handleMoveClass(index, 'down')}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              width: '24px',
-                              height: '24px',
-                              borderRadius: '50%',
-                              background: 'rgba(255,255,255,0.05)',
-                              border: '1px solid rgba(255,255,255,0.1)',
-                              color: 'var(--text-main)',
-                              cursor: index === classHierarchy.length - 1 ? 'not-allowed' : 'pointer',
-                              fontSize: '10px',
-                              opacity: index === classHierarchy.length - 1 ? 0.3 : 0.8,
-                              transition: 'all 0.2s',
-                            }}
-                            onMouseOver={e => {
-                              if (index !== classHierarchy.length - 1) {
-                                e.currentTarget.style.background = 'rgba(0, 229, 255, 0.15)';
-                                e.currentTarget.style.borderColor = 'var(--accent-cyan)';
-                                e.currentTarget.style.color = 'var(--accent-cyan)';
-                              }
-                            }}
-                            onMouseOut={e => {
-                              if (index !== classHierarchy.length - 1) {
-                                e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-                                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
-                                e.currentTarget.style.color = 'var(--text-main)';
-                              }
-                            }}
-                            title="Move Down"
-                          >
-                            ▼
-                          </button>
-                          <button
-                            onClick={() => handleRemoveClassFromHierarchy(index)}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              width: '24px',
-                              height: '24px',
-                              borderRadius: '50%',
-                              background: 'rgba(239, 68, 68, 0.05)',
-                              border: '1px solid rgba(239, 68, 68, 0.15)',
-                              color: 'var(--danger)',
-                              cursor: 'pointer',
-                              fontSize: '12px',
-                              transition: 'all 0.2s',
-                            }}
-                            onMouseOver={e => {
-                              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)';
-                              e.currentTarget.style.borderColor = 'var(--danger)';
-                              e.currentTarget.style.transform = 'scale(1.1)';
-                            }}
-                            onMouseOut={e => {
-                              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.05)';
-                              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.15)';
-                              e.currentTarget.style.transform = 'scale(1)';
-                            }}
-                            title="Remove Class"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {classHierarchy.length === 0 && (
-                    <div style={{ color: 'var(--text-dim)', fontSize: '12px', textAlign: 'center', padding: '10px' }}>
-                      Loading…
-                    </div>
-                  )}
-                </div>
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                  <input
-                    type="text"
-                    className="modern-input"
-                    value={newClassInput}
-                    onChange={e => setNewClassInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleAddClassToHierarchy()}
-                    placeholder="e.g. Nursery 1"
-                    style={{ flex: 1, fontSize: '12px' }}
-                  />
-                  <button
-                    onClick={handleAddClassToHierarchy}
-                    className="primary-btn"
-                    style={{ background: '#10b981', border: 'none', color: '#000', whiteSpace: 'nowrap' }}
+              {snapshot ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  
+                  {/* Card 1: Teachers */}
+                  <div 
+                    onClick={() => { setIsSettingsOpen(false); onTabChange?.('teachers'); }}
+                    style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', transition: 'background 0.2s' }}
+                    onMouseOver={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)'}
+                    onMouseOut={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)'}
                   >
-                    + Add
-                  </button>
-                </div>
-                <button className="secondary-btn" onClick={handleSaveHierarchy} style={{ width: '100%', justifyContent: 'center' }}>
-                  💾 Save Hierarchy
-                </button>
-              </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '18px' }}>👩‍🏫</span>
+                      <span style={{ fontSize: '13px', color: 'var(--text-main)', fontWeight: 600 }}>Teachers Registered</span>
+                    </div>
+                    <span style={{ fontSize: '16px', fontWeight: 800, color: '#00E5FF' }}>{snapshot.teachers}</span>
+                  </div>
 
-              {/* Pass Mark */}
-              <div className="card" style={{ padding: '16px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)' }}>
-                <h4 style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-dim)', margin: '0 0 12px', letterSpacing: '1px' }}>GLOBAL PASS MARK (%)</h4>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input
-                    type="number"
-                    className="modern-input"
-                    min="0"
-                    max="100"
-                    value={passMark}
-                    onChange={e => setPassMark(Math.max(0, Math.min(100, parseInt(e.target.value) || 0)))}
-                    style={{ flex: 1 }}
-                  />
-                  <button onClick={handleSavePassMark} className="primary-btn">
-                    Save
-                  </button>
-                </div>
-                <p style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '6px' }}>Minimum score for promotion recommendation.</p>
-              </div>
+                  {/* Card 2: Students */}
+                  <div 
+                    onClick={() => { setIsSettingsOpen(false); onTabChange?.('students'); }}
+                    style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', transition: 'background 0.2s' }}
+                    onMouseOver={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)'}
+                    onMouseOut={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)'}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '18px' }}>👥</span>
+                      <span style={{ fontSize: '13px', color: 'var(--text-main)', fontWeight: 600 }}>Students Enrolled</span>
+                    </div>
+                    <span style={{ fontSize: '16px', fontWeight: 800, color: '#00E5FF' }}>{snapshot.students}</span>
+                  </div>
 
-              {/* Rollover */}
-              <div className="card" style={{ padding: '16px', background: 'rgba(239,68,68,0.04)', border: '1px solid rgba(239,68,68,0.2)' }}>
-                <h4 style={{ fontSize: '11px', fontWeight: 800, color: '#ef4444', margin: '0 0 6px', letterSpacing: '1px' }}>ACADEMIC ROLLOVER</h4>
-                <p style={{ fontSize: '12px', color: 'var(--text-dim)', marginBottom: '12px', lineHeight: 1.4 }}>
-                  Current Session: <strong style={{ color: '#fff' }}>{activeSession}</strong>
-                </p>
-                <button
-                  onClick={handleRollover}
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    background: 'transparent',
-                    border: '1px dashed #ef4444',
-                    color: '#ef4444',
-                    cursor: 'pointer',
-                    borderRadius: '6px',
-                    fontSize: '13px',
-                  }}
-                >
-                  End Session &amp; Rollover →
-                </button>
-              </div>
+                  {/* Card 3: Classes */}
+                  <div 
+                    onClick={() => { setIsSettingsOpen(false); onTabChange?.('classes'); }}
+                    style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', transition: 'background 0.2s' }}
+                    onMouseOver={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)'}
+                    onMouseOut={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)'}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '18px' }}>🏫</span>
+                      <span style={{ fontSize: '13px', color: 'var(--text-main)', fontWeight: 600 }}>Classes / Arms Configured</span>
+                    </div>
+                    <span style={{ fontSize: '16px', fontWeight: 800, color: '#00E5FF' }}>{snapshot.classes}</span>
+                  </div>
+
+                  {/* Card 4: Paired Devices */}
+                  <div 
+                    onClick={() => { setIsSettingsOpen(false); onTabChange?.('standalone'); }}
+                    style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', transition: 'background 0.2s' }}
+                    onMouseOver={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)'}
+                    onMouseOut={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)'}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '18px' }}>📱</span>
+                      <span style={{ fontSize: '13px', color: 'var(--text-main)', fontWeight: 600 }}>Paired Devices</span>
+                    </div>
+                    <span style={{ fontSize: '16px', fontWeight: 800, color: '#00E5FF' }}>{snapshot.devices}</span>
+                  </div>
+
+                  {/* Card 5: Grade Events */}
+                  <div 
+                    style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '18px' }}>📊</span>
+                      <span style={{ fontSize: '13px', color: 'var(--text-main)', fontWeight: 600 }}>Sync Logs / Grade Events</span>
+                    </div>
+                    <span style={{ fontSize: '16px', fontWeight: 800, color: '#00E5FF' }}>{snapshot.grade_events}</span>
+                  </div>
+
+                  {/* Card 6: Sync Warnings */}
+                  <div 
+                    onClick={() => { setIsSettingsOpen(false); onTabChange?.('sync-hub'); }}
+                    style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', transition: 'background 0.2s' }}
+                    onMouseOver={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)'}
+                    onMouseOut={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)'}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '18px' }}>⚠️</span>
+                      <span style={{ fontSize: '13px', color: 'var(--text-main)', fontWeight: 600 }}>Sync Warnings</span>
+                    </div>
+                    <span style={{ fontSize: '16px', fontWeight: 800, color: snapshot.sync_warnings > 0 ? '#EF4444' : '#10B981' }}>{snapshot.sync_warnings}</span>
+                  </div>
+
+                  {/* Card 7: Fee Alerts */}
+                  <div 
+                    onClick={() => { setIsSettingsOpen(false); onTabChange?.('fees'); }}
+                    style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', transition: 'background 0.2s' }}
+                    onMouseOver={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)'}
+                    onMouseOut={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)'}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '18px' }}>💳</span>
+                      <span style={{ fontSize: '13px', color: 'var(--text-main)', fontWeight: 600 }}>Unpaid/Partial Fee Alerts</span>
+                    </div>
+                    <span style={{ fontSize: '16px', fontWeight: 800, color: snapshot.fee_alerts > 0 ? '#F59E0B' : '#10B981' }}>{snapshot.fee_alerts}</span>
+                  </div>
+
+                </div>
+              ) : (
+                <div style={{ color: 'var(--text-dim)', fontSize: '12px', textAlign: 'center', padding: '20px' }}>
+                  Loading snapshot data…
+                </div>
+              )}
 
             </div>
           </div>

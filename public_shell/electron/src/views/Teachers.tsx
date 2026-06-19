@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { DataTable, Column } from '../components/DataTable';
 import { CurriculumPresets } from '../lib/curriculum';
 import { useSudoAuth } from '../context/SudoAuthContext';
+import { Combobox } from '../components/Combobox';
+import { MultiSelectCombobox } from '../components/MultiSelectCombobox';
+import { useClassArms } from '../hooks/useClassArms';
 
 interface TeacherAllocation {
   class_name: string;
@@ -20,6 +23,7 @@ interface Teacher {
 
 export function Teachers() {
   const { requireSudo } = useSudoAuth();
+  const { fullList } = useClassArms();
   // ── State ──────────────────────────────────────────────────────────────────
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [totalTeachers, setTotalTeachers] = useState(0);
@@ -46,13 +50,12 @@ export function Teachers() {
   const [checkedSubjects, setCheckedSubjects] = useState<string[]>([]);
   const [customSubjects, setCustomSubjects] = useState<string[]>([]);
   const [customSubjectInput, setCustomSubjectInput] = useState('');
-  const [classAllocationInput, setClassAllocationInput] = useState('');
+  const [classAllocationInput, setClassAllocationInput] = useState<string[]>([]);
   const [formLog, setFormLog] = useState<{ text: string; isError: boolean } | null>(null);
 
   // Modals
   const [isClassHostsOpen, setIsClassHostsOpen] = useState(false);
   const [classHosts, setClassHosts] = useState<{ class_name: string; teacher_id: string }[]>([]);
-  const [allClasses, setAllClasses] = useState<string[]>([]);
   const [classHostTeachers, setClassHostTeachers] = useState<Teacher[]>([]);
   const [isSubjectAuditOpen, setIsSubjectAuditOpen] = useState(false);
   const [syncWarnings, setSyncWarnings] = useState<any[]>([]);
@@ -114,7 +117,7 @@ export function Teachers() {
     setName(''); setPhone(''); setEmail(''); setHostClass('');
     setSignatureBase64(null); setStagedAllocations([]);
     setCheckedSubjects([]); setCustomSubjects([]);
-    setCustomSubjectInput(''); setClassAllocationInput(''); setFormLog(null);
+    setCustomSubjectInput(''); setClassAllocationInput([]); setFormLog(null);
   };
 
   const openAddDrawer = () => { setEditTeacherId(null); resetForm(); setIsDrawerOpen(true); };
@@ -137,7 +140,7 @@ export function Teachers() {
     });
     setStagedAllocations(Object.entries(grouped).map(([class_name, subjects]) => ({ class_name, subjects })));
     setCheckedSubjects([]); setCustomSubjects([]);
-    setCustomSubjectInput(''); setClassAllocationInput(''); setFormLog(null);
+    setCustomSubjectInput(''); setClassAllocationInput([]); setFormLog(null);
     setIsDrawerOpen(true);
   };
 
@@ -156,8 +159,8 @@ export function Teachers() {
   };
 
   const handleAddStagedAllocation = () => {
-    const classes = classAllocationInput.split(',').map(c => c.trim()).filter(Boolean);
-    if (!classes.length) { alert('Please enter at least one class name.'); return; }
+    const classes = classAllocationInput;
+    if (!classes.length) { alert('Please select at least one class.'); return; }
     if (!checkedSubjects.length) { alert('Please select at least one subject.'); return; }
     setStagedAllocations(prev => {
       const copy = [...prev];
@@ -171,7 +174,7 @@ export function Teachers() {
       });
       return copy;
     });
-    setClassAllocationInput('');
+    setClassAllocationInput([]);
   };
 
   const handleRemoveStagedAllocation = (idx: number) =>
@@ -236,9 +239,6 @@ export function Teachers() {
     setIsClassHostsOpen(true);
     if (!window.electronAPI) return;
     try {
-      const classes = await window.electronAPI.getClasses();
-      setAllClasses(Array.isArray(classes) ? classes : []);
-
       const tchRes = await window.electronAPI.getAllTeachers({ limit: 1000, minimal: true });
       setClassHostTeachers(tchRes?.data || []);
 
@@ -686,7 +686,7 @@ export function Teachers() {
                 {editTeacherId && (
                   <div className="form-group">
                     <label style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Host Class Designation</label>
-                    <input type="text" className="modern-input" value={hostClass} onChange={e => setHostClass(e.target.value)} placeholder="e.g. SS2A (Optional)" id="edit-tch-host-class" />
+                    <Combobox options={fullList} value={hostClass} onChange={setHostClass} placeholder="e.g. JSS 1 Gold (Optional)" />
                   </div>
                 )}
               </div>
@@ -698,8 +698,8 @@ export function Teachers() {
                 </h4>
 
                 <div className="form-group">
-                  <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-dim)' }}>Target Classes (comma separated)</label>
-                  <input type="text" className="modern-input" value={classAllocationInput} onChange={e => setClassAllocationInput(e.target.value)} placeholder="e.g. JSS 1A, JSS 1B" id="wiz-alloc-class" />
+                  <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-dim)' }}>Target Classes</label>
+                  <MultiSelectCombobox options={fullList} selectedValues={classAllocationInput} onChange={setClassAllocationInput} placeholder="Select classes..." />
                 </div>
 
                 {/* Curriculum Preset Tabs — Pattern 1: fees-tab-btn underline rail */}
@@ -914,12 +914,12 @@ export function Teachers() {
               <button onClick={() => setIsClassHostsOpen(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center' }}>✕</button>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {allClasses.length === 0 && (
+              {fullList.length === 0 && (
                 <p style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: '13px', padding: '24px' }}>
                   No classes found. Ensure students are registered in the system.
                 </p>
               )}
-              {allClasses.map(cls => {
+              {fullList.map(cls => {
                 const currentHost = classHosts.find(m => m.class_name === cls)?.teacher_id || '';
                 return (
                   <div key={cls} style={{ display: 'flex', alignItems: 'center', gap: '14px', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-sm)', padding: '10px 14px' }}>

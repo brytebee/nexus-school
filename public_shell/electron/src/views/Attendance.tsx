@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useLicense } from '../hooks/useLicense';
 import { DataTable, Column } from '../components/DataTable';
+import { Combobox } from '../components/Combobox';
+import { useClassArms } from '../hooks/useClassArms';
 
 interface AttendanceRecord {
   student: {
@@ -28,6 +30,7 @@ interface EscalationStep {
 
 export function Attendance() {
   const { license } = useLicense();
+  const { fullList } = useClassArms();
   const currentTier = license?.tier || 'Silver';
   const isDiamond = currentTier === 'Diamond';
 
@@ -35,7 +38,6 @@ export function Attendance() {
   const [activeSubTab, setActiveSubTab] = useState<'register' | 'radar' | 'reports' | 'settings'>('register');
 
   // Register State
-  const [classes, setClasses] = useState<string[]>([]);
   const [selectedClass, setSelectedClass] = useState('');
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [register, setRegister] = useState<AttendanceRecord[]>([]);
@@ -77,10 +79,6 @@ export function Attendance() {
     const initData = async () => {
       if (!window.electronAPI) return;
       try {
-        // Use dedicated getClasses() API — fast DISTINCT query, no pagination issues
-        const classList = await window.electronAPI.getClasses();
-        setClasses(Array.isArray(classList) ? classList : []);
-
         // Get term config for queries
         const termCfg = await window.electronAPI.getTermConfig();
         if (termCfg) {
@@ -516,17 +514,12 @@ export function Attendance() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
               <div className="form-group">
                 <label style={{ fontSize: '11px', color: 'var(--text-dim)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '2px' }}>Class Room</label>
-                <select
+                <Combobox
+                  options={fullList}
                   value={selectedClass}
-                  onChange={(e) => setSelectedClass(e.target.value)}
-                  className="modern-input"
-                  style={{ cursor: 'pointer' }}
-                >
-                  <option value="">Select Class...</option>
-                  {classes.map(c => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
+                  onChange={setSelectedClass}
+                  placeholder="Select Class..."
+                />
               </div>
               <div className="form-group">
                 <label style={{ fontSize: '11px', color: 'var(--text-dim)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '2px' }}>Roll Date</label>
@@ -919,10 +912,12 @@ export function Attendance() {
                 {/* Class Room form group */}
                 <div className="form-group">
                   <label style={{ fontSize: '11px', color: 'var(--text-dim)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Class Room</label>
-                  <select value={reportClass} onChange={(e) => setReportClass(e.target.value)} className="modern-input">
-                    <option value="">All Classes</option>
-                    {classes.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                  <Combobox
+                    options={['All Classes', ...fullList]}
+                    value={reportClass || 'All Classes'}
+                    onChange={(val) => setReportClass(val === 'All Classes' ? '' : val)}
+                    placeholder="All Classes"
+                  />
                 </div>
 
                 {/* Target Student form group */}

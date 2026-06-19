@@ -288,6 +288,7 @@
             tampered:          { icon: '⛔', title: 'Tampered License',       msg: 'Your license file has been modified. Please import a fresh license from your portal.',            ctaType: 'renew' },
             hardware_mismatch: { icon: '💻', title: 'Device Mismatch',        msg: 'This license is bound to a different computer. Contact support to transfer your license.',         ctaType: 'support' },
             clock_rollback:    { icon: '🕐', title: 'Clock Tampering',        msg: 'Your system clock was rolled back. Please correct your system date and restart.',                 ctaType: 'support' },
+            invalid_tier:      { icon: '🚨', title: 'Invalid License Tier',   msg: 'This license contains an unrecognised tier value. This may indicate tampering. Contact support.', ctaType: 'support' },
         };
 
         const _applyLicenseStatus = async (status) => {

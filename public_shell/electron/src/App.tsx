@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { NavSidebar } from "./components/NavSidebar";
 import { HelpDrawer } from "./components/HelpDrawer";
 import { SetupGuideDrawer } from "./components/SetupGuideDrawer";
+import { LicenseLockScreen, LockReason } from "./components/LicenseLockScreen";
+import { useLicense } from "./hooks/useLicense";
 import { useIdentity } from "./hooks/useIdentity";
 import { FinancialHub } from "./views/FinancialHub";
 import { ExamClearance } from "./views/ExamClearance";
@@ -13,6 +15,7 @@ import { Settings } from "./views/Settings";
 import { Dashboard } from "./views/Dashboard";
 import { Teachers } from "./views/Teachers";
 import { Students } from "./views/Students";
+import Classes from "./views/Classes";
 import { Attendance } from "./views/Attendance";
 import { SyncHub } from "./views/SyncHub";
 import { PrintHub } from "./views/PrintHub";
@@ -28,26 +31,21 @@ function App() {
   const [activeTab, setActiveTab] = useState<string>(() => {
     return localStorage.getItem("nexus_nav_activeTab") || "dashboard";
   });
-  const [historyStack, setHistoryStack] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem("nexus_nav_historyStack");
-      return saved ? JSON.parse(saved) : ["dashboard"];
-    } catch {
-      return ["dashboard"];
-    }
+  const [tabHistory, setTabHistory] = useState<string[]>(["dashboard"]);
+  const [historyIndex, setHistoryIndex] = useState<number>(0);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem("nexus_nav_collapsed") === "true";
   });
-  const [historyIdx, setHistoryIdx] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem("nexus_nav_historyIdx");
-      return saved ? parseInt(saved, 10) : 0;
-    } catch {
-      return 0;
-    }
-  });
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [isHelpOpen, setIsHelpOpen] = useState<boolean>(false);
   const [isGuideOpen, setIsGuideOpen] = useState<boolean>(false);
   const [guideModule, setGuideModule] = useState<string>("");
+
+  // ── License enforcement ───────────────────────────────────────────────────
+  const { license, loading: licenseLoading } = useLicense();
+  const isLicenseLocked = license?.locked === true;
+  const lockReason: LockReason =
+    (license?.server_revoked ? 'server_revoked' : license?.reason) as LockReason
+    ?? 'tampered';
 
   React.useEffect(() => {
     (window as any).showModuleSetupGuide = (moduleName: string) => {
@@ -59,45 +57,32 @@ function App() {
   const { identity } = useIdentity();
   const schoolName = identity?.name || "Nexus School OS";
 
-  const navigateTo = (viewId: string, pushToHistory = true) => {
-    if (viewId === activeTab) return;
-    setActiveTab(viewId);
-    localStorage.setItem("nexus_nav_activeTab", viewId);
+  const navigateTo = (tab: string, pushToHistory = true) => {
+    setActiveTab(tab);
+    localStorage.setItem("nexus_nav_activeTab", tab);
     if (pushToHistory) {
-      setHistoryStack((prev) => {
-        const nextStack = prev.slice(0, historyIdx + 1);
-        nextStack.push(viewId);
-        const nextIdx = nextStack.length - 1;
-        setHistoryIdx(nextIdx);
-        localStorage.setItem(
-          "nexus_nav_historyStack",
-          JSON.stringify(nextStack),
-        );
-        localStorage.setItem("nexus_nav_historyIdx", nextIdx.toString());
-        return nextStack;
-      });
+      const newHistory = tabHistory.slice(0, historyIndex + 1);
+      newHistory.push(tab);
+      setTabHistory(newHistory);
+      setHistoryIndex(newHistory.length - 1);
     }
   };
 
-  const handleBack = () => {
-    if (historyIdx > 0) {
-      const nextIdx = historyIdx - 1;
-      setHistoryIdx(nextIdx);
-      const nextTab = historyStack[nextIdx];
-      setActiveTab(nextTab);
-      localStorage.setItem("nexus_nav_activeTab", nextTab);
-      localStorage.setItem("nexus_nav_historyIdx", nextIdx.toString());
+  const navigateBack = () => {
+    if (historyIndex > 0) {
+      const idx = historyIndex - 1;
+      setHistoryIndex(idx);
+      setActiveTab(tabHistory[idx]);
+      localStorage.setItem("nexus_nav_activeTab", tabHistory[idx]);
     }
   };
 
-  const handleForward = () => {
-    if (historyIdx < historyStack.length - 1) {
-      const nextIdx = historyIdx + 1;
-      setHistoryIdx(nextIdx);
-      const nextTab = historyStack[nextIdx];
-      setActiveTab(nextTab);
-      localStorage.setItem("nexus_nav_activeTab", nextTab);
-      localStorage.setItem("nexus_nav_historyIdx", nextIdx.toString());
+  const navigateForward = () => {
+    if (historyIndex < tabHistory.length - 1) {
+      const idx = historyIndex + 1;
+      setHistoryIndex(idx);
+      setActiveTab(tabHistory[idx]);
+      localStorage.setItem("nexus_nav_activeTab", tabHistory[idx]);
     }
   };
 
@@ -109,6 +94,8 @@ function App() {
         return <Teachers />;
       case "students":
         return <Students />;
+      case "classes":
+        return <Classes />;
       case "attendance":
         return <Attendance />;
       case "sync":
@@ -158,6 +145,32 @@ function App() {
     }
   };
 
+  // ── Three mutually exclusive render paths ────────────────────────────────
+  // The app shell is NEVER in the DOM while loading or locked.
+  // This eliminates any flash regardless of IPC timing or React batching.
+
+  // 1. Loading — dark screen matching the BrowserWindow backgroundColor
+  if (licenseLoading) {
+    return (
+      <div style={{
+        position: 'fixed', inset: 0,
+        background: '#0A0E2E',
+        zIndex: 99999,
+      }} />
+    );
+  }
+
+  // 2. Locked — only the lock screen, nothing else in the DOM
+  if (isLicenseLocked) {
+    return (
+      <LicenseLockScreen
+        reason={lockReason}
+        message={license?.message}
+      />
+    );
+  }
+
+  // 3. Valid license — full app
   return (
     <>
       <div className="background-glow"></div>
@@ -184,28 +197,12 @@ function App() {
               onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
             >
               {isSidebarCollapsed ? (
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                >
-                  <path
-                    d="M6 3l5 5-5 5"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    fill="none"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.8"
+                    fill="none" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               ) : (
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                   <rect x="1" y="3" width="14" height="1.5" rx="0.75" />
                   <rect x="1" y="7.25" width="14" height="1.5" rx="0.75" />
                   <rect x="1" y="11.5" width="14" height="1.5" rx="0.75" />
@@ -223,24 +220,10 @@ function App() {
 
             {/* Back/Forward Nav */}
             <div className="titlebar-nav">
-              <button
-                className="titlebar-nav-btn"
-                id="btn-back"
-                title="Go Back"
-                disabled={historyIdx <= 0}
-                onClick={handleBack}
-              >
-                ←
-              </button>
-              <button
-                className="titlebar-nav-btn"
-                id="btn-forward"
-                title="Go Forward"
-                disabled={historyIdx >= historyStack.length - 1}
-                onClick={handleForward}
-              >
-                →
-              </button>
+              <button className="titlebar-nav-btn" id="btn-back" title="Go Back"
+                disabled={historyIndex <= 0} onClick={navigateBack}>←</button>
+              <button className="titlebar-nav-btn" id="btn-forward" title="Go Forward"
+                disabled={historyIndex >= tabHistory.length - 1} onClick={navigateForward}>→</button>
             </div>
           </div>
 
@@ -250,18 +233,10 @@ function App() {
       </div>
 
       {/* Reusable right slide-in Help Drawer */}
-      <HelpDrawer
-        isOpen={isHelpOpen}
-        onClose={() => setIsHelpOpen(false)}
-        activeTab={activeTab}
-      />
+      <HelpDrawer isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} activeTab={activeTab} />
 
       {/* Reusable right slide-in Setup Guide Drawer */}
-      <SetupGuideDrawer
-        isOpen={isGuideOpen}
-        onClose={() => setIsGuideOpen(false)}
-        moduleName={guideModule}
-      />
+      <SetupGuideDrawer isOpen={isGuideOpen} onClose={() => setIsGuideOpen(false)} moduleName={guideModule} />
     </>
   );
 }

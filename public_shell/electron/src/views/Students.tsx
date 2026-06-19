@@ -2,11 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { DataTable, Column } from '../components/DataTable';
 import { CurriculumPresets } from '../lib/curriculum';
 import { useSudoAuth } from '../context/SudoAuthContext';
+import { Combobox } from '../components/Combobox';
+import { useClassArms } from '../hooks/useClassArms';
 
 interface Student {
   id: string;
   name: string;
   class_name: string;
+  class_arm?: string;
   reg_no?: string;
   gender?: string;
   dob?: string;
@@ -18,8 +21,30 @@ interface Student {
   photo?: string;
 }
 
+const splitClass = (selected: string, configs: { hierarchy_class: string }[]) => {
+  const sorted = [...configs].sort((a, b) => b.hierarchy_class.length - a.hierarchy_class.length);
+  for (const conf of sorted) {
+    const prefix = conf.hierarchy_class;
+    if (selected === prefix) {
+      return { class_name: prefix, class_arm: '' };
+    }
+    if (selected.startsWith(prefix + ' ')) {
+      return { class_name: prefix, class_arm: selected.substring(prefix.length + 1).trim() };
+    }
+  }
+  const lastSpace = selected.lastIndexOf(' ');
+  if (lastSpace > -1) {
+    return {
+      class_name: selected.substring(0, lastSpace).trim(),
+      class_arm: selected.substring(lastSpace + 1).trim()
+    };
+  }
+  return { class_name: selected, class_arm: '' };
+};
+
 export function Students() {
   const { requireSudo } = useSudoAuth();
+  const { configs, fullList } = useClassArms();
   // State
   const [students, setStudents] = useState<Student[]>([]);
   const [totalStudents, setTotalStudents] = useState(0);
@@ -55,10 +80,43 @@ export function Students() {
   // Settings Panel State
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
   const [mobileRegLocked, setMobileRegLocked] = useState(false);
+  const [mobileGradesLocked, setMobileGradesLocked] = useState(false);
+  const [mobileAttendanceLocked, setMobileAttendanceLocked] = useState(false);
+  const [mobileRegLockAt, setMobileRegLockAt] = useState('');
+  const [mobileGradesLockAt, setMobileGradesLockAt] = useState('');
+  const [mobileAttendanceLockAt, setMobileAttendanceLockAt] = useState('');
+  const [scheduleRegLock, setScheduleRegLock] = useState(false);
+  const [scheduleGradesLock, setScheduleGradesLock] = useState(false);
+  const [scheduleAttendanceLock, setScheduleAttendanceLock] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
+  const [nowTick, setNowTick] = useState(Date.now());
 
-  // Autocomplete for Class
-  const [classSuggestions, setClassSuggestions] = useState<string[]>([]);
+  useEffect(() => {
+    if (!isSettingsPanelOpen) return;
+    const interval = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [isSettingsPanelOpen]);
+
+
+  const getCountdownText = (targetTimeStr: string) => {
+    if (!targetTimeStr) return '';
+    const target = new Date(targetTimeStr).getTime();
+    if (isNaN(target) || nowTick >= target) return '⏱️ Lock engaged / Deadline passed';
+    const diff = target - nowTick;
+    const days = Math.floor(diff / 86400000);
+    const hours = Math.floor((diff % 86400000) / 3600000);
+    const mins = Math.floor((diff % 3600000) / 60000);
+    const parts = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (mins > 0 || parts.length === 0) parts.push(`${mins}m`);
+    return `⏱️ Locks in ${parts.join(' ')}`;
+  };
+
+  const isRegLockedEff = mobileRegLocked || (scheduleRegLock && mobileRegLockAt && nowTick >= new Date(mobileRegLockAt).getTime());
+  const isGradesLockedEff = mobileGradesLocked || (scheduleGradesLock && mobileGradesLockAt && nowTick >= new Date(mobileGradesLockAt).getTime());
+  const isAttendanceLockedEff = mobileAttendanceLocked || (scheduleAttendanceLock && mobileAttendanceLockAt && nowTick >= new Date(mobileAttendanceLockAt).getTime());
+
   const [csvStatus, setCsvStatus] = useState<string | null>(null);
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -125,28 +183,38 @@ export function Students() {
     fetchStudents();
   }, [page, search, limit]);
 
-  // Load class list on mount for suggestions
-  useEffect(() => {
-    const loadSuggestions = async () => {
-      if (!window.electronAPI?.getClasses) return;
-      try {
-        const classList = await window.electronAPI.getClasses();
-        if (Array.isArray(classList)) {
-          setClassSuggestions(classList);
-        }
-      } catch (err) {
-        console.error('Error fetching class list for suggestions:', err);
-      }
-    };
-    loadSuggestions();
-  }, []);
 
   // Load student directory settings on mount
   useEffect(() => {
     const loadStudentSettings = async () => {
       try {
         const res = await window.electronAPI?.students?.getSettings();
-        if (res?.ok) setMobileRegLocked(res.mobile_registration_locked ?? false);
+        if (res?.ok) {
+          setMobileRegLocked(res.mobile_registration_locked ?? false);
+          setMobileGradesLocked(res.mobile_grades_locked ?? false);
+          setMobileAttendanceLocked(res.mobile_attendance_locked ?? false);
+          if (res.mobile_registration_lock_at) {
+            setMobileRegLockAt(res.mobile_registration_lock_at.substring(0, 16));
+            setScheduleRegLock(true);
+          } else {
+            setMobileRegLockAt('');
+            setScheduleRegLock(false);
+          }
+          if (res.mobile_grades_lock_at) {
+            setMobileGradesLockAt(res.mobile_grades_lock_at.substring(0, 16));
+            setScheduleGradesLock(true);
+          } else {
+            setMobileGradesLockAt('');
+            setScheduleGradesLock(false);
+          }
+          if (res.mobile_attendance_lock_at) {
+            setMobileAttendanceLockAt(res.mobile_attendance_lock_at.substring(0, 16));
+            setScheduleAttendanceLock(true);
+          } else {
+            setMobileAttendanceLockAt('');
+            setScheduleAttendanceLock(false);
+          }
+        }
       } catch (err) {
         console.error('Error loading student settings:', err);
       }
@@ -256,7 +324,7 @@ export function Students() {
   const openEditDrawer = (student: Student) => {
     setEditStudentId(student.id);
     setName(student.name || '');
-    setClassName(student.class_name || '');
+    setClassName(student.class_arm ? `${student.class_name} ${student.class_arm}` : (student.class_name || ''));
     setRegNo(student.reg_no || '');
     setGender(student.gender || '');
     setDob(student.dob || '');
@@ -315,10 +383,12 @@ export function Students() {
     setFormLog({ text: 'Saving record...', isError: false });
 
     try {
+      const { class_name, class_arm } = splitClass(className, configs);
       const payload = {
         id: editStudentId || '',
         name,
-        class_name: className,
+        class_name,
+        class_arm,
         reg_no: regNo,
         gender,
         dob,
@@ -451,7 +521,7 @@ export function Students() {
               fontSize: '11px',
               fontWeight: 700
             }}>
-              {s.class_name}
+              {s.class_arm ? `${s.class_name} ${s.class_arm}` : s.class_name}
             </span>
             {s.reg_no && (
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dim)' }}>
@@ -593,7 +663,7 @@ export function Students() {
       </div>
 
       {/* Mobile Registration Lock Banner */}
-      {mobileRegLocked && (
+      {isRegLockedEff && (
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -924,26 +994,17 @@ export function Students() {
                     className="modern-input"
                   />
                 </div>
-
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <label style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block' }}>
                       Class Room Designation *
                     </label>
-                    <input
-                      type="text"
+                    <Combobox
+                      options={fullList}
                       value={className}
-                      onChange={(e) => setClassName(e.target.value)}
-                      placeholder="e.g. JSS 1"
-                      list="class-suggestions-list"
-                      id="stu-add-class"
-                      className="modern-input"
+                      onChange={setClassName}
+                      placeholder="e.g. JSS 1 Gold"
                     />
-                    <datalist id="class-suggestions-list">
-                      {classSuggestions.map(cls => (
-                        <option key={cls} value={cls} />
-                      ))}
-                    </datalist>
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1417,7 +1478,7 @@ export function Students() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                     {([
                       { label: 'Full Name',    value: detailStudent.name },
-                      { label: 'Class',        value: detailStudent.class_name },
+                      { label: 'Class',        value: detailStudent.class_arm ? `${detailStudent.class_name} ${detailStudent.class_arm}` : detailStudent.class_name },
                       { label: 'Reg. Number',  value: detailStudent.reg_no  || '—' },
                       { label: 'Gender',       value: detailStudent.gender  || '—' },
                       { label: 'Date of Birth',value: detailStudent.dob     || '—' },
@@ -1551,51 +1612,222 @@ export function Students() {
               {/* Section label */}
               <p style={{ fontSize: '10px', fontWeight: 700, color: 'var(--accent-gold, #FFD700)', textTransform: 'uppercase', letterSpacing: '0.12em', margin: '0 0 16px' }}>Mobile Companion Controls</p>
 
-              {/* Toggle Row */}
-              <div style={{
-                background: 'rgba(255,255,255,0.03)',
-                border: '1px solid var(--glass-border)',
-                borderRadius: 'var(--radius-md)',
-                padding: '16px 18px',
-                display: 'flex', alignItems: 'flex-start', gap: '14px',
-              }}>
-                {/* Toggle Switch */}
-                <div
-                  onClick={() => setMobileRegLocked(v => !v)}
-                  style={{
-                    width: '40px', height: '22px', borderRadius: '11px', flexShrink: 0, marginTop: '2px',
-                    background: mobileRegLocked ? 'rgba(239,68,68,0.8)' : 'rgba(0,229,255,0.7)',
-                    position: 'relative', cursor: 'pointer',
-                    transition: 'background 0.25s',
-                    boxShadow: mobileRegLocked ? '0 0 10px rgba(239,68,68,0.35)' : '0 0 10px rgba(0,229,255,0.25)',
-                  }}
-                >
-                  <div style={{
-                    position: 'absolute', top: '3px',
-                    left: mobileRegLocked ? '21px' : '3px',
-                    width: '16px', height: '16px', borderRadius: '50%',
-                    background: '#fff',
-                    transition: 'left 0.25s cubic-bezier(0.4,0,0.2,1)',
-                    boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
-                  }} />
+              {/* Mobile Companion Controls Container */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+
+                {/* 1. Mobile Registration Lock */}
+                <div style={{
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid var(--glass-border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '16px 18px',
+                  display: 'flex', flexDirection: 'column', gap: '14px',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
+                    <div
+                      onClick={() => setMobileRegLocked(v => !v)}
+                      style={{
+                        width: '40px', height: '22px', borderRadius: '11px', flexShrink: 0, marginTop: '2px',
+                        background: isRegLockedEff ? 'rgba(239,68,68,0.8)' : 'rgba(0,229,255,0.7)',
+                        position: 'relative', cursor: 'pointer',
+                        transition: 'background 0.25s',
+                        boxShadow: isRegLockedEff ? '0 0 10px rgba(239,68,68,0.35)' : '0 0 10px rgba(0,229,255,0.25)',
+                      }}
+                    >
+                      <div style={{
+                        position: 'absolute', top: '3px',
+                        left: isRegLockedEff ? '21px' : '3px',
+                        width: '16px', height: '16px', borderRadius: '50%',
+                        background: '#fff',
+                        transition: 'left 0.25s cubic-bezier(0.4,0,0.2,1)',
+                        boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
+                      }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <p style={{ margin: '0 0 4px', fontSize: '13px', fontWeight: 600, color: 'var(--text-main)' }}>
+                        {isRegLockedEff ? '🔒 Mobile Registration Locked' : '🔓 Mobile Registration Enabled'}
+                      </p>
+                      <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.5 }}>
+                        Mobile companion devices cannot register new students into Central Hub.
+                      </p>
+                    </div>
+                  </div>
+                  <div style={{ paddingLeft: '54px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-main)', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={scheduleRegLock}
+                        onChange={e => {
+                          setScheduleRegLock(e.target.checked);
+                          if (!e.target.checked) setMobileRegLockAt('');
+                        }}
+                        style={{ accentColor: 'var(--accent)' }}
+                      />
+                      Schedule lock at date & time
+                    </label>
+                    {scheduleRegLock && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <input
+                          type="datetime-local"
+                          value={mobileRegLockAt}
+                          onChange={e => setMobileRegLockAt(e.target.value)}
+                          className="modern-input"
+                          style={{ fontSize: '12px', padding: '6px 10px', background: 'rgba(0,0,0,0.2)' }}
+                        />
+                        {mobileRegLockAt && (
+                          <span style={{ fontSize: '11px', fontWeight: 600, color: getCountdownText(mobileRegLockAt).includes('passed') ? 'var(--danger, #ef4444)' : 'var(--accent, #00e5ff)' }}>
+                            {getCountdownText(mobileRegLockAt)}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                <div style={{ flex: 1 }}>
-                  <p style={{ margin: '0 0 4px', fontSize: '13px', fontWeight: 600, color: 'var(--text-main)' }}>
-                    {mobileRegLocked ? '🔒 Mobile Registration Locked' : '🔓 Mobile Registration Enabled'}
-                  </p>
-                  <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.5 }}>
-                    {mobileRegLocked
-                      ? 'Mobile companion devices cannot add new students. Existing sync, grade updates, and attendance are still allowed.'
-                      : 'Mobile companion devices can register new students into the school database during sync.'}
-                  </p>
+                {/* 2. Mobile Grades Entry Lock */}
+                <div style={{
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid var(--glass-border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '16px 18px',
+                  display: 'flex', flexDirection: 'column', gap: '14px',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
+                    <div
+                      onClick={() => setMobileGradesLocked(v => !v)}
+                      style={{
+                        width: '40px', height: '22px', borderRadius: '11px', flexShrink: 0, marginTop: '2px',
+                        background: isGradesLockedEff ? 'rgba(239,68,68,0.8)' : 'rgba(0,229,255,0.7)',
+                        position: 'relative', cursor: 'pointer',
+                        transition: 'background 0.25s',
+                        boxShadow: isGradesLockedEff ? '0 0 10px rgba(239,68,68,0.35)' : '0 0 10px rgba(0,229,255,0.25)',
+                      }}
+                    >
+                      <div style={{
+                        position: 'absolute', top: '3px',
+                        left: isGradesLockedEff ? '21px' : '3px',
+                        width: '16px', height: '16px', borderRadius: '50%',
+                        background: '#fff',
+                        transition: 'left 0.25s cubic-bezier(0.4,0,0.2,1)',
+                        boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
+                      }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <p style={{ margin: '0 0 4px', fontSize: '13px', fontWeight: 600, color: 'var(--text-main)' }}>
+                        {isGradesLockedEff ? '🔒 Mobile Grade Entry Locked' : '🔓 Mobile Grade Entry Enabled'}
+                      </p>
+                      <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.5 }}>
+                        Restrict teachers from entering, updating, or saving student grades.
+                      </p>
+                    </div>
+                  </div>
+                  <div style={{ paddingLeft: '54px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-main)', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={scheduleGradesLock}
+                        onChange={e => {
+                          setScheduleGradesLock(e.target.checked);
+                          if (!e.target.checked) setMobileGradesLockAt('');
+                        }}
+                        style={{ accentColor: 'var(--accent)' }}
+                      />
+                      Schedule lock at date & time
+                    </label>
+                    {scheduleGradesLock && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <input
+                          type="datetime-local"
+                          value={mobileGradesLockAt}
+                          onChange={e => setMobileGradesLockAt(e.target.value)}
+                          className="modern-input"
+                          style={{ fontSize: '12px', padding: '6px 10px', background: 'rgba(0,0,0,0.2)' }}
+                        />
+                        {mobileGradesLockAt && (
+                          <span style={{ fontSize: '11px', fontWeight: 600, color: getCountdownText(mobileGradesLockAt).includes('passed') ? 'var(--danger, #ef4444)' : 'var(--accent, #00e5ff)' }}>
+                            {getCountdownText(mobileGradesLockAt)}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
+
+                {/* 3. Mobile Attendance Entry Lock */}
+                <div style={{
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid var(--glass-border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '16px 18px',
+                  display: 'flex', flexDirection: 'column', gap: '14px',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
+                    <div
+                      onClick={() => setMobileAttendanceLocked(v => !v)}
+                      style={{
+                        width: '40px', height: '22px', borderRadius: '11px', flexShrink: 0, marginTop: '2px',
+                        background: isAttendanceLockedEff ? 'rgba(239,68,68,0.8)' : 'rgba(0,229,255,0.7)',
+                        position: 'relative', cursor: 'pointer',
+                        transition: 'background 0.25s',
+                        boxShadow: isAttendanceLockedEff ? '0 0 10px rgba(239,68,68,0.35)' : '0 0 10px rgba(0,229,255,0.25)',
+                      }}
+                    >
+                      <div style={{
+                        position: 'absolute', top: '3px',
+                        left: isAttendanceLockedEff ? '21px' : '3px',
+                        width: '16px', height: '16px', borderRadius: '50%',
+                        background: '#fff',
+                        transition: 'left 0.25s cubic-bezier(0.4,0,0.2,1)',
+                        boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
+                      }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <p style={{ margin: '0 0 4px', fontSize: '13px', fontWeight: 600, color: 'var(--text-main)' }}>
+                        {isAttendanceLockedEff ? '🔒 Mobile Attendance Locked' : '🔓 Mobile Attendance Enabled'}
+                      </p>
+                      <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.5 }}>
+                        Restrict teachers from modifying class attendance registers.
+                      </p>
+                    </div>
+                  </div>
+                  <div style={{ paddingLeft: '54px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-main)', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={scheduleAttendanceLock}
+                        onChange={e => {
+                          setScheduleAttendanceLock(e.target.checked);
+                          if (!e.target.checked) setMobileAttendanceLockAt('');
+                        }}
+                        style={{ accentColor: 'var(--accent)' }}
+                      />
+                      Schedule lock at date & time
+                    </label>
+                    {scheduleAttendanceLock && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <input
+                          type="datetime-local"
+                          value={mobileAttendanceLockAt}
+                          onChange={e => setMobileAttendanceLockAt(e.target.value)}
+                          className="modern-input"
+                          style={{ fontSize: '12px', padding: '6px 10px', background: 'rgba(0,0,0,0.2)' }}
+                        />
+                        {mobileAttendanceLockAt && (
+                          <span style={{ fontSize: '11px', fontWeight: 600, color: getCountdownText(mobileAttendanceLockAt).includes('passed') ? 'var(--danger, #ef4444)' : 'var(--accent, #00e5ff)' }}>
+                            {getCountdownText(mobileAttendanceLockAt)}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
               </div>
 
               <div style={{ height: '1px', background: 'var(--glass-border)', margin: '24px 0' }} />
 
               <p style={{ fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
-                <strong style={{ color: 'var(--text-main)' }}>Note:</strong> This only restricts <em>new student registration</em> from mobile. Teachers can still submit grades and sync attendance normally. Changes take effect immediately on the next sync from any mobile device.
+                <strong style={{ color: 'var(--text-main)' }}>Note:</strong> Mobile lock statuses and scheduled deadlines take effect immediately on companion terminals upon their next sync query.
               </p>
 
             </div>
@@ -1617,7 +1849,14 @@ export function Students() {
                 onClick={async () => {
                   setSettingsSaving(true);
                   try {
-                    const res = await window.electronAPI?.students?.saveSettings({ mobile_registration_locked: mobileRegLocked });
+                    const res = await window.electronAPI?.students?.saveSettings({
+                      mobile_registration_locked: mobileRegLocked,
+                      mobile_grades_locked: mobileGradesLocked,
+                      mobile_attendance_locked: mobileAttendanceLocked,
+                      mobile_registration_lock_at: scheduleRegLock && mobileRegLockAt ? mobileRegLockAt : null,
+                      mobile_grades_lock_at: scheduleGradesLock && mobileGradesLockAt ? mobileGradesLockAt : null,
+                      mobile_attendance_lock_at: scheduleAttendanceLock && mobileAttendanceLockAt ? mobileAttendanceLockAt : null
+                    });
                     if (res?.ok) setIsSettingsPanelOpen(false);
                     else alert('Failed to save settings.');
                   } finally {
