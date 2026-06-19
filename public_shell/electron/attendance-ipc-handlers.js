@@ -156,9 +156,9 @@ module.exports = function registerAttendanceHandlers(database, enqueueWhatsApp, 
                 SELECT sa.student_id, s.name as student_name, sa.status, sa.marked_by
                 FROM subject_attendance sa
                 JOIN students s ON s.id = sa.student_id
-                WHERE sa.class_name = ? AND sa.subject_name = ? AND sa.date = ?
+                WHERE UPPER(replace(sa.class_name, ' ', '')) = ? AND sa.subject_name = ? AND sa.date = ?
                 ORDER BY s.name ASC
-            `).all(class_name, subject_name, date);
+            `).all(class_name.replace(/\s+/g, '').toUpperCase(), subject_name, date);
             return { ok: true, rows };
         } catch (err) {
             return { ok: false, error: err.message };
@@ -191,10 +191,10 @@ module.exports = function registerAttendanceHandlers(database, enqueueWhatsApp, 
         }
         try {
             const query = class_name
-                ? `SELECT tf.*, s.name as student_name, s.class_name FROM truancy_flags tf JOIN students s ON s.id = tf.student_id WHERE s.class_name = ? ORDER BY tf.flag_count DESC`
+                ? `SELECT tf.*, s.name as student_name, s.class_name FROM truancy_flags tf JOIN students s ON s.id = tf.student_id WHERE UPPER(replace(s.class_name, ' ', '')) = ? ORDER BY tf.flag_count DESC`
                 : `SELECT tf.*, s.name as student_name, s.class_name FROM truancy_flags tf JOIN students s ON s.id = tf.student_id ORDER BY tf.flag_count DESC`;
             const rows = class_name
-                ? db().prepare(query).all(class_name)
+                ? db().prepare(query).all(class_name.replace(/\s+/g, '').toUpperCase())
                 : db().prepare(query).all();
             return { ok: true, rows };
         } catch (err) {
@@ -219,10 +219,10 @@ module.exports = function registerAttendanceHandlers(database, enqueueWhatsApp, 
                 LEFT JOIN truancy_flags tf ON tf.student_id = da.student_id
                 WHERE da.date = ?
                   AND da.status IN ('Present', 'Late')
-                  ${class_name ? "AND da.class_name = ?" : ""}
+                  ${class_name ? "AND UPPER(replace(da.class_name, ' ', '')) = ?" : ""}
                 GROUP BY s.id
                 ORDER BY tf.flag_count DESC
-            `).all(...(class_name ? [date, class_name] : [date]));
+            `).all(...(class_name ? [date, class_name.replace(/\s+/g, '').toUpperCase()] : [date]));
             return { ok: true, rows };
         } catch (err) {
             return { ok: false, error: err.message };

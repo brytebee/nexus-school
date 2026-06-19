@@ -132,7 +132,7 @@ const initAttendanceModule = async () => {
         const res = await window.electronAPI.getDailyAttendance({ class_name: cls, date });
         if (!res.ok) return;
 
-        const students = (_allStudents || []).filter(s => s.class_name === cls);
+        const students = (_allStudents || []).filter(s => (s.class_name || '').replace(/\s+/g, '').toUpperCase() === (cls || '').replace(/\s+/g, '').toUpperCase());
         const attMap = {};
         res.data.forEach(r => attMap[r.student_id] = r.status);
 
@@ -202,7 +202,7 @@ const initAttendanceModule = async () => {
     if (rClass && rStu) {
         rClass.addEventListener("change", () => {
             const cls = rClass.value;
-            const students = (_allStudents || []).filter(s => !cls || s.class_name === cls);
+            const students = (_allStudents || []).filter(s => !cls || (s.class_name || '').replace(/\s+/g, '').toUpperCase() === (cls || '').replace(/\s+/g, '').toUpperCase());
             rStu.innerHTML = '<option value="">Select Student...</option>';
             students.forEach(s => {
                 const opt = document.createElement("option");
