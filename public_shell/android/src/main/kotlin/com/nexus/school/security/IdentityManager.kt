@@ -401,6 +401,10 @@ class IdentityManager(context: Context) {
     }
 
     fun clearData() {
+        val deviceId = prefs.getString("device_id", null)
         prefs.edit().clear().apply()
+        if (deviceId != null) {
+            prefs.edit().putString("device_id", deviceId).apply()
+        }
     }
 }
