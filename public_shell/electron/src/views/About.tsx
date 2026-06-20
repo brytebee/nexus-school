@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useLicense } from '../hooks/useLicense';
 
 interface AboutProps {
@@ -6,7 +6,9 @@ interface AboutProps {
 }
 
 export function About({ onTabChange }: AboutProps) {
-  const { license, loading } = useLicense();
+  const { license, loading, importLicenseFile, activateOnline, refreshLicense } = useLicense();
+  const [licenseActionStatus, setLicenseActionStatus] = useState<'idle' | 'importing' | 'activating' | 'success' | 'error'>('idle');
+  const [licenseActionMsg, setLicenseActionMsg] = useState('');
 
   const currentTier = license?.tier || 'Silver';
   const studentCount = license?.student_count || 0;
@@ -259,6 +261,74 @@ export function About({ onTabChange }: AboutProps) {
               🚀 Upgrade to a Plan →
             </button>
           )}
+
+          {/* ── In-app License Management ── */}
+          <div
+            style={{
+              marginTop: '14px',
+              paddingTop: '14px',
+              borderTop: '1px solid rgba(255,255,255,0.07)',
+            }}
+          >
+            <p style={{ fontSize: '10.5px', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>
+              License Key
+            </p>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                id="about-import-license-btn"
+                onClick={async () => {
+                  setLicenseActionStatus('importing');
+                  setLicenseActionMsg('');
+                  const res = await importLicenseFile();
+                  if (res?.ok) {
+                    setLicenseActionStatus('success');
+                    setLicenseActionMsg('License imported. Reloading...');
+                    setTimeout(() => { refreshLicense(); setLicenseActionStatus('idle'); }, 1800);
+                  } else if (res?.reason === 'cancelled') {
+                    setLicenseActionStatus('idle');
+                  } else {
+                    setLicenseActionStatus('error');
+                    setLicenseActionMsg(res?.reason || 'Import failed.');
+                    setTimeout(() => setLicenseActionStatus('idle'), 4000);
+                  }
+                }}
+                disabled={licenseActionStatus !== 'idle'}
+                style={{
+                  flex: 1, padding: '8px 10px', borderRadius: '8px',
+                  background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+                  color: '#c8d0e0', fontSize: '11px', fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                📁 Import .nexus File
+              </button>
+              <button
+                id="about-activate-online-btn"
+                onClick={async () => {
+                  setLicenseActionStatus('activating');
+                  setLicenseActionMsg('');
+                  await activateOnline();
+                  setLicenseActionStatus('idle');
+                }}
+                disabled={licenseActionStatus !== 'idle'}
+                style={{
+                  flex: 1, padding: '8px 10px', borderRadius: '8px',
+                  background: 'rgba(0,229,255,0.08)', border: '1px solid rgba(0,229,255,0.2)',
+                  color: '#00e5ff', fontSize: '11px', fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                {licenseActionStatus === 'activating' ? '🌐 Opening...' : '🌐 Activate Online'}
+              </button>
+            </div>
+            {licenseActionStatus === 'importing' && (
+              <p style={{ color: '#00e5ff', fontSize: '11px', marginTop: '6px', textAlign: 'center' }}>⏳ Importing license file...</p>
+            )}
+            {licenseActionStatus === 'success' && (
+              <p style={{ color: '#4caf50', fontSize: '11px', marginTop: '6px', textAlign: 'center' }}>✅ {licenseActionMsg}</p>
+            )}
+            {licenseActionStatus === 'error' && (
+              <p style={{ color: '#ff4444', fontSize: '11px', marginTop: '6px', textAlign: 'center' }}>❌ {licenseActionMsg}</p>
+            )}
+          </div>
         </div>
       </div>
 
@@ -313,7 +383,7 @@ export function About({ onTabChange }: AboutProps) {
               animation: 'none'
             }}
           >
-            Request Upgrade →
+            {currentTier === 'Gold' ? 'Manage Plan →' : 'Request Upgrade →'}
           </button>
         </div>
       )}

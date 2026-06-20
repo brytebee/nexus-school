@@ -444,10 +444,19 @@ export function PortalContent() {
                   <div style={{ marginBottom: '16px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                       <label className="ph-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)', display: 'block' }}>Content (Markdown)</label>
-                      <label style={{ fontSize: '12px', color: 'var(--accent)', cursor: 'pointer', border: '1px dashed var(--accent)', padding: '4px 8px', borderRadius: '4px' }}>
-                        Import .md file
-                        <input type="file" accept=".md,.txt" style={{ display: 'none' }} onChange={(e) => handleImportMarkdown(e, 'news')} />
-                      </label>
+                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                        <a
+                          href="data:text/markdown;charset=utf-8,%23%20School%20News%20Title%0A%0AWrite%20your%20news%20content%20here%20in%20Markdown.%20You%20can%20use%20bullet%20points%20or%20headings."
+                          download="News_Template.md"
+                          style={{ fontSize: '11px', color: 'var(--accent-gold, #FFD700)', textDecoration: 'none', border: '1px solid var(--accent-gold, #FFD700)', padding: '4px 8px', borderRadius: '4px' }}
+                        >
+                          📥 Template
+                        </a>
+                        <label style={{ fontSize: '12px', color: 'var(--accent)', cursor: 'pointer', border: '1px dashed var(--accent)', padding: '4px 8px', borderRadius: '4px' }}>
+                          Import .md file
+                          <input type="file" accept=".md,.txt" style={{ display: 'none' }} onChange={(e) => handleImportMarkdown(e, 'news')} />
+                        </label>
+                      </div>
                     </div>
                     <textarea value={newsBody} onChange={(e) => setNewsBody(e.target.value)} className="modern-input" style={{ height: '250px', marginTop: '8px', fontFamily: 'monospace', fontSize: '13px' }} placeholder="Write content in Markdown..."></textarea>
                   </div>
@@ -534,10 +543,19 @@ export function PortalContent() {
                   <div style={{ marginBottom: '16px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                       <label className="ph-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)', display: 'block' }}>Policy Content (Markdown)</label>
-                      <label style={{ fontSize: '12px', color: 'var(--accent)', cursor: 'pointer', border: '1px dashed var(--accent)', padding: '4px 8px', borderRadius: '4px' }}>
-                        Import .md file
-                        <input type="file" accept=".md,.txt" style={{ display: 'none' }} onChange={(e) => handleImportMarkdown(e, 'policy')} />
-                      </label>
+                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                        <a
+                          href="data:text/markdown;charset=utf-8,%23%20School%20Policy%20Title%0A%0ADefine%20your%20policy%20details%20here%20in%20Markdown."
+                          download="Policy_Template.md"
+                          style={{ fontSize: '11px', color: 'var(--accent-gold, #FFD700)', textDecoration: 'none', border: '1px solid var(--accent-gold, #FFD700)', padding: '4px 8px', borderRadius: '4px' }}
+                        >
+                          📥 Template
+                        </a>
+                        <label style={{ fontSize: '12px', color: 'var(--accent)', cursor: 'pointer', border: '1px dashed var(--accent)', padding: '4px 8px', borderRadius: '4px' }}>
+                          Import .md file
+                          <input type="file" accept=".md,.txt" style={{ display: 'none' }} onChange={(e) => handleImportMarkdown(e, 'policy')} />
+                        </label>
+                      </div>
                     </div>
                     <textarea value={policyBody} onChange={(e) => setPolicyBody(e.target.value)} className="modern-input" style={{ height: '250px', marginTop: '8px', fontFamily: 'monospace', fontSize: '13px' }} placeholder="Write content in Markdown..."></textarea>
                   </div>

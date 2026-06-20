@@ -9,6 +9,33 @@ export default function Classes() {
   const [selectedClass, setSelectedClass] = useState<ClassConfig | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [newArmName, setNewArmName] = useState('');
+
+  // CSV Import state
+  const [csvStatus, setCsvStatus] = useState<string | null>(null);
+
+  // Handle Classes CSV Loaded notification
+  useEffect(() => {
+    if ((window as any).electronAPI?.onClassesCSVLoaded) {
+      (window as any).electronAPI.onClassesCSVLoaded((res: { count: number, error: string | null }) => {
+        if (res.error) {
+          setCsvStatus(`❌ Classes Import Failed: ${res.error}`);
+        } else {
+          setCsvStatus(`✅ Classes CSV Processed: ${res.count} records loaded`);
+          refresh();
+        }
+        setTimeout(() => setCsvStatus(null), 4000);
+      });
+    }
+  }, [refresh]);
+
+  const handleClassesCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCsvStatus('⏳ Ingesting and verifying Classes CSV data...');
+    if ((window as any).electronAPI?.processClassesCSV) {
+      (window as any).electronAPI.processClassesCSV(file.path);
+    }
+  };
   
   // Inline/card temporary inputs
   const [cardMaxSubjects, setCardMaxSubjects] = useState<Record<string, string>>({});
@@ -266,12 +293,78 @@ export default function Classes() {
     <div className="animate-in fade-in duration-300 h-full flex flex-col min-h-0" style={{ padding: '24px', background: '#020617', color: '#f8fafc', overflowY: 'auto' }}>
       
       {/* View Header */}
-      <div className="view-header" style={{ marginBottom: '24px' }}>
-        <h2 className="view-title" style={{ fontSize: '24px', fontWeight: 800, color: '#f8fafc', margin: 0 }}>🏫 Class & Arm Manager</h2>
-        <p className="view-sub" style={{ fontSize: '13px', color: '#94a3b8', margin: '4px 0 0 0' }}>
-          Configure hierarchy classes, assign stable subject capacities, override pass marks, and manage aliases/arms.
-        </p>
+      <div className="view-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '24px' }}>
+        <div>
+          <h2 className="view-title" style={{ fontSize: '24px', fontWeight: 800, color: '#f8fafc', margin: 0 }}>🏫 Class & Arm Manager</h2>
+          <p className="view-sub" style={{ fontSize: '13px', color: '#94a3b8', margin: '4px 0 0 0' }}>
+            Configure hierarchy classes, assign stable subject capacities, override pass marks, and manage aliases/arms.
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <a
+            href="data:text/csv;charset=utf-8,Class_Name,Max_Subjects,Pass_Mark_Override,Arms%0AJSS 1,12,45,A|B|C%0ASS 1,15,50,Science|Arts"
+            download="Nexus_Classes_Template.csv"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderRadius: '6px',
+              color: '#f8fafc',
+              fontSize: '12px',
+              fontWeight: 500,
+              padding: '6px 12px',
+              textDecoration: 'none',
+              cursor: 'pointer',
+              transition: 'background 0.2s',
+            }}
+            onMouseOver={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)')}
+            onMouseOut={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)')}
+          >
+            📥 Download CSV Template
+          </a>
+          <label
+            htmlFor="classes-csv-upload-input"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              background: '#00e5ff',
+              color: '#020617',
+              borderRadius: '6px',
+              fontSize: '12px',
+              fontWeight: 600,
+              padding: '6px 14px',
+              cursor: 'pointer',
+              transition: 'opacity 0.2s',
+            }}
+            onMouseOver={(e) => (e.currentTarget.style.opacity = '0.9')}
+            onMouseOut={(e) => (e.currentTarget.style.opacity = '1')}
+          >
+            ⚡ Import CSV
+          </label>
+          <input
+            id="classes-csv-upload-input"
+            type="file"
+            accept=".csv"
+            onChange={handleClassesCSVUpload}
+            style={{ display: 'none' }}
+          />
+        </div>
       </div>
+
+      {csvStatus && (
+        <div style={{
+          background: csvStatus.startsWith('❌') ? 'rgba(239, 68, 68, 0.1)' : 'rgba(0, 229, 255, 0.1)',
+          border: csvStatus.startsWith('❌') ? '1px solid rgba(239, 68, 68, 0.25)' : '1px solid rgba(0, 229, 255, 0.25)',
+          padding: '10px 16px',
+          borderRadius: '6px',
+          fontSize: '12px',
+          color: csvStatus.startsWith('❌') ? '#ef4444' : '#00e5ff',
+          marginBottom: '20px',
+        }}>
+          {csvStatus}
+        </div>
+      )}
 
       {/* Main Grid: Class configs */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px', marginBottom: '40px' }}>

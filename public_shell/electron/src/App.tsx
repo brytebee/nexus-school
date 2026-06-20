@@ -119,7 +119,7 @@ function App() {
       case "about":
         return <About onTabChange={(tab) => navigateTo(tab, true)} />;
       case "settings":
-        return <Settings />;
+        return <Settings onTabChange={(tab) => navigateTo(tab, true)} />;
       case "live-quiz":
         return <LiveQuiz />;
       case "analytics":
