@@ -1211,7 +1211,7 @@ code {
 }
 @media (min-width: 1201px) {
   .settings-content {
-    grid-template-columns: 1fr 1fr 1.2fr;
+    grid-template-columns: 1fr 1fr;
   }
 }
 

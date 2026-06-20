@@ -1,14 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { useIdentity, SchoolIdentity } from '../hooks/useIdentity';
 import { useLicense } from '../hooks/useLicense';
+import { useSudoAuth } from '../context/SudoAuthContext';
 
 interface SettingsProps {
   onResetSuccess?: () => void;
+  onTabChange?: (tab: string) => void;
 }
 
-export function Settings({ onResetSuccess }: SettingsProps) {
+const identityTemplateObj = {
+  _comment: "School Identity Config Template. Excludes Logo, Signature image and Stamp style.",
+  name: "Nexus Academy",
+  address: "123 Education Way",
+  motto: "Excellence in all things",
+  signature: "Principal Name",
+  principalPhone: "08012345678",
+  portalSlug: "nexusacademy",
+  themePrimary: "#1A237E",
+  themeSecondary: "#00E5FF"
+};
+
+const identityTemplateUri = "data:application/json;charset=utf-8," + encodeURIComponent(JSON.stringify(identityTemplateObj, null, 2));
+
+export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
   const { identity, saveIdentity } = useIdentity();
   const { license } = useLicense();
+  const { requireSudo } = useSudoAuth();
 
   const currentTier = license?.tier || 'Silver';
 
@@ -36,6 +53,8 @@ export function Settings({ onResetSuccess }: SettingsProps) {
   const [stampPreviews, setStampPreviews] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [identityUploadStatus, setIdentityUploadStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [isTemplateDrawerOpen, setIsTemplateDrawerOpen] = useState(false);
 
   // Load identity values when they arrive
   useEffect(() => {
@@ -172,28 +191,227 @@ export function Settings({ onResetSuccess }: SettingsProps) {
       return;
     }
 
-    const confirm = window.confirm(
-      'Reset All Data?\n\nThis will clear school identity and all student/teacher records. This cannot be undone.'
-    );
-    if (confirm) {
-      try {
-        await window.electronAPI.resetAppData();
-        alert('System Reset Completed. Reloading application...');
-        if (onResetSuccess) {
-          onResetSuccess();
-        } else {
-          window.location.reload();
+    const Swal = (window as any).Swal;
+
+    // 1. Request global admin PIN authorization using useSudoAuth
+    await requireSudo(
+      async () => {
+        if (!Swal) {
+          // Fallback if Swal is not loaded
+          if (window.confirm("Reset all data now? This will delete everything.")) {
+            await window.electronAPI.resetAppData();
+            alert('System Reset Completed. Reloading...');
+            window.location.reload();
+          }
+          return;
         }
+
+        // 2. PIN provided successfully. Now present backup / delete options.
+        const result = await Swal.fire({
+          title: 'Database Reset Protection',
+          html: `
+            <p style="color:#ccc;font-size:13px;line-height:1.7;margin:0">
+              Would you like to save a local backup of your database before wiping all data?<br/><br/>
+              <strong style="color:#00e5ff">Local backup</strong> saves an unencrypted <code>.sqlite</code> copy
+              to your computer's Nexus data folder.<br/>
+              <span style="color:#888;font-size:11px">For encrypted cloud backup, configure Google Drive in Nexus Pulse.</span>
+            </p>`,
+          icon: 'warning',
+          showCancelButton: true,
+          showDenyButton: true,
+          confirmButtonText: '💾 Save Local Backup',
+          denyButtonText: '🗑 Delete Now',
+          cancelButtonText: 'Cancel',
+          confirmButtonColor: '#00e5ff',
+          denyButtonColor: '#ef4444',
+          cancelButtonColor: '#1e293b',
+          background: '#0d1235',
+          color: '#fff',
+        });
+
+        if (result.isConfirmed) {
+          // Run backup
+          try {
+            const backupRes = await (window as any).electronAPI.backupDatabase();
+            if (backupRes?.ok) {
+              await Swal.fire({
+                title: 'Backup Successful',
+                text: `Database backup saved successfully at:\n${backupRes.path}`,
+                icon: 'success',
+                background: '#0d1235',
+                color: '#fff',
+              });
+              
+              // Proceed with reset
+              await window.electronAPI.resetAppData();
+              if (onResetSuccess) {
+                onResetSuccess();
+              } else {
+                window.location.reload();
+              }
+            } else {
+              // Backup failed or unconfigured
+              const backupPrompt = await Swal.fire({
+                title: 'Backup Failed',
+                text: 'Could not write a local backup file. Would you like to delete all data anyway, or cancel?',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: 'Wipe Data Anyway',
+                cancelButtonText: 'Cancel — Keep Data',
+                confirmButtonColor: '#ef4444',
+                cancelButtonColor: '#1e293b',
+                background: '#0d1235',
+                color: '#fff',
+              });
+
+              if (backupPrompt.isConfirmed) {
+                // Wipe anyway
+                await window.electronAPI.resetAppData();
+                if (onResetSuccess) {
+                  onResetSuccess();
+                } else {
+                  window.location.reload();
+                }
+              }
+              // If cancelled, do nothing — data is safe
+            }
+          } catch (backupErr: any) {
+            Swal.fire({
+              title: 'Backup Error',
+              text: `Backup failed: ${backupErr.message}. Clear anyway?`,
+              icon: 'error',
+              showCancelButton: true,
+              confirmButtonText: 'Yes, Clear Anyway',
+              cancelButtonText: 'Cancel',
+              background: '#0d1235',
+              color: '#fff',
+            }).then(async (innerRes) => {
+              if (innerRes.isConfirmed) {
+                await window.electronAPI.resetAppData();
+                if (onResetSuccess) {
+                  onResetSuccess();
+                } else {
+                  window.location.reload();
+                }
+              }
+            });
+          }
+        } else if (result.isDenied) {
+          // Delete Now
+          try {
+            await window.electronAPI.resetAppData();
+            if (onResetSuccess) {
+              onResetSuccess();
+            } else {
+              window.location.reload();
+            }
+          } catch (resetErr: any) {
+            Swal.fire({
+              title: 'Error',
+              text: `Failed to reset application data: ${resetErr.message}`,
+              icon: 'error',
+              background: '#0d1235',
+              color: '#fff',
+            });
+          }
+        }
+      },
+      'Authorize Destruction',
+      'Enter administrator PIN to confirm database reset.',
+      true
+    );
+  };
+
+  const handleIdentityJSONUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const data = JSON.parse(text);
+        
+        if (data.name !== undefined) setName(String(data.name));
+        if (data.address !== undefined) setAddress(String(data.address));
+        if (data.motto !== undefined) setMotto(String(data.motto));
+        if (data.signature !== undefined) setSignature(String(data.signature));
+        if (data.principalPhone !== undefined) setPrincipalPhone(String(data.principalPhone));
+        if (data.portalSlug !== undefined) setPortalSlug(String(data.portalSlug));
+        if (data.themePrimary !== undefined) setThemePrimary(String(data.themePrimary));
+        if (data.themeSecondary !== undefined) setThemeSecondary(String(data.themeSecondary));
+        
+        setIdentityUploadStatus('success');
+        setTimeout(() => setIdentityUploadStatus('idle'), 4000);
       } catch (err) {
-        console.error('Reset failed:', err);
-        alert('Reset operation encountered an error.');
+        console.error(err);
+        setIdentityUploadStatus('error');
+        setTimeout(() => setIdentityUploadStatus('idle'), 4000);
       }
-    }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   // Apply terminal mode helper
   const handleApplyTerminalMode = () => {
     alert('Terminal architecture mode applied. Please restart the application.');
+  };
+
+  // Restore Database Backup helper
+  const handleRestoreDatabase = async () => {
+    const Swal = (window as any).Swal;
+    if (!Swal) {
+      if (!confirm('This will completely replace the current database with the selected backup. All existing changes will be lost, and the application will restart. Continue?')) {
+        return;
+      }
+      try {
+        const res = await (window as any).electronAPI.restoreDatabase();
+        if (!res.ok && res.reason !== 'cancelled') {
+          alert('Failed to restore database: ' + (res.error || res.reason));
+        }
+      } catch (err: any) {
+        alert('An unexpected error occurred: ' + err.message);
+      }
+      return;
+    }
+
+    const result = await Swal.fire({
+      title: 'Restore Database Backup?',
+      text: 'This will completely replace the current database with the selected backup. All existing changes will be lost, and the application will restart.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, Restore Backup',
+      cancelButtonText: 'Cancel',
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#1e293b',
+      background: '#0d1235',
+      color: '#fff',
+    });
+
+    if (!result.isConfirmed) return;
+
+    try {
+      const res = await (window as any).electronAPI.restoreDatabase();
+      if (!res.ok) {
+        if (res.reason === 'cancelled') return;
+        await Swal.fire({
+          title: 'Restore Failed',
+          text: `Failed to restore database: ${res.error || res.reason}`,
+          icon: 'error',
+          background: '#0d1235',
+          color: '#fff',
+        });
+      }
+    } catch (err: any) {
+      await Swal.fire({
+        title: 'Error',
+        text: `An unexpected error occurred: ${err.message}`,
+        icon: 'error',
+        background: '#0d1235',
+        color: '#fff',
+      });
+    }
   };
 
   // Stamp Styles config
@@ -225,22 +443,43 @@ export function Settings({ onResetSuccess }: SettingsProps) {
             Customize your school's branding and report card metadata.
           </p>
         </div>
-        <button
-          onClick={handleResetData}
-          id="reset-btn"
-          style={{
-            background: 'transparent',
-            border: '1px solid #ff4444',
-            color: '#ff4444',
-            padding: '8px 16px',
-            borderRadius: '8px',
-            cursor: 'pointer',
-            fontSize: '12px',
-            fontWeight: 600,
-          }}
-        >
-          🗑 Reset All Data
-        </button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button
+            id="data-templates-btn"
+            onClick={() => setIsTemplateDrawerOpen(true)}
+            style={{
+              background: 'rgba(0,229,255,0.1)',
+              border: '1px solid rgba(0,229,255,0.3)',
+              color: '#00e5ff',
+              padding: '8px 14px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            📋 Data Templates
+          </button>
+          <button
+            onClick={handleResetData}
+            id="reset-btn"
+            style={{
+              background: 'transparent',
+              border: '1px solid #ff4444',
+              color: '#ff4444',
+              padding: '8px 16px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 600,
+            }}
+          >
+            🗑 Reset All Data
+          </button>
+        </div>
       </div>
 
       <div className="settings-content">
@@ -550,139 +789,284 @@ export function Settings({ onResetSuccess }: SettingsProps) {
             {saving ? '⌛ Saving...' : saveStatus === 'success' ? '✅ Saved!' : saveStatus === 'error' ? '❌ Error' : 'Save Identity Shard'}
           </button>
         </div>
+      </div>
 
-        {/* Column 3: Data Templates & Terminal Architecture */}
-        <div className="settings-column">
-          <h3>Data Templates</h3>
-          <p style={{ color: 'var(--text-dim)', fontSize: '12px', marginBottom: '12px' }}>
-            Download CSV templates to bulk import your school data correctly.
+      {/* ── Data Templates Slide-in Drawer (position:fixed, same pattern as FinancialHub) ── */}
+      {isTemplateDrawerOpen && (
+        <>
+          {/* Dim overlay */}
+          <div
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 99 }}
+            onClick={() => setIsTemplateDrawerOpen(false)}
+          />
+          {/* Drawer panel */}
+          <div
+            id="templates-drawer-panel"
+            style={{
+              position: 'fixed', right: 0, top: 0, bottom: 0, width: '400px',
+              background: '#0d1235',
+              borderLeft: '1px solid var(--glass-border)',
+              zIndex: 100,
+              display: 'flex', flexDirection: 'column',
+              boxShadow: '-10px 0 40px rgba(0,0,0,0.7)',
+            }}
+          >
+          {/* Drawer Header */}
+            <div style={{ padding: '20px', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '15px' }}>📋 Data Templates</h3>
+                <p style={{ margin: '4px 0 0', fontSize: '11px', color: 'var(--text-dim)' }}>Download templates to bulk import your school data correctly.</p>
+              </div>
+              <button
+                id="close-templates-drawer-btn"
+                onClick={() => setIsTemplateDrawerOpen(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-dim)', fontSize: '24px', cursor: 'pointer', lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Scrollable body */}
+            <div style={{ padding: '20px', flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+
+        {/* Identity JSON */}
+        <div
+          className="form-group"
+          style={{
+            background: 'rgba(0, 229, 255, 0.05)',
+            padding: '16px',
+            borderRadius: '8px',
+            border: '1px dashed rgba(0, 229, 255, 0.3)',
+            marginBottom: '12px',
+          }}
+        >
+          <label style={{ color: '#00e5ff', fontSize: '13px', marginBottom: '8px', display: 'block' }}>
+            ℹ️ School Identity Template
+          </label>
+          <p style={{ fontSize: '11px', color: '#aaa', marginBottom: '10px' }}>
+            Import branding metadata (Name, Motto, Phone, Theme Colors, etc.) via JSON. Excludes binary Logo/Signature images and Stamp style.
           </p>
-
-          <div
-            className="form-group"
-            style={{
-              background: 'rgba(0, 229, 255, 0.05)',
-              padding: '16px',
-              borderRadius: '8px',
-              border: '1px dashed rgba(0, 229, 255, 0.3)',
-              marginBottom: '12px',
-            }}
-          >
-            <label style={{ color: '#00e5ff', fontSize: '13px', marginBottom: '8px', display: 'block' }}>
-              🧑‍🏫 Teachers Template
-            </label>
-            <p style={{ fontSize: '11px', color: '#aaa', marginBottom: '10px' }}>
-              Columns: <code>Teacher_ID, Teacher_Name, Teacher_Phone, Class, Subjects</code> — subjects pipe-delimited (e.g. English Language|Mathematics).
-            </p>
+          <div style={{ display: 'flex', gap: '8px' }}>
             <a
-              href="data:text/csv;charset=utf-8,Teacher_ID,Teacher_Name,Teacher_Phone,Class,Subjects%0ATCH-01,John%20Doe,08012345678,JSS%201,Mathematics|English%20Language"
-              download="Nexus_Teachers_Template.csv"
+              href={identityTemplateUri}
+              download="Nexus_Identity_Template.json"
               className="secondary-btn"
               style={{
-                display: 'block',
+                flex: 1,
                 textAlign: 'center',
-                width: '100%',
-                fontSize: '12px',
-                padding: '8px',
-                textDecoration: 'none',
-              }}
-            >
-              📥 Download Teachers.csv
-            </a>
-          </div>
-
-          <div
-            className="form-group"
-            style={{
-              background: 'rgba(0, 229, 255, 0.05)',
-              padding: '16px',
-              borderRadius: '8px',
-              border: '1px dashed rgba(0, 229, 255, 0.3)',
-            }}
-          >
-            <label style={{ color: '#00e5ff', fontSize: '13px', marginBottom: '8px', display: 'block' }}>
-              🎓 Students Template
-            </label>
-            <p style={{ fontSize: '11px', color: '#aaa', marginBottom: '10px' }}>
-              Columns: <code>Student_ID, First_Name, Last_Name, Class, Subjects</code> — subjects pipe-delimited (e.g. English Language|Mathematics).
-            </p>
-            <a
-              href="data:text/csv;charset=utf-8,Student_ID,First_Name,Last_Name,Class,Subjects%0ASTU-001,Jane,Smith,JSS%201,English%20Language|Mathematics|Basic%20Science"
-              download="Nexus_Students_Template.csv"
-              className="secondary-btn"
-              style={{
-                display: 'block',
-                textAlign: 'center',
-                width: '100%',
-                fontSize: '12px',
-                padding: '8px',
-                textDecoration: 'none',
-              }}
-            >
-              📥 Download Students.csv
-            </a>
-          </div>
-
-          <div
-            className="form-group"
-            style={{
-              background: 'rgba(255, 215, 0, 0.05)',
-              padding: '16px',
-              borderRadius: '8px',
-              border: '1px dashed rgba(255, 215, 0, 0.3)',
-              marginTop: '18px',
-            }}
-          >
-            <label style={{ color: '#ffd700', fontSize: '13px', marginBottom: '8px', display: 'block' }}>
-              🖥️ Terminal Architecture
-            </label>
-            <p style={{ fontSize: '11px', color: '#aaa', marginBottom: '10px' }}>
-              Select the role of this PC. Changes require a restart.
-            </p>
-            <select
-              className="modern-input"
-              id="terminal-mode-select"
-              style={{ fontSize: '12px', marginBottom: '8px' }}
-              value={terminalMode}
-              onChange={(e) => {
-                setTerminalMode(e.target.value);
-                setShowMasterIp(e.target.value === 'client');
-              }}
-            >
-              <option value="master">Master Node (Runs Database)</option>
-              <option value="client">Client Terminal (Connects via IP)</option>
-            </select>
-            {showMasterIp && (
-              <input
-                type="text"
-                id="master-ip-input"
-                className="modern-input"
-                placeholder="Master Node IP (e.g., 192.168.1.5)"
-                style={{ fontSize: '12px', marginBottom: '8px' }}
-                value={masterIp}
-                onChange={(e) => setMasterIp(e.target.value)}
-              />
-            )}
-            <button
-              onClick={handleApplyTerminalMode}
-              className="primary-btn"
-              style={{
-                width: '100%',
                 fontSize: '11px',
-                padding: '6px',
-                background: 'linear-gradient(135deg, #b8860b, #ffd700)',
-                color: '#000',
-                justifyContent: 'center',
-                boxShadow: 'none',
+                padding: '8px',
+                textDecoration: 'none',
+                whiteSpace: 'nowrap',
               }}
             >
-              Apply Mode
+              📥 Download JSON
+            </a>
+            <button
+              onClick={() => document.getElementById('identity-json-upload-input')?.click()}
+              className="secondary-btn"
+              style={{
+                flex: 1,
+                fontSize: '11px',
+                padding: '8px',
+                whiteSpace: 'nowrap',
+                cursor: 'pointer',
+              }}
+            >
+              📤 Upload JSON
             </button>
           </div>
+          <input
+            type="file"
+            id="identity-json-upload-input"
+            accept=".json"
+            style={{ display: 'none' }}
+            onChange={handleIdentityJSONUpload}
+          />
+          {identityUploadStatus === 'success' && (
+            <p style={{ color: '#4caf50', fontSize: '11px', marginTop: '6px', textAlign: 'center' }}>
+              ✅ Identity config loaded! Save to persist.
+            </p>
+          )}
+          {identityUploadStatus === 'error' && (
+            <p style={{ color: '#ff4444', fontSize: '11px', marginTop: '6px', textAlign: 'center' }}>
+              ❌ Error parsing JSON file.
+            </p>
+          )}
         </div>
-      </div>
-    </div>
-  );
+
+        {/* Teachers Template */}
+        <div
+          className="form-group"
+          style={{
+            background: 'rgba(0, 229, 255, 0.05)',
+            padding: '16px',
+            borderRadius: '8px',
+            border: '1px dashed rgba(0, 229, 255, 0.3)',
+            marginBottom: '12px',
+          }}
+        >
+          <label style={{ color: '#00e5ff', fontSize: '13px', marginBottom: '8px', display: 'block' }}>
+            🧑‍🏫 Teachers Template
+          </label>
+          <p style={{ fontSize: '11px', color: '#aaa', marginBottom: '10px' }}>
+            Columns: <code>Teacher_ID, Teacher_Name, Teacher_Phone, Class, Subjects, Class_Host</code> — subjects pipe-delimited, Class_Host is TRUE/FALSE.
+          </p>
+          <a
+            href="data:text/csv;charset=utf-8,Teacher_ID,Teacher_Name,Teacher_Phone,Class,Subjects,Class_Host%0ATCH-01,John%20Doe,08012345678,JSS%201,Mathematics|English%20Language,TRUE"
+            download="Nexus_Teachers_Template.csv"
+            className="secondary-btn"
+            style={{
+              display: 'block',
+              textAlign: 'center',
+              width: '100%',
+              fontSize: '12px',
+              padding: '8px',
+              textDecoration: 'none',
+            }}
+          >
+            📥 Download Teachers.csv
+          </a>
+        </div>
+
+        {/* Students Template */}
+        <div
+          className="form-group"
+          style={{
+            background: 'rgba(0, 229, 255, 0.05)',
+            padding: '16px',
+            borderRadius: '8px',
+            border: '1px dashed rgba(0, 229, 255, 0.3)',
+            marginBottom: '12px',
+          }}
+        >
+          <label style={{ color: '#00e5ff', fontSize: '13px', marginBottom: '8px', display: 'block' }}>
+            🎓 Students Template
+          </label>
+          <p style={{ fontSize: '11px', color: '#aaa', marginBottom: '10px' }}>
+            Columns: <code>Student_ID, First_Name, Last_Name, Class, Subjects, Parent_Name, Parent_Email, Parent_Phone</code> — subjects pipe-delimited.
+          </p>
+          <a
+            href="data:text/csv;charset=utf-8,Student_ID,First_Name,Last_Name,Class,Subjects,Parent_Name,Parent_Email,Parent_Phone%0ASTU-001,Jane,Smith,JSS%201,English%20Language|Mathematics|Basic%20Science,John%20Smith,john@example.com,08098765432"
+            download="Nexus_Students_Template.csv"
+            className="secondary-btn"
+            style={{
+              display: 'block',
+              textAlign: 'center',
+              width: '100%',
+              fontSize: '12px',
+              padding: '8px',
+              textDecoration: 'none',
+            }}
+          >
+            📥 Download Students.csv
+          </a>
+        </div>
+
+        {/* Terminal Architecture */}
+        <div
+          className="form-group"
+          style={{
+            background: 'rgba(255, 215, 0, 0.05)',
+            padding: '16px',
+            borderRadius: '8px',
+            border: '1px dashed rgba(255, 215, 0, 0.3)',
+            marginTop: '8px',
+          }}
+        >
+          <label style={{ color: '#ffd700', fontSize: '13px', marginBottom: '8px', display: 'block' }}>
+            🖥️ Terminal Architecture
+          </label>
+          <p style={{ fontSize: '11px', color: '#aaa', marginBottom: '10px' }}>
+            Select the role of this PC. Changes require a restart.
+          </p>
+          <select
+            className="modern-input"
+            id="terminal-mode-select"
+            style={{ fontSize: '12px', marginBottom: '8px' }}
+            value={terminalMode}
+            onChange={(e) => {
+              setTerminalMode(e.target.value);
+              setShowMasterIp(e.target.value === 'client');
+            }}
+          >
+            <option value="master">Master Node (Runs Database)</option>
+            <option value="client">Client Terminal (Connects via IP)</option>
+          </select>
+          {showMasterIp && (
+            <input
+              type="text"
+              id="master-ip-input"
+              className="modern-input"
+              placeholder="Master Node IP (e.g., 192.168.1.5)"
+              style={{ fontSize: '12px', marginBottom: '8px' }}
+              value={masterIp}
+              onChange={(e) => setMasterIp(e.target.value)}
+            />
+          )}
+          <button
+            onClick={handleApplyTerminalMode}
+            className="primary-btn"
+            style={{
+              width: '100%',
+              fontSize: '11px',
+              padding: '6px',
+              background: 'linear-gradient(135deg, #b8860b, #ffd700)',
+              color: '#000',
+              justifyContent: 'center',
+              boxShadow: 'none',
+            }}
+          >
+            Apply Mode
+          </button>
+        </div>
+
+        {/* Database Restore */}
+        <div
+          className="form-group"
+          style={{
+            background: 'rgba(239, 68, 68, 0.05)',
+            padding: '16px',
+            borderRadius: '8px',
+            border: '1px dashed rgba(239, 68, 68, 0.3)',
+            marginTop: '8px',
+          }}
+        >
+          <label style={{ color: '#ef4444', fontSize: '13px', marginBottom: '8px', display: 'block' }}>
+            🔄 Restore Database Backup
+          </label>
+          <p style={{ fontSize: '11px', color: '#aaa', marginBottom: '10px' }}>
+            Restore your database from an existing <code>.sqlite</code> copy. This will overwrite all current school records.
+          </p>
+          <button
+            onClick={handleRestoreDatabase}
+            id="restore-db-btn"
+            className="secondary-btn"
+            style={{
+              width: '100%',
+              fontSize: '12px',
+              padding: '8px',
+              borderColor: '#ef4444',
+              color: '#ef4444',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              background: 'transparent',
+              cursor: 'pointer',
+              border: '1px solid',
+              borderRadius: '6px',
+            }}
+          >
+            🔄 Select Backup file
+          </button>
+        </div>
+      </div>{/* end scrollable body */}
+    </div>{/* end drawer panel */}
+  </>
+)}{/* end isTemplateDrawerOpen */}
+</div>
+);
 }
 
 export default Settings;

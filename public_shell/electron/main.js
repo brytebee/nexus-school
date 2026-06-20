@@ -13,7 +13,7 @@ const dgram = require("dgram");
 const Handlebars = require("handlebars");
 const { database, server, reports } = require("@nexus/engine");
 const scholar = require("@nexus/engine/src/scholar");
-const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, handleCSVUpload, clearData } = server;
+const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, handleCSVUpload, handleGradesCSVUpload, handleAttendanceCSVUpload, handleClassesCSVUpload, clearData } = server;
 const address = require("address");
 const pulseBot     = require('./pulse-bot.js');
 const pulseExporter = require('./pulse-exporter.js');
@@ -133,6 +133,58 @@ ipcMain.on("pulse:set-autostart", (event, enabled) => {
     }
 });
 ipcMain.handle("pulse:status", () => pulseBot.getPulseStatus());
+
+  ipcMain.handle("database:backup", async () => {
+    try {
+      const db = database.getDb();
+      const fs = require('fs');
+      const path = require('path');
+      const backupDir = path.join(path.dirname(db.name), 'backups');
+      if (!fs.existsSync(backupDir)) {
+        fs.mkdirSync(backupDir, { recursive: true });
+      }
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const backupPath = path.join(backupDir, `nexus_backup_${timestamp}.sqlite`);
+      await db.backup(backupPath);
+      console.log(`[Backup] Safe database backup created at: ${backupPath}`);
+      return { ok: true, path: backupPath };
+    } catch (e) {
+      console.error('[Backup] Database backup failed:', e.message);
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle("database:restore", async () => {
+    try {
+      const db = database.getDb();
+      const dbPath = db.name;
+      const { dialog } = require('electron');
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: 'Select a Backup Database File (.sqlite)',
+        buttonLabel: 'Restore Database',
+        filters: [{ name: 'SQLite Database', extensions: ['sqlite', 'db'] }],
+        properties: ['openFile'],
+      });
+      if (result.canceled || !result.filePaths[0]) {
+        return { ok: false, reason: 'cancelled' };
+      }
+      const src = result.filePaths[0];
+
+      // Close the DB connection to release lock
+      db.close();
+
+      // Copy backup file over the active DB file
+      fs.copyFileSync(src, dbPath);
+
+      // Relaunch the application to load the new database state cleanly
+      app.relaunch();
+      app.exit(0);
+      return { ok: true };
+    } catch (e) {
+      console.error('[Restore] Database restore failed:', e.message);
+      return { ok: false, error: e.message };
+    }
+  });
 
 // ── CBT ENGINE IPC ───────────────────────────────────────────────────────────
 require('./cbt-ipc-handlers')(database);
@@ -2437,15 +2489,15 @@ ipcMain.handle("save-identity", (event, newIdentity) => {
     fs.writeFileSync(identityFilePath, JSON.stringify(identityPacket, null, 2));
     console.log("[Electron] Identity saved locally.");
 
-    // ── Keep app_settings.school_name in sync so pulse-bot.js and
-    // pulse-exporter.js (which read from the DB) always use the correct name.
-    if (identityPacket.name) {
-      try {
-        const db = database.getDb();
+    // ── Keep app_settings.school_identity and school_name in sync
+    try {
+      const db = database.getDb();
+      db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_identity', ?)").run(JSON.stringify(identityPacket));
+      if (identityPacket.name) {
         db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_name', ?)").run(identityPacket.name);
-      } catch (dbErr) {
-        console.warn("[Identity] Could not sync school_name to DB:", dbErr.message);
       }
+    } catch (dbErr) {
+      console.warn("[Identity] Could not sync school_identity/school_name to DB:", dbErr.message);
     }
 
     if (qrPayload) {
@@ -2675,27 +2727,37 @@ function createWindow() {
         console.warn("[Database] Sync Check Failed (Likely new DB):", e.message);
     }
 
-    if (fs.existsSync(identityFilePath)) {
-      const data = fs.readFileSync(identityFilePath, "utf-8");
-      identityPacket = JSON.parse(data);
-      // Sync the private_engine server's school_config so the handshake
-      // payload reflects the saved identity on every cold start.
-      setSchoolConfig(identityPacket);
-      // ── Keep app_settings.school_name in sync so pulse-bot.js and
-      // pulse-exporter.js (which read from the DB) always use the correct name.
-      try {
-        const db = database.getDb();
+    // Load identity from SQLite DB if it exists, otherwise fall back to identity.json
+    try {
+      const db = database.getDb();
+      const row = db.prepare("SELECT value FROM app_settings WHERE key = 'school_identity'").get();
+      if (row && row.value) {
+        identityPacket = JSON.parse(row.value);
+        console.log(`[Database] Loaded school_identity from DB for: "${identityPacket.name || 'N/A'}"`);
+        fs.writeFileSync(identityFilePath, JSON.stringify(identityPacket, null, 2));
+      } else if (fs.existsSync(identityFilePath)) {
+        const data = fs.readFileSync(identityFilePath, "utf-8");
+        identityPacket = JSON.parse(data);
+        db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_identity', ?)").run(JSON.stringify(identityPacket));
         if (identityPacket.name) {
           db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_name', ?)").run(identityPacket.name);
         }
-      } catch (_) { /* DB not yet ready on very first boot — seeded default is fine */ }
-      console.log(`[Electron] Identity loaded → school: "${identityPacket.name || 'N/A'}"`);
-    } else {
-      fs.writeFileSync(
-        identityFilePath,
-        JSON.stringify(identityPacket, null, 2),
-      );
+      } else {
+        fs.writeFileSync(
+          identityFilePath,
+          JSON.stringify(identityPacket, null, 2),
+        );
+      }
+    } catch (e) {
+      console.warn("[Database] Could not read/sync school_identity during startup:", e.message);
+      if (fs.existsSync(identityFilePath)) {
+        try {
+          const data = fs.readFileSync(identityFilePath, "utf-8");
+          identityPacket = JSON.parse(data);
+        } catch (_) {}
+      }
     }
+    setSchoolConfig(identityPacket);
   } catch (err) {
     console.error("Failed to load/save identity.json or initialize DB", err);
   }
@@ -3781,6 +3843,24 @@ function createWindow() {
   ipcMain.on("process-csv", (event, filePath) => {
     handleCSVUpload(filePath, (count) => {
       event.reply("csv-loaded", count);
+    });
+  });
+
+  ipcMain.on("process-grades-csv", (event, filePath) => {
+    handleGradesCSVUpload(filePath, (count, err) => {
+      event.reply("grades-csv-loaded", { count, error: err });
+    });
+  });
+
+  ipcMain.on("process-attendance-csv", (event, filePath) => {
+    handleAttendanceCSVUpload(filePath, (count, err) => {
+      event.reply("attendance-csv-loaded", { count, error: err });
+    });
+  });
+
+  ipcMain.on("process-classes-csv", (event, filePath) => {
+    handleClassesCSVUpload(filePath, (count, err) => {
+      event.reply("classes-csv-loaded", { count, error: err });
     });
   });
 

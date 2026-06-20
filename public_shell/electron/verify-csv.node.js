@@ -4,7 +4,7 @@
  */
 const path = require('path');
 const os = require('os');
-const database = require('./database');
+const { database } = require('@nexus/engine');
 
 // Inline the CSV handler to avoid pulling in Express/Electron
 const fs = require('fs');

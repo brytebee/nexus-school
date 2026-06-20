@@ -242,6 +242,52 @@ export function Students() {
     }
   };
 
+  const handleGradesCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCsvStatus('⏳ Ingesting and verifying Grades CSV data...');
+    if ((window.electronAPI as any)?.processGradesCSV) {
+      (window.electronAPI as any).processGradesCSV(file.path);
+    }
+  };
+
+  const handleAttendanceCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCsvStatus('⏳ Ingesting and verifying Attendance CSV data...');
+    if ((window.electronAPI as any)?.processAttendanceCSV) {
+      (window.electronAPI as any).processAttendanceCSV(file.path);
+    }
+  };
+
+  // Handle Grades CSV Loaded notification
+  useEffect(() => {
+    if ((window.electronAPI as any)?.onGradesCSVLoaded) {
+      (window.electronAPI as any).onGradesCSVLoaded((res: { count: number, error: string | null }) => {
+        if (res.error) {
+          setCsvStatus(`❌ Grades Import Failed: ${res.error}`);
+        } else {
+          setCsvStatus(`✅ Grades CSV Processed: ${res.count} records loaded`);
+        }
+        setTimeout(() => setCsvStatus(null), 4000);
+      });
+    }
+  }, []);
+
+  // Handle Attendance CSV Loaded notification
+  useEffect(() => {
+    if ((window.electronAPI as any)?.onAttendanceCSVLoaded) {
+      (window.electronAPI as any).onAttendanceCSVLoaded((res: { count: number, error: string | null }) => {
+        if (res.error) {
+          setCsvStatus(`❌ Attendance Import Failed: ${res.error}`);
+        } else {
+          setCsvStatus(`✅ Attendance CSV Processed: ${res.count} records loaded`);
+        }
+        setTimeout(() => setCsvStatus(null), 4000);
+      });
+    }
+  }, []);
+
   // Open View Detail Modal
   const openDetailModal = (student: Student) => {
     setDetailStudent(student);
@@ -1822,6 +1868,89 @@ export function Students() {
                   </div>
                 </div>
 
+              </div>
+
+              <div style={{ height: '1px', background: 'var(--glass-border)', margin: '24px 0' }} />
+
+              {/* Data Import Section */}
+              <p style={{ fontSize: '10px', fontWeight: 700, color: 'var(--accent-gold, #FFD700)', textTransform: 'uppercase', letterSpacing: '0.12em', margin: '0 0 16px' }}>Academic Data Import</p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '20px' }}>
+                {/* 1. Grades Import */}
+                <div style={{
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid var(--glass-border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '16px 18px',
+                  display: 'flex', flexDirection: 'column', gap: '10px',
+                }}>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-main)' }}>📊 Grades & Scores</span>
+                  <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.5 }}>
+                    Columns: <code>Student_ID, Subject, Assessment, Score, Session, Term</code>
+                  </p>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                    <a
+                      href="data:text/csv;charset=utf-8,Student_ID,Subject,Assessment,Score,Session,Term%0ASTU-001,Mathematics,CA1,15,2024/2025,First Term"
+                      download="Nexus_Grades_Template.csv"
+                      className="secondary-btn"
+                      style={{ fontSize: '11px', padding: '6px 10px', flex: 1, textAlign: 'center', textDecoration: 'none', display: 'inline-block' }}
+                    >
+                      📥 Template
+                    </a>
+                    <label
+                      htmlFor="grades-csv-upload-input"
+                      className="primary-btn"
+                      style={{ fontSize: '11px', padding: '6px 10px', cursor: 'pointer', flex: 1, textAlign: 'center' }}
+                    >
+                      📤 Import CSV
+                    </label>
+                    <input
+                      type="file"
+                      id="grades-csv-upload-input"
+                      accept=".csv"
+                      onChange={handleGradesCSVUpload}
+                      style={{ display: 'none' }}
+                    />
+                  </div>
+                </div>
+
+                {/* 2. Attendance Summary Import */}
+                <div style={{
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid var(--glass-border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '16px 18px',
+                  display: 'flex', flexDirection: 'column', gap: '10px',
+                }}>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-main)' }}>📅 Attendance Summaries</span>
+                  <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.5 }}>
+                    Columns: <code>Student_ID, Session, Term, Total_Days, Days_Attended</code>
+                  </p>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                    <a
+                      href="data:text/csv;charset=utf-8,Student_ID,Session,Term,Total_Days,Days_Attended%0ASTU-001,2024/2025,First Term,90,85"
+                      download="Nexus_Attendance_Template.csv"
+                      className="secondary-btn"
+                      style={{ fontSize: '11px', padding: '6px 10px', flex: 1, textAlign: 'center', textDecoration: 'none', display: 'inline-block' }}
+                    >
+                      📥 Template
+                    </a>
+                    <label
+                      htmlFor="attendance-csv-upload-input"
+                      className="primary-btn"
+                      style={{ fontSize: '11px', padding: '6px 10px', cursor: 'pointer', flex: 1, textAlign: 'center' }}
+                    >
+                      📤 Import CSV
+                    </label>
+                    <input
+                      type="file"
+                      id="attendance-csv-upload-input"
+                      accept=".csv"
+                      onChange={handleAttendanceCSVUpload}
+                      style={{ display: 'none' }}
+                    />
+                  </div>
+                </div>
               </div>
 
               <div style={{ height: '1px', background: 'var(--glass-border)', margin: '24px 0' }} />
