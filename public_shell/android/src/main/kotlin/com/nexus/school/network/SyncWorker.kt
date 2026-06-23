@@ -83,7 +83,7 @@ class SyncWorker(private val context: Context) {
 
             Log.d("SyncWorker", "Pushing ${pendingEvents.size} events to $ip:$port")
 
-            val response: HttpResponse = client.post("http://$ip:$port/sync") {
+            val response: HttpResponse = client.post("http://$ip:$port/api/sync") {
                 contentType(ContentType.Application.Json)
                 setBody(payload)
             }

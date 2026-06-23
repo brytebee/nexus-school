@@ -28,11 +28,11 @@ suspend fun saveGradeEvent(
     }
 
     val db    = SyncDatabase.getDatabase(context)
-    val total = components.sumOf { compValues[it.key]?.toIntOrNull() ?: 0 }
+    val total = components.sumOf { compValues[it.key]?.toDoubleOrNull() ?: 0.0 }
     
     // Save to local offline persistence first
     components.forEach { comp ->
-        val scoreVal = compValues[comp.key]?.toIntOrNull() ?: 0
+        val scoreVal = compValues[comp.key]?.toDoubleOrNull() ?: 0.0
         db.studentDao().insertScore(com.nexus.school.data.StudentScore(
             student_id = studentId,
             subject = subject,
@@ -43,7 +43,7 @@ suspend fun saveGradeEvent(
 
     // Build the sync_queue payload for pushing to the Hub
     val bdParts = components.joinToString(", ") { comp ->
-        "\"${comp.key}\": ${compValues[comp.key]?.toIntOrNull() ?: 0}"
+        "\"${comp.key}\": ${compValues[comp.key]?.toDoubleOrNull() ?: 0.0}"
     }
     val payload = """{"student_id": "$studentId", "score": $total, "subject": "$subject", "assessment": "${components.firstOrNull()?.key ?: "CA1"}", "breakdown": {$bdParts}}"""
     val eventId = "GRADE_${studentId}_$subject"

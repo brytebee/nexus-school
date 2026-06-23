@@ -39,7 +39,7 @@ interface SyncDao {
     suspend fun deleteEvents(eventIds: List<String>)
 }
 
-@Database(entities = [SyncEvent::class, Student::class, StudentScore::class, DailyAttendance::class], version = 8, exportSchema = false)
+@Database(entities = [SyncEvent::class, Student::class, StudentScore::class, DailyAttendance::class], version = 9, exportSchema = false)
 abstract class SyncDatabase : RoomDatabase() {
     abstract fun syncDao(): SyncDao
     abstract fun studentDao(): StudentDao
@@ -96,6 +96,15 @@ abstract class SyncDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS local_scores_new (student_id TEXT NOT NULL, subject TEXT NOT NULL, component_key TEXT NOT NULL, score REAL NOT NULL, PRIMARY KEY(student_id, subject, component_key))")
+                db.execSQL("INSERT INTO local_scores_new (student_id, subject, component_key, score) SELECT student_id, subject, component_key, CAST(score AS REAL) FROM local_scores")
+                db.execSQL("DROP TABLE local_scores")
+                db.execSQL("ALTER TABLE local_scores_new RENAME TO local_scores")
+            }
+        }
+
         fun getDatabase(context: Context): SyncDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -103,7 +112,7 @@ abstract class SyncDatabase : RoomDatabase() {
                     SyncDatabase::class.java,
                     "nexus_sync_database"
                 )
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance

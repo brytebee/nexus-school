@@ -330,7 +330,7 @@ export function Students() {
     try {
       const payload = {
         student_id: detailStudent.id,
-        grades: gradesData.map(g => ({ subject: g.subject, breakdown: g.breakdown })),
+        grades: gradesData.map(g => ({ subject: g.subject, breakdown: g.breakdown, score: g.score })),
       };
       const res = await (window.electronAPI as any)?.students?.saveGrades(payload);
       if (res?.ok) {
@@ -649,7 +649,8 @@ export function Students() {
   ];
 
   return (
-    <div className="fade-in-up" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--grid-gap)' }}>
+    <>
+      <div className="fade-in-up" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--grid-gap)' }}>
       {/* Header Bar */}
       <div className="view-header">
         <div>
@@ -914,6 +915,7 @@ export function Students() {
           </div>
         </div>
       )}
+      </div>
 
       {/* Form Drawer Overlay */}
       {isDrawerOpen && (
@@ -1478,23 +1480,43 @@ export function Students() {
                             borderRadius: 'var(--radius-sm)',
                             padding: '8px 12px',
                           }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: gradesEditMode && Object.keys(g.breakdown).length ? '8px' : 0 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: gradesEditMode && Object.keys(g.breakdown || {}).length > 0 ? '8px' : 0 }}>
                               <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-main)' }}>{g.subject}</span>
-                              <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>
-                                {g.score ?? '—'}
-                              </span>
+                              {/* In edit mode with NO breakdown sub-components, show a direct score input */}
+                              {gradesEditMode && Object.keys(g.breakdown || {}).length === 0 ? (
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={g.score ?? 0}
+                                  min={0}
+                                  onChange={e => {
+                                    const newVal = parseFloat(e.target.value) || 0;
+                                    setGradesData(prev => prev.map((gx, gxi) =>
+                                      gxi !== gi ? gx : { ...gx, score: newVal }
+                                    ));
+                                  }}
+                                  className="modern-input"
+                                  style={{ width: '60px', textAlign: 'center', fontSize: '12px', padding: '3px 6px' }}
+                                />
+                              ) : (
+                                <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>
+                                  {g.score ?? '—'}
+                                </span>
+                              )}
                             </div>
-                            {gradesEditMode && Object.keys(g.breakdown).length > 0 && (
+                            {/* Sub-component breakdown inputs — only shown when breakdown has keys */}
+                            {gradesEditMode && Object.keys(g.breakdown || {}).length > 0 && (
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', overflowY: 'auto', maxHeight: '120px' }}>
-                                {Object.entries(g.breakdown).map(([key, val]) => (
+                                {Object.entries(g.breakdown || {}).map(([key, val]) => (
                                   <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                                     <label style={{ fontSize: '10px', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{key}</label>
                                     <input
                                       type="number"
+                                      step="any"
                                       value={val as number}
                                       min={0}
                                       onChange={e => {
-                                        const newVal = parseInt(e.target.value) || 0;
+                                        const newVal = parseFloat(e.target.value) || 0;
                                         setGradesData(prev => prev.map((gx, gxi) => {
                                           if (gxi !== gi) return gx;
                                           const newBd = { ...gx.breakdown, [key]: newVal };
@@ -1886,11 +1908,11 @@ export function Students() {
                 }}>
                   <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-main)' }}>📊 Grades & Scores</span>
                   <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.5 }}>
-                    Columns: <code>Student_ID, Subject, Assessment, Score, Session, Term</code>
+                    Columns: <code>Student_ID, Subject, Session, Term, CA1_Score, CA2_Score, Exam_Score</code> (or with <code>Score, Assessment</code>)
                   </p>
                   <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
                     <a
-                      href="data:text/csv;charset=utf-8,Student_ID,Subject,Assessment,Score,Session,Term%0ASTU-001,Mathematics,CA1,15,2024/2025,First Term"
+                      href="data:text/csv;charset=utf-8,Student_ID,Subject,Session,Term,CA1_Score,CA2_Score,Exam_Score%0ASTU-001,Mathematics,2024/2025,First Term,15,15,40"
                       download="Nexus_Grades_Template.csv"
                       className="secondary-btn"
                       style={{ fontSize: '11px', padding: '6px 10px', flex: 1, textAlign: 'center', textDecoration: 'none', display: 'inline-block' }}
@@ -2002,7 +2024,7 @@ export function Students() {
           </div>
         </>
       )}
-    </div>
+    </>
   );
 }
 

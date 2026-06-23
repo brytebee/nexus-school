@@ -95,7 +95,7 @@ class HandshakeService {
 
     suspend fun performHandshake(ip: String, port: Int, response: DeviceResponse): HandshakeResponse? {
         return try {
-            val httpResponse: HttpResponse = client.post("http://$ip:$port/handshake") {
+            val httpResponse: HttpResponse = client.post("http://$ip:$port/api/handshake") {
                 contentType(ContentType.Application.Json)
                 setBody(response)
             }

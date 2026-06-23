@@ -106,6 +106,17 @@ export function ResultStudio() {
     setImgError(false);
   }, [template]);
 
+  // Listen to IPC report-generation status updates
+  useEffect(() => {
+    if (window.electronAPI?.on) {
+      window.electronAPI.on("report-generation:status", (status: any) => {
+        if (status && status.text) {
+          setGenStatus(status.text);
+        }
+      });
+    }
+  }, []);
+
   // Load configs & metadata
   const fetchMetadata = async () => {
     if (!window.electronAPI) return;
@@ -277,7 +288,10 @@ export function ResultStudio() {
     setIsRemarksOpen(true);
     setRemarksSaveStatus("");
     try {
-      const mapped = queryResults.map((student) => ({
+      const sourceList = skipUngraded
+        ? queryResults.filter((s) => (s.average ?? 0) > 0)
+        : queryResults;
+      const mapped = sourceList.map((student) => ({
         ...student,
         days_attended:
           student.attendance?.days_attended ?? student.days_attended ?? 0,
@@ -344,7 +358,26 @@ export function ResultStudio() {
       const res = await window.electronAPI.saveBulkRemarks(payload);
       if (res.ok) {
         setRemarksSaveStatus("✅ All remarks saved successfully!");
-        setQueryResults(remarksData);
+        setQueryResults((prev) =>
+          prev.map((s) => {
+            const updated = remarksData.find((x) => x.id === s.id);
+            if (updated) {
+              return {
+                ...s,
+                remark: updated.remark,
+                principal_remark: updated.principal_remark,
+                attendance: {
+                  ...s.attendance,
+                  days_attended: updated.days_attended,
+                  total_days: updated.total_days,
+                },
+                days_attended: updated.days_attended,
+                total_days: updated.total_days,
+              };
+            }
+            return s;
+          })
+        );
         setTimeout(() => setIsRemarksOpen(false), 1200);
       } else {
         setRemarksSaveStatus("❌ Error: " + res.error);
@@ -1063,7 +1096,10 @@ export function ResultStudio() {
                         </td>
                       </tr>
                     ) : (
-                      queryResults.map((s, i) => (
+                      (skipUngraded
+                        ? queryResults.filter((s) => (s.average ?? 0) > 0)
+                        : queryResults
+                      ).map((s, i) => (
                         <tr key={s.id}>
                           <td>{i + 1}</td>
                           <td>

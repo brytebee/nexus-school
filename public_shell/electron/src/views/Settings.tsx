@@ -74,6 +74,31 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
     }
   }, [identity]);
 
+  // On mount: check if this launch was triggered by a user-initiated restore
+  useEffect(() => {
+    const checkRestore = async () => {
+      try {
+        const restored = await (window as any).electronAPI?.wasRestored?.();
+        if (restored) {
+          const Swal = (window as any).Swal;
+          if (Swal) {
+            Swal.fire({
+              title: '✅ Backup Restored',
+              text: 'Your database has been successfully restored from the selected backup file.',
+              icon: 'success',
+              timer: 4000,
+              timerProgressBar: true,
+              showConfirmButton: false,
+              background: '#0d1235',
+              color: '#fff',
+            });
+          }
+        }
+      } catch (_) {}
+    };
+    checkRestore();
+  }, []);
+
   const ThemeColorLoad = (prim?: string, sec?: string) => {
     if (prim) setThemePrimary(prim);
     if (sec) setThemeSecondary(sec);
@@ -243,7 +268,15 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
               });
               
               // Proceed with reset
-              await window.electronAPI.resetAppData();
+              const resetRes = await window.electronAPI.resetAppData();
+              if ((resetRes as any)?.ok === false) {
+                await Swal.fire({
+                  title: 'Reset Failed',
+                  text: `Could not clear database: ${(resetRes as any).error}`,
+                  icon: 'error', background: '#0d1235', color: '#fff',
+                });
+                return;
+              }
               if (onResetSuccess) {
                 onResetSuccess();
               } else {
@@ -266,7 +299,15 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
 
               if (backupPrompt.isConfirmed) {
                 // Wipe anyway
-                await window.electronAPI.resetAppData();
+                const resetRes2 = await window.electronAPI.resetAppData();
+                if ((resetRes2 as any)?.ok === false) {
+                  await Swal.fire({
+                    title: 'Reset Failed',
+                    text: `Could not clear database: ${(resetRes2 as any).error}`,
+                    icon: 'error', background: '#0d1235', color: '#fff',
+                  });
+                  return;
+                }
                 if (onResetSuccess) {
                   onResetSuccess();
                 } else {
@@ -286,8 +327,16 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
               background: '#0d1235',
               color: '#fff',
             }).then(async (innerRes) => {
-              if (innerRes.isConfirmed) {
-                await window.electronAPI.resetAppData();
+            if (innerRes.isConfirmed) {
+                const resetRes3 = await window.electronAPI.resetAppData();
+                if ((resetRes3 as any)?.ok === false) {
+                  Swal.fire({
+                    title: 'Reset Failed',
+                    text: `Could not clear database: ${(resetRes3 as any).error}`,
+                    icon: 'error', background: '#0d1235', color: '#fff',
+                  });
+                  return;
+                }
                 if (onResetSuccess) {
                   onResetSuccess();
                 } else {
@@ -299,7 +348,15 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
         } else if (result.isDenied) {
           // Delete Now
           try {
-            await window.electronAPI.resetAppData();
+            const resetRes4 = await window.electronAPI.resetAppData();
+            if ((resetRes4 as any)?.ok === false) {
+              Swal.fire({
+                title: 'Reset Failed',
+                text: `Could not clear database: ${(resetRes4 as any).error}`,
+                icon: 'error', background: '#0d1235', color: '#fff',
+              });
+              return;
+            }
             if (onResetSuccess) {
               onResetSuccess();
             } else {
@@ -910,10 +967,10 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
             🧑‍🏫 Teachers Template
           </label>
           <p style={{ fontSize: '11px', color: '#aaa', marginBottom: '10px' }}>
-            Columns: <code>Teacher_ID, Teacher_Name, Teacher_Phone, Class, Subjects, Class_Host</code> — subjects pipe-delimited, Class_Host is TRUE/FALSE.
+            Columns: <code>Teacher_ID, Teacher_Name, Teacher_Phone, Class, Subjects, Class_Host</code> — classes and subjects pipe-delimited, Class_Host is TRUE/FALSE or an explicit class arm.
           </p>
           <a
-            href="data:text/csv;charset=utf-8,Teacher_ID,Teacher_Name,Teacher_Phone,Class,Subjects,Class_Host%0ATCH-01,John%20Doe,08012345678,JSS%201,Mathematics|English%20Language,TRUE"
+            href="data:text/csv;charset=utf-8,Teacher_ID,Teacher_Name,Teacher_Phone,Class,Subjects,Class_Host%0ATCH-01,John%20Doe,08012345678,JSS%201%20Gold|JSS%201%20Silver,Mathematics|English%20Language,JSS%201%20Gold"
             download="Nexus_Teachers_Template.csv"
             className="secondary-btn"
             style={{
@@ -944,10 +1001,10 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
             🎓 Students Template
           </label>
           <p style={{ fontSize: '11px', color: '#aaa', marginBottom: '10px' }}>
-            Columns: <code>Student_ID, First_Name, Last_Name, Class, Subjects, Parent_Name, Parent_Email, Parent_Phone</code> — subjects pipe-delimited.
+            Columns: <code>Student_ID, First_Name, Last_Name, Class, Subjects, Parent_Name, Parent_Email, Parent_Phone, Gender, DOB, Registration_Number</code> (Optional).
           </p>
           <a
-            href="data:text/csv;charset=utf-8,Student_ID,First_Name,Last_Name,Class,Subjects,Parent_Name,Parent_Email,Parent_Phone%0ASTU-001,Jane,Smith,JSS%201,English%20Language|Mathematics|Basic%20Science,John%20Smith,john@example.com,08098765432"
+            href="data:text/csv;charset=utf-8,Student_ID,First_Name,Last_Name,Class,Subjects,Parent_Name,Parent_Email,Parent_Phone,Gender,DOB,Registration_Number%0ASTU-001,Jane,Smith,JSS%201,English%20Language|Mathematics|Basic%20Science,John%20Smith,john@example.com,08098765432,Female,2015-05-15,REG-100293"
             download="Nexus_Students_Template.csv"
             className="secondary-btn"
             style={{

@@ -188,6 +188,19 @@ export function SyncHub() {
 
   const [indicator, setIndicator] = useState<{ text: string; color: string } | null>(null);
 
+  // ── Activity Feed state ───────────────────────────────────────────────────
+  interface ActivityEntry {
+    log_id: string;
+    device_id: string;
+    device_model: string;
+    actor_label: string;
+    event_type: string;
+    payload_hash: string | null;
+    received_at: string;
+  }
+  const [activityLog,     setActivityLog]     = useState<ActivityEntry[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+
   const showIndicator = useCallback((text: string, color = '#4CAF50') => {
     setIndicator({ text, color });
     setTimeout(() => setIndicator(null), 3000);
@@ -199,6 +212,16 @@ export function SyncHub() {
       const res = await window.electronAPI?.auth?.getAdmins?.();
       if (Array.isArray(res)) setAdmins(res);
     } catch (_) {}
+  }, []);
+
+  // ── Load activity log ─────────────────────────────────────────────────────
+  const loadActivityLog = useCallback(async () => {
+    setActivityLoading(true);
+    try {
+      const res = await (window as any).electronAPI?.getActivityLog?.({ limit: 100 });
+      if (res?.ok && Array.isArray(res.data)) setActivityLog(res.data);
+    } catch (_) {}
+    finally { setActivityLoading(false); }
   }, []);
 
   // ── Load teacher access list ────────────────------------------------------
@@ -275,7 +298,8 @@ export function SyncHub() {
     fetchTeachers();
     loadAdmins();
     fetchDeviceSlots();
-  }, [loadAccessList, loadAdmins, fetchDeviceSlots, currentTier]);
+    loadActivityLog();
+  }, [loadAccessList, loadAdmins, fetchDeviceSlots, loadActivityLog, currentTier]);
 
   // ── QR IPC listeners ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -403,8 +427,7 @@ export function SyncHub() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="fade-in-up" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--grid-gap)' }}>
-
+    <>
       {/* PIN Confirmation Modal */}
       {pendingAction && admins.length > 0 && (
         <PinModal
@@ -422,6 +445,8 @@ export function SyncHub() {
           onClose={() => setPendingAction(null)}
         />
       )}
+
+      <div className="fade-in-up" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--grid-gap)' }}>
 
       {/* Header */}
       <div className="view-header">
@@ -753,7 +778,90 @@ export function SyncHub() {
           ⚠️ Revoking a teacher's access immediately disconnects their tablet on next sync attempt and is logged to the audit trail. Re-issuing QR codes does not restore access — you must explicitly click <strong>Restore</strong>.
         </p>
       </div>
-    </div>
+
+      {/* ── Activity Feed ──────────────────────────────────────────────── */}
+      <div style={{
+        marginTop: '24px',
+        background: 'rgba(255,255,255,0.03)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: '12px',
+        padding: '20px 24px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+          <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: 'var(--accent)' }}>
+            📋 Activity Feed
+          </h3>
+          <button
+            onClick={loadActivityLog}
+            disabled={activityLoading}
+            style={{
+              padding: '5px 14px', fontSize: '12px', borderRadius: '6px', cursor: 'pointer',
+              background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)',
+              color: 'var(--text)', opacity: activityLoading ? 0.5 : 1,
+            }}
+          >
+            {activityLoading ? '⌛ Refreshing…' : '🔄 Refresh'}
+          </button>
+        </div>
+
+        {activityLog.length === 0 && !activityLoading && (
+          <p style={{ color: 'var(--text-dim)', fontSize: '13px', textAlign: 'center', padding: '20px 0' }}>
+            No activity recorded yet. Actions like imports, backups, and resets will appear here.
+          </p>
+        )}
+
+        {activityLog.length > 0 && (
+          <div style={{ overflowX: 'auto', maxHeight: '320px', overflowY: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', textAlign: 'left' }}>
+                  {['Event', 'Actor', 'Device', 'Time'].map(h => (
+                    <th key={h} style={{ padding: '6px 10px', color: 'var(--text-dim)', fontWeight: 500 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {activityLog.map((entry) => {
+                  // Colour-code event types by category
+                  const badgeColor = entry.event_type.startsWith('BACKUP') ? '#4CAF50'
+                    : entry.event_type.startsWith('FEE') ? '#00bcd4'
+                    : entry.event_type.startsWith('STUDENT') || entry.event_type.startsWith('TEACHER') ? '#ff9800'
+                    : entry.event_type.startsWith('GRADES') || entry.event_type.startsWith('ATTENDANCE') || entry.event_type.startsWith('ROSTER') || entry.event_type.startsWith('CLASSES') ? '#7c4dff'
+                    : entry.event_type.startsWith('APP_RESET') || entry.event_type.startsWith('REVOKE') ? '#f44336'
+                    : entry.event_type.startsWith('SYNC') ? '#1a237e'
+                    : 'rgba(255,255,255,0.15)';
+                  return (
+                    <tr key={entry.log_id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <td style={{ padding: '7px 10px' }}>
+                        <span style={{
+                          display: 'inline-block', padding: '2px 8px', borderRadius: '4px',
+                          background: badgeColor, color: '#fff', fontSize: '11px', fontWeight: 600,
+                          letterSpacing: '0.3px',
+                        }}>
+                          {entry.event_type.replace(/_/g, ' ')}
+                        </span>
+                      </td>
+                      <td style={{ padding: '7px 10px', color: 'var(--text)' }}>{entry.actor_label}</td>
+                      <td style={{ padding: '7px 10px', color: 'var(--text-dim)' }}>
+                        {entry.device_model || entry.device_id.substring(0, 10)}
+                      </td>
+                      <td style={{ padding: '7px 10px', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
+                        {new Date(entry.received_at).toLocaleString()}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <p style={{ margin: '12px 0 0', fontSize: '11px', color: 'var(--text-dim)' }}>
+          Showing the last 100 actions. All desktop and mobile sync actions are recorded automatically.
+        </p>
+      </div>
+      </div>
+    </>
   );
 }
 
