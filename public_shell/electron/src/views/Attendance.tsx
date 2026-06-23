@@ -355,7 +355,8 @@ export function Attendance() {
   );
 
   return (
-    <div className="fade-in-up" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--grid-gap)' }}>
+    <>
+      <div className="fade-in-up" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--grid-gap)' }}>
       {/* Header Bar */}
       <div className="view-header">
         <div>
@@ -1204,6 +1205,7 @@ export function Attendance() {
           </div>
         </div>
       )}
+      </div>
 
       {/* Escalation Step Edit Modal */}
       {isEscalationModalOpen && (
@@ -1269,7 +1271,7 @@ export function Attendance() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
 

@@ -941,7 +941,7 @@ fun FocusModePager(
         val db = SyncDatabase.getDatabase(context)
         db.studentDao().getAllScores().forEach { score ->
             val key = "${score.student_id}_${score.subject}_${score.component_key}"
-            gradeState[key] = score.score.toString()
+            gradeState[key] = if (score.score % 1.0 == 0.0) score.score.toInt().toString() else score.score.toString()
         }
     }
 
@@ -1079,7 +1079,7 @@ fun StudentFocusCard(
     onSave: () -> Unit,
     onSkip: () -> Unit
 ) {
-    val total    = scoreComponents.sumOf { compValues[it.key]?.toIntOrNull() ?: 0 }
+    val total    = scoreComponents.sumOf { compValues[it.key]?.toDoubleOrNull() ?: 0.0 }
     val maxTotal = scoreComponents.sumOf { it.max }
 
     // Auto-save debounce: 650 ms after last keystroke
@@ -1092,7 +1092,7 @@ fun StudentFocusCard(
         onAutoSave()
     }
 
-    val pct = if (maxTotal > 0) total.toFloat() / maxTotal else 0f
+    val pct = if (maxTotal > 0) (total / maxTotal).toFloat() else 0f
     val totalColor = when {
         pct >= 0.7f -> Color(0xFF22C55E)   // green
         pct >  0f   -> primaryColor
@@ -1186,7 +1186,7 @@ fun StudentFocusCard(
                 // Live total badge
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        "$total",
+                        if (total % 1.0 == 0.0) total.toInt().toString() else total.toString(),
                         color = totalColor,
                         fontSize = 28.sp,
                         fontWeight = FontWeight.ExtraBold
@@ -1338,7 +1338,7 @@ fun CompactGradeInputCard(
             modifier = Modifier.fillMaxWidth(),
             enabled = enabled,
             singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             textStyle = TextStyle(
                 color = Color.White,
                 fontSize = 18.sp,
@@ -1502,7 +1502,7 @@ fun EditStudentRecordSheet(
         val db = SyncDatabase.getDatabase(context)
         val scores = db.studentDao().getScoresForStudent(student.id, student.subject)
         scores.forEach { score ->
-            tempScores[score.component_key] = score.score.toString()
+            tempScores[score.component_key] = if (score.score % 1.0 == 0.0) score.score.toInt().toString() else score.score.toString()
         }
     }
 
@@ -1655,8 +1655,8 @@ fun EditStudentRecordSheet(
                                             value = tempScores[comp.key] ?: "",
                                             onValueChange = { v ->
                                                 if (!isGradesLocked) {
-                                                    val f = v.filter { it.isDigit() }
-                                                    if (f.isEmpty() || (f.toIntOrNull() ?: 0) <= comp.max) tempScores[comp.key] = f
+                                                    val f = v.filter { it.isDigit() || it == '.' }
+                                                    if (f.isEmpty() || (f.toDoubleOrNull() ?: 0.0) <= comp.max) tempScores[comp.key] = f
                                                 }
                                             },
                                             enabled = !isGradesLocked,
@@ -1668,7 +1668,7 @@ fun EditStudentRecordSheet(
                                             ),
                                             colors = outlinedSheetColors(primaryColor),
                                             shape = RoundedCornerShape(10.dp),
-                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                                         )
                                     }
                                 }

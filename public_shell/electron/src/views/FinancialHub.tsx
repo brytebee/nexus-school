@@ -111,7 +111,7 @@ export function FinancialHub() {
   const Swal       = (window as any).Swal;
 
   // ── Active tab ────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<'roster'|'structure'|'adjustments'|'receipts'>('roster');
+  const [activeTab, setActiveTab] = useState<'roster'|'structure'|'adjustments'|'receipts'|'import'>('roster');
 
   // ── Session/Term ──────────────────────────────────────────────────────────
   const [sessions,        setSessions]        = useState<string[]>([]);
@@ -204,6 +204,48 @@ export function FinancialHub() {
   // ── UI indicator ──────────────────────────────────────────────────────────
   const [indicator,     setIndicator]     = useState<{ text:string; color:string }|null>(null);
   const [dispatchPulse, setDispatchPulse] = useState(false);
+
+  // ── Fee CSV Import state ──────────────────────────────────────────────────
+  const [csvImportStatus, setCsvImportStatus] = useState<Record<string, { loading: boolean; result: string | null }>>({
+    structure:  { loading: false, result: null },
+    payment:    { loading: false, result: null },
+    adjustment: { loading: false, result: null },
+  });
+
+  const handleFeeCSV = (type: 'structure' | 'payment' | 'adjustment') => {
+    const api = (window as any).electronAPI;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv';
+    input.onchange = (e: any) => {
+      const file = e.target?.files?.[0];
+      if (!file) return;
+      setCsvImportStatus(prev => ({ ...prev, [type]: { loading: true, result: null } }));
+
+      const listeners: Record<string, string> = {
+        structure:  'onFeeStructureCSVLoaded',
+        payment:    'onFeePaymentCSVLoaded',
+        adjustment: 'onFeeAdjustmentCSVLoaded',
+      };
+      const senders: Record<string, string> = {
+        structure:  'processFeeStructureCSV',
+        payment:    'processFeePaymentCSV',
+        adjustment: 'processFeeAdjustmentCSV',
+      };
+
+      api?.[listeners[type]]?.((res: { count: number; error: string | null }) => {
+        const msg = res.error
+          ? `❌ Error: ${res.error}`
+          : `✅ ${res.count} row${res.count === 1 ? '' : 's'} imported successfully.`;
+        setCsvImportStatus(prev => ({ ...prev, [type]: { loading: false, result: msg } }));
+        if (!res.error) {
+          doLoadRoster(sessionRef.current, termRef.current, 0, searchQuery, statusFilter);
+        }
+      });
+      api?.[senders[type]]?.(file.path);
+    };
+    input.click();
+  };
 
   const showIndicator = useCallback((text: string, color = '#4CAF50') => {
     setIndicator({ text, color });
@@ -801,6 +843,13 @@ export function FinancialHub() {
             </span>
           )}
         </button>
+        <button
+          id="fees-tab-btn-import"
+          className={`fees-tab-btn${activeTab==='import'?' active':''}`}
+          onClick={() => setActiveTab('import')}
+        >
+          📥 Bulk Import
+        </button>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
@@ -1123,6 +1172,112 @@ export function FinancialHub() {
                 </table>
               )}
             </div>
+          </div>
+        )}
+
+        {/* ── Bulk Import Panel ────────────────────────────────────────────── */}
+        {activeTab === 'import' && (
+          <div id="fees-tab-import" style={{ flex:1, overflowY:'auto', padding:'24px 28px' }}>
+            <div style={{ marginBottom:'20px' }}>
+              <div style={{ fontWeight:700, fontSize:'16px', marginBottom:'4px' }}>📥 Bulk Fee Import</div>
+              <div style={{ fontSize:'12px', color:'var(--text-dim)' }}>
+                Download a template, fill it in, then upload to bulk-import fee data. All imports run in a transaction — partial failures are rejected.
+              </div>
+            </div>
+
+            {/* Helper to render one import card */}
+            {(
+              [
+                {
+                  key:   'structure' as const,
+                  title: '🏗️ Fee Structure',
+                  desc:  'Define billing line items per class and term. Upserts existing rows.',
+                  cols:  'Class_Name | Item_Name | Amount | Term',
+                  example: 'JSS 1 Gold | Tuition | 35000 | First Term',
+                  tplName: 'Nexus_FeeStructure_Template.csv',
+                  tplContent: 'Class_Name,Item_Name,Amount,Term\nJSS 1 Gold,Tuition,35000,First Term\nJSS 1 Gold,PTA Levy,5000,All Terms\n',
+                },
+                {
+                  key:   'payment' as const,
+                  title: '💰 Fee Payments',
+                  desc:  'Record bulk payments. Updates the fee ledger and student balance.',
+                  cols:  'Student_ID | Academic_Session | Term | Amount_Paid | Payment_Method | Reference_Number* | Payment_Date* | Recorded_By*',
+                  example: 'STU001 | 2025/2026 | First Term | 30000 | cash |  | 2025-09-01 | Bursar',
+                  tplName: 'Nexus_FeePayment_Template.csv',
+                  tplContent: 'Student_ID,Academic_Session,Term,Amount_Paid,Payment_Method,Reference_Number,Payment_Date,Recorded_By\nSTU001,2025/2026,First Term,30000,cash,,2025-09-01,Bursar\n',
+                },
+                {
+                  key:   'adjustment' as const,
+                  title: '🎓 Fee Adjustments',
+                  desc:  'Apply scholarships, waivers, and discounts in bulk.',
+                  cols:  'Student_ID | Academic_Session | Term | Adjustment_Type | Amount | Description* | Approved_By*',
+                  example: 'STU002 | 2025/2026 | First Term | scholarship | 15000 | 50% Tuition Waiver | Principal',
+                  tplName: 'Nexus_FeeAdjustment_Template.csv',
+                  tplContent: 'Student_ID,Academic_Session,Term,Adjustment_Type,Amount,Description,Approved_By\nSTU002,2025/2026,First Term,scholarship,15000,50% Tuition Waiver,Principal\n',
+                },
+              ] as const
+            ).map(card => {
+              const status = csvImportStatus[card.key];
+              const downloadTpl = () => {
+                const blob = new Blob([card.tplContent], { type: 'text/csv' });
+                const url  = URL.createObjectURL(blob);
+                const a    = document.createElement('a');
+                a.href = url; a.download = card.tplName; a.click();
+                URL.revokeObjectURL(url);
+              };
+              return (
+                <div key={card.key} style={{
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid rgba(255,255,255,0.09)',
+                  borderRadius: '10px',
+                  padding: '18px 20px',
+                  marginBottom: '16px',
+                }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'10px' }}>
+                    <div>
+                      <div style={{ fontWeight:600, fontSize:'14px', marginBottom:'3px' }}>{card.title}</div>
+                      <div style={{ fontSize:'12px', color:'var(--text-dim)' }}>{card.desc}</div>
+                    </div>
+                    <button
+                      onClick={downloadTpl}
+                      style={{ fontSize:'12px', padding:'5px 14px', borderRadius:'6px', cursor:'pointer',
+                        background:'rgba(0,229,255,0.08)', border:'1px solid rgba(0,229,255,0.25)',
+                        color:'#00e5ff', whiteSpace:'nowrap', flexShrink:0, marginLeft:'16px' }}
+                    >
+                      ⬇️ Download Template
+                    </button>
+                  </div>
+
+                  <div style={{ fontSize:'11px', color:'var(--text-dim)', marginBottom:'8px', fontFamily:'monospace',
+                    background:'rgba(0,0,0,0.2)', borderRadius:'5px', padding:'6px 10px' }}>
+                    <strong>Columns:</strong> {card.cols}<br />
+                    <strong>Example:</strong> {card.example}
+                    <span style={{ marginLeft:'8px', color:'rgba(255,255,255,0.3)', fontSize:'10px' }}>* optional</span>
+                  </div>
+
+                  <div style={{ display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap' }}>
+                    <button
+                      onClick={() => handleFeeCSV(card.key)}
+                      disabled={status.loading}
+                      style={{ fontSize:'13px', padding:'7px 18px', borderRadius:'7px', cursor:'pointer',
+                        background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.15)',
+                        color:'var(--text)', opacity: status.loading ? 0.6 : 1 }}
+                    >
+                      {status.loading ? '⌛ Importing…' : '📂 Choose CSV & Import'}
+                    </button>
+                    {status.result && (
+                      <span style={{ fontSize:'12px', color: status.result.startsWith('✅') ? '#4CAF50' : '#ff5252' }}>
+                        {status.result}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            <p style={{ fontSize:'11px', color:'var(--text-dim)', marginTop:'8px' }}>
+              ⚠️ Use pipe <code>|</code> only for multi-value fields. Adjustment_Type must be one of: <code>scholarship</code>, <code>waiver</code>, <code>owner_grant</code>, <code>bursary</code>, <code>discount</code>. Payment_Method must be: <code>cash</code>, <code>transfer</code>, <code>pos</code>, or <code>bank_teller</code>.
+            </p>
           </div>
         )}
       </div>

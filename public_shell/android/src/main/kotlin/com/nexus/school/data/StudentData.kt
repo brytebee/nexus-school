@@ -12,7 +12,7 @@ import kotlinx.serialization.Serializable
 data class HonorRollItem(
     val name: String,
     val subject: String,
-    val score: Int
+    val score: Double
 )
 
 @Serializable
@@ -42,7 +42,7 @@ data class StudentScore(
     val student_id: String,
     val subject: String,
     val component_key: String, // e.g. "CA1", "CA2", "Exam"
-    val score: Int
+    val score: Double
 )
 
 @Serializable

@@ -13,7 +13,10 @@ const dgram = require("dgram");
 const Handlebars = require("handlebars");
 const { database, server, reports } = require("@nexus/engine");
 const scholar = require("@nexus/engine/src/scholar");
-const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, handleCSVUpload, handleGradesCSVUpload, handleAttendanceCSVUpload, handleClassesCSVUpload, clearData } = server;
+const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, logActivity,
+        handleCSVUpload, handleGradesCSVUpload, handleAttendanceCSVUpload, handleClassesCSVUpload,
+        handleFeeStructureCSVUpload, handleFeePaymentCSVUpload, handleFeeAdjustmentCSVUpload,
+        clearData } = server;
 const address = require("address");
 const pulseBot     = require('./pulse-bot.js');
 const pulseExporter = require('./pulse-exporter.js');
@@ -147,6 +150,7 @@ ipcMain.handle("pulse:status", () => pulseBot.getPulseStatus());
       const backupPath = path.join(backupDir, `nexus_backup_${timestamp}.sqlite`);
       await db.backup(backupPath);
       console.log(`[Backup] Safe database backup created at: ${backupPath}`);
+      logActivity({ event_type: 'BACKUP_CREATED', payload: { path: backupPath } });
       return { ok: true, path: backupPath };
     } catch (e) {
       console.error('[Backup] Database backup failed:', e.message);
@@ -170,13 +174,19 @@ ipcMain.handle("pulse:status", () => pulseBot.getPulseStatus());
       }
       const src = result.filePaths[0];
 
-      // Close the DB connection to release lock
+      // Close the DB connection before overwriting the file
       db.close();
 
       // Copy backup file over the active DB file
       fs.copyFileSync(src, dbPath);
 
-      // Relaunch the application to load the new database state cleanly
+      // Write a restore-pending flag so the next launch can distinguish
+      // a restore-relaunch from a normal app start (user-triggered only)
+      const flagPath = path.join(app.getPath('userData'), '.nexus_restore_pending');
+      fs.writeFileSync(flagPath, new Date().toISOString(), 'utf8');
+      logActivity({ event_type: 'BACKUP_RESTORED', payload: { source: src } });
+
+      // Relaunch to load the restored database state
       app.relaunch();
       app.exit(0);
       return { ok: true };
@@ -2049,6 +2059,10 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
     // Aggregate Explicit Subjects 
     const getExplicitSubjects = db.prepare("SELECT subject FROM student_subjects WHERE student_id = ?");
     
+    const getTermAttendance = db.prepare(
+      "SELECT total_days, days_attended FROM student_attendance WHERE student_id = ? AND academic_session = ? AND term = ?"
+    );
+    
     // V2.1 Optimized: Fetch all form teachers into a map once per batch
     const formTeacherMap = new Map();
     db.prepare(`
@@ -2088,7 +2102,7 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
         resolvedSubjects.set(r.subject, {
           name: r.subject,
           score: r.score,
-          breakdown: (() => { try { return JSON.parse(r.breakdown); } catch { return {}; } })(),
+          breakdown: (() => { try { const p = JSON.parse(r.breakdown); return (p && typeof p === 'object') ? p : {}; } catch { return {}; } })(),
         });
       });
 
@@ -2111,10 +2125,18 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
       // NEW: Look up form teacher for this class
       const ft = formTeacherMap.get(stu.class_name) || {};
 
-      // NEW: Resolve attendance
-      const classTotalDays = classDaysMap.get(stu.class_name) || 0;
-      const attRow = getStudentAttendanceCount.get(stu.id, session, term) || { days_attended: 0 };
-      const daysAttended = attRow.days_attended;
+      // Resolve attendance: check term-level student_attendance first, then fall back to daily roll calls
+      const termAtt = getTermAttendance.get(stu.id, session, term);
+      let classTotalDays = 0;
+      let daysAttended = 0;
+      if (termAtt) {
+        classTotalDays = termAtt.total_days;
+        daysAttended = termAtt.days_attended;
+      } else {
+        classTotalDays = classDaysMap.get(stu.class_name) || 0;
+        const attRow = getStudentAttendanceCount.get(stu.id, session, term) || { days_attended: 0 };
+        daysAttended = attRow.days_attended;
+      }
 
       // V2.2: Resolve official stamp
       let schoolStamp = identityPacket.stamp || null;
@@ -2178,7 +2200,7 @@ ipcMain.handle("get-student-grades", (event, { student_id }) => {
     const grades = rows.map(r => ({
       subject: r.subject,
       score: r.score,
-      breakdown: (() => { try { return JSON.parse(r.breakdown); } catch { return {}; } })(),
+      breakdown: (() => { try { const p = JSON.parse(r.breakdown); return (p && typeof p === 'object') ? p : {}; } catch { return {}; } })(),
     }));
 
     return { ok: true, grades, session: academic_session, term };
@@ -2216,7 +2238,10 @@ ipcMain.handle("save-student-grades", (event, { student_id, grades }) => {
     const saveAll = db.transaction((items) => {
       for (const item of items) {
         const bd = item.breakdown || {};
-        const total = Object.values(bd).reduce((sum, v) => sum + (Number(v) || 0), 0);
+        // If no sub-components exist use the passed score directly (flat-score grade)
+        const total = Object.keys(bd).length > 0
+          ? Object.values(bd).reduce((sum, v) => sum + (Number(v) || 0), 0)
+          : (Number(item.score) || 0);
         deleteRow.run(student_id, academic_session, term, item.subject);
         insertRow.run(student_id, academic_session, term, item.subject, total, JSON.stringify(bd));
       }
@@ -2546,7 +2571,17 @@ ipcMain.handle('pulse-bridge-ready', () => {
 ipcMain.handle("reset-app-data", async () => {
   console.log("[Electron] Resetting app data...");
 
-  // 1. Reset identity packet to default
+  // 1. Clear the database FIRST — if this fails we must NOT relaunch
+  // (clearData now throws on failure so the try-catch below catches it)
+  try {
+    clearData();
+    console.log("[Electron] Database cleared successfully.");
+  } catch (err) {
+    console.error("[Electron] RESET ABORTED — clearData failed:", err.message);
+    return { ok: false, error: `Database clear failed: ${err.message}` };
+  }
+
+  // 2. Reset identity packet to default
   identityPacket = {
     name: "Green Valley High",
     themePrimary: "#1A237E",
@@ -2557,7 +2592,7 @@ ipcMain.handle("reset-app-data", async () => {
     signature: "",
   };
 
-  // 2. Clear identity.json
+  // 3. Clear identity.json
   try {
     if (identityFilePath && fs.existsSync(identityFilePath)) {
       fs.unlinkSync(identityFilePath);
@@ -2567,21 +2602,38 @@ ipcMain.handle("reset-app-data", async () => {
     console.error("Failed to delete identity.json", err);
   }
 
-  // 3. Clear server data (students)
-  clearData();
+  // 4. Clear Scholar Knowledge index
+  try {
+    scholar.clearIndex();
+    console.log("[Electron] Scholar index cleared.");
+  } catch (err) {
+    console.error("Failed to clear Scholar index", err);
+  }
 
-  // 4. Update QR Payload
+  // 5. Disconnect WhatsApp Bot and wipe session folder
+  try {
+    pulseBot.destroyPulse();
+    const pulseAuthPath = require('path').join(require('os').homedir(), ".nexus_pulse_auth");
+    if (fs.existsSync(pulseAuthPath)) {
+      fs.rmSync(pulseAuthPath, { recursive: true, force: true });
+      console.log("[Electron] WhatsApp session folder cleared.");
+    }
+  } catch (err) {
+    console.error("Failed to destroy WhatsApp Pulse session folder:", err);
+  }
+
+  // 6. Update QR Payload
   if (qrPayload) {
     qrPayload.config = identityPacket;
     setSchoolConfig(qrPayload.config);
   }
 
-  // 5. Notify UI
-  if (mainWindow) {
-    mainWindow.webContents.send("qr-payload", qrPayload);
-  }
+  // 7. Relaunch cleanly — only reached if clearData() succeeded
+  console.log("[Electron] App data reset complete. Relaunching application...");
+  app.relaunch();
+  app.exit(0);
 
-  return true;
+  return { ok: true };
 });
 // ── Last image path for clipboard ─────────────────────────────────────────────
 let _lastImagePath = null;
@@ -2599,39 +2651,52 @@ ipcMain.handle("copy-result-image", async (event, { imagePath } = {}) => {
 console.log("[Electron] Registering generate-reports handler...");
 ipcMain.handle("generate-reports", async (event, payload) => {
   const { termConfig, reportType = "terminal", format = "pdf" } = payload || {};
+  let tempDir = "";
   try {
+    const startTime = Date.now();
     const outFolder = path.join(app.getPath("desktop"), "NexusReports");
     if (!fs.existsSync(outFolder)) fs.mkdirSync(outFolder, { recursive: true });
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 
+    mainWindow?.webContents.send("report-generation:status", { text: "⏳ Querying student metrics..." });
+
     const db = database.getDb();
     if (payload.students) {
+      const _licTier = licenseStatus?.tier || identityPacket?.planTier || identityPacket?.plan_tier || 'Standalone';
+      const _feeGated = _licTier === 'Gold' || _licTier === 'Diamond';
+
+      // Hoist statements to avoid re-preparing on every student in the loop
+      const feeStmt = _feeGated ? db.prepare(
+        `SELECT status FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ? LIMIT 1`
+      ) : null;
+
+      let attStmt = null;
+      try {
+        attStmt = db.prepare(`SELECT subject_name, total_classes, classes_attended FROM subject_attendance_agg WHERE student_id = ? AND academic_session = ? AND term = ?`);
+      } catch (_) {}
+
       for (const s of payload.students) {
-        // Fee Shield: only Gold/Diamond schools have the finance module.
-        // For Standalone/Silver, there is no billing — never show a watermark.
-        const _licTier = licenseStatus?.tier || identityPacket?.planTier || identityPacket?.plan_tier || 'Standalone';
-        const _feeGated = _licTier === 'Gold' || _licTier === 'Diamond';
         if (!_feeGated) {
           s.feeStatus = 'cleared';
         } else {
           try {
-            const feeRow = db.prepare(
-              `SELECT status FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ? LIMIT 1`
-            ).get(s.id, termConfig?.academic_session, termConfig?.term);
-            // If no fee record exists yet, treat as cleared (billed=0) rather than unpaid
+            const feeRow = feeStmt.get(s.id, termConfig?.academic_session, termConfig?.term);
             s.feeStatus = feeRow?.status ?? 'cleared';
           } catch (feeErr) {
-            s.feeStatus = 'cleared'; // non-fatal — no finance data = no watermark
+            s.feeStatus = 'cleared';
           }
         }
 
-        // Subject Attendance Aggregation (Diamond Tier)
-        try {
-            const subAtt = db.prepare(`SELECT subject_name, total_classes, classes_attended FROM subject_attendance_agg WHERE student_id = ? AND academic_session = ? AND term = ?`).all(s.id, termConfig?.academic_session, termConfig?.term);
+        if (attStmt) {
+          try {
+            const subAtt = attStmt.all(s.id, termConfig?.academic_session, termConfig?.term);
             if (subAtt && subAtt.length > 0) s.subject_attendance_agg = subAtt;
-        } catch (e) { /* ignore if table not ready */ }
+          } catch (e) {}
+        }
       }
     }
+
+    mainWindow?.webContents.send("report-generation:status", { text: "⏳ Saving templates and asset cache..." });
 
     let html = "";
     let outPath = "";
@@ -2641,12 +2706,17 @@ ipcMain.handle("generate-reports", async (event, payload) => {
             baseDir = path.dirname(require.resolve("@nexus/engine"));
         } catch (_) {}
     }
-    
+
+    // Create unique temp directory under OS tmpdir for de-duplicated image storage
+    tempDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'nexus-reports-'));
+    const tempHtmlPath = path.join(tempDir, `nexus_report_temp.html`);
+
     if (reportType === "portal_card") {
         html = reports.generatePortalCards(payload);
         outPath = path.join(outFolder, `Parent_Access_Cards_${timestamp}.${format === "image" ? "png" : "pdf"}`);
     } else if (reportType !== "broadsheet") {
-        html = reports.generateHTMLPages(payload, baseDir);
+        // Pass tempDir to let report compiler write image files & return HTML with file:// URLs
+        html = reports.generateHTMLPages(payload, baseDir, tempDir);
         outPath = path.join(outFolder, `TerminalReport_${termConfig?.term?.replace(/\s/g,"_")||"Term"}_${timestamp}.${format === "image" ? "png" : "pdf"}`);
     } else {
         html = reports.generateBroadsheetHTML(payload);
@@ -2660,29 +2730,60 @@ ipcMain.handle("generate-reports", async (event, payload) => {
          return { success: true, path: outPath, folder: outFolder, format };
     }
 
-    // Write to a robust temp file to bypass Windows Chromium data:URL string length truncation
-    const tempHtmlPath = path.join(app.getPath("desktop"), `nexus_report_temp_${Date.now()}.html`);
+    // Write temp HTML file
     fs.writeFileSync(tempHtmlPath, html, "utf8");
 
+    mainWindow?.webContents.send("report-generation:status", { text: `⏳ Generating ${format.toUpperCase()} (pages are rendering)...` });
+
     await new Promise((resolve, reject) => {
-        let hw = new BrowserWindow({ show: false, width: 794, height: 1123, webPreferences: { offscreen: true } });
+        let hw = new BrowserWindow({
+          show: false,
+          width: 794,
+          height: 1123,
+          webPreferences: {
+            offscreen: true,
+            webSecurity: false // Allow loading file:// URLs for local temp images
+          }
+        });
         hw.loadFile(tempHtmlPath);
         hw.webContents.on("did-finish-load", async () => {
           try {
+            // Wait a brief tick (e.g. 200ms) for file:// images to decode and render completely before printing
+            await new Promise(r => setTimeout(r, 200));
+
             if (format === "image") {
               const image = await hw.webContents.capturePage();
               fs.writeFileSync(outPath, image.toPNG());
             } else {
-              const buf = await hw.webContents.printToPDF({ printBackground: true, pageSize: "A4", landscape: (reportType === "broadsheet") });
+              const buf = await hw.webContents.printToPDF({
+                printBackground: true,
+                pageSize: "A4",
+                landscape: (reportType === "broadsheet")
+              });
               fs.writeFileSync(outPath, buf);
             }
             hw.close(); hw = null;
-            // Clean up temp file
-            if (fs.existsSync(tempHtmlPath)) fs.unlinkSync(tempHtmlPath);
             resolve();
           } catch(e) { hw?.close(); reject(e); }
         });
     });
+
+    const durationSec = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`[Electron] Printed ${payload.students?.length || 0} reports in ${durationSec}s`);
+    try {
+      logActivity({
+        event_type: 'GRADES_CSV_IMPORTED', // reuse / map to activity log event
+        actor_label: 'Admin',
+        device_id: 'DESKTOP',
+        payload_hash: '',
+        payload: {
+          action: 'print_reports',
+          count: payload.students?.length || 0,
+          format,
+          durationSeconds: parseFloat(durationSec)
+        }
+      });
+    } catch (_) {}
 
     require('electron').shell.openPath(outFolder);
     return { success: true, path: outPath, folder: outFolder, format };
@@ -2690,6 +2791,15 @@ ipcMain.handle("generate-reports", async (event, payload) => {
   } catch (err) {
     console.error(`[Electron] Report generation failed:`, err);
     throw err;
+  } finally {
+    // Deterministic Cleanup: remove the temporary directory and all generated image files recursively
+    if (tempDir && fs.existsSync(tempDir)) {
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch (e) {
+        console.error("[Electron] Failed to clean up tempDir:", e);
+      }
+    }
   }
 });
 
@@ -2705,16 +2815,10 @@ function createWindow() {
     const userDataPath = app.getPath("userData");
     identityFilePath = path.join(userDataPath, "identity.json");
 
-    // Initialize SQLite Database
+    // Initialize SQLite Database — always use the user's persistent data directory
     let dbPath = path.join(userDataPath, 'nexus_os.db');
     scholar.init(userDataPath);
-    
-    // DEMO MODE: Prioritize the seeded DB in the project root if it exists
-    const repoDbPath = path.join(__dirname, "../../private_engine/nexus.sqlite");
-    if (fs.existsSync(repoDbPath)) {
-        dbPath = repoDbPath;
-    }
-    
+
     const betterSqlite3 = require("better-sqlite3");
     database.init(dbPath, betterSqlite3);
     
@@ -3175,10 +3279,31 @@ function createWindow() {
         WHERE student_id = ? AND academic_session = ? AND term = ?
       `).all(id, termConfig.academic_session, termConfig.term);
 
-      const attendance = db.prepare(`
+      let attendance = db.prepare(`
         SELECT status, date FROM daily_attendance 
         WHERE student_id = ? AND academic_session = ? AND term = ?
       `).all(id, termConfig.academic_session, termConfig.term);
+
+      if (attendance.length === 0) {
+        try {
+          const termAtt = db.prepare(`
+            SELECT total_days, days_attended FROM student_attendance
+            WHERE student_id = ? AND academic_session = ? AND term = ?
+          `).get(id, termConfig.academic_session, termConfig.term);
+          if (termAtt && termAtt.total_days > 0) {
+            attendance = [];
+            for (let i = 0; i < termAtt.days_attended; i++) {
+              attendance.push({ status: 'Present', date: `Day ${i + 1}` });
+            }
+            const absentCount = termAtt.total_days - termAtt.days_attended;
+            for (let i = 0; i < absentCount; i++) {
+              attendance.push({ status: 'Absent', date: `Day ${termAtt.days_attended + i + 1}` });
+            }
+          }
+        } catch (err) {
+          console.warn('[Portal API] Failed to fetch term attendance fallback:', err.message);
+        }
+      }
 
       const fees = db.prepare(`
         SELECT total_billed, total_paid FROM student_fees 
@@ -3864,6 +3989,38 @@ function createWindow() {
     });
   });
 
+  // ── Fee CSV imports ────────────────────────────────────────────────────
+  ipcMain.on("process-fee-structure-csv", (event, filePath) => {
+    handleFeeStructureCSVUpload(filePath, (count, err) => {
+      event.reply("fee-structure-csv-loaded", { count, error: err });
+    });
+  });
+
+  ipcMain.on("process-fee-payment-csv", (event, filePath) => {
+    handleFeePaymentCSVUpload(filePath, (count, err) => {
+      event.reply("fee-payment-csv-loaded", { count, error: err });
+    });
+  });
+
+  ipcMain.on("process-fee-adjustment-csv", (event, filePath) => {
+    handleFeeAdjustmentCSVUpload(filePath, (count, err) => {
+      event.reply("fee-adjustment-csv-loaded", { count, error: err });
+    });
+  });
+
+  // ── Activity Log query (for Activity Feed UI) ───────────────────────────
+  ipcMain.handle('activity-log:get', (_, { limit = 100 } = {}) => {
+    try {
+      const db = database.getDb();
+      const rows = db.prepare(
+        'SELECT * FROM activity_log ORDER BY received_at DESC LIMIT ?'
+      ).all(limit);
+      return { ok: true, data: rows };
+    } catch (e) {
+      return { ok: false, error: e.message, data: [] };
+    }
+  });
+
   console.log(
     "QR Payload:",
     JSON.stringify(
@@ -3966,6 +4123,21 @@ function createWindow() {
 
 if (app) {
   app.whenReady().then(() => {
+    // Check if this launch follows a user-triggered restore.
+    // The flag is written by database:restore before relaunching and is consumed once.
+    const restoreFlagPath = path.join(app.getPath('userData'), '.nexus_restore_pending');
+    let wasRestoredFromBackup = false;
+    if (fs.existsSync(restoreFlagPath)) {
+      wasRestoredFromBackup = true;
+      try { fs.unlinkSync(restoreFlagPath); } catch(_) {}
+      console.log('[Electron] Launch type: RESTORE — loaded from user backup.');
+    } else {
+      console.log('[Electron] Launch type: NORMAL.');
+    }
+
+    // Expose flag to renderer so it can show a "Restored from backup" notice
+    ipcMain.handle('app:was-restored', () => wasRestoredFromBackup);
+
     createWindow();
 
     app.on("activate", () => {

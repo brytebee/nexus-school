@@ -13,6 +13,16 @@ const nexusAPI = {
     onAttendanceCSVLoaded: (callback) => ipcRenderer.on('attendance-csv-loaded', (_event, value) => callback(value)),
     processClassesCSV: (filePath) => ipcRenderer.send('process-classes-csv', filePath),
     onClassesCSVLoaded: (callback) => ipcRenderer.on('classes-csv-loaded', (_event, value) => callback(value)),
+    // Fee CSV imports
+    processFeeStructureCSV:   (filePath) => ipcRenderer.send('process-fee-structure-csv', filePath),
+    onFeeStructureCSVLoaded:  (callback) => ipcRenderer.on('fee-structure-csv-loaded', (_event, v) => callback(v)),
+    processFeePaymentCSV:     (filePath) => ipcRenderer.send('process-fee-payment-csv', filePath),
+    onFeePaymentCSVLoaded:    (callback) => ipcRenderer.on('fee-payment-csv-loaded',    (_event, v) => callback(v)),
+    processFeeAdjustmentCSV:  (filePath) => ipcRenderer.send('process-fee-adjustment-csv', filePath),
+    onFeeAdjustmentCSVLoaded: (callback) => ipcRenderer.on('fee-adjustment-csv-loaded', (_event, v) => callback(v)),
+    // Activity Log
+    getActivityLog: (opts) => ipcRenderer.invoke('activity-log:get', opts),
+
     backupDatabase: () => ipcRenderer.invoke('database:backup'),
     restoreDatabase: () => ipcRenderer.invoke('database:restore'),
     uiReady: () => ipcRenderer.send('ui-ready'),
@@ -20,6 +30,8 @@ const nexusAPI = {
     saveIdentity: (packet) => ipcRenderer.invoke('save-identity', packet),
     generateReports: (payload) => ipcRenderer.invoke('generate-reports', payload),
     resetAppData: () => ipcRenderer.invoke('reset-app-data'),
+    wasRestored:  () => ipcRenderer.invoke('app:was-restored'),
+
     getTeachers: () => ipcRenderer.invoke('get-teachers'),
     setTeacher: (data) => ipcRenderer.invoke('set-teacher', data),
     generateAdminQR: () => ipcRenderer.invoke('generateAdminQR'),

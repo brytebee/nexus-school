@@ -397,7 +397,8 @@ export function Teachers() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="fade-in-up" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--grid-gap)' }}>
+    <>
+      <div className="fade-in-up" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--grid-gap)' }}>
 
       {/* ── View Header ── */}
       <div className="view-header">
@@ -607,6 +608,7 @@ export function Teachers() {
           </div>
         </div>
       )}
+      </div>
 
       {/* ══════════════════════════════════════════════
           Add / Edit Drawer  (§9B Slide-in Drawer Sheet)
@@ -1138,7 +1140,7 @@ export function Teachers() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
 

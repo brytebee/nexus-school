@@ -17,7 +17,7 @@ export interface DataTableProps<T> {
 }
 
 export function DataTable<T>({ data, columns, isLoading, emptyMessage = "No data available", onRowClick }: DataTableProps<T>) {
-  if (isLoading) {
+  if (isLoading && data.length === 0) {
     return (
       <div className="w-full h-48 flex items-center justify-center text-nexus-text-dim border border-nexus-border rounded-xl bg-nexus-panel/50">
         <span className="animate-pulse">Loading data...</span>
@@ -26,7 +26,17 @@ export function DataTable<T>({ data, columns, isLoading, emptyMessage = "No data
   }
 
   return (
-    <div className="w-full overflow-x-auto border border-nexus-border rounded-xl bg-nexus-panel shadow-sm">
+    <div className="w-full overflow-x-auto border border-nexus-border rounded-xl bg-nexus-panel shadow-sm relative">
+      {isLoading && (
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'rgba(10, 14, 46, 0.45)', backdropFilter: 'blur(1.5px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 10, borderRadius: '12px'
+        }}>
+          <span className="animate-pulse" style={{ color: 'var(--accent)', fontWeight: 600, fontSize: '13px', letterSpacing: '0.5px' }}>Refreshing Shard Registry...</span>
+        </div>
+      )}
       <table className="w-full text-left text-sm text-nexus-text border-collapse">
         <thead className="bg-black/20 text-nexus-text-dim border-b border-nexus-border uppercase tracking-wider text-[11px] font-semibold">
           <tr>
