@@ -222,13 +222,18 @@ export function Students() {
     loadStudentSettings();
   }, []);
 
-  // Handle CSV Loaded notification
   useEffect(() => {
     if (window.electronAPI?.onCSVLoaded) {
-      window.electronAPI.onCSVLoaded((count) => {
-        setCsvStatus(`✅ CSV Processed: ${count} Students Loaded`);
+      window.electronAPI.onCSVLoaded((payload: any) => {
+        const count = typeof payload === 'object' ? payload.count : payload;
+        const warnings: string[] = typeof payload === 'object' ? (payload.warnings || []) : [];
+        const baseMsg = `✅ CSV Processed: ${count} Students Loaded`;
+        const fullMsg = warnings.length > 0
+          ? `${baseMsg} — ⚠️ ${warnings.length} warning(s): ${warnings.join(' | ')}`
+          : baseMsg;
+        setCsvStatus(fullMsg);
         fetchStudents();
-        setTimeout(() => setCsvStatus(null), 4000);
+        setTimeout(() => setCsvStatus(null), warnings.length > 0 ? 8000 : 4000);
       });
     }
   }, []);
