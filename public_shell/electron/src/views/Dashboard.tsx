@@ -57,6 +57,8 @@ export function Dashboard({ onTabChange }: DashboardProps = {}) {
       const stats = await window.electronAPI.getDbStats();
       setTeachersCount(stats.teachers || 0);
       setStudentsCount(stats.students || 0);
+      setDevicesSynced(stats.devices || 0);
+      setGradeEventsCount(stats.grade_events || 0);
     } catch (err) {
       console.error('Error fetching db stats:', err);
     }

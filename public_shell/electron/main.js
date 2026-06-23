@@ -895,6 +895,29 @@ ipcMain.handle("classes:getAll", () => {
 ipcMain.handle("classes:getFullList", () => {
   try {
     const db = database.getDb();
+
+    // One-time idempotent migration: class_arms.arm was sometimes stored with
+    // the hierarchy class prefix included (e.g. "JSS 1 Emerald" instead of
+    // "Emerald"). This caused getFullList to produce doubled names like
+    // "JSS 1 JSS 1 Emerald". Two-step fix:
+    // Step 1 — delete prefixed arms where the normalised form already exists
+    //           (avoids UNIQUE constraint violations on step 2).
+    db.prepare(`
+      DELETE FROM class_arms
+      WHERE arm LIKE hierarchy_class || ' %'
+        AND EXISTS (
+          SELECT 1 FROM class_arms ca2
+          WHERE ca2.hierarchy_class = class_arms.hierarchy_class
+            AND ca2.arm = substr(class_arms.arm, length(class_arms.hierarchy_class) + 2)
+        )
+    `).run();
+    // Step 2 — normalise remaining prefixed arms.
+    db.prepare(`
+      UPDATE class_arms
+      SET arm = substr(arm, length(hierarchy_class) + 2)
+      WHERE arm LIKE hierarchy_class || ' %'
+    `).run();
+
     const setting = db.prepare("SELECT value FROM system_settings WHERE key = 'class_hierarchy'").get();
     const hierarchy = setting ? JSON.parse(setting.value) : [];
 
@@ -910,7 +933,10 @@ ipcMain.handle("classes:getFullList", () => {
       const clsArms = armsMap[cls] || [];
       if (clsArms.length > 0) {
         clsArms.forEach(arm => {
-          flatList.push(`${cls} ${arm}`);
+          // Defensive: if the stored arm already contains the full name, use
+          // it directly rather than prepending the class name again.
+          const fullName = arm.startsWith(`${cls} `) ? arm : `${cls} ${arm}`;
+          flatList.push(fullName);
         });
       } else {
         flatList.push(cls);
@@ -994,7 +1020,13 @@ ipcMain.handle("dashboard:getSnapshot", async () => {
     const classes = db.prepare("SELECT COUNT(*) as c FROM class_arms").get().c;
     
     let devices = 0;
-    try { devices = db.prepare("SELECT COUNT(*) as c FROM connected_devices").get().c; } catch (_) {}
+    try {
+      if (licenseStatus?.tier === 'Standalone') {
+        devices = db.prepare("SELECT COUNT(*) as c FROM connected_devices").get().c;
+      } else {
+        devices = db.prepare("SELECT COUNT(DISTINCT device_id) as c FROM sync_logs").get().c;
+      }
+    } catch (_) {}
 
     let grade_events = 0;
     try { grade_events = db.prepare("SELECT COUNT(*) as c FROM sync_logs").get().c; } catch (_) {}
@@ -1160,12 +1192,20 @@ ipcMain.handle("get-db-stats", () => {
     const students = db.prepare("SELECT COUNT(*) as c FROM students").get().c;
     const classes = db.prepare("SELECT COUNT(*) as c FROM class_arms").get().c;
     let devices = 0;
-    if (licenseStatus?.tier === 'Standalone') {
-      devices = db.prepare("SELECT COUNT(*) as c FROM connected_devices").get().c;
-    }
-    return { teachers, students, classes, devices };
+    try {
+      if (licenseStatus?.tier === 'Standalone') {
+        devices = db.prepare("SELECT COUNT(*) as c FROM connected_devices").get().c;
+      } else {
+        devices = db.prepare("SELECT COUNT(DISTINCT device_id) as c FROM sync_logs").get().c;
+      }
+    } catch (_) {}
+    let grade_events = 0;
+    try {
+      grade_events = db.prepare("SELECT COUNT(*) as c FROM sync_logs").get().c;
+    } catch (_) {}
+    return { teachers, students, classes, devices, grade_events };
   } catch (err) {
-    return { teachers: 0, students: 0, classes: 0, devices: 0 };
+    return { teachers: 0, students: 0, classes: 0, devices: 0, grade_events: 0 };
   }
 });
 
@@ -2469,10 +2509,28 @@ ipcMain.handle("get-stamp-preview", (event, { style, color }) => {
 ipcMain.handle("get-form-teachers", () => {
   try {
     const db = database.getDb();
+    // One-time idempotent migration: expand any bare hierarchy class names
+    // (e.g. "JSS 1") stored in form_teachers to their arm-expanded form
+    // (e.g. "JSS 1 Gold") so they match the fullList used by the modal.
+    // Rows whose class_name already includes an arm are unaffected because
+    // class_arms.hierarchy_class only stores the base name (e.g. "JSS 1").
+    db.prepare(`
+      UPDATE form_teachers
+      SET class_name = class_name || ' ' || (
+        SELECT arm FROM class_arms
+        WHERE hierarchy_class = form_teachers.class_name
+        ORDER BY rowid LIMIT 1
+      )
+      WHERE EXISTS (
+        SELECT 1 FROM class_arms WHERE hierarchy_class = form_teachers.class_name
+      )
+    `).run();
+    // LEFT JOIN so orphaned mappings (teacher deleted) still surface rather
+    // than being silently hidden.
     const rows = db.prepare(`
       SELECT f.class_name, f.teacher_id, t.name as teacher_name 
       FROM form_teachers f
-      JOIN teachers t ON f.teacher_id = t.id
+      LEFT JOIN teachers t ON f.teacher_id = t.id
     `).all();
     return { ok: true, data: rows };
   } catch (err) {
@@ -3966,8 +4024,8 @@ function createWindow() {
   });
 
   ipcMain.on("process-csv", (event, filePath) => {
-    handleCSVUpload(filePath, (count) => {
-      event.reply("csv-loaded", count);
+    handleCSVUpload(filePath, (count, err, result) => {
+      event.reply("csv-loaded", { count, warnings: result?.warnings || [] });
     });
   });
 

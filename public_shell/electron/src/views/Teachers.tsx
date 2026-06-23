@@ -97,10 +97,16 @@ export function Teachers() {
 
   useEffect(() => {
     if (window.electronAPI?.onCSVLoaded) {
-      window.electronAPI.onCSVLoaded((count) => {
-        setCsvStatus(`✅ CSV Processed: ${count} Records Imported`);
+      window.electronAPI.onCSVLoaded((payload: any) => {
+        const count = typeof payload === 'object' ? payload.count : payload;
+        const warnings: string[] = typeof payload === 'object' ? (payload.warnings || []) : [];
+        const baseMsg = `✅ CSV Processed: ${count} Records Imported`;
+        const fullMsg = warnings.length > 0
+          ? `${baseMsg} — ⚠️ ${warnings.length} warning(s): ${warnings.join(' | ')}`
+          : baseMsg;
+        setCsvStatus(fullMsg);
         fetchTeachers();
-        setTimeout(() => setCsvStatus(null), 4000);
+        setTimeout(() => setCsvStatus(null), warnings.length > 0 ? 8000 : 4000);
       });
     }
   }, []);
