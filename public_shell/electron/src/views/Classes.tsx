@@ -17,11 +17,32 @@ export default function Classes() {
   useEffect(() => {
     if ((window as any).electronAPI?.onClassesCSVLoaded) {
       (window as any).electronAPI.onClassesCSVLoaded((res: { count: number, error: string | null }) => {
+        const Swal = (window as any).Swal;
         if (res.error) {
           setCsvStatus(`❌ Classes Import Failed: ${res.error}`);
+          if (Swal) {
+            Swal.fire({
+              title: 'Classes Import Failed',
+              text: res.error,
+              icon: 'error',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#ef4444'
+            });
+          }
         } else {
           setCsvStatus(`✅ Classes CSV Processed: ${res.count} records loaded`);
           refresh();
+          if (Swal) {
+            Swal.fire({
+              title: 'Success!',
+              text: `Successfully imported ${res.count} class records.`,
+              icon: 'success',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#00E5FF'
+            });
+          }
         }
         setTimeout(() => setCsvStatus(null), 4000);
       });
@@ -353,15 +374,34 @@ export default function Classes() {
       </div>
 
       {csvStatus && (
-        <div style={{
-          background: csvStatus.startsWith('❌') ? 'rgba(239, 68, 68, 0.1)' : 'rgba(0, 229, 255, 0.1)',
-          border: csvStatus.startsWith('❌') ? '1px solid rgba(239, 68, 68, 0.25)' : '1px solid rgba(0, 229, 255, 0.25)',
-          padding: '10px 16px',
-          borderRadius: '6px',
-          fontSize: '12px',
-          color: csvStatus.startsWith('❌') ? '#ef4444' : '#00e5ff',
-          marginBottom: '20px',
-        }}>
+        <div 
+          className="slide-in-right"
+          style={{
+            position: 'fixed',
+            top: '24px',
+            right: '24px',
+            zIndex: 99999,
+            background: csvStatus.startsWith('❌') || csvStatus.includes('Failed') 
+              ? 'rgba(239, 68, 68, 0.95)' 
+              : csvStatus.startsWith('✅') 
+                ? 'rgba(16, 185, 129, 0.95)' 
+                : 'rgba(13, 18, 53, 0.95)',
+            border: csvStatus.startsWith('❌') || csvStatus.includes('Failed')
+              ? '1px solid rgba(239, 68, 68, 0.5)'
+              : csvStatus.startsWith('✅')
+                ? '1px solid rgba(16, 185, 129, 0.5)'
+                : '1px solid rgba(0, 229, 255, 0.4)',
+            padding: '14px 20px',
+            borderRadius: '12px',
+            fontSize: '13px',
+            color: '#fff',
+            fontWeight: 600,
+            boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
+            backdropFilter: 'blur(10px)',
+            maxWidth: '350px',
+            wordBreak: 'break-word',
+          }}
+        >
           {csvStatus}
         </div>
       )}

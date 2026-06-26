@@ -91,6 +91,10 @@ const nexusAPI = {
         addArm: (data) => ipcRenderer.invoke('classes:addArm', data),
         removeArm: (data) => ipcRenderer.invoke('classes:removeArm', data),
     },
+    db: {
+        getClearImpact: (data) => ipcRenderer.invoke('db:get-clear-impact', data),
+        clearData: (data) => ipcRenderer.invoke('db:clear-data', data),
+    },
     dashboard: {
         getSnapshot: () => ipcRenderer.invoke('dashboard:getSnapshot'),
     },

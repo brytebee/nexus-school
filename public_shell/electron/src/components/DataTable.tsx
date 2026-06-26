@@ -3,7 +3,7 @@ import React, { ReactNode } from 'react';
 export interface Column<T> {
   header: string;
   accessorKey?: keyof T;
-  cell?: (row: T) => ReactNode;
+  cell?: (row: T, rowIndex: number) => ReactNode;
   align?: 'left' | 'center' | 'right';
   width?: string;
 }
@@ -70,7 +70,7 @@ export function DataTable<T>({ data, columns, isLoading, emptyMessage = "No data
                     key={colIdx} 
                     className={`py-3 px-6 ${col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left'}`}
                   >
-                    {col.cell ? col.cell(row) : (col.accessorKey ? String(row[col.accessorKey]) : null)}
+                    {col.cell ? col.cell(row, rowIdx) : (col.accessorKey ? String(row[col.accessorKey]) : null)}
                   </td>
                 ))}
               </tr>

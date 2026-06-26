@@ -784,15 +784,25 @@ window.initAdminManagement = async function () {
     list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:10px;">Loading…</div>';
     try {
       const admins = await window.electronAPI.getAdmins();
+      const session = await window.electronAPI.invoke('auth:get-session');
       if (!admins.length) { list.innerHTML = '<div style="color:var(--text-dim);padding:10px;">No accounts found.</div>'; return; }
-      list.innerHTML = admins.map(a => `
+      list.innerHTML = admins.map(a => {
+        const canEdit = session && (session.id === a.id || session.role_level >= 9);
+        const editBtn = canEdit 
+          ? `<button onclick="window._editAdminSecurity(${a.id}, '${a.username}', '${a.phone || ''}', '${a.recovery_question?.replace(/'/g, "\\'") || ''}')" style="background:rgba(0,229,255,0.1);border:1px solid rgba(0,229,255,0.3);color:#00e5ff;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;margin-right:6px;">Security</button>`
+          : '';
+        return `
         <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px 14px;margin-bottom:8px;">
           <div>
             <div style="font-weight:600;font-size:13px;">${a.username}</div>
             <div style="font-size:11px;color:${ROLE_COLOR[a.role_level]||'#aaa'};margin-top:2px;">${ROLE_LABEL[a.role_level]||'Level '+a.role_level}</div>
           </div>
-          <button onclick="window._deleteAdmin(${a.id},'${a.username}')" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#ef4444;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;">Remove</button>
-        </div>`).join('');
+          <div>
+            ${editBtn}
+            <button onclick="window._deleteAdmin(${a.id},'${a.username}')" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#ef4444;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;">Remove</button>
+          </div>
+        </div>`;
+      }).join('');
     } catch (e) { list.innerHTML = `<div style="color:#ef4444;padding:10px;">${e.message}</div>`; }
   }
 
@@ -804,6 +814,46 @@ window.initAdminManagement = async function () {
     else Swal.fire('Error', res.error, 'error');
   };
 
+  window._editAdminSecurity = async (id, username, phone, question) => {
+    const { value: f } = await Swal.fire({
+      title: `Update Recovery Settings`,
+      background: '#0d1235', color: '#fff',
+      confirmButtonColor: '#00e5ff', showCancelButton: true, width: 440, focusConfirm: false,
+      html: `
+        <div style="text-align:left;display:flex;flex-direction:column;gap:10px;margin-top:8px;">
+          <label style="font-size:12px;color:rgba(255,255,255,0.5);">WhatsApp Number (for OTP resets)</label>
+          <input id="up-phone" class="swal2-input" placeholder="Recovery WhatsApp Number" value="${phone || ''}" style="margin:0;width:100%;box-sizing:border-box;">
+          
+          <label style="font-size:12px;color:rgba(255,255,255,0.5);margin-top:6px;">Security Question</label>
+          <input id="up-question" class="swal2-input" placeholder="Security Question" value="${question || ''}" style="margin:0;width:100%;box-sizing:border-box;">
+          
+          <label style="font-size:12px;color:rgba(255,255,255,0.5);margin-top:6px;">Security Answer</label>
+          <input id="up-answer" class="swal2-input" type="password" placeholder="Answer (leave blank to keep unchanged)" style="margin:0;width:100%;box-sizing:border-box;">
+        </div>`,
+      preConfirm: () => ({
+        phone: document.getElementById('up-phone').value.trim(),
+        question: document.getElementById('up-question').value.trim(),
+        answer: document.getElementById('up-answer').value.trim()
+      })
+    });
+    
+    if (f === undefined) return;
+    
+    const res = await window.electronAPI.invoke('auth:update-profile-security', {
+      adminId: id,
+      phone: f.phone,
+      question: f.question,
+      answer: f.answer
+    });
+    
+    if (res.ok) {
+      renderAdmins();
+      Swal.fire({ title: 'Updated!', text: `Security settings for ${username} updated successfully.`, icon: 'success', background: '#0d1235', color: '#fff', timer: 2000, showConfirmButton: false });
+    } else {
+      Swal.fire('Error', res.error, 'error');
+    }
+  };
+
   const addBtn = document.getElementById('admin-add-btn');
   if (addBtn && !addBtn._bound) {
     addBtn._bound = true;
@@ -813,22 +863,35 @@ window.initAdminManagement = async function () {
         confirmButtonColor: '#10b981', showCancelButton: true, width: 440, focusConfirm: false,
         html: `
           <div style="text-align:left;display:flex;flex-direction:column;gap:10px;margin-top:8px;">
-            <input id="na-user" class="swal2-input" placeholder="Username (e.g. deputy_principal)" style="margin:0;">
-            <input id="na-pin" type="password" class="swal2-input" placeholder="Initial 4-digit PIN" maxlength="4" inputmode="numeric" style="margin:0;">
-            <select id="na-role" class="swal2-input" style="margin:0;">
+            <input id="na-user" class="swal2-input" placeholder="Username (e.g. deputy_principal)" style="margin:0;width:100%;box-sizing:border-box;">
+            <input id="na-pin" type="password" class="swal2-input" placeholder="Initial 4-digit PIN" maxlength="4" inputmode="numeric" style="margin:0;width:100%;box-sizing:border-box;">
+            <select id="na-role" class="swal2-input" style="margin:0;width:100%;box-sizing:border-box;">
               <option value="9">👑 Super Admin — Full access (Principal)</option>
               <option value="5">🔑 Manager — Most features (Deputy, Bursar)</option>
               <option value="1" selected>🧑‍💼 Staff — Limited access (Clerk, Secretary)</option>
             </select>
+            <input id="na-phone" class="swal2-input" placeholder="WhatsApp Phone (Optional)" style="margin:0;width:100%;box-sizing:border-box;">
+            <input id="na-question" class="swal2-input" placeholder="Security Question (e.g. Favorite color?)" style="margin:0;width:100%;box-sizing:border-box;">
+            <input id="na-answer" class="swal2-input" placeholder="Security Answer" style="margin:0;width:100%;box-sizing:border-box;">
           </div>`,
         preConfirm: () => ({
           username: document.getElementById('na-user').value.trim(),
           pin: document.getElementById('na-pin').value.trim(),
-          roleLevel: document.getElementById('na-role').value
+          roleLevel: document.getElementById('na-role').value,
+          phone: document.getElementById('na-phone').value.trim(),
+          question: document.getElementById('na-question').value.trim(),
+          answer: document.getElementById('na-answer').value.trim()
         })
       });
       if (!f?.username) return;
-      const res = await window.electronAPI.createAdmin({ username: f.username, pin: f.pin, roleLevel: parseInt(f.roleLevel) });
+      const res = await window.electronAPI.createAdmin({ 
+        username: f.username, 
+        pin: f.pin, 
+        roleLevel: parseInt(f.roleLevel),
+        phone: f.phone,
+        question: f.question,
+        answer: f.answer
+      });
       if (res.ok) {
         renderAdmins();
         Swal.fire({ title: 'Account Created!', html: `<strong>${f.username}</strong> can now log in with their PIN on the lock screen.`, icon: 'success', background: '#0d1235', color: '#fff', timer: 2500, showConfirmButton: false });

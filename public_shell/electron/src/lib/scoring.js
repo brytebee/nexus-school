@@ -9,14 +9,15 @@ function aggregateScores(subjects, totalMaxScore = 100, maxSubjects = null) {
     const score = sub.score ?? sub.Total ?? 0;
     return acc + (Number(score) || 0);
   }, 0);
+  const roundedTotal = totalScore % 1 === 0 ? totalScore : Number(totalScore.toFixed(2));
   const numGraded = gradedSubs.length;
   const denominator = (maxSubjects && maxSubjects > 0) ? maxSubjects : numGraded;
-  const avgScore = numGraded > 0 ? (totalScore / denominator).toFixed(1) : "—";
+  const avgScore = numGraded > 0 ? (roundedTotal / denominator).toFixed(2) : "—";
   const avgPercent = (numGraded > 0 && totalMaxScore > 0)
-    ? Math.round((totalScore / (denominator * totalMaxScore)) * 100) : 0;
+    ? Math.round((roundedTotal / (denominator * totalMaxScore)) * 100) : 0;
 
   return {
-    totalScore,
+    totalScore: roundedTotal,
     numGraded,
     avgScore,
     avgPercent

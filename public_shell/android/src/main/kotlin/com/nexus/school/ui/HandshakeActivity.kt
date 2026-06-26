@@ -355,6 +355,7 @@ class HandshakeActivity : AppCompatActivity() {
                                                     config.plan_tier?.takeIf { it.isNotBlank() }?.let {
                                                         identityManager.savePlanTier(it)
                                                     }
+                                                    identityManager.saveRole(result.role ?: "teacher")
                                                     val scoreJson = buildString {
                                                         append("[")
                                                         result.score_components.forEachIndexed { idx, comp ->

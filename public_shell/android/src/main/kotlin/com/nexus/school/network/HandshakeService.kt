@@ -64,6 +64,7 @@ data class ScoreComponent(
 data class HandshakeResponse(
     val status: String,
     val message: String,
+    val role: String? = null,
     val school_config: SchoolConfig,
     val server_timestamp: String,
     val students: List<com.nexus.school.data.Student> = emptyList(),

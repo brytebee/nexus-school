@@ -119,6 +119,16 @@ export function Students() {
 
   const [csvStatus, setCsvStatus] = useState<string | null>(null);
 
+  // Filter state — used to narrow the student list
+  const [filterClass, setFilterClass] = useState('');
+  const [filterSubject, setFilterSubject] = useState('');
+  const [filterTeacherId, setFilterTeacherId] = useState('');
+  const [filterNoArm, setFilterNoArm] = useState(false);
+
+  // Filter metadata — teachers list and all known subjects
+  const [filterTeachers, setFilterTeachers] = useState<{ id: string; name: string; allocations?: { class_name: string; subject: string }[] }[]>([]);
+  const [filterSubjects, setFilterSubjects] = useState<string[]>([]);
+
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -149,6 +159,25 @@ export function Students() {
   const [gradesUnlocked, setGradesUnlocked] = useState(false);
   const [gradesStatus, setGradesStatus] = useState<string | null>(null);
 
+  // Load filter metadata on mount (teachers + subjects from canonical allocation list)
+  useEffect(() => {
+    const loadFilterMeta = async () => {
+      try {
+        const tchRes = await window.electronAPI?.getAllTeachers?.({ limit: 500 });
+        if (tchRes?.ok) setFilterTeachers(tchRes.data || []);
+
+        const subRes = await window.electronAPI?.subjects?.getCanonicalList?.();
+        if (subRes?.ok) {
+          const unique = Array.from(new Set((subRes.data || []).map((r: any) => r.subject).filter(Boolean))).sort() as string[];
+          setFilterSubjects(unique);
+        }
+      } catch (err) {
+        console.error('Failed to load filter metadata:', err);
+      }
+    };
+    loadFilterMeta();
+  }, []);
+
   // Fetch student records
   const fetchStudents = async () => {
     if (!window.electronAPI?.getAllStudents) return;
@@ -158,6 +187,10 @@ export function Students() {
         limit,
         offset: page * limit,
         search,
+        class_name: filterClass,
+        subject: filterSubject,
+        teacher_id: filterTeacherId,
+        no_arm: filterNoArm,
       });
       if (res && res.ok) {
         setStudents(res.data || []);
@@ -181,7 +214,7 @@ export function Students() {
 
   useEffect(() => {
     fetchStudents();
-  }, [page, search, limit]);
+  }, [page, search, limit, filterClass, filterSubject, filterTeacherId, filterNoArm]);
 
 
   // Load student directory settings on mount
@@ -234,6 +267,37 @@ export function Students() {
         setCsvStatus(fullMsg);
         fetchStudents();
         setTimeout(() => setCsvStatus(null), warnings.length > 0 ? 8000 : 4000);
+
+        const Swal = (window as any).Swal;
+        if (Swal) {
+          if (warnings.length > 0) {
+            Swal.fire({
+              title: 'Import Processed with Warnings',
+              html: `
+                <p style="color: #fff; margin-bottom: 10px;">Successfully loaded <strong>${count}</strong> students.</p>
+                <div style="text-align: left; background: rgba(239, 68, 68, 0.1); border-left: 4px solid #ef4444; padding: 10px; margin-top: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto;">
+                  <strong style="color: #ef4444; font-size: 13px;">Warnings:</strong>
+                  <ul style="margin: 5px 0 0 0; padding-left: 15px; color: #fca5a5; font-size: 11px; line-height: 1.6;">
+                    ${warnings.map(w => `<li>${w}</li>`).join('')}
+                  </ul>
+                </div>
+              `,
+              icon: 'warning',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#00E5FF'
+            });
+          } else {
+            Swal.fire({
+              title: 'Success!',
+              text: `Successfully loaded ${count} students.`,
+              icon: 'success',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#00E5FF'
+            });
+          }
+        }
       });
     }
   }, []);
@@ -265,14 +329,150 @@ export function Students() {
     }
   };
 
+  const handleClearData = async (type: 'grades' | 'attendance') => {
+    const Swal = (window as any).Swal;
+    if (!Swal) return;
+
+    try {
+      const res = await (window.electronAPI as any)?.db?.getClearImpact({ type });
+      if (!res?.ok) {
+        Swal.fire({
+          title: 'Error',
+          text: 'Failed to calculate database impact: ' + (res?.error || 'Unknown error'),
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#00E5FF'
+        });
+        return;
+      }
+
+      const counts = res.counts || {};
+      let impactHtml = '<div style="text-align: left; padding: 10px 5px; font-family: \'Inter\', sans-serif;">';
+      if (type === 'grades') {
+        impactHtml += `
+          <p style="color: #fff; font-size: 14px; margin-bottom: 15px; line-height: 1.5;">
+            You are about to delete all grade records. This will affect:
+          </p>
+          <ul style="color: #aaa; font-size: 12px; line-height: 1.8; padding-left: 20px; margin-bottom: 15px;">
+            <li><strong>${counts.student_records || 0}</strong> Student subject grade entries (scores/breakdowns)</li>
+            <li><strong>${counts.sync_warnings || 0}</strong> Mismatched subject sync warnings</li>
+          </ul>
+        `;
+      } else {
+        impactHtml += `
+          <p style="color: #fff; font-size: 14px; margin-bottom: 15px; line-height: 1.5;">
+            You are about to delete all attendance records. This will affect:
+          </p>
+          <ul style="color: #aaa; font-size: 12px; line-height: 1.8; padding-left: 20px; margin-bottom: 15px;">
+            <li><strong>${counts.student_attendance || 0}</strong> Term-level student attendance cards</li>
+            <li><strong>${counts.daily_attendance || 0}</strong> Daily roll-call records</li>
+            <li><strong>${counts.subject_attendance || 0}</strong> Subject-level period attendance logs</li>
+            <li><strong>${counts.subject_attendance_agg || 0}</strong> Aggregated subject attendance caches</li>
+            <li><strong>${counts.truancy_flags || 0}</strong> Truancy radar flags</li>
+          </ul>
+        `;
+      }
+      impactHtml += `
+        <p style="color: #ef4444; font-size: 13px; font-weight: 600; margin-top: 15px;">
+          ⚠️ THIS ACTION IS IRREVERSIBLE AND DESTROYS ALL CORRESPONDING DATA!
+        </p>
+      </div>`;
+
+      const confirmRes = await Swal.fire({
+        title: `<span style="color:#ef4444; font-size:20px; font-weight:700;">Clear All ${type === 'grades' ? 'Grades & Marks' : 'Attendance Records'}?</span>`,
+        html: impactHtml,
+        showCancelButton: true,
+        confirmButtonText: 'Yes, Clear All',
+        cancelButtonText: 'Cancel',
+        confirmButtonColor: '#ef4444',
+        cancelButtonColor: '#555',
+        background: '#0b0f19',
+        color: '#fff',
+      });
+
+      if (!confirmRes.isConfirmed) return;
+
+      requireSudo(
+        async () => {
+          Swal.fire({
+            title: 'Wiping Data...',
+            html: '<p style="color:#aaa;">Please wait while records are being purged from the database.</p>',
+            allowOutsideClick: false,
+            didOpen: () => {
+              Swal.showLoading();
+            },
+            background: '#0b0f19',
+            color: '#fff'
+          });
+
+          const clearRes = await (window.electronAPI as any)?.db?.clearData({ type });
+          if (clearRes?.ok) {
+            Swal.fire({
+              title: 'Success!',
+              text: `All ${type} and cascading records have been deleted successfully.`,
+              icon: 'success',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#00E5FF'
+            });
+          } else {
+            Swal.fire({
+              title: 'Clear Failed',
+              text: clearRes?.error || 'Failed to clear data.',
+              icon: 'error',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#ef4444'
+            });
+          }
+        },
+        `Authorize Deleting ${type === 'grades' ? 'Grades' : 'Attendance'}`,
+        `Enter administrator PIN to confirm and execute the purge.`,
+        true
+      );
+
+    } catch (err: any) {
+      Swal.fire({
+        title: 'Error',
+        text: err.message,
+        icon: 'error',
+        background: '#0b0f19',
+        color: '#fff',
+        confirmButtonColor: '#ef4444'
+      });
+    }
+  };
+
   // Handle Grades CSV Loaded notification
   useEffect(() => {
     if ((window.electronAPI as any)?.onGradesCSVLoaded) {
       (window.electronAPI as any).onGradesCSVLoaded((res: { count: number, error: string | null }) => {
+        const Swal = (window as any).Swal;
         if (res.error) {
           setCsvStatus(`❌ Grades Import Failed: ${res.error}`);
+          if (Swal) {
+            Swal.fire({
+              title: 'Grades Import Failed',
+              text: res.error,
+              icon: 'error',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#ef4444'
+            });
+          }
         } else {
           setCsvStatus(`✅ Grades CSV Processed: ${res.count} records loaded`);
+          if (Swal) {
+            Swal.fire({
+              title: 'Success!',
+              text: `Successfully imported ${res.count} grade records.`,
+              icon: 'success',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#00E5FF'
+            });
+          }
         }
         setTimeout(() => setCsvStatus(null), 4000);
       });
@@ -283,10 +483,31 @@ export function Students() {
   useEffect(() => {
     if ((window.electronAPI as any)?.onAttendanceCSVLoaded) {
       (window.electronAPI as any).onAttendanceCSVLoaded((res: { count: number, error: string | null }) => {
+        const Swal = (window as any).Swal;
         if (res.error) {
           setCsvStatus(`❌ Attendance Import Failed: ${res.error}`);
+          if (Swal) {
+            Swal.fire({
+              title: 'Attendance Import Failed',
+              text: res.error,
+              icon: 'error',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#ef4444'
+            });
+          }
         } else {
           setCsvStatus(`✅ Attendance CSV Processed: ${res.count} records loaded`);
+          if (Swal) {
+            Swal.fire({
+              title: 'Success!',
+              text: `Successfully imported ${res.count} attendance records.`,
+              icon: 'success',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#00E5FF'
+            });
+          }
         }
         setTimeout(() => setCsvStatus(null), 4000);
       });
@@ -508,7 +729,7 @@ export function Students() {
   const columns: Column<Student>[] = [
     {
       header: 'INDEX',
-      cell: (_, idx) => <span style={{ fontSize: '12px', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{page * limit + (idx ?? 0) + 1}</span>,
+      cell: (_, rowIndex) => <span style={{ fontSize: '12px', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{page * limit + rowIndex + 1}</span>,
       width: '60px',
     },
     {
@@ -739,14 +960,34 @@ export function Students() {
       )}
 
       {csvStatus && (
-        <div style={{
-          background: 'rgba(0, 229, 255, 0.1)',
-          border: '1px solid rgba(0, 229, 255, 0.25)',
-          padding: '10px 16px',
-          borderRadius: 'var(--radius-sm)',
-          fontSize: '12px',
-          color: 'var(--accent)',
-        }}>
+        <div 
+          className="slide-in-right"
+          style={{
+            position: 'fixed',
+            top: '24px',
+            right: '24px',
+            zIndex: 99999,
+            background: csvStatus.startsWith('❌') || csvStatus.includes('Failed') 
+              ? 'rgba(239, 68, 68, 0.95)' 
+              : csvStatus.startsWith('✅') 
+                ? 'rgba(16, 185, 129, 0.95)' 
+                : 'rgba(13, 18, 53, 0.95)',
+            border: csvStatus.startsWith('❌') || csvStatus.includes('Failed')
+              ? '1px solid rgba(239, 68, 68, 0.5)'
+              : csvStatus.startsWith('✅')
+                ? '1px solid rgba(16, 185, 129, 0.5)'
+                : '1px solid rgba(0, 229, 255, 0.4)',
+            padding: '14px 20px',
+            borderRadius: '12px',
+            fontSize: '13px',
+            color: '#fff',
+            fontWeight: 600,
+            boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
+            backdropFilter: 'blur(10px)',
+            maxWidth: '350px',
+            wordBreak: 'break-word',
+          }}
+        >
           {csvStatus}
         </div>
       )}
@@ -791,6 +1032,157 @@ export function Students() {
           </button>
         )}
       </div>
+
+      {/* ── Filter Panel ──────────────────────────────────────────────── */}
+      {(() => {
+        // Derive filtered options when a teacher is selected
+        const selectedTeacherAllocations = filterTeacherId
+          ? (filterTeachers.find(t => t.id === filterTeacherId)?.allocations || [])
+          : null;
+        const teacherClasses  = selectedTeacherAllocations ? Array.from(new Set(selectedTeacherAllocations.map(a => a.class_name))) : null;
+        const teacherSubjects = selectedTeacherAllocations ? Array.from(new Set(selectedTeacherAllocations.map(a => a.subject))).sort() : null;
+
+        const classOptions  = teacherClasses ? [...teacherClasses].sort() : [...fullList].sort();
+        const subjectOptions = teacherSubjects || filterSubjects;
+
+        const hasAnyFilter = filterClass || filterSubject || filterTeacherId || filterNoArm;
+
+        const clearAll = () => {
+          setFilterClass('');
+          setFilterSubject('');
+          setFilterTeacherId('');
+          setFilterNoArm(false);
+          setPage(0);
+        };
+
+        return (
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+            background: 'rgba(255,255,255,0.03)',
+            border: '1px solid var(--glass-border)',
+            borderRadius: 'var(--radius-md)',
+            padding: '14px 18px',
+          }}>
+            {/* Filter row */}
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap', paddingTop: '2px' }}>
+                🔽 Filters
+              </span>
+
+              {/* Teacher */}
+              <select
+                value={filterTeacherId}
+                onChange={e => { setFilterTeacherId(e.target.value); setFilterClass(''); setFilterSubject(''); setPage(0); }}
+                className="modern-input"
+                style={{ fontSize: '12px', padding: '7px 10px', minWidth: '160px', flex: '1 1 160px' }}
+              >
+                <option value="">All Teachers</option>
+                {filterTeachers.map(t => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+
+              {/* Class / Arm */}
+              <select
+                value={filterClass}
+                onChange={e => { setFilterClass(e.target.value); setPage(0); }}
+                className="modern-input"
+                style={{ fontSize: '12px', padding: '7px 10px', minWidth: '150px', flex: '1 1 150px' }}
+              >
+                <option value="">All Classes</option>
+                {classOptions.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+
+              {/* Subject */}
+              <select
+                value={filterSubject}
+                onChange={e => { setFilterSubject(e.target.value); setPage(0); }}
+                className="modern-input"
+                style={{ fontSize: '12px', padding: '7px 10px', minWidth: '160px', flex: '1 1 160px' }}
+              >
+                <option value="">All Subjects</option>
+                {subjectOptions.map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+
+              {hasAnyFilter && (
+                <button
+                  onClick={clearAll}
+                  style={{
+                    background: 'rgba(239,68,68,0.12)',
+                    border: '1px solid rgba(239,68,68,0.35)',
+                    color: '#f87171',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '7px 14px',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    transition: 'background 0.2s',
+                  }}
+                  onMouseOver={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.22)')}
+                  onMouseOut={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.12)')}
+                >
+                  ✕ Clear filters
+                </button>
+              )}
+
+              {/* No-arm data-quality toggle */}
+              <button
+                onClick={() => { setFilterNoArm(v => !v); setPage(0); }}
+                title="Show only students with no arm assignment"
+                style={{
+                  background: filterNoArm ? 'rgba(245,158,11,0.2)' : 'rgba(245,158,11,0.06)',
+                  border: `1px solid ${filterNoArm ? 'rgba(245,158,11,0.6)' : 'rgba(245,158,11,0.25)'}`,
+                  color: '#f59e0b',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '7px 12px',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  fontWeight: filterNoArm ? 700 : 400,
+                  transition: 'all 0.2s',
+                }}
+              >
+                ⚠️ No Arm
+              </button>
+            </div>
+
+            {hasAnyFilter && (
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {filterNoArm && (
+                  <span style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', color: '#f59e0b', borderRadius: '20px', padding: '2px 10px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    ⚠️ No arm assigned
+                    <button onClick={() => { setFilterNoArm(false); setPage(0); }} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: '12px' }}>×</button>
+                  </span>
+                )}
+                {filterTeacherId && (
+                  <span style={{ background: 'rgba(0,229,255,0.1)', border: '1px solid rgba(0,229,255,0.3)', color: '#00e5ff', borderRadius: '20px', padding: '2px 10px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    👤 {filterTeachers.find(t => t.id === filterTeacherId)?.name || filterTeacherId}
+                    <button onClick={() => { setFilterTeacherId(''); setPage(0); }} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: '12px' }}>×</button>
+                  </span>
+                )}
+                {filterClass && (
+                  <span style={{ background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.3)', color: '#a78bfa', borderRadius: '20px', padding: '2px 10px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    🏫 {filterClass}
+                    <button onClick={() => { setFilterClass(''); setPage(0); }} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: '12px' }}>×</button>
+                  </span>
+                )}
+                {filterSubject && (
+                  <span style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', color: '#34d399', borderRadius: '20px', padding: '2px 10px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    📚 {filterSubject}
+                    <button onClick={() => { setFilterSubject(''); setPage(0); }} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: '12px' }}>×</button>
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Data Table */}
       <DataTable
@@ -1977,6 +2369,54 @@ export function Students() {
                       style={{ display: 'none' }}
                     />
                   </div>
+                </div>
+              </div>
+
+              <div style={{ height: '1px', background: 'var(--glass-border)', margin: '24px 0' }} />
+
+              {/* Danger Zone Container */}
+              <div style={{
+                background: 'rgba(239, 68, 68, 0.05)',
+                border: '1px dashed rgba(239, 68, 68, 0.3)',
+                borderRadius: '8px',
+                padding: '16px',
+                marginBottom: '24px'
+              }}>
+                <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', fontWeight: 600, color: '#ef4444', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  ⚠️ Danger Zone
+                </h4>
+                <p style={{ fontSize: '11px', color: 'var(--text-dim)', margin: '0 0 12px 0', lineHeight: 1.5 }}>
+                  These actions are destructive, irreversible, and require administrator credentials.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <button
+                    onClick={() => handleClearData('grades')}
+                    className="secondary-btn"
+                    style={{
+                      borderColor: 'rgba(239, 68, 68, 0.4)',
+                      color: '#ef4444',
+                      fontSize: '11px',
+                      padding: '8px 12px',
+                      justifyContent: 'center',
+                      background: 'transparent'
+                    }}
+                  >
+                    Clear All Grades & Marks
+                  </button>
+                  <button
+                    onClick={() => handleClearData('attendance')}
+                    className="secondary-btn"
+                    style={{
+                      borderColor: 'rgba(239, 68, 68, 0.4)',
+                      color: '#ef4444',
+                      fontSize: '11px',
+                      padding: '8px 12px',
+                      justifyContent: 'center',
+                      background: 'transparent'
+                    }}
+                  >
+                    Clear All Attendance Records
+                  </button>
                 </div>
               </div>
 

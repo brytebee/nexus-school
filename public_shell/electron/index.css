@@ -65,6 +65,15 @@ body {
     height: 100vh;
     overflow: hidden;
     display: flex;
+    /* Allow text selection throughout the app (Electron disables it by default) */
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+/* Restore no-select on interactive/draggable elements */
+button, .nav-item, [draggable], label {
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 .background-glow {
@@ -73,6 +82,39 @@ body {
     background: radial-gradient(ellipse at 20% 50%, rgba(26,35,126,0.35) 0%, transparent 60%);
     pointer-events: none;
     z-index: 0;
+}
+
+/* ── Date / Time inputs — force white icon on dark background ──
+   Chromium/Electron renders the calendar icon using the system
+   color-scheme. Without 'dark' on the input itself the icon appears
+   in the OS light-mode colour (dark grey) — invisible on our dark UI. */
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"],
+input[type="month"],
+input[type="week"] {
+    color-scheme: dark;
+}
+
+/* Explicit icon override — invert + brighten to match select arrow */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="month"]::-webkit-calendar-picker-indicator,
+input[type="week"]::-webkit-calendar-picker-indicator {
+    filter: invert(1) brightness(1.4) contrast(1.1);
+    cursor: pointer;
+    opacity: 0.75;
+    transition: opacity 0.15s ease;
+    padding: 0 2px;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover,
+input[type="month"]::-webkit-calendar-picker-indicator:hover,
+input[type="week"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
 }
 
 ::-webkit-scrollbar {
@@ -637,6 +679,7 @@ body {
     background: rgba(0,0,0,0.2);
     border: 1px solid var(--glass-border);
     color: var(--text-main);
+    color-scheme: dark;           /* ensures date/time sub-elements use dark icon colours */
     padding: 10px 14px;
     border-radius: var(--radius-sm);
     font-family: 'Inter', sans-serif;
@@ -1821,7 +1864,7 @@ code {
     background: rgba(0, 0, 0, 0.75) !important;
     backdrop-filter: blur(8px) !important;
     -webkit-backdrop-filter: blur(8px) !important;
-    z-index: 9999 !important;
+    z-index: 999999 !important;
 }
 
 .swal2-popup {

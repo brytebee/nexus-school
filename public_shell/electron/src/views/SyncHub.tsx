@@ -826,8 +826,8 @@ export function SyncHub() {
                   const badgeColor = entry.event_type.startsWith('BACKUP') ? '#4CAF50'
                     : entry.event_type.startsWith('FEE') ? '#00bcd4'
                     : entry.event_type.startsWith('STUDENT') || entry.event_type.startsWith('TEACHER') ? '#ff9800'
-                    : entry.event_type.startsWith('GRADES') || entry.event_type.startsWith('ATTENDANCE') || entry.event_type.startsWith('ROSTER') || entry.event_type.startsWith('CLASSES') ? '#7c4dff'
-                    : entry.event_type.startsWith('APP_RESET') || entry.event_type.startsWith('REVOKE') ? '#f44336'
+                    : entry.event_type.startsWith('GRADES') || entry.event_type.startsWith('ATTENDANCE') || entry.event_type.startsWith('ROSTER') || entry.event_type.startsWith('CLASSES') || entry.event_type.startsWith('PRINT') ? '#7c4dff'
+                    : entry.event_type.startsWith('APP_RESET') || entry.event_type.startsWith('REVOKE') || entry.event_type.startsWith('CLEAR') ? '#f44336'
                     : entry.event_type.startsWith('SYNC') ? '#1a237e'
                     : 'rgba(255,255,255,0.15)';
                   return (
