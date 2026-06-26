@@ -44,6 +44,21 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
   const [principalSignBase64, setPrincipalSignBase64] = useState<string | undefined>(undefined);
   const [premiumPlan, setPremiumPlan] = useState(false);
 
+  // Admin Profile & Security States
+  const [isProfileUnlocked, setIsProfileUnlocked] = useState(false);
+  const [profileUsername, setProfileUsername] = useState('');
+  const [profilePhone, setProfilePhone] = useState('');
+  const [profileRecoveryEmail, setProfileRecoveryEmail] = useState('');
+  const [profileAvatar, setProfileAvatar] = useState<string | undefined>(undefined);
+  const [profileTotpEnabled, setProfileTotpEnabled] = useState(false);
+  const [verificationCode, setVerificationCode] = useState('');
+
+  // 2FA Setup States
+  const [isSettingUp2fa, setIsSettingUp2fa] = useState(false);
+  const [totpSecret, setTotpSecret] = useState('');
+  const [totpQrUrl, setTotpQrUrl] = useState('');
+  const [totpVerifyCode, setTotpVerifyCode] = useState('');
+
   // Terminal mode states
   const [terminalMode, setTerminalMode] = useState('master');
   const [masterIp, setMasterIp] = useState('');

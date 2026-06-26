@@ -660,9 +660,100 @@
       }
     });
 
+    function renderLockScreen(reasonCode) {
+      const lockReasons = {
+        tampered: {
+          title: "License Integrity Error",
+          message: "The license file on this device appears to be tampered with or corrupted.",
+          buttonText: "Contact Support",
+          buttonUrl: "mailto:sch-support@nexusos.com.ng?subject=License%20Integrity%20Error&body=Support%20Code:%20TAMPERED",
+          icon: "🚨",
+          color: "#FF5C5C",
+          bg: "rgba(255,92,92,0.1)",
+          border: "rgba(255,92,92,0.3)"
+        },
+        expired: {
+          title: "License Expired",
+          message: "Your subscription has expired. Please renew to continue using the software.",
+          buttonText: "Renew Subscription",
+          buttonUrl: "https://nexusos.com.ng/portal",
+          icon: "⏳",
+          color: "#F59E0B",
+          bg: "rgba(245,158,11,0.1)",
+          border: "rgba(245,158,11,0.3)"
+        },
+        revoked: {
+          title: "Device Revoked",
+          message: "This device's synchronization access has been revoked by the administrator.",
+          buttonText: "Contact Support",
+          buttonUrl: "mailto:sch-support@nexusos.com.ng?subject=Device%20Revoked&body=Support%20Code:%20REVOKED",
+          icon: "🚨",
+          color: "#FF5C5C",
+          bg: "rgba(255,92,92,0.1)",
+          border: "rgba(255,92,92,0.3)"
+        },
+        invalid: {
+          title: "No License Found",
+          message: "No valid license file was found on this system. Please activate your license.",
+          buttonText: "Contact Support",
+          buttonUrl: "mailto:sch-support@nexusos.com.ng?subject=No%20License%20Found&body=Support%20Code:%20INVALID",
+          icon: "🔒",
+          color: "#FF5C5C",
+          bg: "rgba(255,92,92,0.1)",
+          border: "rgba(255,92,92,0.3)"
+        },
+        trial_end: {
+          title: "Trial Ended",
+          message: "Your trial period has ended. Please upgrade to a payment plan to continue.",
+          buttonText: "Upgrade to Payment Plan",
+          buttonUrl: "https://nexusos.com.ng/portal",
+          icon: "🗓️",
+          color: "#F59E0B",
+          bg: "rgba(245,158,11,0.1)",
+          border: "rgba(245,158,11,0.3)"
+        }
+      };
+
+      const reason = lockReasons[reasonCode] || {
+        title: "Access Restricted",
+        message: "Access to the system is temporarily restricted.",
+        buttonText: "Contact Support",
+        buttonUrl: "mailto:sch-support@nexusos.com.ng",
+        icon: "🔒",
+        color: "#00E5FF",
+        bg: "rgba(0,229,255,0.1)",
+        border: "rgba(0,229,255,0.3)"
+      };
+
+      const card = document.querySelector('.admin-card');
+      card.innerHTML = `
+        <div style="text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px;">
+          <div style="font-size: 56px; filter: drop-shadow(0 0 15px ${reason.color}44); line-height: 1;">${reason.icon}</div>
+          <h2 style="font-size: 18px; font-weight: 700; color: #fff; letter-spacing: 0.05em; text-transform: uppercase; margin-top: 8px;">${reason.title}</h2>
+          <div class="divider" style="margin: 8px 0; background: var(--border);"></div>
+          <p style="font-size: 13px; color: rgba(255,255,255,0.75); line-height: 1.6; padding: 0 10px; margin-bottom: 8px;">${reason.message}</p>
+          <button id="lock-action-btn" class="key" style="width: 100%; height: 48px; background: ${reason.bg}; border: 1px solid ${reason.border}; color: ${reason.color}; font-weight: 600; font-size: 14px; margin-top: 10px;">
+            ${reason.buttonText}
+          </button>
+        </div>
+      `;
+
+      card.style.borderColor = reason.color + '44';
+
+      document.getElementById('lock-action-btn').onclick = () => {
+        api.openExternal(reason.buttonUrl);
+      };
+    }
+
     // ── Boot ──────────────────────────────────────────────────────
-    loadBranding();
-    loadAdmins();
+    const hash = window.location.hash.substring(1);
+    if (hash) {
+      loadBranding();
+      renderLockScreen(hash);
+    } else {
+      loadBranding();
+      loadAdmins();
+    }
   </script>
 </body>
 </html>
