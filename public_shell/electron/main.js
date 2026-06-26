@@ -3546,6 +3546,10 @@ function createWindow() {
   // ── Boot: load lock screen first, unless developer bypass is active ────────
   // Set DEV_AUTO_LOGIN=true in .env to skip auth during testing and go straight
   // to the main app. This flag must NEVER appear in production builds.
+  if (process.env.DEV_TEST_LOCK) {
+    licenseStatus = { locked: true, reason: process.env.DEV_TEST_LOCK };
+  }
+
   let bootFile = 'lock.html';
   if (licenseStatus.locked) {
     let hash = 'default';
@@ -3553,6 +3557,10 @@ function createWindow() {
       hash = 'invalid';
     } else if (licenseStatus.reason === 'expired') {
       hash = 'expired';
+    } else if (licenseStatus.reason === 'revoked') {
+      hash = 'revoked';
+    } else if (licenseStatus.reason === 'trial_end') {
+      hash = 'trial_end';
     } else if (['tampered', 'invalid_tier', 'hardware_mismatch', 'internal_error'].includes(licenseStatus.reason)) {
       hash = 'tampered';
     }
