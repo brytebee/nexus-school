@@ -238,6 +238,30 @@ export function FinancialHub() {
           ? `❌ Error: ${res.error}`
           : `✅ ${res.count} row${res.count === 1 ? '' : 's'} imported successfully.`;
         setCsvImportStatus(prev => ({ ...prev, [type]: { loading: false, result: msg } }));
+
+        const Swal = (window as any).Swal;
+        if (Swal) {
+          if (res.error) {
+            Swal.fire({
+              title: 'Import Failed',
+              text: res.error,
+              icon: 'error',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#ef4444'
+            });
+          } else {
+            Swal.fire({
+              title: 'Success!',
+              text: `${res.count} row${res.count === 1 ? '' : 's'} imported successfully.`,
+              icon: 'success',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#00E5FF'
+            });
+          }
+        }
+
         if (!res.error) {
           doLoadRoster(sessionRef.current, termRef.current, 0, searchQuery, statusFilter);
         }

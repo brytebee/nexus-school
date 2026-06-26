@@ -156,7 +156,7 @@ private fun AttendanceScreen(
 
     // ── Date picker launcher ──────────────────────────────────────────────────
     fun showDatePicker() {
-        DatePickerDialog(
+        val picker = DatePickerDialog(
             context,
             { _, year, month, day ->
                 selectedDate = LocalDate.of(year, month + 1, day)
@@ -164,7 +164,10 @@ private fun AttendanceScreen(
             selectedDate.year,
             selectedDate.monthValue - 1,
             selectedDate.dayOfMonth
-        ).show()
+        )
+        // Prevent teachers from selecting future dates for attendance
+        picker.datePicker.maxDate = System.currentTimeMillis()
+        picker.show()
     }
 
     // ── Save handler ──────────────────────────────────────────────────────────

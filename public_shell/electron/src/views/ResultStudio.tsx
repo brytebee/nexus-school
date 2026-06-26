@@ -7,6 +7,7 @@ interface StudentResult {
   id: string;
   name: string;
   class_name: string;
+  class_arm?: string;
   subjects?: any[];
   total_score?: number;
   average?: number;
@@ -73,7 +74,7 @@ export function ResultStudio() {
   const [subjects, setSubjects] = useState<string[]>([]);
   const [selectedSubject, setSelectedSubject] = useState("");
   const [students, setStudents] = useState<
-    { id: string; name: string; class_name: string }[]
+    { id: string; name: string; class_name: string; class_arm?: string }[]
   >([]);
   const [selectedStudentId, setSelectedStudentId] = useState("");
 
@@ -243,6 +244,10 @@ export function ResultStudio() {
         format,
         subject: selectedSubject,
         useSchoolColors: useBrandColors,
+        scope,
+        selectedClass,
+        selectedTeacherName: teachers.find((t) => t.id === selectedTeacherId)?.name,
+        selectedStudentName: scope === "student" && studentsToGenerate.length > 0 ? studentsToGenerate[0].name : undefined,
       });
 
       if (res && res.success) {
@@ -314,16 +319,25 @@ export function ResultStudio() {
       prev.map((student) => {
         let remark = student.remark;
         let princ = student.principal_remark;
-        const avg = student.average || 0;
+        const avgRaw = parseFloat(student.average);
+        const hasGrades = !isNaN(avgRaw);
+        const avg = hasGrades ? avgRaw : 0;
+
         if (!remark) {
-          remark = "An impressive performance. Keep it up.";
-          if (avg < 50)
-            remark = "Work harder next term to improve your grades.";
-          else if (avg < 70)
-            remark = "A good result, but there is room for more effort.";
+          if (!hasGrades) {
+            remark = "No academic records for this term.";
+          } else {
+            remark = "An impressive performance. Keep it up.";
+            if (avg < 50)
+              remark = "Work harder next term to improve your grades.";
+            else if (avg < 70)
+              remark = "A good result, but there is room for more effort.";
+          }
         }
         if (!princ) {
-          if (isEndTerm) {
+          if (!hasGrades) {
+            princ = "No academic records.";
+          } else if (isEndTerm) {
             princ = "Promoted to next class.";
             if (avg < 40) princ = "To repeat the class.";
           } else {
@@ -779,7 +793,7 @@ export function ResultStudio() {
                   <option value="">— Select —</option>
                   {students.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.name} ({s.class_name})
+                      {s.name} ({s.class_name}{s.class_arm ? ` ${s.class_arm}` : ''})
                     </option>
                   ))}
                 </select>
@@ -1105,13 +1119,17 @@ export function ResultStudio() {
                           <td>
                             <strong>{s.name}</strong>
                           </td>
-                          <td>{s.class_name}</td>
+                          <td>{s.class_name}{s.class_arm ? ` ${s.class_arm}` : ''}</td>
                           <td>
                             {s.subjects?.filter((x: any) => x.score !== null)
                               .length || 0}{" "}
                             graded
                           </td>
-                          <td>{s.total_score ?? "—"}</td>
+                          <td>
+                            {s.total_score != null && !isNaN(Number(s.total_score))
+                              ? Number(s.total_score).toFixed(2)
+                              : "—"}
+                          </td>
                           <td>{s.average ?? "—"}</td>
                         </tr>
                       ))
@@ -1267,7 +1285,7 @@ export function ResultStudio() {
                               fontFamily: "var(--font-mono)",
                             }}
                           >
-                            {student.class_name} · Avg: {student.average ?? "—"}
+                            {student.class_name}{student.class_arm ? ` ${student.class_arm}` : ''} · Avg: {student.average ?? '—'}
                             %
                           </div>
                         </td>

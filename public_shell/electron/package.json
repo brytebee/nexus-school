@@ -95,7 +95,7 @@
     ]
   },
   "dependencies": {
-    "@nexus/engine": "file:nexus-engine-1.0.16.tgz",
+    "@nexus/engine": "file:nexus-engine-1.0.21.tgz",
     "address": "^1.2.2",
     "better-sqlite3": "^11.10.0",
     "bonjour-service": "^1.3.0",

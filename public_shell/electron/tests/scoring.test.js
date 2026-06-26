@@ -11,7 +11,7 @@ describe('scoring engine', () => {
     const results = aggregateScores(subjects, 100);
     expect(results.totalScore).toBe(240);
     expect(results.numGraded).toBe(3);
-    expect(results.avgScore).toBe('80.0');
+    expect(results.avgScore).toBe('80.00');
     expect(results.avgPercent).toBe(80);
   });
 
@@ -25,7 +25,7 @@ describe('scoring engine', () => {
     const results = aggregateScores(subjects, 100);
     expect(results.totalScore).toBe(170);
     expect(results.numGraded).toBe(2);
-    expect(results.avgScore).toBe('85.0');
+    expect(results.avgScore).toBe('85.00');
   });
 
   it('returns placeholder string average and zero percent when no subjects are graded', () => {

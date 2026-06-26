@@ -17,6 +17,7 @@ fun FeatureGate(
 ) {
     val context = LocalContext.current
     val identityManager = IdentityManager(context)
+    val role = identityManager.getRole()
     
     // Only compose the content if the license tier explicitly granted access
     if (identityManager.isModuleEnabled(moduleKey)) {

@@ -2,7 +2,7 @@ console.log("\n\n*******************************************");
 console.log("*       NEXUS DEMO HUB - VERSION 2.3      *");
 console.log("*******************************************\n");
 
-const { app, BrowserWindow, ipcMain, shell, Menu, dialog, nativeImage, clipboard, globalShortcut } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, Menu, dialog, nativeImage, clipboard, globalShortcut, powerSaveBlocker } = require("electron");
 
 const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, ".env") });
@@ -276,8 +276,12 @@ ipcMain.handle('auth:verify-pin', (event, { adminId, pin }) => {
 
 ipcMain.handle('auth:logout', () => {
     if (currentAdminSession) {
-        const db = database.getDb();
-        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'LOGOUT', 'SYSTEM', 'Session terminated')").run(currentAdminSession.id);
+        try {
+            const db = database.getDb();
+            db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'LOGOUT', 'SYSTEM', 'Session terminated')").run(currentAdminSession.id);
+        } catch (err) {
+            console.error("[Auth] Failed to write logout audit log:", err.message);
+        }
     }
     currentAdminSession = null;
     console.log(`[Auth] Session closed.`);
@@ -286,27 +290,46 @@ ipcMain.handle('auth:logout', () => {
 
 const pendingOTPs = {};
 
-ipcMain.handle('auth:forgot-password', (event, { adminId }) => {
+ipcMain.handle('auth:forgot-password', async (event, { adminId }) => {
     const db = database.getDb();
     const admin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(adminId);
     if (!admin) return { ok: false, error: 'Admin not found' };
+
+    const tier = licenseStatus?.tier || 'Silver';
+    const isOfflineTier = (tier === 'Standalone' || tier === 'Silver');
+
+    if (isOfflineTier) {
+        if (!admin.recovery_question) {
+            return { ok: false, error: 'No recovery question configured for this admin.' };
+        }
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'OTP_REQUESTED', 'SYSTEM', 'Recovery requested via SQA (Offline Tier)')").run(adminId);
+        return { ok: true, method: 'sqa', question: admin.recovery_question };
+    }
 
     // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     pendingOTPs[adminId] = { otp, expiresAt: Date.now() + 10 * 60000 }; // 10 min expiry
 
-    // Phone is stored in identityPacket.principalPhone (loaded from identity.json at boot)
-    // NOT in app_settings — so we read it directly from the in-memory packet.
-    const phone = identityPacket?.principalPhone?.trim() || null;
+    // Check individual admin's phone first, then global fallback
+    const phone = (admin.phone?.trim() || identityPacket?.principalPhone?.trim() || '').trim();
 
     if (!phone && process.env.DEV_MODE !== 'true') {
-        return { ok: false, error: 'School contact phone not configured. Go to Settings → School Identity and save the Principal phone first.' };
+        if (admin.recovery_question) {
+            db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'OTP_REQUESTED', 'SYSTEM', 'Recovery requested via SQA (No Phone configured)')").run(adminId);
+            return { ok: true, method: 'sqa', question: admin.recovery_question };
+        }
+        return { ok: false, error: 'School contact phone not configured. Please contact settings or set a security question first.' };
+    }
+
+    // Auto-bootstrap Pulse if disconnected
+    const pulseStatus = pulseBot.getPulseStatus().status;
+    if (pulseStatus === 'disconnected') {
+        console.log('[Auth] Forgot Password triggered and Pulse disconnected. Starting Pulse...');
+        pulseBot.startPulse();
     }
 
     const message = `*Nexus School OS - Emergency Access*\n\nAdmin: ${admin.username}\nYour OTP is: *${otp}*\n\nThis OTP expires in 10 minutes.`;
 
-    // Only queue WhatsApp message if we have a real phone number
-    // (in DEV_MODE with no phone configured, we skip the queue to avoid NOT NULL crash)
     if (phone) {
         try {
             db.prepare(`
@@ -320,24 +343,34 @@ ipcMain.handle('auth:forgot-password', (event, { adminId }) => {
 
     db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'OTP_REQUESTED', 'SYSTEM', 'Emergency OTP requested via Pulse')").run(adminId);
 
-    const result = { ok: true };
+    const result = { ok: true, method: 'otp' };
     if (process.env.DEV_MODE === 'true') result.devOtp = otp;
     return result;
 });
 
 
-ipcMain.handle('auth:verify-otp-login', (event, { adminId, otp }) => {
+ipcMain.handle('auth:verify-otp-login', (event, { adminId, otp, username }) => {
     const db = database.getDb();
     const admin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(adminId);
     if (!admin) return { ok: false, error: 'Admin not found' };
+
+    // Verify username to confirm identity
+    if (!username || admin.username.trim().toLowerCase() !== username.trim().toLowerCase()) {
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'RECOVERY_FAILED', 'SYSTEM', 'OTP verification failed: Username mismatch')").run(adminId);
+        return { ok: false, error: 'Identity verification failed.' };
+    }
 
     const record = pendingOTPs[adminId];
     if (!record) return { ok: false, error: 'No OTP requested' };
     if (Date.now() > record.expiresAt) {
         delete pendingOTPs[adminId];
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'RECOVERY_FAILED', 'SYSTEM', 'OTP verification failed: Expired')").run(adminId);
         return { ok: false, error: 'OTP expired' };
     }
-    if (record.otp !== otp) return { ok: false, error: 'Invalid OTP' };
+    if (record.otp !== otp) {
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'RECOVERY_FAILED', 'SYSTEM', 'OTP verification failed: Incorrect code')").run(adminId);
+        return { ok: false, error: 'Invalid OTP' };
+    }
 
     // Login successful
     delete pendingOTPs[adminId];
@@ -347,6 +380,84 @@ ipcMain.handle('auth:verify-otp-login', (event, { adminId, otp }) => {
     db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'LOGIN', 'SYSTEM', 'Session initialized via Emergency OTP')").run(admin.id);
     
     return { ok: true, username: admin.username, role_level: admin.role_level };
+});
+
+// auth:get-recovery-question
+ipcMain.handle('auth:get-recovery-question', (event, { adminId }) => {
+    const db = database.getDb();
+    const admin = db.prepare('SELECT id, username, recovery_question FROM admin_users WHERE id = ?').get(adminId);
+    if (!admin) return { ok: false, error: 'Admin not found' };
+    return { ok: true, question: admin.recovery_question };
+});
+
+// auth:verify-sqa-login
+ipcMain.handle('auth:verify-sqa-login', (event, { adminId, answer, username }) => {
+    const db = database.getDb();
+    const admin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(adminId);
+    if (!admin) return { ok: false, error: 'Admin not found' };
+    if (!admin.recovery_question || !admin.recovery_answer_hash) {
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'RECOVERY_FAILED', 'SYSTEM', 'Security recovery failed: SQA not configured')").run(adminId);
+        return { ok: false, error: 'Security question not set.' };
+    }
+
+    // Verify username to confirm identity
+    if (admin.username.trim().toLowerCase() !== username.trim().toLowerCase()) {
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'RECOVERY_FAILED', 'SYSTEM', 'Security recovery failed: Username mismatch')").run(adminId);
+        return { ok: false, error: 'Identity verification failed.' };
+    }
+
+    const hashedAnswer = Buffer.from(answer.trim().toLowerCase()).toString('base64');
+    if (admin.recovery_answer_hash !== hashedAnswer) {
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'RECOVERY_FAILED', 'SYSTEM', 'Security recovery failed: Incorrect answer')").run(adminId);
+        return { ok: false, error: 'Incorrect answer.' };
+    }
+
+    // Login successful
+    currentAdminSession = { id: admin.id, username: admin.username, role_level: admin.role_level, loginAt: Date.now() };
+    console.log(`[Auth] Session opened via SQA: ${admin.username}`);
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'RECOVERY_SUCCESS', 'SYSTEM', 'Session initialized via Security Question verification')").run(admin.id);
+    return { ok: true, username: admin.username, role_level: admin.role_level };
+});
+
+// auth:update-profile-security
+ipcMain.handle('auth:update-profile-security', (event, { adminId, phone, question, answer }) => {
+    try {
+        const db = database.getDb();
+        const admin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(adminId);
+        if (!admin) return { ok: false, error: 'Admin not found' };
+
+        // Permission check: self or super admin
+        if (!currentAdminSession || (currentAdminSession.id !== adminId && currentAdminSession.role_level < 9)) {
+            return { ok: false, error: 'Permission denied.' };
+        }
+
+        let query = 'UPDATE admin_users SET phone = ?';
+        const params = [phone ? phone.trim() : null];
+
+        if (question && question.trim()) {
+            query += ', recovery_question = ?';
+            params.push(question.trim());
+        }
+        if (answer && answer.trim()) {
+            query += ', recovery_answer_hash = ?';
+            params.push(Buffer.from(answer.trim().toLowerCase()).toString('base64'));
+        }
+
+        query += ' WHERE id = ?';
+        params.push(adminId);
+
+        db.prepare(query).run(...params);
+
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'PROFILE_SECURITY_UPDATED', 'admin_users', ?)").run(
+            currentAdminSession.id,
+            `Security settings updated for admin ID ${adminId}`
+        );
+
+        return { ok: true };
+    } catch (e) {
+        console.error('[Auth] update-profile-security error:', e);
+        return { ok: false, error: e.message };
+    }
 });
 
 // auth:change-pin — called after OTP verify to let admin set a new PIN/password
@@ -359,7 +470,15 @@ ipcMain.handle('auth:change-pin', (event, { adminId, newPin, authType }) => {
         const newHash = Buffer.from(newPin.trim()).toString('base64');
         db.prepare('UPDATE admin_users SET secret_hash = ?, auth_type = ? WHERE id = ?')
           .run(newHash, authType || admin.auth_type || 'pin', adminId);
-        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'PIN_CHANGED', 'SYSTEM', 'Admin changed credentials via Emergency OTP flow')").run(adminId);
+
+        let details = 'Admin credentials changed';
+        if (currentAdminSession && currentAdminSession.id === adminId) {
+            details += ' proactively while logged in';
+        } else {
+            details += ' via recovery reset';
+        }
+
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'PIN_CHANGED', 'SYSTEM', ?)").run(adminId, details);
         console.log(`[Auth] PIN changed for admin ID ${adminId}`);
         return { ok: true };
     } catch (e) {
@@ -369,7 +488,7 @@ ipcMain.handle('auth:change-pin', (event, { adminId, newPin, authType }) => {
 });
 
 // auth:create-admin — Super-admins can add new staff accounts
-ipcMain.handle('auth:create-admin', (event, { username, pin, roleLevel, displayName }) => {
+ipcMain.handle('auth:create-admin', (event, { username, pin, roleLevel, displayName, phone, question, answer }) => {
     try {
         const db = database.getDb();
         if (!username?.trim() || !pin?.trim()) return { ok: false, error: 'Username and PIN are required.' };
@@ -377,7 +496,21 @@ ipcMain.handle('auth:create-admin', (event, { username, pin, roleLevel, displayN
         if (exists) return { ok: false, error: `Username "${username.trim()}" is already taken.` };
         if (pin.trim().length < 4) return { ok: false, error: 'PIN must be at least 4 characters.' };
         const hash = Buffer.from(pin.trim()).toString('base64');
-        const result = db.prepare(`INSERT INTO admin_users (username, secret_hash, auth_type, role_level) VALUES (?, ?, 'pin', ?)`).run(username.trim(), hash, parseInt(roleLevel) || 1);
+        
+        const qHash = answer?.trim() ? Buffer.from(answer.trim().toLowerCase()).toString('base64') : null;
+        
+        const result = db.prepare(`
+            INSERT INTO admin_users (username, secret_hash, auth_type, role_level, phone, recovery_question, recovery_answer_hash) 
+            VALUES (?, ?, 'pin', ?, ?, ?, ?)
+        `).run(
+            username.trim(), 
+            hash, 
+            parseInt(roleLevel) || 1, 
+            phone ? phone.trim() : null, 
+            question ? question.trim() : null, 
+            qHash
+        );
+        
         if (currentAdminSession) db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'CREATE_ADMIN', 'admin_users', ?)").run(currentAdminSession.id, `Created: ${username.trim()} (Level ${roleLevel || 1})`);
         return { ok: true, id: result.lastInsertRowid };
     } catch (e) { return { ok: false, error: e.message }; }
@@ -430,8 +563,12 @@ ipcMain.on('auth:unlock', () => {
 ipcMain.on('auth:lock', () => {
     if (!mainWindow) return;
     if (currentAdminSession) {
-        const db = database.getDb();
-        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'LOCK', 'SYSTEM', 'Idle timeout triggered lock')").run(currentAdminSession.id);
+        try {
+            const db = database.getDb();
+            db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'LOCK', 'SYSTEM', 'Idle timeout triggered lock')").run(currentAdminSession.id);
+        } catch (err) {
+            console.error("[Auth] Failed to write lock audit log:", err.message);
+        }
         currentAdminSession = null;
     }
     mainWindow.loadFile('lock.html');
@@ -493,7 +630,7 @@ ipcMain.handle('fee-structure:apply-to-class', (event, { className, academicSess
         WHERE class_name = ? AND (term = 'All Terms' OR term = ?)
     `).get(className, activeTerm);
 
-    const students = db.prepare("SELECT id FROM students WHERE UPPER(replace(class_name, ' ', '')) = ?").all(className.replace(/\s+/g, '').toUpperCase());
+    const students = db.prepare("SELECT id FROM students WHERE UPPER(replace(class_name || COALESCE(' ' || NULLIF(class_arm, ''), ''), ' ', '')) = ?").all(className.replace(/\s+/g, '').toUpperCase());
     if (students.length === 0) return { ok: false, error: 'No students in class', count: 0 };
 
     const upsert = db.prepare(`
@@ -616,7 +753,7 @@ function startMessageQueueWorker() {
 ipcMain.handle("pulse:trigger-digest", async (event, { class_name }) => {
   try {
     const db = database.getDb();
-    const students = db.prepare("SELECT id, name, parent_phone FROM students WHERE UPPER(replace(class_name, ' ', '')) = ?").all(class_name.replace(/\s+/g, '').toUpperCase());
+    const students = db.prepare("SELECT id, name, parent_phone FROM students WHERE UPPER(replace(class_name || COALESCE(' ' || NULLIF(class_arm, ''), ''), ' ', '')) = ?").all(class_name.replace(/\s+/g, '').toUpperCase());
     
     let count = 0;
     const enqueueMsg = db.prepare(`
@@ -829,7 +966,7 @@ ipcMain.handle("portal:get-info", () => {
 ipcMain.handle("get-unique-metadata", () => {
   try {
     const db = database.getDb();
-    const classes = db.prepare("SELECT DISTINCT class_name FROM students WHERE class_name IS NOT NULL AND class_name != '' ORDER BY class_name ASC").all().map(r => r.class_name);
+    const classes = db.prepare("SELECT DISTINCT class_name || COALESCE(' ' || NULLIF(class_arm, ''), '') as class_name FROM students WHERE class_name IS NOT NULL AND class_name != '' ORDER BY class_name ASC").all().map(r => r.class_name);
     
     const subjects = db.prepare(`
       SELECT DISTINCT subject FROM student_subjects 
@@ -849,7 +986,7 @@ ipcMain.handle("get-unique-metadata", () => {
 ipcMain.handle("get-classes", () => {
   try {
     const db = database.getDb();
-    const rows = db.prepare("SELECT DISTINCT class_name FROM students WHERE class_name IS NOT NULL AND class_name != '' ORDER BY class_name ASC").all();
+    const rows = db.prepare("SELECT DISTINCT class_name || COALESCE(' ' || NULLIF(class_arm, ''), '') as class_name FROM students WHERE class_name IS NOT NULL AND class_name != '' ORDER BY class_name ASC").all();
     return rows.map(r => r.class_name);
   } catch (err) {
     console.error("Failed to fetch classes:", err);
@@ -1515,27 +1652,44 @@ ipcMain.handle("get-all-teachers", (event, { limit = 15, offset = 0, search = ""
 });
 
 // ── Directory: Get All Students ─────────────────────────────────────────
-ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = "", class_name = "", minimal = false } = {}) => {
+ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = "", class_name = "", subject = "", teacher_id = "", no_arm = false, minimal = false } = {}) => {
   try {
     const db = database.getDb();
     const query = search ? `%${search}%` : "%";
 
-    let totalSql = "SELECT COUNT(*) as total FROM students WHERE (name LIKE ? OR id LIKE ? OR reg_no LIKE ?)";
-    let selectSql = `
-      SELECT id, name, class_name, COALESCE(class_arm, '') as class_arm, reg_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status 
-      FROM students 
-      WHERE (name LIKE ? OR id LIKE ? OR reg_no LIKE ?)
-    `;
+    // Base WHERE clause (always present)
+    let conditions = "(s.name LIKE ? OR s.id LIKE ? OR s.reg_no LIKE ?)";
     const params = [query, query, query];
+
+    // Optional class/arm filter (normalised, handles "JSS 1 Gold" or "JSS 1")
     if (class_name) {
       const normClass = class_name.replace(/\s+/g, '').toUpperCase();
-      totalSql += " AND UPPER(replace(class_name, ' ', '')) = ?";
-      selectSql += " AND UPPER(replace(class_name, ' ', '')) = ?";
+      conditions += " AND UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', '')) = ?";
       params.push(normClass);
     }
-    selectSql += " ORDER BY class_name ASC, name ASC LIMIT ? OFFSET ?";
 
-    const total = db.prepare(totalSql).get(...params).total;
+    // Optional subject filter — student must be enrolled in this subject
+    if (subject) {
+      conditions += " AND EXISTS (SELECT 1 FROM student_subjects ss WHERE ss.student_id = s.id AND ss.subject = ?)";
+      params.push(subject);
+    }
+
+    // Optional teacher filter — student's class must be allocated to this teacher
+    if (teacher_id) {
+      conditions += ` AND UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', ''))
+        IN (SELECT UPPER(replace(class_name, ' ', '')) FROM teacher_allocations WHERE teacher_id = ?)`;
+      params.push(teacher_id);
+    }
+
+    // Optional no-arm filter — students with no arm assignment
+    if (no_arm) {
+      conditions += " AND (s.class_arm = '' OR s.class_arm IS NULL)";
+    }
+
+    const totalSql   = `SELECT COUNT(*) as total FROM students s WHERE ${conditions}`;
+    const selectSql  = `SELECT s.id, s.name, s.class_name, COALESCE(s.class_arm, '') as class_arm, s.reg_no, s.gender, s.dob, s.photo, s.parent_email, s.parent_phone, s.parent_name, s.fee_status FROM students s WHERE ${conditions} ORDER BY s.class_name ASC, s.name ASC LIMIT ? OFFSET ?`;
+
+    const total    = db.prepare(totalSql).get(...params).total;
     const students = db.prepare(selectSql).all(...params, limit, offset);
 
     // Attach subject enrollment if not minimal
@@ -1549,7 +1703,7 @@ ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = ""
         student.subjects = [];
       }
     }
-    
+
     return { ok: true, data: students, total };
   } catch (err) {
     console.error("[Dir] Failed to get students:", err);
@@ -1653,13 +1807,17 @@ ipcMain.handle("get-term-config", () => {
 ipcMain.handle("save-term-config", (event, config) => {
   try {
     const db = database.getDb();
+    // Ensure new column exists for DBs that haven't restarted since migration was added
+    try { db.exec("ALTER TABLE school_term_config ADD COLUMN exclude_unregistered_from_totals INTEGER DEFAULT 0"); } catch (_) {}
     db.prepare(`
       INSERT INTO school_term_config
         (id, academic_session, term, resumption_date, term_start_date, term_end_date,
-         grading_scale, show_position, show_domains, show_attendance, attendance_score_weight, template)
+         grading_scale, show_position, show_domains, show_attendance, attendance_score_weight, template,
+         include_attendance_in_grades, exclude_unregistered_from_totals)
       VALUES
         (1, @academic_session, @term, @resumption_date, @term_start_date, @term_end_date,
-         @grading_scale, @show_position, @show_domains, @show_attendance, @attendance_score_weight, @template)
+         @grading_scale, @show_position, @show_domains, @show_attendance, @attendance_score_weight, @template,
+         @include_attendance_in_grades, @exclude_unregistered_from_totals)
       ON CONFLICT(id) DO UPDATE SET
         academic_session = excluded.academic_session,
         term             = excluded.term,
@@ -1671,7 +1829,9 @@ ipcMain.handle("save-term-config", (event, config) => {
         show_domains     = excluded.show_domains,
         show_attendance  = excluded.show_attendance,
         attendance_score_weight = excluded.attendance_score_weight,
-        template         = excluded.template
+        template         = excluded.template,
+        include_attendance_in_grades = excluded.include_attendance_in_grades,
+        exclude_unregistered_from_totals = excluded.exclude_unregistered_from_totals
     `).run({
       academic_session: config.academic_session || "2024/2025",
       term:             config.term || "First Term",
@@ -1686,6 +1846,8 @@ ipcMain.handle("save-term-config", (event, config) => {
       show_attendance: config.show_attendance ? 1 : 0,
       attendance_score_weight: Number(config.attendance_score_weight) || 0,
       template:      config.template || "clean_slate",
+      include_attendance_in_grades: config.include_attendance_in_grades !== false && config.include_attendance_in_grades !== 0 ? 1 : 0,
+      exclude_unregistered_from_totals: config.exclude_unregistered_from_totals ? 1 : 0,
     });
     return { ok: true };
   } catch (err) {
@@ -2046,7 +2208,7 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
     if (scope === "student" && student_id) {
       students = db.prepare("SELECT * FROM students WHERE id = ?").all(student_id);
     } else if (scope === "class" && class_name) {
-      students = db.prepare("SELECT * FROM students WHERE UPPER(replace(class_name, ' ', '')) = ? ORDER BY name ASC").all(class_name.replace(/\s+/g, '').toUpperCase());
+      students = db.prepare("SELECT * FROM students WHERE UPPER(replace(class_name || COALESCE(' ' || NULLIF(class_arm, ''), ''), ' ', '')) = ? ORDER BY name ASC").all(class_name.replace(/\s+/g, '').toUpperCase());
     } else if (scope === "teacher" && teacher_id) {
       // Students who are enrolled in at least one of this teacher's allocated subjects.
       // The LEFT JOIN + GROUP BY approach keeps students who have student_subjects rows
@@ -2056,7 +2218,7 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
       // report data is never silently suppressed for legacy records.
       students = db.prepare(`
         SELECT DISTINCT s.* FROM students s
-        JOIN teacher_allocations a ON UPPER(replace(s.class_name, ' ', '')) = UPPER(replace(a.class_name, ' ', ''))
+        JOIN teacher_allocations a ON UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', '')) = UPPER(replace(a.class_name, ' ', ''))
         WHERE a.teacher_id = ?
           AND (
             -- Student has explicit subject enrollment that matches this teacher's subject
@@ -2096,8 +2258,17 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
       "SELECT remark, principal_remark FROM teacher_remarks WHERE student_id = ? AND academic_session = ? AND term = ?"
     );
 
-    // Aggregate Explicit Subjects 
+    // Aggregate Explicit Subjects
     const getExplicitSubjects = db.prepare("SELECT subject FROM student_subjects WHERE student_id = ?");
+
+    // Determine whether to exclude unregistered subjects from totals/averages.
+    // Ensure column exists first (DBs not yet restarted after migration), then read safely.
+    let excludeUnregisteredFromTotals = false;
+    try {
+      try { db.exec("ALTER TABLE school_term_config ADD COLUMN exclude_unregistered_from_totals INTEGER DEFAULT 0"); } catch (_) {}
+      const termCfgForExclude = db.prepare("SELECT exclude_unregistered_from_totals FROM school_term_config WHERE id = 1").get() || {};
+      excludeUnregisteredFromTotals = termCfgForExclude.exclude_unregistered_from_totals === 1;
+    } catch (_) { /* safety net — defaults to false */ }
     
     const getTermAttendance = db.prepare(
       "SELECT total_days, days_attended FROM student_attendance WHERE student_id = ? AND academic_session = ? AND term = ?"
@@ -2134,15 +2305,21 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
       // If a record exists that ISN'T in explicit subjects, we still include it to avoid data loss.
       const resolvedSubjects = new Map();
       
+      // Build a Set of registered subject names for O(1) lookup
+      const explicitSubjsSet = new Set(explicitSubjs);
+
+      // Seed registered subjects first (score may remain null if not yet graded)
       explicitSubjs.forEach(sName => {
-        resolvedSubjects.set(sName, { name: sName, score: null, breakdown: {} });
+        resolvedSubjects.set(sName, { name: sName, score: null, breakdown: {}, isRegistered: true });
       });
-      
+
+      // Merge grade records; tag each as registered (in student_subjects) or unregistered (score recorded but no formal enrolment)
       records.forEach(r => {
         resolvedSubjects.set(r.subject, {
           name: r.subject,
           score: r.score,
           breakdown: (() => { try { const p = JSON.parse(r.breakdown); return (p && typeof p === 'object') ? p : {}; } catch { return {}; } })(),
+          isRegistered: explicitSubjsSet.has(r.subject),
         });
       });
 
@@ -2151,19 +2328,25 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
         allSubjectsArray = allSubjectsArray.filter(s => s.name === subject);
       }
 
-      // Filter out zero-score empty subjects so avg isn't polluted by ungraded subjects
-      const gradedSubjects = allSubjectsArray.filter(s => s.score !== null);
+      // Filter out zero-score empty subjects so avg isn't polluted by ungraded subjects.
+      // When the admin has chosen to exclude unregistered courses, only use registered subjects for totals.
+      const gradedSubjects = allSubjectsArray.filter(s =>
+        s.score !== null && (!excludeUnregisteredFromTotals || s.isRegistered)
+      );
       const totalScore = gradedSubjects.reduce((sum, s) => sum + s.score, 0);
       // Use max_subjects as denominator when configured (stable average)
       const _maxSubs = _resolveMax(stu.class_name);
       const _denom = (_maxSubs && _maxSubs > 0) ? _maxSubs : gradedSubjects.length;
-      const avg = gradedSubjects.length ? (totalScore / _denom).toFixed(1) : "—";
+      const avg = gradedSubjects.length ? (totalScore / _denom).toFixed(2) : "—";
 
       const domains = getDomains.all(stu.id, session, term);
       const remark = getRemark.get(stu.id, session, term) || {};
+      const fullClassName = (stu.class_arm && !stu.class_name.includes(stu.class_arm))
+        ? `${stu.class_name} ${stu.class_arm}`
+        : stu.class_name;
 
       // NEW: Look up form teacher for this class
-      const ft = formTeacherMap.get(stu.class_name) || {};
+      const ft = formTeacherMap.get(fullClassName) || {};
 
       // Resolve attendance: check term-level student_attendance first, then fall back to daily roll calls
       const termAtt = getTermAttendance.get(stu.id, session, term);
@@ -2173,7 +2356,7 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
         classTotalDays = termAtt.total_days;
         daysAttended = termAtt.days_attended;
       } else {
-        classTotalDays = classDaysMap.get(stu.class_name) || 0;
+        classTotalDays = classDaysMap.get(fullClassName) || 0;
         const attRow = getStudentAttendanceCount.get(stu.id, session, term) || { days_attended: 0 };
         daysAttended = attRow.days_attended;
       }
@@ -2187,6 +2370,7 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
 
       return {
         ...stu,
+        class_name: fullClassName,
         subjects: allSubjectsArray,
         total_score: totalScore,
         average: avg,
@@ -2277,11 +2461,16 @@ ipcMain.handle("save-student-grades", (event, { student_id, grades }) => {
 
     const saveAll = db.transaction((items) => {
       for (const item of items) {
-        const bd = item.breakdown || {};
+        const rawBd = item.breakdown || {};
+        const bd = {};
+        for (const [k, v] of Object.entries(rawBd)) {
+          bd[k] = Math.round((Number(v) || 0) * 100) / 100;
+        }
         // If no sub-components exist use the passed score directly (flat-score grade)
-        const total = Object.keys(bd).length > 0
+        const totalRaw = Object.keys(bd).length > 0
           ? Object.values(bd).reduce((sum, v) => sum + (Number(v) || 0), 0)
           : (Number(item.score) || 0);
+        const total = Math.round(totalRaw * 100) / 100;
         deleteRow.run(student_id, academic_session, term, item.subject);
         insertRow.run(student_id, academic_session, term, item.subject, total, JSON.stringify(bd));
       }
@@ -2710,11 +2899,14 @@ console.log("[Electron] Registering generate-reports handler...");
 ipcMain.handle("generate-reports", async (event, payload) => {
   const { termConfig, reportType = "terminal", format = "pdf" } = payload || {};
   let tempDir = "";
+  // Keep display awake for the duration of report generation
+  const sleepBlockerId = powerSaveBlocker.start('prevent-display-sleep');
   try {
     const startTime = Date.now();
-    const outFolder = path.join(app.getPath("desktop"), "NexusReports");
-    if (!fs.existsSync(outFolder)) fs.mkdirSync(outFolder, { recursive: true });
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const outFolderBase = path.join(app.getPath("desktop"), "NexusReports");
+    const outFolder = path.join(outFolderBase, `Reports_${timestamp}`);
+    if (!fs.existsSync(outFolder)) fs.mkdirSync(outFolder, { recursive: true });
 
     mainWindow?.webContents.send("report-generation:status", { text: "⏳ Querying student metrics..." });
 
@@ -2756,8 +2948,6 @@ ipcMain.handle("generate-reports", async (event, payload) => {
 
     mainWindow?.webContents.send("report-generation:status", { text: "⏳ Saving templates and asset cache..." });
 
-    let html = "";
-    let outPath = "";
     let baseDir = path.join(__dirname, "../../private_engine");
     if (!fs.existsSync(baseDir) || !fs.existsSync(path.join(baseDir, "assets", "templates"))) {
         try {
@@ -2767,89 +2957,191 @@ ipcMain.handle("generate-reports", async (event, payload) => {
 
     // Create unique temp directory under OS tmpdir for de-duplicated image storage
     tempDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'nexus-reports-'));
-    const tempHtmlPath = path.join(tempDir, `nexus_report_temp.html`);
 
-    if (reportType === "portal_card") {
-        html = reports.generatePortalCards(payload);
-        outPath = path.join(outFolder, `Parent_Access_Cards_${timestamp}.${format === "image" ? "png" : "pdf"}`);
-    } else if (reportType !== "broadsheet") {
-        // Pass tempDir to let report compiler write image files & return HTML with file:// URLs
-        html = reports.generateHTMLPages(payload, baseDir, tempDir);
-        outPath = path.join(outFolder, `TerminalReport_${termConfig?.term?.replace(/\s/g,"_")||"Term"}_${timestamp}.${format === "image" ? "png" : "pdf"}`);
-    } else {
-        html = reports.generateBroadsheetHTML(payload);
-        outPath = path.join(outFolder, `Broadsheet_${payload.subject?.replace(/\s/g,"_")}_${timestamp}.${format === "image" ? "png" : "pdf"}`);
-    }
+    let finalOutPath = outFolder;
 
-    if (format === "html") {
-         outPath = outPath.replace(".pdf", ".html").replace(".png", ".html");
-         fs.writeFileSync(outPath, html, "utf8");
-         require('electron').shell.openPath(outFolder);
-         return { success: true, path: outPath, folder: outFolder, format };
-    }
-
-    // Write temp HTML file
-    fs.writeFileSync(tempHtmlPath, html, "utf8");
-
-    mainWindow?.webContents.send("report-generation:status", { text: `⏳ Generating ${format.toUpperCase()} (pages are rendering)...` });
-
-    await new Promise((resolve, reject) => {
-        let hw = new BrowserWindow({
-          show: false,
-          width: 794,
-          height: 1123,
-          webPreferences: {
-            offscreen: true,
-            webSecurity: false // Allow loading file:// URLs for local temp images
-          }
-        });
-        hw.loadFile(tempHtmlPath);
-        hw.webContents.on("did-finish-load", async () => {
-          try {
-            // Wait a brief tick (e.g. 200ms) for file:// images to decode and render completely before printing
-            await new Promise(r => setTimeout(r, 200));
-
-            if (format === "image") {
-              const image = await hw.webContents.capturePage();
-              fs.writeFileSync(outPath, image.toPNG());
-            } else {
-              const buf = await hw.webContents.printToPDF({
-                printBackground: true,
-                pageSize: "A4",
-                landscape: (reportType === "broadsheet")
-              });
-              fs.writeFileSync(outPath, buf);
+    if (reportType !== "broadsheet" && payload.students && payload.students.length > 0) {
+        // Group students by class_name (resolving class_arm if present)
+        const classGroups = {};
+        for (const s of payload.students) {
+            if (s.class_arm && s.class_name && !s.class_name.includes(s.class_arm)) {
+                s.class_name = `${s.class_name} ${s.class_arm}`;
             }
-            hw.close(); hw = null;
-            resolve();
-          } catch(e) { hw?.close(); reject(e); }
-        });
-    });
+            const cn = (s.class_name || "Unassigned").trim();
+            if (!classGroups[cn]) classGroups[cn] = [];
+            classGroups[cn].push(s);
+        }
+        const classNames = Object.keys(classGroups).sort();
+
+        for (const cn of classNames) {
+            const groupStudents = classGroups[cn];
+            mainWindow?.webContents.send("report-generation:status", { text: `⏳ Rendering reports for ${cn} (${groupStudents.length} students)...` });
+
+            const groupPayload = {
+                ...payload,
+                students: groupStudents
+            };
+
+            let groupHtml = "";
+            const safeClassName = cn.replace(/[^a-zA-Z0-9]/g, "_");
+            let groupOutPath = path.join(outFolder, `${reportType === "portal_card" ? "Parent_Access_Cards" : "TerminalReport"}_${safeClassName}_${termConfig?.term?.replace(/\s/g,"_")||"Term"}.${format === "image" ? "png" : "pdf"}`);
+            finalOutPath = groupOutPath;
+
+            if (reportType === "portal_card") {
+                groupHtml = reports.generatePortalCards(groupPayload);
+            } else {
+                groupHtml = reports.generateHTMLPages(groupPayload, baseDir, tempDir);
+            }
+
+            if (format === "html") {
+                 groupOutPath = groupOutPath.replace(".pdf", ".html").replace(".png", ".html");
+                 finalOutPath = groupOutPath;
+                 fs.writeFileSync(groupOutPath, groupHtml, "utf8");
+                 continue;
+            }
+
+            // Write temp HTML file
+            const groupHtmlPath = path.join(tempDir, `nexus_report_${safeClassName}.html`);
+            fs.writeFileSync(groupHtmlPath, groupHtml, "utf8");
+
+            await new Promise((resolve, reject) => {
+                let hw = new BrowserWindow({
+                  show: false,
+                  width: 794,
+                  height: 1123,
+                  webPreferences: {
+                    offscreen: true,
+                    webSecurity: false // Allow loading file:// URLs for local temp images
+                  }
+                });
+                hw.loadFile(groupHtmlPath);
+                hw.webContents.on("did-finish-load", async () => {
+                  try {
+                    // Wait a brief tick (e.g. 200ms) for file:// images to decode and render completely before printing
+                    await new Promise(r => setTimeout(r, 200));
+
+                    if (format === "image") {
+                      const image = await hw.webContents.capturePage();
+                      fs.writeFileSync(groupOutPath, image.toPNG());
+                    } else {
+                      const buf = await hw.webContents.printToPDF({
+                        printBackground: true,
+                        pageSize: "A4",
+                        landscape: false
+                      });
+                      fs.writeFileSync(groupOutPath, buf);
+                    }
+                    hw.close(); hw = null;
+                    resolve();
+                  } catch(e) { hw?.close(); reject(e); }
+                });
+            });
+        }
+    } else {
+        // Broadsheet or empty students list
+        mainWindow?.webContents.send("report-generation:status", { text: `⏳ Rendering Broadsheet...` });
+        const html = reports.generateBroadsheetHTML(payload);
+        const outPath = path.join(outFolder, `Broadsheet_${payload.subject?.replace(/\s/g,"_")}.${format === "image" ? "png" : "pdf"}`);
+        finalOutPath = outPath;
+
+        if (format === "html") {
+             const htmlPath = outPath.replace(".pdf", ".html").replace(".png", ".html");
+             finalOutPath = htmlPath;
+             fs.writeFileSync(htmlPath, html, "utf8");
+        } else {
+             const tempHtmlPath = path.join(tempDir, `nexus_broadsheet_temp.html`);
+             fs.writeFileSync(tempHtmlPath, html, "utf8");
+
+             await new Promise((resolve, reject) => {
+                 let hw = new BrowserWindow({
+                   show: false,
+                   width: 1123, // landscape broadsheet width
+                   height: 794,
+                   webPreferences: {
+                     offscreen: true,
+                     webSecurity: false
+                   }
+                 });
+                 hw.loadFile(tempHtmlPath);
+                 hw.webContents.on("did-finish-load", async () => {
+                   try {
+                     await new Promise(r => setTimeout(r, 200));
+
+                     if (format === "image") {
+                       const image = await hw.webContents.capturePage();
+                       fs.writeFileSync(outPath, image.toPNG());
+                     } else {
+                       const buf = await hw.webContents.printToPDF({
+                         printBackground: true,
+                         pageSize: "A4",
+                         landscape: true
+                       });
+                       fs.writeFileSync(outPath, buf);
+                     }
+                     hw.close(); hw = null;
+                     resolve();
+                   } catch(e) { hw?.close(); reject(e); }
+                 });
+             });
+        }
+    }
 
     const durationSec = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`[Electron] Printed ${payload.students?.length || 0} reports in ${durationSec}s`);
     try {
+      const scope = payload.scope || 'all';
+      let eventType = 'PRINT_REPORTS';
+      if (scope === 'all') eventType = 'PRINT_REPORTS_SCHOOL';
+      else if (scope === 'class') eventType = 'PRINT_REPORTS_CLASS';
+      else if (scope === 'teacher') eventType = 'PRINT_REPORTS_TEACHER';
+      else if (scope === 'student') eventType = 'PRINT_REPORTS_STUDENT';
+      else if (scope === 'subject') eventType = 'PRINT_REPORTS_SUBJECT';
+
+      const adminLabel = currentAdminSession?.username || 'Admin';
+
       logActivity({
-        event_type: 'GRADES_CSV_IMPORTED', // reuse / map to activity log event
-        actor_label: 'Admin',
+        event_type: eventType,
+        actor_label: adminLabel,
         device_id: 'DESKTOP',
         payload_hash: '',
         payload: {
           action: 'print_reports',
           count: payload.students?.length || 0,
           format,
+          scope,
+          targetName: scope === 'class' ? payload.selectedClass
+                    : scope === 'teacher' ? payload.selectedTeacherName
+                    : scope === 'student' ? payload.selectedStudentName
+                    : scope === 'subject' ? payload.selectedSubject
+                    : undefined,
           durationSeconds: parseFloat(durationSec)
         }
       });
+
+      // Also log to the relational audit_logs table
+      const adminId = currentAdminSession ? currentAdminSession.id : null;
+      let details = `Printed ${payload.students?.length || 0} reports (${format.toUpperCase()}).`;
+      if (scope === 'all') details += ' Scope: Entire School.';
+      else if (scope === 'class' && payload.selectedClass) details += ` Scope: Class (${payload.selectedClass}).`;
+      else if (scope === 'teacher' && payload.selectedTeacherName) details += ` Scope: Teacher (${payload.selectedTeacherName}).`;
+      else if (scope === 'student' && payload.selectedStudentName) details += ` Scope: Student (${payload.selectedStudentName}).`;
+      else if (scope === 'subject' && payload.selectedSubject) details += ` Scope: Subject (${payload.selectedSubject}).`;
+
+      db.prepare(`
+        INSERT INTO audit_logs (admin_id, action, target, details)
+        VALUES (?, 'PRINT_REPORTS', 'student_records', ?)
+      `).run(adminId, details);
     } catch (_) {}
 
     require('electron').shell.openPath(outFolder);
-    return { success: true, path: outPath, folder: outFolder, format };
+    return { success: true, path: finalOutPath, folder: outFolder, format };
 
   } catch (err) {
     console.error(`[Electron] Report generation failed:`, err);
     throw err;
   } finally {
+    // Release the screen wake-lock whether generation succeeded or failed
+    if (powerSaveBlocker.isStarted(sleepBlockerId)) powerSaveBlocker.stop(sleepBlockerId);
     // Deterministic Cleanup: remove the temporary directory and all generated image files recursively
     if (tempDir && fs.existsSync(tempDir)) {
       try {
@@ -2946,29 +3238,86 @@ function createWindow() {
   }
 
   // ── App menu ─────────────────────────────────────────────────────────────────
+  const isMac = process.platform === 'darwin';
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
-      {
-        label: 'NexusSchoolOS',
+      // macOS Application menu (first item named after the app)
+      ...(isMac ? [{
+        label: app.getName(),
         submenu: [
-          {
-            label: 'About NexusSchoolOS',
-            click: () => mainWindow?.webContents.send('navigate-to', 'about'),
-          },
+          { label: 'About NexusSchoolOS', click: () => mainWindow?.webContents.send('navigate-to', 'about') },
           { type: 'separator' },
-          { role: 'quit' }
+          { role: 'services' },
+          { type: 'separator' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'unhide' },
+          { type: 'separator' },
+          { role: 'quit' },
         ],
-      },
+      }] : []),
+
+      // File (Windows / Linux only — macOS uses the app menu above)
+      ...(!isMac ? [{
+        label: 'File',
+        submenu: [
+          { label: 'About NexusSchoolOS', click: () => mainWindow?.webContents.send('navigate-to', 'about') },
+          { type: 'separator' },
+          { role: 'quit', label: 'Exit' },
+        ],
+      }] : []),
+
+      // Edit — provides system clipboard integration (copy/paste in inputs)
       {
         label: 'Edit',
         submenu: [
-          { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
-          { role: 'cut'  }, { role: 'copy' }, { role: 'paste'     },
-          { role: 'delete' }, { role: 'selectall' }
-        ]
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut'  },
+          { role: 'copy' },
+          { role: 'paste' },
+          ...(isMac ? [{ role: 'pasteAndMatchStyle' }] : []),
+          { role: 'delete' },
+          { type: 'separator' },
+          { role: 'selectAll' },
+        ],
       },
+
+      // View
       {
-        label: 'Help',
+        label: 'View',
+        submenu: [
+          { role: 'reload' },
+          { role: 'forceReload' },
+          ...(!app.isPackaged ? [{ role: 'toggleDevTools', label: 'Developer Tools' }] : []),
+          { type: 'separator' },
+          { role: 'resetZoom' },
+          { role: 'zoomIn'   },
+          { role: 'zoomOut'  },
+          { type: 'separator' },
+          { role: 'togglefullscreen' },
+        ],
+      },
+
+      // Window
+      {
+        label: 'Window',
+        submenu: [
+          { role: 'minimize' },
+          ...(isMac ? [
+            { type: 'separator' },
+            { role: 'front' },
+            { role: 'zoom'  },
+          ] : [
+            { role: 'close' },
+          ]),
+        ],
+      },
+
+      // Help
+      {
+        role: 'help',
         submenu: [
           {
             label: 'Check for Updates',
@@ -2985,9 +3334,27 @@ function createWindow() {
               }
             },
           },
+          { type: 'separator' },
           {
-            label: 'Open Portal',
+            label: 'View Portal',
             click: () => shell.openExternal(process.env.NEXUSOS_PORTAL_URL || 'https://nexusos.com.ng/portal'),
+          },
+          {
+            label: 'Contact Support',
+            // BCC silently copies the Brytebee team on every support email
+            click: () => shell.openExternal(
+              'mailto:sch-support@nexusos.com.ng'
+              + '?subject=Support%20Request%20%E2%80%94%20NexusSchoolOS'
+              + '&bcc=brytebee%40gmail.com'
+            ),
+          },
+          {
+            label: 'Report a Bug',
+            click: () => shell.openExternal(
+              'mailto:sch-support@nexusos.com.ng'
+              + '?subject=Bug%20Report%20%E2%80%94%20NexusSchoolOS'
+              + '&bcc=brytebee%40gmail.com'
+            ),
           },
         ],
       },
@@ -4192,6 +4559,74 @@ if (app) {
     } else {
       console.log('[Electron] Launch type: NORMAL.');
     }
+
+    // Clear Impact and Purge Handlers
+    ipcMain.handle("db:get-clear-impact", async (event, { type }) => {
+      try {
+        const db = database.getDb();
+        if (type === "grades") {
+          const student_records = db.prepare("SELECT COUNT(*) as c FROM student_records").get().c;
+          const sync_warnings = db.prepare("SELECT COUNT(*) as c FROM sync_warnings").get().c;
+          return { ok: true, counts: { student_records, sync_warnings } };
+        } else if (type === "attendance") {
+          const student_attendance = db.prepare("SELECT COUNT(*) as c FROM student_attendance").get().c;
+          const daily_attendance = db.prepare("SELECT COUNT(*) as c FROM daily_attendance").get().c;
+          const subject_attendance = db.prepare("SELECT COUNT(*) as c FROM subject_attendance").get().c;
+          const subject_attendance_agg = db.prepare("SELECT COUNT(*) as c FROM subject_attendance_agg").get().c;
+          const truancy_flags = db.prepare("SELECT COUNT(*) as c FROM truancy_flags").get().c;
+          return { ok: true, counts: { student_attendance, daily_attendance, subject_attendance, subject_attendance_agg, truancy_flags } };
+        }
+        return { ok: false, error: "Invalid type" };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+
+    ipcMain.handle("db:clear-data", async (event, { type }) => {
+      try {
+        const db = database.getDb();
+        const adminId = currentAdminSession ? currentAdminSession.id : null;
+        const adminLabel = currentAdminSession?.username || 'Admin';
+
+        if (type === "grades") {
+          db.transaction(() => {
+            db.prepare("DELETE FROM student_records").run();
+            db.prepare("DELETE FROM sync_warnings").run();
+            db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'CLEAR_GRADES', 'student_records', 'All student grades and marks deleted')").run(adminId);
+          })();
+          
+          logActivity({
+            event_type: 'CLEAR_GRADES',
+            actor_label: adminLabel,
+            device_id: 'DESKTOP',
+            payload_hash: '',
+            payload: { action: 'clear_grades' }
+          });
+          return { ok: true };
+        } else if (type === "attendance") {
+          db.transaction(() => {
+            db.prepare("DELETE FROM student_attendance").run();
+            db.prepare("DELETE FROM daily_attendance").run();
+            db.prepare("DELETE FROM subject_attendance").run();
+            db.prepare("DELETE FROM subject_attendance_agg").run();
+            db.prepare("DELETE FROM truancy_flags").run();
+            db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'CLEAR_ATTENDANCE', 'student_attendance', 'All student attendance records deleted')").run(adminId);
+          })();
+
+          logActivity({
+            event_type: 'CLEAR_ATTENDANCE',
+            actor_label: adminLabel,
+            device_id: 'DESKTOP',
+            payload_hash: '',
+            payload: { action: 'clear_attendance' }
+          });
+          return { ok: true };
+        }
+        return { ok: false, error: "Invalid type" };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
 
     // Expose flag to renderer so it can show a "Restored from backup" notice
     ipcMain.handle('app:was-restored', () => wasRestoredFromBackup);

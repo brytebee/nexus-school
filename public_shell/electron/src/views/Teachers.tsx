@@ -107,6 +107,37 @@ export function Teachers() {
         setCsvStatus(fullMsg);
         fetchTeachers();
         setTimeout(() => setCsvStatus(null), warnings.length > 0 ? 8000 : 4000);
+
+        const Swal = (window as any).Swal;
+        if (Swal) {
+          if (warnings.length > 0) {
+            Swal.fire({
+              title: 'Import Processed with Warnings',
+              html: `
+                <p style="color: #fff; margin-bottom: 10px;">Successfully loaded <strong>${count}</strong> teachers.</p>
+                <div style="text-align: left; background: rgba(239, 68, 68, 0.1); border-left: 4px solid #ef4444; padding: 10px; margin-top: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto;">
+                  <strong style="color: #ef4444; font-size: 13px;">Warnings:</strong>
+                  <ul style="margin: 5px 0 0 0; padding-left: 15px; color: #fca5a5; font-size: 11px; line-height: 1.6;">
+                    ${warnings.map(w => `<li>${w}</li>`).join('')}
+                  </ul>
+                </div>
+              `,
+              icon: 'warning',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#00E5FF'
+            });
+          } else {
+            Swal.fire({
+              title: 'Success!',
+              text: `Successfully loaded ${count} teachers.`,
+              icon: 'success',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#00E5FF'
+            });
+          }
+        }
       });
     }
   }, []);
@@ -434,11 +465,34 @@ export function Teachers() {
 
       {/* ── CSV Status Banner ── */}
       {csvStatus && (
-        <div style={{
-          background: 'rgba(0,229,255,0.08)', border: '1px solid rgba(0,229,255,0.25)',
-          borderRadius: 'var(--radius-sm)', padding: '10px 16px',
-          fontSize: '12px', color: 'var(--accent)',
-        }}>
+        <div 
+          className="slide-in-right"
+          style={{
+            position: 'fixed',
+            top: '24px',
+            right: '24px',
+            zIndex: 99999,
+            background: csvStatus.startsWith('❌') || csvStatus.includes('Failed') 
+              ? 'rgba(239, 68, 68, 0.95)' 
+              : csvStatus.startsWith('✅') 
+                ? 'rgba(16, 185, 129, 0.95)' 
+                : 'rgba(13, 18, 53, 0.95)',
+            border: csvStatus.startsWith('❌') || csvStatus.includes('Failed')
+              ? '1px solid rgba(239, 68, 68, 0.5)'
+              : csvStatus.startsWith('✅')
+                ? '1px solid rgba(16, 185, 129, 0.5)'
+                : '1px solid rgba(0, 229, 255, 0.4)',
+            padding: '14px 20px',
+            borderRadius: '12px',
+            fontSize: '13px',
+            color: '#fff',
+            fontWeight: 600,
+            boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
+            backdropFilter: 'blur(10px)',
+            maxWidth: '350px',
+            wordBreak: 'break-word',
+          }}
+        >
           {csvStatus}
         </div>
       )}

@@ -73,9 +73,11 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
   const [termEndDate, setTermEndDate] = useState("");
   const [showPosition, setShowPosition] = useState(true);
   const [showDomains, setShowDomains] = useState(true);
+  const [showAttendance, setShowAttendance] = useState(true);
   const [includeAttendance, setIncludeAttendance] = useState(true);
   const [attendanceWeight, setAttendanceWeight] = useState(10);
   const [template, setTemplate] = useState("clean_slate");
+  const [excludeUnregistered, setExcludeUnregistered] = useState(false);
 
   // Grading scale components
   const [components, setComponents] = useState<GradingComponent[]>([
@@ -158,11 +160,23 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
             ? Number(cfg.attendance_score_weight)
             : 0;
           setAttendanceWeight(hasAtt ? (dbAttWeight || 10) : 0);
-          setIncludeAttendance(hasAtt && dbAttWeight > 0);
+
+          const dbShowAtt = cfg.show_attendance !== undefined
+            ? (cfg.show_attendance !== false && cfg.show_attendance !== 0)
+            : true;
+          setShowAttendance(hasAtt && dbShowAtt);
+
+          const dbIncludeAtt = cfg.include_attendance_in_grades !== undefined
+            ? (cfg.include_attendance_in_grades !== false && cfg.include_attendance_in_grades !== 0)
+            : (dbAttWeight > 0);
+          setIncludeAttendance(hasAtt && dbIncludeAtt);
 
           if (cfg.template) {
             setTemplate(isTemplateLocked(cfg.template) ? "clean_slate" : cfg.template);
           }
+
+          // Unregistered courses exclusion flag
+          setExcludeUnregistered(cfg.exclude_unregistered_from_totals === 1 || cfg.exclude_unregistered_from_totals === true);
 
           if (cfg.grading_scale) {
             const raw = JSON.parse(cfg.grading_scale);
@@ -234,6 +248,68 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
     loadConfig();
   }, [currentTier]);
 
+  const handleShowAttendanceHelp = () => {
+    if (typeof (window as any).Swal !== "undefined") {
+      (window as any).Swal.fire({
+        title: "Attendance Configuration",
+        html: `
+          <div style="text-align: left; font-size: 13px; line-height: 1.6; color: #cbd5e1; font-family: sans-serif;">
+            <p style="margin-bottom: 12px;">Nexus School OS supports two distinct options for managing attendance on report cards:</p>
+            
+            <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #00e5ff;">
+              <strong style="color: #00e5ff; font-size: 14px;">1. Show Attendance in Result</strong>
+              <p style="margin: 4px 0 0 0;">When enabled, an <strong>Attendance</strong> column is rendered on the student's report sheet (or broadsheet) showing their computed attendance score/percentage. If unchecked, the attendance column is completely omitted.</p>
+            </div>
+            
+            <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; border-left: 4px solid #10b981;">
+              <strong style="color: #10b981; font-size: 14px;">2. Include Attendance in Grade Computation</strong>
+              <p style="margin: 4px 0 0 0;">When enabled, the attendance score is added directly to the student's subject total (e.g., CA 1 + CA 2 + Exam + Attendance = 100%).</p>
+              <p style="margin: 6px 0 0 0; font-style: italic; font-size: 11px; color: #94a3b8;">Note: If this option is disabled, the grading scale components alone (e.g. CA 1 + CA 2 + Exam) must sum to 100%, and attendance is treated as a standalone column that does not affect student averages or grades.</p>
+            </div>
+          </div>
+        `,
+        icon: "info",
+        confirmButtonColor: "#00E5FF",
+        background: "#0d1235",
+        color: "#fff",
+      });
+    } else {
+      alert("Show Attendance: Renders the attendance column on report cards.\nInclude Attendance: Adds the attendance score to the final subject grade calculation.");
+    }
+  };
+
+  const handleShowUnregisteredHelp = () => {
+    if (typeof (window as any).Swal !== "undefined") {
+      (window as any).Swal.fire({
+        title: "Unregistered Course",
+        html: `
+          <div style="text-align: left; font-size: 13px; line-height: 1.6; color: #cbd5e1; font-family: sans-serif;">
+            <p style="margin-bottom: 12px;">A course is considered <strong style="color:#f59e0b;">unregistered</strong> when a grade or score has been recorded for a student in that subject, but the student was <em>never formally enrolled</em> in it via the student subject list.</p>
+
+            <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #f59e0b;">
+              <strong style="color: #f59e0b; font-size: 14px;">Visual Indicator</strong>
+              <p style="margin: 4px 0 0 0;">On every printed report, unregistered courses are automatically marked with an <strong style="color:#f59e0b;">Unreg.</strong> badge next to the subject name so the admin, teacher, and parent can immediately identify the anomaly.</p>
+            </div>
+
+            <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #00e5ff;">
+              <strong style="color: #00e5ff; font-size: 14px;">Exclude from Totals &amp; Average (this option)</strong>
+              <p style="margin: 4px 0 0 0;">When <strong>checked</strong>: unregistered courses are still <em>displayed</em> on the report for full transparency, but their scores are <strong>not counted</strong> when calculating the student's total and average. This is useful when a teacher accidentally recorded a grade to the wrong student.</p>
+              <p style="margin: 6px 0 0 0;">When <strong>unchecked</strong>: all recorded scores — whether the subject is registered or not — contribute to totals and averages, matching the previous behaviour.</p>
+            </div>
+
+            <p style="font-size: 11px; color: #94a3b8; font-style: italic;">To formally register a student for a subject, go to the student's profile and update their subject list.</p>
+          </div>
+        `,
+        icon: "info",
+        confirmButtonColor: "#f59e0b",
+        background: "#0d1235",
+        color: "#fff",
+      });
+    } else {
+      alert("Unregistered courses are subjects where a score was recorded but the student was never formally enrolled. When this option is checked, those scores are shown on the report but excluded from the student's total and average.");
+    }
+  };
+
   const handleSaveConfig = async () => {
     if (totalScoreSum > 100) {
       if (typeof (window as any).Swal !== "undefined") {
@@ -274,10 +350,12 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
         term_end_date: termEndDate,
         show_position: showPosition,
         show_domains: showDomains,
-        show_attendance: hasAttendanceAccess ? true : false,
-        attendance_score_weight: (hasAttendanceAccess && includeAttendance) ? attendanceWeight : 0,
+        show_attendance: hasAttendanceAccess ? (showAttendance ? 1 : 0) : 0,
+        include_attendance_in_grades: hasAttendanceAccess ? (includeAttendance ? 1 : 0) : 0,
+        attendance_score_weight: (hasAttendanceAccess && (includeAttendance || showAttendance)) ? attendanceWeight : 0,
         grading_scale: JSON.stringify({ scale: existingScale, components: sortGradingComponents(components) }),
         template,
+        exclude_unregistered_from_totals: excludeUnregistered ? 1 : 0,
       };
 
       const res = await window.electronAPI.saveTermConfig(config);
@@ -591,19 +669,86 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
               </label>
 
               {currentTier !== "Silver" && currentTier !== "Standalone" && (
-                <label
-                  className="ph-toggle"
-                  style={{ cursor: "pointer", userSelect: "none" }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={includeAttendance}
-                    onChange={(e) => setIncludeAttendance(e.target.checked)}
-                    style={{ marginRight: "6px" }}
-                  />
-                  Include Attendance in Grade Computation
-                </label>
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "4px" }}>
+                  <label
+                    className="ph-toggle"
+                    style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center" }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={showAttendance}
+                      onChange={(e) => {
+                        const val = e.target.checked;
+                        setShowAttendance(val);
+                        if (!val) {
+                          setIncludeAttendance(false);
+                        }
+                      }}
+                      style={{ marginRight: "6px" }}
+                    />
+                    Show Attendance in Result
+                    <span
+                      style={{
+                        marginLeft: "6px",
+                        cursor: "pointer",
+                        color: "#00e5ff",
+                        fontSize: "11px",
+                        borderBottom: "1px dashed #00e5ff"
+                      }}
+                      onClick={handleShowAttendanceHelp}
+                    >
+                      (What is this?)
+                    </span>
+                  </label>
+
+                  <label
+                    className="ph-toggle"
+                    style={{
+                      cursor: showAttendance ? "pointer" : "default",
+                      userSelect: "none",
+                      display: "flex",
+                      alignItems: "center",
+                      opacity: showAttendance ? 1 : 0.5
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={includeAttendance}
+                      disabled={!showAttendance}
+                      onChange={(e) => setIncludeAttendance(e.target.checked)}
+                      style={{ marginRight: "6px" }}
+                    />
+                    Include Attendance in Grade Computation
+                  </label>
+                 </div>
               )}
+
+              {/* Unregistered courses exclusion — available to all tiers */}
+              <label
+                className="ph-toggle"
+                style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={excludeUnregistered}
+                  onChange={(e) => setExcludeUnregistered(e.target.checked)}
+                  style={{ marginRight: "6px", accentColor: "#f59e0b" }}
+                />
+                Exclude unregistered courses from totals
+                <span
+                  style={{
+                    marginLeft: "6px",
+                    cursor: "pointer",
+                    color: "#f59e0b",
+                    fontSize: "11px",
+                    borderBottom: "1px dashed #f59e0b"
+                  }}
+                  onClick={handleShowUnregisteredHelp}
+                >
+                  (What is this?)
+                </span>
+              </label>
+
             </div>
           </div>
 

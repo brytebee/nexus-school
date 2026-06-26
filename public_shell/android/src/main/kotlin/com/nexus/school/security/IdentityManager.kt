@@ -96,6 +96,14 @@ class IdentityManager(context: Context) {
             .apply()
     }
 
+    fun saveRole(role: String) {
+        prefs.edit().putString("staff_role", role).apply()
+    }
+
+    fun getRole(): String? {
+        return prefs.getString("staff_role", null)
+    }
+
     fun saveDeviceModel(model: String) {
         prefs.edit().putString("device_model", model).apply()
     }
