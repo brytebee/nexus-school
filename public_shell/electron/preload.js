@@ -150,6 +150,11 @@ const nexusAPI = {
         getAuditLogs:()      => ipcRenderer.invoke('auth:get-audit-logs'),
         forgotPassword: (data)=> ipcRenderer.invoke('auth:forgot-password', data),
         verifyOtpLogin: (data)=> ipcRenderer.invoke('auth:verify-otp-login', data),
+        getAdminProfile: ()  => ipcRenderer.invoke('auth:get-admin-profile'),
+        updateAdminProfile: (data) => ipcRenderer.invoke('auth:update-admin-profile', data),
+        setupTotp:       ()  => ipcRenderer.invoke('auth:setup-totp'),
+        verifyTotp:      (data) => ipcRenderer.invoke('auth:verify-totp', data),
+        disableTotp:     (data) => ipcRenderer.invoke('auth:disable-totp', data),
     },
     // ── Fee Structure Management ───────────────────────────────────────
     feeStructure: {

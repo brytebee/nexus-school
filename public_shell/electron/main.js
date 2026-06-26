@@ -460,6 +460,158 @@ ipcMain.handle('auth:update-profile-security', (event, { adminId, phone, questio
     }
 });
 
+// auth:get-admin-profile — Retrieve profile details of currently logged-in administrator
+ipcMain.handle('auth:get-admin-profile', () => {
+    if (!currentAdminSession) return { ok: false, error: 'Unauthorized' };
+    try {
+        const db = database.getDb();
+        const admin = db.prepare('SELECT id, username, role_level, phone, recovery_email, totp_enabled, avatar FROM admin_users WHERE id = ?').get(currentAdminSession.id);
+        return { ok: true, profile: admin };
+    } catch (e) {
+        return { ok: false, error: e.message };
+    }
+});
+
+// auth:update-admin-profile — Update username, phone, recovery email, and avatar (requires Sudo PIN or TOTP)
+ipcMain.handle('auth:update-admin-profile', (event, { username, phone, recovery_email, avatar, pin, totpCode }) => {
+    if (!currentAdminSession) return { ok: false, error: 'Unauthorized' };
+    try {
+        const db = database.getDb();
+        const admin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(currentAdminSession.id);
+        if (!admin) return { ok: false, error: 'Admin not found' };
+
+        // Verify either sudo PIN or TOTP
+        let verified = false;
+        if (pin) {
+            const pinHash = Buffer.from(String(pin)).toString('base64');
+            if (pinHash === admin.secret_hash) {
+                verified = true;
+            }
+        }
+        if (!verified && totpCode && admin.totp_secret && admin.totp_enabled === 1) {
+            const speakeasy = require('speakeasy');
+            verified = speakeasy.totp.verify({
+                secret: admin.totp_secret,
+                encoding: 'base32',
+                token: String(totpCode),
+                window: 1
+            });
+        }
+
+        if (!verified) {
+            return { ok: false, error: 'Verification failed. Incorrect PIN or TOTP code.' };
+        }
+
+        db.prepare('UPDATE admin_users SET username = ?, phone = ?, recovery_email = ?, avatar = COALESCE(?, avatar) WHERE id = ?')
+          .run(username.trim(), phone ? phone.trim() : null, recovery_email ? recovery_email.trim() : '', avatar || null, currentAdminSession.id);
+
+        currentAdminSession.username = username.trim();
+
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'UPDATE_PROFILE', 'admin_users', ?)").run(
+            currentAdminSession.id,
+            `Updated profile for ${username.trim()}`
+        );
+
+        return { ok: true };
+    } catch (e) {
+        return { ok: false, error: e.message };
+    }
+});
+
+// auth:setup-totp — Generates secret and QR code URI for 2FA setup
+ipcMain.handle('auth:setup-totp', async () => {
+    if (!currentAdminSession) return { ok: false, error: 'Unauthorized' };
+    try {
+        const db = database.getDb();
+        const admin = db.prepare('SELECT username FROM admin_users WHERE id = ?').get(currentAdminSession.id);
+        if (!admin) return { ok: false, error: 'Admin not found' };
+
+        const speakeasy = require('speakeasy');
+        const qrcode = require('qrcode');
+
+        const secret = speakeasy.generateSecret({
+            name: `Nexus School OS (${admin.username})`,
+            issuer: 'Nexus OS'
+        });
+
+        const qrDataUrl = await qrcode.toDataURL(secret.otpauth_url);
+
+        db.prepare('UPDATE admin_users SET totp_secret = ?, totp_enabled = 0 WHERE id = ?')
+          .run(secret.base32, currentAdminSession.id);
+
+        return {
+            ok: true,
+            secret: secret.base32,
+            qrCodeUrl: qrDataUrl
+        };
+    } catch (e) {
+        return { ok: false, error: e.message };
+    }
+});
+
+// auth:verify-totp — Verifies the code and enables 2FA
+ipcMain.handle('auth:verify-totp', (event, { code }) => {
+    if (!currentAdminSession) return { ok: false, error: 'Unauthorized' };
+    try {
+        const db = database.getDb();
+        const admin = db.prepare('SELECT totp_secret FROM admin_users WHERE id = ?').get(currentAdminSession.id);
+        if (!admin || !admin.totp_secret) return { ok: false, error: 'TOTP setup not initialized' };
+
+        const speakeasy = require('speakeasy');
+        const verified = speakeasy.totp.verify({
+            secret: admin.totp_secret,
+            encoding: 'base32',
+            token: String(code),
+            window: 1
+        });
+
+        if (verified) {
+            db.prepare('UPDATE admin_users SET totp_enabled = 1 WHERE id = ?').run(currentAdminSession.id);
+            db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'ENABLE_2FA', 'admin_users', 'TOTP 2FA enabled')").run(currentAdminSession.id);
+            return { ok: true };
+        } else {
+            return { ok: false, error: 'Invalid verification code' };
+        }
+    } catch (e) {
+        return { ok: false, error: e.message };
+    }
+});
+
+// auth:disable-totp — Disables 2FA (requires PIN or TOTP code)
+ipcMain.handle('auth:disable-totp', (event, { pin, totpCode }) => {
+    if (!currentAdminSession) return { ok: false, error: 'Unauthorized' };
+    try {
+        const db = database.getDb();
+        const admin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(currentAdminSession.id);
+        if (!admin) return { ok: false, error: 'Admin not found' };
+
+        let verified = false;
+        if (pin) {
+            const pinHash = Buffer.from(String(pin)).toString('base64');
+            if (pinHash === admin.secret_hash) verified = true;
+        }
+        if (!verified && totpCode && admin.totp_secret && admin.totp_enabled === 1) {
+            const speakeasy = require('speakeasy');
+            verified = speakeasy.totp.verify({
+                secret: admin.totp_secret,
+                encoding: 'base32',
+                token: String(totpCode),
+                window: 1
+            });
+        }
+
+        if (!verified) {
+            return { ok: false, error: 'Verification failed. Incorrect PIN or TOTP code.' };
+        }
+
+        db.prepare('UPDATE admin_users SET totp_secret = NULL, totp_enabled = 0 WHERE id = ?').run(currentAdminSession.id);
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'DISABLE_2FA', 'admin_users', 'TOTP 2FA disabled')").run(currentAdminSession.id);
+        return { ok: true };
+    } catch (e) {
+        return { ok: false, error: e.message };
+    }
+});
+
 // auth:change-pin — called after OTP verify to let admin set a new PIN/password
 ipcMain.handle('auth:change-pin', (event, { adminId, newPin, authType }) => {
     try {
@@ -3395,7 +3547,18 @@ function createWindow() {
   // Set DEV_AUTO_LOGIN=true in .env to skip auth during testing and go straight
   // to the main app. This flag must NEVER appear in production builds.
   let bootFile = 'lock.html';
-  if (process.env.DEV_AUTO_LOGIN === 'true') {
+  if (licenseStatus.locked) {
+    let hash = 'default';
+    if (licenseStatus.reason === 'no_license') {
+      hash = 'invalid';
+    } else if (licenseStatus.reason === 'expired') {
+      hash = 'expired';
+    } else if (['tampered', 'invalid_tier', 'hardware_mismatch', 'internal_error'].includes(licenseStatus.reason)) {
+      hash = 'tampered';
+    }
+    bootFile = `lock.html#${hash}`;
+    console.log(`[License] System is LOCKED due to ${licenseStatus.reason || 'restriction'}. Loading ${bootFile}`);
+  } else if (process.env.DEV_AUTO_LOGIN === 'true') {
     currentAdminSession = { id: 1, name: 'Developer', role: 'super_admin', loginAt: Date.now() };
     console.log('[Auth] DEV_AUTO_LOGIN active — skipping lock screen.');
     bootFile = process.env.USE_REACT_UI === 'true' ? 'dist/renderer.html' : 'index.html';
