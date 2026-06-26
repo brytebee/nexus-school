@@ -632,6 +632,52 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
 .form-group { display: flex; flex-direction: column; gap: 6px; }
 .form-group label { font-size: 12px; font-weight: 600; color: var(--text-dim); }
 
+/* Avatar Uploader */
+.avatar-uploader-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.avatar-uploader-circle {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.04);
+    border: 1px dashed var(--glass-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    overflow: hidden;
+    position: relative;
+    transition: all 0.2s ease;
+}
+.avatar-uploader-circle:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 15px rgba(0,229,255,0.15);
+}
+.avatar-uploader-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(8,9,13,0.75);
+    color: var(--text);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+.avatar-uploader-circle:hover .avatar-uploader-overlay {
+    opacity: 1;
+}
+
+
 /* Logo uploader */
 .logo-uploader {
     height: 110px;
@@ -1254,9 +1300,10 @@ code {
 }
 @media (min-width: 1201px) {
   .settings-content {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 1fr 1fr;
   }
 }
+
 
 /* 2-Column Settings Layout for Attendance Rules Setup */
 .attendance-settings-content {
