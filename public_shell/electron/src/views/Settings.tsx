@@ -188,6 +188,285 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
     reader.readAsDataURL(file);
   };
 
+  // Load Admin Profile Details
+  const loadAdminProfile = async () => {
+    try {
+      const res = await (window as any).electronAPI.auth.getAdminProfile();
+      if (res && res.ok && res.profile) {
+        setProfileUsername(res.profile.username || '');
+        setProfilePhone(res.profile.phone || '');
+        setProfileRecoveryEmail(res.profile.recovery_email || '');
+        setProfileTotpEnabled(!!res.profile.totp_enabled);
+        setProfileAvatar(res.profile.avatar || undefined);
+      }
+    } catch (err) {
+      console.error('Failed to load admin profile:', err);
+    }
+  };
+
+  const handleUnlockProfile = () => {
+    requireSudo(
+      () => {
+        setIsProfileUnlocked(true);
+        loadAdminProfile();
+      },
+      'Unlock Admin Profile',
+      'Enter your admin PIN to view and modify your profile and security settings.',
+      false // non-destructive
+    );
+  };
+
+  const handleSaveProfile = async () => {
+    if (!profileUsername.trim()) {
+      const Swal = (window as any).Swal;
+      if (Swal) {
+        Swal.fire({
+          title: 'Validation Error',
+          text: 'Username is required.',
+          icon: 'error',
+          background: '#0d1235',
+          color: '#fff'
+        });
+      } else {
+        alert('Username is required.');
+      }
+      return;
+    }
+
+    if (!verificationCode.trim()) {
+      const Swal = (window as any).Swal;
+      if (Swal) {
+        Swal.fire({
+          title: 'Verification Required',
+          text: 'Please enter your Admin PIN or TOTP 2FA code to save profile changes.',
+          icon: 'warning',
+          background: '#0d1235',
+          color: '#fff'
+        });
+      } else {
+        alert('Please enter your verification code.');
+      }
+      return;
+    }
+
+    try {
+      const payload: any = {
+        username: profileUsername,
+        phone: profilePhone || null,
+        recovery_email: profileRecoveryEmail,
+        avatar: profileAvatar || null
+      };
+
+      const cleanCode = verificationCode.trim();
+      if (cleanCode.length === 6) {
+        payload.totpCode = cleanCode;
+      } else {
+        payload.pin = cleanCode;
+      }
+
+      const res = await (window as any).electronAPI.auth.updateAdminProfile(payload);
+      const Swal = (window as any).Swal;
+      if (res && res.ok) {
+        if (Swal) {
+          Swal.fire({
+            title: 'Profile Updated',
+            text: 'Your administrator profile has been updated successfully.',
+            icon: 'success',
+            background: '#0d1235',
+            color: '#fff',
+            timer: 2000,
+            showConfirmButton: false
+          });
+        } else {
+          alert('Profile updated successfully.');
+        }
+        setVerificationCode('');
+        loadAdminProfile();
+      } else {
+        if (Swal) {
+          Swal.fire({
+            title: 'Update Failed',
+            text: res?.error || 'Incorrect authorization code.',
+            icon: 'error',
+            background: '#0d1235',
+            color: '#fff'
+          });
+        } else {
+          alert(res?.error || 'Update failed.');
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to update admin profile:', err);
+      const Swal = (window as any).Swal;
+      if (Swal) {
+        Swal.fire({
+          title: 'System Error',
+          text: err.message || 'An unexpected error occurred.',
+          icon: 'error',
+          background: '#0d1235',
+          color: '#fff'
+        });
+      } else {
+        alert(err.message || 'System error.');
+      }
+    }
+  };
+
+  const handleStart2faSetup = async () => {
+    try {
+      const res = await (window as any).electronAPI.auth.setupTotp();
+      if (res && res.ok) {
+        setTotpSecret(res.secret);
+        setTotpQrUrl(res.qrCodeUrl);
+        setTotpVerifyCode('');
+        setIsSettingUp2fa(true);
+      } else {
+        const Swal = (window as any).Swal;
+        if (Swal) {
+          Swal.fire({
+            title: 'Setup Failed',
+            text: res?.error || 'Could not initialize 2FA setup.',
+            icon: 'error',
+            background: '#0d1235',
+            color: '#fff'
+          });
+        } else {
+          alert(res?.error || 'Failed to start 2FA setup.');
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to setup TOTP:', err);
+    }
+  };
+
+  const handleVerify2fa = async () => {
+    if (!totpVerifyCode || totpVerifyCode.length !== 6) {
+      const Swal = (window as any).Swal;
+      if (Swal) {
+        Swal.fire({
+          title: 'Invalid Code',
+          text: 'Please enter a 6-digit verification code.',
+          icon: 'warning',
+          background: '#0d1235',
+          color: '#fff'
+        });
+      } else {
+        alert('Please enter a 6-digit code.');
+      }
+      return;
+    }
+
+    try {
+      const res = await (window as any).electronAPI.auth.verifyTotp({ code: totpVerifyCode });
+      const Swal = (window as any).Swal;
+      if (res && res.ok) {
+        if (Swal) {
+          Swal.fire({
+            title: '2FA Enabled',
+            text: 'Two-Factor Authentication is now active on your account.',
+            icon: 'success',
+            background: '#0d1235',
+            color: '#fff'
+          });
+        } else {
+          alert('2FA enabled successfully.');
+        }
+        setIsSettingUp2fa(false);
+        setProfileTotpEnabled(true);
+        loadAdminProfile();
+      } else {
+        if (Swal) {
+          Swal.fire({
+            title: 'Verification Failed',
+            text: res?.error || 'Invalid 6-digit code. Please try again.',
+            icon: 'error',
+            background: '#0d1235',
+            color: '#fff'
+          });
+        } else {
+          alert(res?.error || 'Verification failed.');
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to verify TOTP:', err);
+    }
+  };
+
+  const handleDisable2fa = async () => {
+    const Swal = (window as any).Swal;
+    if (!verificationCode.trim()) {
+      if (Swal) {
+        Swal.fire({
+          title: 'Verification Required',
+          text: 'Please enter your Admin PIN or TOTP 2FA code to disable Two-Factor Authentication.',
+          icon: 'warning',
+          background: '#0d1235',
+          color: '#fff'
+        });
+      } else {
+        alert('Please enter your verification code.');
+      }
+      return;
+    }
+
+    if (Swal) {
+      const confirm = await Swal.fire({
+        title: 'Disable 2FA?',
+        text: 'Are you sure you want to disable Two-Factor Authentication? Your account will be less secure.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Yes, disable it',
+        cancelButtonText: 'Cancel',
+        background: '#0d1235',
+        color: '#fff',
+        confirmButtonColor: '#ff4444'
+      });
+      if (!confirm.isConfirmed) return;
+    }
+
+    try {
+      const cleanCode = verificationCode.trim();
+      const payload: any = {};
+      if (cleanCode.length === 6) {
+        payload.totpCode = cleanCode;
+      } else {
+        payload.pin = cleanCode;
+      }
+
+      const res = await (window as any).electronAPI.auth.disableTotp(payload);
+      if (res && res.ok) {
+        if (Swal) {
+          Swal.fire({
+            title: '2FA Disabled',
+            text: 'Two-Factor Authentication has been disabled.',
+            icon: 'success',
+            background: '#0d1235',
+            color: '#fff'
+          });
+        } else {
+          alert('2FA disabled successfully.');
+        }
+        setProfileTotpEnabled(false);
+        setVerificationCode('');
+        loadAdminProfile();
+      } else {
+        if (Swal) {
+          Swal.fire({
+            title: 'Action Failed',
+            text: res?.error || 'Verification failed. Incorrect PIN or TOTP code.',
+            icon: 'error',
+            background: '#0d1235',
+            color: '#fff'
+          });
+        } else {
+          alert(res?.error || 'Action failed.');
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to disable TOTP:', err);
+    }
+  };
+
   // Submit form
   const handleSave = async () => {
     setSaving(true);
@@ -860,6 +1139,289 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
           >
             {saving ? '⌛ Saving...' : saveStatus === 'success' ? '✅ Saved!' : saveStatus === 'error' ? '❌ Error' : 'Save Identity Shard'}
           </button>
+        </div>
+
+        {/* Column 3: Admin Profile & Security */}
+        <div className="settings-column">
+          <h3>Admin Profile &amp; Security</h3>
+          
+          {!isProfileUnlocked ? (
+            <div style={{
+              background: 'rgba(255,255,255,0.02)',
+              border: '1px dashed var(--glass-border)',
+              borderRadius: '12px',
+              padding: '40px 20px',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '16px',
+              flex: 1
+            }}>
+              <div style={{ fontSize: '32px' }}>🔒</div>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '13px', color: '#fff', fontWeight: 600 }}>Security Settings Locked</h4>
+                <p style={{ margin: '6px 0 0', fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.5 }}>
+                  Please authorize to edit admin profile and security credentials.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleUnlockProfile}
+                style={{
+                  background: 'rgba(0,229,255,0.1)',
+                  border: '1px solid rgba(0,229,255,0.3)',
+                  color: '#00e5ff',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                🔓 Unlock Profile
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flex: 1 }}>
+              {/* Circular Avatar */}
+              <div className="avatar-uploader-container">
+                <div
+                  className="avatar-uploader-circle"
+                  onClick={() => document.getElementById('avatar-upload-input')?.click()}
+                >
+                  {profileAvatar ? (
+                    <img
+                      src={profileAvatar}
+                      alt="Avatar Preview"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  ) : (
+                    <span style={{ fontSize: '28px' }}>👤</span>
+                  )}
+                  <div className="avatar-uploader-overlay">
+                    Change
+                  </div>
+                </div>
+                <input
+                  type="file"
+                  id="avatar-upload-input"
+                  accept="image/png, image/jpeg"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                      setProfileAvatar(event.target?.result as string);
+                    };
+                    reader.readAsDataURL(file);
+                  }}
+                />
+                <span style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '4px' }}>Admin Avatar</span>
+              </div>
+
+              <div className="form-group">
+                <label>Admin Username</label>
+                <input
+                  type="text"
+                  className="modern-input"
+                  placeholder="Username"
+                  value={profileUsername}
+                  onChange={(e) => setProfileUsername(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Recovery Phone Number</label>
+                <input
+                  type="text"
+                  className="modern-input"
+                  placeholder="e.g. +234..."
+                  value={profilePhone}
+                  onChange={(e) => setProfilePhone(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Recovery Email</label>
+                <input
+                  type="email"
+                  className="modern-input"
+                  placeholder="e.g. admin@school.com"
+                  value={profileRecoveryEmail}
+                  onChange={(e) => setProfileRecoveryEmail(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Verification Code (PIN or 2FA Code)</label>
+                <input
+                  type="password"
+                  className="modern-input"
+                  placeholder="Enter 4-digit PIN or 6-digit 2FA code"
+                  value={verificationCode}
+                  onChange={(e) => setVerificationCode(e.target.value)}
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSaveProfile}
+                className="primary-btn"
+                style={{
+                  background: 'var(--accent)',
+                  color: 'var(--bg-deep)',
+                  border: 'none',
+                  padding: '10px 18px',
+                  borderRadius: '8px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  justifyContent: 'center',
+                  display: 'flex',
+                  alignItems: 'center',
+                  boxShadow: '0 4px 14px rgba(0,229,255,0.2)'
+                }}
+              >
+                Save Profile Shard
+              </button>
+
+              <div style={{
+                margin: '10px 0 0',
+                borderTop: '1px solid rgba(255,255,255,0.06)',
+                paddingTop: '16px'
+              }}>
+                <h4 style={{ fontSize: '11px', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px' }}>
+                  Two-Factor Authentication (2FA)
+                </h4>
+
+                {profileTotpEnabled ? (
+                  <div style={{
+                    background: 'rgba(34,197,94,0.05)',
+                    border: '1px solid rgba(34,197,94,0.2)',
+                    borderRadius: '8px',
+                    padding: '12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#22c55e', fontSize: '12px', fontWeight: 600 }}>
+                      <span>🛡️</span>
+                      <span>TOTP 2FA Status: Enabled</span>
+                    </div>
+                    <p style={{ fontSize: '10px', color: 'var(--text-dim)', margin: 0, lineHeight: 1.4 }}>
+                      Secure verification is active. Use your authenticator app to generate codes.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleDisable2fa}
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid #ff4444',
+                        color: '#ff4444',
+                        padding: '6px 10px',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: '10px',
+                        fontWeight: 600,
+                        alignSelf: 'flex-start'
+                      }}
+                    >
+                      Disable 2FA
+                    </button>
+                  </div>
+                ) : isSettingUp2fa ? (
+                  <div style={{
+                    background: 'rgba(255,255,255,0.02)',
+                    border: '1px solid var(--glass-border)',
+                    borderRadius: '8px',
+                    padding: '12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px'
+                  }}>
+                    <p style={{ fontSize: '11px', color: '#fff', fontWeight: 600, margin: 0 }}>Scan this QR Code</p>
+                    <div style={{ display: 'flex', justifyContent: 'center', background: '#fff', padding: '6px', borderRadius: '8px', alignSelf: 'center' }}>
+                      <img src={totpQrUrl} alt="TOTP QR Code" style={{ width: '130px', height: '130px' }} />
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '10px', color: 'var(--text-dim)', margin: '0 0 4px 0' }}>Manual Entry Key:</p>
+                      <code style={{ fontSize: '10px', color: '#00e5ff', background: 'rgba(0,0,0,0.3)', padding: '3px 6px', borderRadius: '4px', wordBreak: 'break-all', display: 'block', textAlign: 'center', fontFamily: 'monospace' }}>
+                        {totpSecret}
+                      </code>
+                    </div>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label style={{ fontSize: '10px' }}>Enter 6-Digit Verification Code</label>
+                      <input
+                        type="text"
+                        maxLength={6}
+                        className="modern-input"
+                        placeholder="000000"
+                        style={{ textAlign: 'center', fontSize: '16px', letterSpacing: '3px' }}
+                        value={totpVerifyCode}
+                        onChange={(e) => setTotpVerifyCode(e.target.value.replace(/[^0-9]/g, ''))}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setIsSettingUp2fa(false)}
+                        className="secondary-btn"
+                        style={{ flex: 1, padding: '6px', fontSize: '10px' }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleVerify2fa}
+                        className="primary-btn"
+                        style={{ flex: 1, padding: '6px', fontSize: '10px', background: 'var(--accent)', color: 'var(--bg-deep)' }}
+                      >
+                        Verify &amp; Enable
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{
+                    background: 'rgba(255,255,255,0.02)',
+                    border: '1px dashed var(--glass-border)',
+                    borderRadius: '8px',
+                    padding: '12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-dim)', fontSize: '11px' }}>
+                      <span>🔓</span>
+                      <span>TOTP 2FA Status: Disabled</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleStart2faSetup}
+                      style={{
+                        background: 'rgba(0,229,255,0.1)',
+                        border: '1px solid rgba(0,229,255,0.3)',
+                        color: '#00e5ff',
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: '10px',
+                        fontWeight: 600,
+                        alignSelf: 'flex-start'
+                      }}
+                    >
+                      Setup 2FA Authenticator
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
