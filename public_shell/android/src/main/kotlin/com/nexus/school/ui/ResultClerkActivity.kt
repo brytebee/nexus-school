@@ -56,7 +56,10 @@ class ResultClerkActivity : AppCompatActivity() {
                 withContext(Dispatchers.IO) {
                     val db = SyncDatabase.getDatabase(this@ResultClerkActivity)
                     val students = db.studentDao().getAllStudents()
-                    classesList = students.map { it.class_name }.distinct().filter { it.isNotBlank() }.sorted()
+                    classesList = students.map { 
+                        val arm = it.class_arm
+                        if (!arm.isNullOrBlank()) "${it.class_name} $arm" else it.class_name 
+                    }.distinct().filter { it.isNotBlank() }.sorted()
                 }
             }
 
