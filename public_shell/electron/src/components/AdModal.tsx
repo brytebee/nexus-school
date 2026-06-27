@@ -12,12 +12,55 @@ interface AdModalProps {
   onClose: () => void;
 }
 
+// YouTube IFrame API player states
+const YT_PLAYING = 1;
+const YT_ERRORED = -1; // synthetic — we map all error events here
+
 export function AdModal({ ad, onClose }: AdModalProps) {
   const [countdown, setCountdown] = useState(ad.skip_after_seconds);
+  const [videoReady, setVideoReady] = useState(false);   // true once video starts playing
+  const [videoError, setVideoError] = useState(false);   // true on any player error (e.g. Error 153)
   const [isMuted, setIsMuted] = useState(true);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
+  // Build embed URL — enable JS API so we can receive postMessage events
+  const embedUrl = `https://www.youtube.com/embed/${ad.youtube_id}?autoplay=1&mute=${isMuted ? 1 : 0}&controls=0&modestbranding=1&rel=0&iv_load_policy=3&showinfo=0&enablejsapi=1&origin=${encodeURIComponent(window.location.origin || 'file://')}`;
+
+  // Listen for YouTube IFrame API postMessage events
   useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (!event.data) return;
+      let data: any = {};
+      try {
+        data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+      } catch {
+        return;
+      }
+
+      // YouTube sends { event: 'onStateChange', info: <state> }
+      if (data.event === 'onStateChange') {
+        if (data.info === YT_PLAYING && !videoReady) {
+          setVideoReady(true);
+        }
+      }
+
+      // YouTube sends { event: 'onError', info: <errorCode> }
+      // Error 100: removed/private. Error 101/150: embedding disabled. Error 5: HTML5 issue.
+      if (data.event === 'onError') {
+        setVideoError(true);
+        setVideoReady(true); // allow skip immediately on error
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [videoReady]);
+
+  // Start countdown only after video is confirmed playing (or errored)
+  useEffect(() => {
+    if (!videoReady) return;
+
     setCountdown(ad.skip_after_seconds);
     timerRef.current = setInterval(() => {
       setCountdown((prev) => {
@@ -32,6 +75,15 @@ export function AdModal({ ad, onClose }: AdModalProps) {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
+  }, [videoReady, ad]);
+
+  // Safety net: if the player never fires a postMessage within 8 seconds
+  // (e.g. iframe is sandboxed or network blocked), unlock skip anyway.
+  useEffect(() => {
+    const fallback = setTimeout(() => {
+      if (!videoReady) setVideoReady(true);
+    }, 8000);
+    return () => clearTimeout(fallback);
   }, [ad]);
 
   const handleCta = () => {
@@ -40,7 +92,14 @@ export function AdModal({ ad, onClose }: AdModalProps) {
     }
   };
 
-  const embedUrl = `https://www.youtube.com/embed/${ad.youtube_id}?autoplay=1&mute=${isMuted ? 1 : 0}&controls=0&modestbranding=1&rel=0&iv_load_policy=3&showinfo=0`;
+  const toggleMute = () => {
+    setIsMuted((m) => !m);
+    // Post mute command to iframe player
+    iframeRef.current?.contentWindow?.postMessage(
+      JSON.stringify({ event: 'command', func: isMuted ? 'unMute' : 'mute', args: [] }),
+      '*'
+    );
+  };
 
   return (
     <div
@@ -64,8 +123,13 @@ export function AdModal({ ad, onClose }: AdModalProps) {
           from { opacity: 0; }
           to { opacity: 1; }
         }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
       `}</style>
 
+      {/* Video container */}
       <div
         style={{
           width: '100%',
@@ -79,15 +143,64 @@ export function AdModal({ ad, onClose }: AdModalProps) {
           position: 'relative',
         }}
       >
+        {/* Buffering overlay — visible until video starts */}
+        {!videoReady && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(0,0,0,0.7)',
+              zIndex: 2,
+              gap: '12px',
+            }}
+          >
+            <div style={{ fontSize: '28px', animation: 'pulse 1.5s ease-in-out infinite' }}>⏳</div>
+            <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '13px', margin: 0 }}>
+              Loading video…
+            </p>
+          </div>
+        )}
+
+        {/* Error overlay — shown when YouTube rejects embedding */}
+        {videoError && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(0,0,0,0.88)',
+              zIndex: 3,
+              gap: '10px',
+            }}
+          >
+            <div style={{ fontSize: '36px' }}>🎬</div>
+            <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '13px', margin: 0 }}>
+              This video cannot be played inline.
+            </p>
+            <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '11px', margin: 0 }}>
+              Skip or click Learn More to continue.
+            </p>
+          </div>
+        )}
+
         <iframe
+          ref={iframeRef}
           src={embedUrl}
           title={ad.title}
           style={{ width: '100%', height: '100%', border: 'none' }}
           allow="autoplay; encrypted-media"
         />
 
+        {/* Mute toggle */}
         <button
-          onClick={() => setIsMuted(!isMuted)}
+          onClick={toggleMute}
           style={{
             position: 'absolute',
             bottom: '16px',
@@ -104,6 +217,7 @@ export function AdModal({ ad, onClose }: AdModalProps) {
             cursor: 'pointer',
             fontSize: '18px',
             transition: 'all 0.2s ease',
+            zIndex: 4,
           }}
           onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
           onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
@@ -112,6 +226,7 @@ export function AdModal({ ad, onClose }: AdModalProps) {
         </button>
       </div>
 
+      {/* Bottom bar */}
       <div
         style={{
           width: '100%',
@@ -159,7 +274,24 @@ export function AdModal({ ad, onClose }: AdModalProps) {
             Learn More
           </button>
 
-          {countdown > 0 ? (
+          {/* Waiting for video / countdown / skip button */}
+          {!videoReady ? (
+            <div
+              style={{
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: '8px',
+                padding: '10px 20px',
+                color: 'rgba(255,255,255,0.3)',
+                fontSize: '13px',
+                minWidth: '120px',
+                textAlign: 'center',
+                animation: 'pulse 1.5s ease-in-out infinite',
+              }}
+            >
+              Buffering…
+            </div>
+          ) : countdown > 0 ? (
             <div
               style={{
                 background: 'rgba(255,255,255,0.05)',
