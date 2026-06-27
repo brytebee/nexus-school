@@ -2979,7 +2979,7 @@ ipcMain.handle("fetch-ads", async () => {
       cta_link: "https://nexusos.com.ng/portal/billing"
     },
     {
-      youtube_id: "3tmd-ClpJxA",
+      youtube_id: "dQw4w9WgXcQ",
       title: "Unlock CBT Arena and AI Insights with Diamond Plan!",
       skip_after_seconds: 7,
       cta_link: "https://nexusos.com.ng/portal/billing"
