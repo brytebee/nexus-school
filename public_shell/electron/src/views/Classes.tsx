@@ -582,10 +582,34 @@ export default function Classes() {
             <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, background: 'rgba(0, 0, 0, 0.15)' }}>
               <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#00E5FF', margin: 0 }}>⚙️ Manage: {selectedClass.hierarchy_class}</h3>
               <button
+                id="close-classes-drawer-btn"
                 onClick={() => setDrawerOpen(false)}
-                style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '24px', lineHeight: 1, cursor: 'pointer' }}
+                style={{
+                  background: 'rgba(255,255,255,0.05)',
+                  border: 'none',
+                  color: 'var(--text-dim)',
+                  fontSize: '18px',
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  padding: 0,
+                  lineHeight: 1
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 68, 68, 0.2)';
+                  e.currentTarget.style.color = '#ff4444';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                  e.currentTarget.style.color = 'var(--text-dim)';
+                }}
               >
-                &times;
+                ×
               </button>
             </div>
 

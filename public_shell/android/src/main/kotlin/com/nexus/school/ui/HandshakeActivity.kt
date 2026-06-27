@@ -27,6 +27,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.nexus.school.data.SyncDatabase
 import kotlinx.coroutines.delay
+import android.graphics.BitmapFactory
+import android.util.Base64
+import androidx.compose.animation.*
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
 
 class HandshakeActivity : AppCompatActivity() {
     private val scope = MainScope()
@@ -247,6 +263,18 @@ class HandshakeActivity : AppCompatActivity() {
                             } catch (e: Exception) {
                                 Color(0xFF1A237E)
                             }
+
+                            val logoBytes: ByteArray? = remember(config.logoBase64) {
+                                config.logoBase64?.let { b64 ->
+                                    try {
+                                        val raw = if (b64.contains(",")) b64.substringAfter(",") else b64
+                                        Base64.decode(raw, Base64.DEFAULT)
+                                    } catch (e: Exception) { null }
+                                }
+                            }
+                            val logoBitmap = remember(logoBytes) {
+                                logoBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                            }
                             
                             var showProgress by remember { mutableStateOf(students.isNotEmpty()) }
                             var progressAmount by remember { mutableStateOf(0f) }
@@ -284,7 +312,7 @@ class HandshakeActivity : AppCompatActivity() {
                             MaterialTheme(
                                 colorScheme = MaterialTheme.colorScheme.copy(
                                     primary = primaryColor,
-                                    background = primaryColor,
+                                    background = Color(0xFF050814),
                                     onPrimary = Color.White,
                                     onBackground = Color.White
                                 )
@@ -304,28 +332,73 @@ class HandshakeActivity : AppCompatActivity() {
                                         }
                                     }
                                 ) { padding ->
-                                    Surface(
-                                        modifier = Modifier.fillMaxSize().padding(padding),
-                                        color = MaterialTheme.colorScheme.background
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(padding)
+                                            .background(
+                                                Brush.verticalGradient(
+                                                    colors = listOf(Color(0xFF050814), primaryColor.copy(alpha = 0.25f), Color(0xFF050814))
+                                                )
+                                            ),
+                                        contentAlignment = Alignment.Center
                                     ) {
                                         Column(
-                                            modifier = Modifier.fillMaxSize(),
-                                            verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
-                                            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(32.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center
                                         ) {
+                                            // School Logo (real image or emoji fallback)
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(96.dp)
+                                                    .clip(CircleShape)
+                                                    .background(primaryColor.copy(alpha = 0.15f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (logoBitmap != null) {
+                                                    Image(
+                                                        bitmap = logoBitmap.asImageBitmap(),
+                                                        contentDescription = "School Logo",
+                                                        contentScale = ContentScale.Crop,
+                                                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                                    )
+                                                } else {
+                                                    Text(text = "🏫", fontSize = 44.sp)
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(20.dp))
+
                                             Text(
-                                                "Synced with ${config.name ?: "Nexus"}",
-                                                style = MaterialTheme.typography.headlineMedium,
-                                                color = MaterialTheme.colorScheme.onPrimary
+                                                text = "Synced with",
+                                                color = Color.White.copy(alpha = 0.6f),
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Normal,
+                                                textAlign = TextAlign.Center
                                             )
-                                            Spacer(modifier = Modifier.height(16.dp))
-                                            Text("Modules Enabled: ${config.modules.joinToString()}", color = MaterialTheme.colorScheme.onPrimary)
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = config.name ?: "Nexus School",
+                                                color = primaryColor,
+                                                fontSize = 26.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                textAlign = TextAlign.Center
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                text = "Modules Enabled: ${config.modules.joinToString()}",
+                                                color = Color.White.copy(alpha = 0.6f),
+                                                fontSize = 14.sp,
+                                                textAlign = TextAlign.Center
+                                            )
                                             
                                             if (showProgress) {
                                                 Spacer(modifier = Modifier.height(32.dp))
                                                 Text(
                                                     "Organizing Class Records... ${(progressAmount * 100).toInt()}%", 
-                                                    color = MaterialTheme.colorScheme.onPrimary,
+                                                    color = Color.White,
                                                     style = MaterialTheme.typography.bodyLarge
                                                 )
                                                 Spacer(modifier = Modifier.height(8.dp))
@@ -371,67 +444,108 @@ class HandshakeActivity : AppCompatActivity() {
                                                 }
 
                                                 if (students.isNotEmpty()) {
-                                                    Spacer(modifier = Modifier.height(16.dp))
-                                                    Text(
-                                                        "✅ ${students.size} Students Safely Digested",
-                                                        color = Color(0xFFA5D6A7),
-                                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
-                                                    )
-                                                    Spacer(modifier = Modifier.height(16.dp))
+                                                    Spacer(modifier = Modifier.height(24.dp))
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .background(Color(0xFF0C192E), shape = RoundedCornerShape(12.dp))
+                                                            .border(1.dp, Color(0x3300E676), shape = RoundedCornerShape(12.dp))
+                                                            .padding(horizontal = 20.dp, vertical = 10.dp)
+                                                    ) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.Center
+                                                        ) {
+                                                            Text(
+                                                                text = "✅",
+                                                                fontSize = 16.sp,
+                                                                modifier = Modifier.padding(end = 8.dp)
+                                                            )
+                                                            Text(
+                                                                text = "${students.size} Students Safely Digested",
+                                                                color = Color(0xFF00E676),
+                                                                fontSize = 14.sp,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                        }
+                                                    }
+                                                    Spacer(modifier = Modifier.height(24.dp))
                                                     Button(
                                                         onClick = navigateToRoster,
                                                         colors = ButtonDefaults.buttonColors(
-                                                            containerColor = Color.White,
-                                                            contentColor = primaryColor
+                                                            containerColor = primaryColor,
+                                                            contentColor = Color.White
                                                         ),
-                                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(50)
+                                                        modifier = Modifier
+                                                            .fillMaxWidth(0.8f)
+                                                            .height(56.dp),
+                                                        shape = RoundedCornerShape(14.dp)
                                                     ) {
-                                                        Text("View Class Roster  →", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+                                                        Text("View Class Roster  →", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                                                     }
                                                 } else {
                                                     // Fallback: handshake succeeded but no students assigned yet
-                                                    // (teacher has no allocations configured on the Hub).
-                                                    // Let them through so they are not permanently stuck.
                                                     Spacer(modifier = Modifier.height(16.dp))
                                                     Text(
                                                         "⚠️ No students assigned to you yet.",
                                                         color = Color(0xFFFFCC80),
                                                         style = MaterialTheme.typography.bodyMedium,
-                                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                                        textAlign = TextAlign.Center
                                                     )
-                                                    Spacer(modifier = Modifier.height(8.dp))
+                                                    Spacer(modifier = Modifier.height(24.dp))
                                                     OutlinedButton(
                                                         onClick = navigateToRoster,
                                                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
                                                         border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
-                                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(50)
+                                                        modifier = Modifier
+                                                            .fillMaxWidth(0.8f)
+                                                            .height(56.dp),
+                                                        shape = RoundedCornerShape(14.dp)
                                                     ) {
-                                                        Text("Continue Anyway  →")
+                                                        Text("Continue Anyway  →", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                                                     }
                                                 }
                                             }
                                             
-                                            Spacer(modifier = Modifier.height(32.dp))
-                                            
                                             val thermalState = identityManager.getThermalStatus()
                                             if (thermalState == "CRITICAL") {
+                                                Spacer(modifier = Modifier.height(24.dp))
                                                 Card(
-                                                    colors = CardDefaults.cardColors(containerColor = Color(0x33FF0000)),
-                                                    modifier = Modifier.padding(16.dp)
+                                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E0A0A)),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth(0.9f)
+                                                        .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.4f), shape = RoundedCornerShape(16.dp)),
+                                                    shape = RoundedCornerShape(16.dp)
                                                 ) {
-                                                    Column(modifier = Modifier.padding(16.dp), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-                                                        Text("❄️ Cooling Down", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                                                    Column(
+                                                        modifier = Modifier.padding(20.dp),
+                                                        horizontalAlignment = Alignment.CenterHorizontally
+                                                    ) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.Center
+                                                        ) {
+                                                            Text("❄️", fontSize = 18.sp)
+                                                            Spacer(modifier = Modifier.width(6.dp))
+                                                            Text(
+                                                                "Cooling Down",
+                                                                style = MaterialTheme.typography.titleMedium,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = Color.White
+                                                            )
+                                                        }
                                                         Spacer(modifier = Modifier.height(8.dp))
                                                         Text(
                                                             "We've paused the sync to protect your phone's battery. We will resume in 2 minutes.", 
                                                             style = MaterialTheme.typography.bodyMedium, 
-                                                            color = Color(0xDDFFAAAA),
-                                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                                            color = Color(0xFFFFAAAA).copy(alpha = 0.8f),
+                                                            textAlign = TextAlign.Center,
+                                                            lineHeight = 20.sp
                                                         )
                                                     }
                                                 }
                                             } else {
-                                                Text("Sync Status: $thermalState (OPTIMIZED)", color = Color(0xAAFFFFFF))
+                                                Spacer(modifier = Modifier.height(24.dp))
+                                                Text("Sync Status: $thermalState (OPTIMIZED)", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
                                             }
                                         }
                                     }

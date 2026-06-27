@@ -160,14 +160,9 @@ class AppLaunchActivity : AppCompatActivity() {
                         // Danger action — kept but no longer labelled "Demo"
                         OutlinedButton(
                             onClick = {
-                                identityManager.clearData()
-                                CoroutineScope(Dispatchers.IO).launch {
-                                    SyncDatabase.getDatabase(this@AppLaunchActivity).clearAllTables()
-                                    launch(Dispatchers.Main) {
-                                        startActivity(Intent(this@AppLaunchActivity, HandshakeActivity::class.java))
-                                        finish()
-                                    }
-                                }
+                                val intent = Intent(this@AppLaunchActivity, LockActivity::class.java)
+                                intent.putExtra("CONFIRM_DANGER_ACTION", true)
+                                startActivityForResult(intent, 1002)
                             },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF4444)),
                             modifier = Modifier
@@ -179,6 +174,21 @@ class AppLaunchActivity : AppCompatActivity() {
                             Text("Disconnect & Scan New QR", fontSize = 14.sp)
                         }
                     }
+                }
+            }
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 1002 && resultCode == RESULT_OK) {
+            val identityManager = IdentityManager(this)
+            identityManager.clearData()
+            CoroutineScope(Dispatchers.IO).launch {
+                SyncDatabase.getDatabase(this@AppLaunchActivity).clearAllTables()
+                launch(Dispatchers.Main) {
+                    startActivity(Intent(this@AppLaunchActivity, HandshakeActivity::class.java))
+                    finish()
                 }
             }
         }

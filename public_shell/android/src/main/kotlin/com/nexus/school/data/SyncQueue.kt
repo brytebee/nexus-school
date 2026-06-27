@@ -39,7 +39,7 @@ interface SyncDao {
     suspend fun deleteEvents(eventIds: List<String>)
 }
 
-@Database(entities = [SyncEvent::class, Student::class, StudentScore::class, DailyAttendance::class], version = 9, exportSchema = false)
+@Database(entities = [SyncEvent::class, Student::class, StudentScore::class, DailyAttendance::class], version = 10, exportSchema = false)
 abstract class SyncDatabase : RoomDatabase() {
     abstract fun syncDao(): SyncDao
     abstract fun studentDao(): StudentDao
@@ -105,6 +105,12 @@ abstract class SyncDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE students ADD COLUMN class_arm TEXT")
+            }
+        }
+
         fun getDatabase(context: Context): SyncDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -112,7 +118,7 @@ abstract class SyncDatabase : RoomDatabase() {
                     SyncDatabase::class.java,
                     "nexus_sync_database"
                 )
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance

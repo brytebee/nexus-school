@@ -188,7 +188,7 @@ class StudentRosterActivity : AppCompatActivity() {
                     // Derive ordered unique (class, subject) tabs, exclusively for teacher's assigned subjects
                     val newTabs = students
                         .filter { teacherAssignedSubjects.isEmpty() || teacherAssignedSubjects.contains(it.subject) }
-                        .map { Pair(it.class_name, it.subject) }
+                        .map { Pair(if (it.class_arm.isNullOrBlank()) it.class_name else "${it.class_name} ${it.class_arm}", it.subject) }
                         .distinct()
                         .sortedWith(compareBy({ it.first }, { it.second }))
                     tabs = newTabs
@@ -223,7 +223,7 @@ class StudentRosterActivity : AppCompatActivity() {
             // Students shown for the currently selected tab
             val filteredStudents = remember(students, selectedTab) {
                 selectedTab?.let { (cls, subj) ->
-                    students.filter { it.class_name == cls && it.subject == subj }
+                    students.filter { (if (it.class_arm.isNullOrBlank()) it.class_name else "${it.class_name} ${it.class_arm}") == cls && it.subject == subj }
                 } ?: emptyList()
             }
 
@@ -374,14 +374,9 @@ class StudentRosterActivity : AppCompatActivity() {
                         if (selectedScreen == AppScreen.SETTINGS) {
                             SettingsScreen(
                                 onDisconnect = {
-                                    IdentityManager(this@StudentRosterActivity).clearData()
-                                    scope.launch(Dispatchers.IO) {
-                                        SyncDatabase.getDatabase(this@StudentRosterActivity).clearAllTables()
-                                        launch(Dispatchers.Main) {
-                                            startActivity(Intent(this@StudentRosterActivity, HandshakeActivity::class.java))
-                                            finish()
-                                        }
-                                    }
+                                    val intent = Intent(this@StudentRosterActivity, LockActivity::class.java)
+                                    intent.putExtra("CONFIRM_DANGER_ACTION", true)
+                                    startActivityForResult(intent, 1002)
                                 }
                             )
                         } else if (showFocusMode && filteredStudents.isNotEmpty()) {
@@ -530,10 +525,11 @@ class StudentRosterActivity : AppCompatActivity() {
                 if (studentToEdit != null) {
                     val student = studentToEdit!!
                     val enrolledSubjects = students.filter { it.id == student.id }.map { it.subject }
+                    val studentFullClass = if (student.class_arm.isNullOrBlank()) student.class_name else "${student.class_name} ${student.class_arm}"
                     val masterSubjectsList = IdentityManager(this@StudentRosterActivity)
-                        .getSubjectsForClass(student.class_name)
+                        .getSubjectsForClass(studentFullClass)
                         .ifEmpty {
-                            tabs.filter { it.first == student.class_name }.map { it.second }.distinct()
+                            tabs.filter { it.first == studentFullClass }.map { it.second }.distinct()
                         }
 
                     EditStudentRecordSheet(
@@ -548,7 +544,7 @@ class StudentRosterActivity : AppCompatActivity() {
                                 saveAddStudentEvent(
                                     context = this@StudentRosterActivity,
                                     studentName = name,
-                                    className = student.class_name,
+                                    className = if (student.class_arm.isNullOrBlank()) student.class_name else "${student.class_name} ${student.class_arm}",
                                     subjects = subjects,
                                     photoBase64 = photo,
                                     parentName  = parentName,
@@ -578,6 +574,20 @@ class StudentRosterActivity : AppCompatActivity() {
 
             } // Close MaterialTheme
         } // Close setContent
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 1002 && resultCode == RESULT_OK) {
+            IdentityManager(this).clearData()
+            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                SyncDatabase.getDatabase(this@StudentRosterActivity).clearAllTables()
+                launch(Dispatchers.Main) {
+                    startActivity(Intent(this@StudentRosterActivity, HandshakeActivity::class.java))
+                    finish()
+                }
+            }
+        }
     }
 
     private fun triggerSync(onSyncDone: () -> Unit, onSuccess: (List<com.nexus.school.data.HonorRollItem>) -> Unit) {
@@ -1624,7 +1634,8 @@ fun EditStudentRecordSheet(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Scores", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
-                        Text("${student.name}  ·  ${student.class_name}", color = TextMuted, fontSize = 11.sp)
+                        val fullClass = if (student.class_arm.isNullOrBlank()) student.class_name else "${student.class_name} ${student.class_arm}"
+                        Text("${student.name}  ·  $fullClass", color = TextMuted, fontSize = 11.sp)
                         if (isGradesLocked) {
                             Text(
                                 "🔒 Locked by Admin",

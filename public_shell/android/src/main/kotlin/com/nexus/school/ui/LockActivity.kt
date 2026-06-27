@@ -41,6 +41,12 @@ class LockActivity : AppCompatActivity() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
                     NexusApp.requiresAuth = false
+                    val isDangerConfirm = intent.getBooleanExtra("CONFIRM_DANGER_ACTION", false)
+                    if (isDangerConfirm) {
+                        setResult(RESULT_OK)
+                        finish()
+                        return
+                    }
                     val isColdBoot = intent.getBooleanExtra("IS_COLD_BOOT", false)
                     if (isColdBoot) {
                         startActivity(Intent(this@LockActivity, MainActivity::class.java))
@@ -51,6 +57,13 @@ class LockActivity : AppCompatActivity() {
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     super.onAuthenticationError(errorCode, errString)
                     Log.w("NexusLock", "Auth error $errorCode: $errString")
+
+                    val isDangerConfirm = intent.getBooleanExtra("CONFIRM_DANGER_ACTION", false)
+                    if (isDangerConfirm) {
+                        setResult(RESULT_CANCELED)
+                        finish()
+                        return
+                    }
 
                     when (errorCode) {
                         BiometricPrompt.ERROR_USER_CANCELED,
@@ -83,6 +96,7 @@ class LockActivity : AppCompatActivity() {
             }
         )
         
+        val isDangerConfirm = intent.getBooleanExtra("CONFIRM_DANGER_ACTION", false)
         val biometricManager = BiometricManager.from(this)
         val authenticators = when {
             biometricManager.canAuthenticate(BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS -> BIOMETRIC_STRONG or DEVICE_CREDENTIAL
@@ -90,9 +104,12 @@ class LockActivity : AppCompatActivity() {
             else -> DEVICE_CREDENTIAL
         }
 
+        val title = if (isDangerConfirm) "Confirm Disconnect" else "Nexus Vault Locked"
+        val subtitle = if (isDangerConfirm) "Authenticate to wipe device records and scan new QR" else "Authenticate to access school records"
+
         promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Nexus Vault Locked")
-            .setSubtitle("Authenticate to access school records")
+            .setTitle(title)
+            .setSubtitle(subtitle)
             .setAllowedAuthenticators(authenticators)
             .build()
     }

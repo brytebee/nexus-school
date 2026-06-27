@@ -1332,10 +1332,34 @@ export function Students() {
                 </p>
               </div>
               <button
+                id="close-enrollment-drawer-btn"
                 onClick={() => setIsDrawerOpen(false)}
-                style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center' }}
+                style={{
+                  background: 'rgba(255,255,255,0.05)',
+                  border: 'none',
+                  color: 'var(--text-dim)',
+                  fontSize: '18px',
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  padding: 0,
+                  lineHeight: 1
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 68, 68, 0.2)';
+                  e.currentTarget.style.color = '#ff4444';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                  e.currentTarget.style.color = 'var(--text-dim)';
+                }}
               >
-                ✕
+                ×
               </button>
             </div>
 
@@ -2064,10 +2088,34 @@ export function Students() {
                 <p style={{ margin: '4px 0 0', fontSize: '11px', color: 'var(--text-dim)' }}>Configure student management policies.</p>
               </div>
               <button
+                id="close-student-settings-btn"
                 onClick={() => setIsSettingsPanelOpen(false)}
-                style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '20px', lineHeight: 1, padding: '4px' }}
+                style={{
+                  background: 'rgba(255,255,255,0.05)',
+                  border: 'none',
+                  color: 'var(--text-dim)',
+                  fontSize: '18px',
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  padding: 0,
+                  lineHeight: 1
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 68, 68, 0.2)';
+                  e.currentTarget.style.color = '#ff4444';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                  e.currentTarget.style.color = 'var(--text-dim)';
+                }}
               >
-                ✕
+                ×
               </button>
             </div>
 

@@ -463,8 +463,35 @@ export function Dashboard({ onTabChange }: DashboardProps = {}) {
                   Live institutional metrics and quick navigation
                 </p>
               </div>
-              <button onClick={() => setIsSettingsOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-dim)', fontSize: '24px', cursor: 'pointer', lineHeight: '1', display: 'flex', alignItems: 'center' }}>
-                &times;
+              <button
+                id="close-dashboard-snapshot-btn"
+                onClick={() => setIsSettingsOpen(false)}
+                style={{
+                  background: 'rgba(255,255,255,0.05)',
+                  border: 'none',
+                  color: 'var(--text-dim)',
+                  fontSize: '18px',
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  padding: 0,
+                  lineHeight: 1
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 68, 68, 0.2)';
+                  e.currentTarget.style.color = '#ff4444';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                  e.currentTarget.style.color = 'var(--text-dim)';
+                }}
+              >
+                ×
               </button>
             </div>
 
