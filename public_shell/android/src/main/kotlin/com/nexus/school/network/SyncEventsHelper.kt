@@ -99,6 +99,26 @@ suspend fun saveAddStudentEvent(
     val db       = SyncDatabase.getDatabase(context)
     val localId  = existingStudentId ?: "TEMP_${UUID.randomUUID().toString().substring(0, 8).uppercase()}"
 
+    val allClasses = com.nexus.school.security.IdentityManager(context).getAllClasses()
+    var parsedClassName = className
+    var parsedClassArm: String? = null
+
+    for (c in allClasses) {
+        if (className.startsWith(c) && className.length > c.length) {
+            parsedClassName = c
+            parsedClassArm = className.substring(c.length).trim()
+            break
+        }
+    }
+
+    if (parsedClassArm == null) {
+        val lastSpaceIdx = className.lastIndexOf(' ')
+        if (lastSpaceIdx != -1) {
+            parsedClassName = className.substring(0, lastSpaceIdx).trim()
+            parsedClassArm = className.substring(lastSpaceIdx + 1).trim()
+        }
+    }
+
     if (existingStudentId != null) {
         db.studentDao().deleteStudentById(existingStudentId)
     }
@@ -109,7 +129,8 @@ suspend fun saveAddStudentEvent(
             Student(
                 id           = localId,
                 name         = studentName,
-                class_name   = className,
+                class_name   = parsedClassName,
+                class_arm    = parsedClassArm,
                 subject      = subject,
                 photo_base64 = photoBase64,
                 parent_name  = parentName,
@@ -132,7 +153,7 @@ suspend fun saveAddStudentEvent(
         val dobField    = if (dob != null) """, "dob": "$dob"""" else ""
         val photoField  = if (photoBase64 != null && index == 0) """, "photo_base64": "$photoBase64"""" else ""
         
-        val payload = """{"student_id": "$localId", "name": "$studentName", "class_name": "$className", "subject": "$subject"$nameField$emailField$phoneField$regNoField$adminNoField$genderField$dobField$photoField}"""
+        val payload = """{"student_id": "$localId", "name": "$studentName", "class_name": "$parsedClassName", "class_arm": "${parsedClassArm ?: ""}", "subject": "$subject"$nameField$emailField$phoneField$regNoField$adminNoField$genderField$dobField$photoField}"""
 
         db.syncDao().insertEvent(
             SyncEvent(

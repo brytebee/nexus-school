@@ -2950,6 +2950,9 @@ ipcMain.on("win-maximize", () => {
 ipcMain.on("win-close", () => {
   if (mainWindow) mainWindow.close();
 });
+ipcMain.on("shell:openExternal", (event, url) => {
+  shell.openExternal(url);
+});
 ipcMain.handle("get-platform", () => process.platform);
 
 ipcMain.handle("revoke-device", async (event, deviceId) => {
@@ -3547,10 +3550,12 @@ function createWindow() {
   // Set DEV_AUTO_LOGIN=true in .env to skip auth during testing and go straight
   // to the main app. This flag must NEVER appear in production builds.
   if (process.env.DEV_TEST_LOCK) {
-    licenseStatus = { locked: true, reason: process.env.DEV_TEST_LOCK };
+    const cleanReason = process.env.DEV_TEST_LOCK.split(' ')[0].trim();
+    licenseStatus = { locked: true, reason: cleanReason };
   }
 
   let bootFile = 'lock.html';
+  let loadOptions = {};
   if (licenseStatus.locked) {
     let hash = 'default';
     if (licenseStatus.reason === 'no_license') {
@@ -3564,14 +3569,25 @@ function createWindow() {
     } else if (['tampered', 'invalid_tier', 'hardware_mismatch', 'internal_error'].includes(licenseStatus.reason)) {
       hash = 'tampered';
     }
-    bootFile = `lock.html#${hash}`;
-    console.log(`[License] System is LOCKED due to ${licenseStatus.reason || 'restriction'}. Loading ${bootFile}`);
+    bootFile = 'lock.html';
+    loadOptions = { hash: hash };
+    console.log(`[License] System is LOCKED due to ${licenseStatus.reason || 'restriction'}. Loading ${bootFile}#${hash}`);
   } else if (process.env.DEV_AUTO_LOGIN === 'true') {
-    currentAdminSession = { id: 1, name: 'Developer', role: 'super_admin', loginAt: Date.now() };
-    console.log('[Auth] DEV_AUTO_LOGIN active — skipping lock screen.');
+    try {
+      const db = database.getDb();
+      const firstSuper = db.prepare('SELECT id, username, role_level FROM admin_users WHERE role_level = 9 LIMIT 1').get();
+      if (firstSuper) {
+        currentAdminSession = { id: firstSuper.id, username: firstSuper.username, role_level: firstSuper.role_level, loginAt: Date.now() };
+      } else {
+        currentAdminSession = { id: 1, name: 'Developer', role: 'super_admin', loginAt: Date.now() };
+      }
+    } catch (_) {
+      currentAdminSession = { id: 1, name: 'Developer', role: 'super_admin', loginAt: Date.now() };
+    }
+    console.log(`[Auth] DEV_AUTO_LOGIN active — skipping lock screen. Logged in as: ${currentAdminSession.username || 'Developer'} (ID: ${currentAdminSession.id})`);
     bootFile = process.env.USE_REACT_UI === 'true' ? 'dist/renderer.html' : 'index.html';
   }
-  mainWindow.loadFile(bootFile);
+  mainWindow.loadFile(bootFile, loadOptions);
 
 
   // Start the message queue worker now that the main window exists

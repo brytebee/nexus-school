@@ -60,6 +60,17 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
   const [totpVerifyCode, setTotpVerifyCode] = useState('');
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
 
+  // Staff Accounts States
+  const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
+  const [staffAccounts, setStaffAccounts] = useState<any[]>([]);
+  const [newStaffUsername, setNewStaffUsername] = useState('');
+  const [newStaffPin, setNewStaffPin] = useState('');
+  const [newStaffRole, setNewStaffRole] = useState(1);
+  const [newStaffPhone, setNewStaffPhone] = useState('');
+  const [newStaffQuestion, setNewStaffQuestion] = useState('');
+  const [newStaffAnswer, setNewStaffAnswer] = useState('');
+  const [currentAdminUser, setCurrentAdminUser] = useState<any>(null);
+
 
   // Terminal mode states
   const [terminalMode, setTerminalMode] = useState('master');
@@ -222,6 +233,140 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
       'Enter your admin PIN to view and modify your profile and security settings.',
       false // non-destructive
     );
+  };
+
+  const loadStaffAccounts = async () => {
+    try {
+      const list = await (window as any).electronAPI.getAdmins();
+      setStaffAccounts(list || []);
+      
+      const session = await (window as any).electronAPI.invoke('auth:get-session');
+      setCurrentAdminUser(session);
+    } catch (err) {
+      console.error('Failed to load staff accounts:', err);
+    }
+  };
+
+  const handleOpenStaffModal = () => {
+    requireSudo(
+      () => {
+        setIsStaffModalOpen(true);
+        loadStaffAccounts();
+      },
+      'Staff Accounts Access',
+      'Please enter your admin PIN to manage staff accounts.',
+      false // non-destructive
+    );
+  };
+
+  const handleCreateStaff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newStaffUsername.trim() || !newStaffPin.trim()) {
+      const Swal = (window as any).Swal;
+      const msg = 'Username and PIN are required.';
+      if (Swal) {
+        Swal.fire({ title: 'Error', text: msg, icon: 'error', background: '#0d1235', color: '#fff' });
+      } else {
+        alert(msg);
+      }
+      return;
+    }
+    if (newStaffPin.trim().length < 4) {
+      const Swal = (window as any).Swal;
+      const msg = 'PIN must be at least 4 characters.';
+      if (Swal) {
+        Swal.fire({ title: 'Error', text: msg, icon: 'error', background: '#0d1235', color: '#fff' });
+      } else {
+        alert(msg);
+      }
+      return;
+    }
+
+    try {
+      const res = await (window as any).electronAPI.createAdmin({
+        username: newStaffUsername.trim(),
+        pin: newStaffPin.trim(),
+        roleLevel: newStaffRole,
+        phone: newStaffPhone.trim() || undefined,
+        question: newStaffQuestion.trim() || undefined,
+        answer: newStaffAnswer.trim() || undefined,
+      });
+
+      const Swal = (window as any).Swal;
+      if (res.ok) {
+        if (Swal) {
+          Swal.fire({ title: 'Success', text: 'Staff account created successfully.', icon: 'success', background: '#0d1235', color: '#fff', timer: 2000, showConfirmButton: false });
+        }
+        // Reset form
+        setNewStaffUsername('');
+        setNewStaffPin('');
+        setNewStaffRole(1);
+        setNewStaffPhone('');
+        setNewStaffQuestion('');
+        setNewStaffAnswer('');
+        // Reload list
+        loadStaffAccounts();
+      } else {
+        const errorMsg = res.error || 'Failed to create staff account.';
+        if (Swal) {
+          Swal.fire({ title: 'Error', text: errorMsg, icon: 'error', background: '#0d1235', color: '#fff' });
+        } else {
+          alert(errorMsg);
+        }
+      }
+    } catch (err: any) {
+      const Swal = (window as any).Swal;
+      if (Swal) {
+        Swal.fire({ title: 'Error', text: err.message, icon: 'error', background: '#0d1235', color: '#fff' });
+      } else {
+        alert(err.message);
+      }
+    }
+  };
+
+  const handleDeleteStaff = async (adminId: string, username: string) => {
+    const Swal = (window as any).Swal;
+    const deleteAction = async () => {
+      try {
+        const res = await (window as any).electronAPI.deleteAdmin({ adminId });
+        if (res.ok) {
+          if (Swal) {
+            Swal.fire({ title: 'Deleted', text: `Staff account "${username}" deleted.`, icon: 'success', background: '#0d1235', color: '#fff', timer: 2000, showConfirmButton: false });
+          }
+          loadStaffAccounts();
+        } else {
+          if (Swal) {
+            Swal.fire({ title: 'Error', text: res.error || 'Failed to delete account.', icon: 'error', background: '#0d1235', color: '#fff' });
+          }
+        }
+      } catch (err: any) {
+        if (Swal) {
+          Swal.fire({ title: 'Error', text: err.message, icon: 'error', background: '#0d1235', color: '#fff' });
+        }
+      }
+    };
+
+    if (Swal) {
+      Swal.fire({
+        title: 'Delete Staff Account?',
+        text: `Are you sure you want to permanently delete the staff login "${username}"?`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ff4444',
+        cancelButtonColor: 'rgba(255,255,255,0.1)',
+        confirmButtonText: 'Yes, Delete',
+        background: '#0d1235',
+        color: '#fff'
+      }).then((result: any) => {
+        if (result.isConfirmed) {
+          deleteAction();
+        }
+      });
+    } else {
+      if (confirm(`Are you sure you want to delete "${username}"?`)) {
+        deleteAction();
+      }
+    }
   };
 
   const handleSaveProfile = async () => {
@@ -818,7 +963,6 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
               cursor: 'pointer',
               overflow: 'hidden',
               padding: 0,
-              marginRight: '4px',
               transition: 'all 0.2s',
               boxShadow: '0 0 10px rgba(0,0,0,0.2)'
             }}
@@ -839,39 +983,100 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
             )}
           </button>
           <button
+            onClick={handleOpenStaffModal}
+            id="staff-accounts-btn"
+            style={{
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '50%',
+              width: '34px',
+              height: '34px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              boxShadow: '0 0 10px rgba(0,0,0,0.2)',
+              fontSize: '16px',
+              color: '#fff'
+            }}
+            title="Manage Staff Accounts"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(0,229,255,0.4)';
+              e.currentTarget.style.boxShadow = '0 0 12px rgba(0,229,255,0.2)';
+              e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
+              e.currentTarget.style.boxShadow = '0 0 10px rgba(0,0,0,0.2)';
+              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+            }}
+          >
+            👥
+          </button>
+          <button
             id="data-templates-btn"
             onClick={() => setIsTemplateDrawerOpen(true)}
             style={{
-              background: 'rgba(0,229,255,0.1)',
-              border: '1px solid rgba(0,229,255,0.3)',
-              color: '#00e5ff',
-              padding: '8px 14px',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '12px',
-              fontWeight: 600,
+              background: 'rgba(0,229,255,0.05)',
+              border: '1px solid rgba(0,229,255,0.2)',
+              borderRadius: '50%',
+              width: '34px',
+              height: '34px',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              boxShadow: '0 0 10px rgba(0,0,0,0.2)',
+              fontSize: '16px',
+              color: '#00e5ff'
+            }}
+            title="Download Data Templates"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(0,229,255,0.6)';
+              e.currentTarget.style.boxShadow = '0 0 12px rgba(0,229,255,0.3)';
+              e.currentTarget.style.background = 'rgba(0,229,255,0.15)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(0,229,255,0.2)';
+              e.currentTarget.style.boxShadow = '0 0 10px rgba(0,0,0,0.2)';
+              e.currentTarget.style.background = 'rgba(0,229,255,0.05)';
             }}
           >
-            📋 Data Templates
+            📋
           </button>
           <button
             onClick={handleResetData}
             id="reset-btn"
             style={{
-              background: 'transparent',
-              border: '1px solid #ff4444',
-              color: '#ff4444',
-              padding: '8px 16px',
-              borderRadius: '8px',
+              background: 'rgba(255,68,68,0.05)',
+              border: '1px solid rgba(255,68,68,0.2)',
+              borderRadius: '50%',
+              width: '34px',
+              height: '34px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               cursor: 'pointer',
-              fontSize: '12px',
-              fontWeight: 600,
+              transition: 'all 0.2s',
+              boxShadow: '0 0 10px rgba(0,0,0,0.2)',
+              fontSize: '16px',
+              color: '#ff4444'
+            }}
+            title="Reset System Data"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(255,68,68,0.6)';
+              e.currentTarget.style.boxShadow = '0 0 12px rgba(255,68,68,0.3)';
+              e.currentTarget.style.background = 'rgba(255,68,68,0.15)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(255,68,68,0.2)';
+              e.currentTarget.style.boxShadow = '0 0 10px rgba(0,0,0,0.2)';
+              e.currentTarget.style.background = 'rgba(255,68,68,0.05)';
             }}
           >
-            🗑 Reset All Data
+            🗑️
           </button>
         </div>
       </div>
@@ -1214,7 +1419,30 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
               <button
                 id="close-templates-drawer-btn"
                 onClick={() => setIsTemplateDrawerOpen(false)}
-                style={{ background: 'none', border: 'none', color: 'var(--text-dim)', fontSize: '24px', cursor: 'pointer', lineHeight: 1 }}
+                style={{
+                  background: 'rgba(255,255,255,0.05)',
+                  border: 'none',
+                  color: 'var(--text-dim)',
+                  fontSize: '18px',
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  padding: 0,
+                  lineHeight: 1
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 68, 68, 0.2)';
+                  e.currentTarget.style.color = '#ff4444';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                  e.currentTarget.style.color = 'var(--text-dim)';
+                }}
               >
                 ×
               </button>
@@ -1506,15 +1734,31 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
                 <span>👤</span> Admin Profile &amp; Security
               </h3>
               <button
+                id="close-admin-modal-btn"
                 onClick={() => setIsAdminModalOpen(false)}
                 style={{
-                  background: 'none',
+                  background: 'rgba(255,255,255,0.05)',
                   border: 'none',
                   color: 'var(--text-dim)',
-                  fontSize: '20px',
+                  fontSize: '18px',
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   cursor: 'pointer',
+                  transition: 'all 0.2s ease',
                   padding: 0,
                   lineHeight: 1
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 68, 68, 0.2)';
+                  e.currentTarget.style.color = '#ff4444';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                  e.currentTarget.style.color = 'var(--text-dim)';
                 }}
               >
                 ×
@@ -1802,6 +2046,329 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Staff Accounts Management Modal ── */}
+      {isStaffModalOpen && (
+        <>
+          {/* Dim overlay */}
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,0.6)',
+              backdropFilter: 'blur(5px)',
+              zIndex: 999
+            }}
+            onClick={() => setIsStaffModalOpen(false)}
+          />
+          {/* Modal Panel */}
+          <div
+            id="staff-accounts-modal-panel"
+            style={{
+              position: 'fixed',
+              left: '50%',
+              top: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '740px',
+              maxWidth: '95vw',
+              maxHeight: '90vh',
+              background: '#0d1235',
+              border: '1px solid var(--glass-border)',
+              borderRadius: '16px',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.6)',
+              zIndex: 1000,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden'
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid var(--glass-border)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <h3 style={{ margin: 0, fontSize: '15px', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>👥</span> Staff Accounts Directory
+              </h3>
+              <button
+                id="close-staff-modal-btn"
+                onClick={() => setIsStaffModalOpen(false)}
+                style={{
+                  background: 'rgba(255,255,255,0.05)',
+                  border: 'none',
+                  color: 'var(--text-dim)',
+                  fontSize: '18px',
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  padding: 0,
+                  lineHeight: 1
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 68, 68, 0.2)';
+                  e.currentTarget.style.color = '#ff4444';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                  e.currentTarget.style.color = 'var(--text-dim)';
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{
+              padding: '20px',
+              overflowY: 'auto',
+              display: 'flex',
+              gap: '24px',
+              minHeight: '400px'
+            }}>
+              {/* Left Column: Active Logins List */}
+              <div style={{ flex: '1.2', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <h4 style={{ margin: '0 0 4px 0', fontSize: '13px', color: '#00e5ff', fontWeight: 600 }}>Active Logins</h4>
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                  overflowY: 'auto',
+                  maxHeight: '450px',
+                  paddingRight: '6px'
+                }}>
+                  {staffAccounts.length === 0 ? (
+                    <p style={{ color: 'var(--text-dim)', fontSize: '12px', fontStyle: 'italic' }}>No staff logins found.</p>
+                  ) : (
+                    staffAccounts.map((account) => {
+                      const isCurrentUser = currentAdminUser?.id === account.id;
+                      const isOnlySuper = account.role_level === 9 && staffAccounts.filter(a => a.role_level === 9).length <= 1;
+                      const canDelete = !isCurrentUser && !isOnlySuper;
+                      
+                      let roleLabel = 'Staff';
+                      let roleColor = 'rgba(51,153,0,0.15)';
+                      let roleBorder = 'rgba(51,153,0,0.4)';
+                      let roleTextColor = '#55ff55';
+                      
+                      if (account.role_level === 9) {
+                        roleLabel = 'Super Admin';
+                        roleColor = 'rgba(255,215,0,0.15)';
+                        roleBorder = 'rgba(255,215,0,0.4)';
+                        roleTextColor = '#ffd700';
+                      } else if (account.role_level === 5) {
+                        roleLabel = 'Manager';
+                        roleColor = 'rgba(199,125,255,0.15)';
+                        roleBorder = 'rgba(199,125,255,0.4)';
+                        roleTextColor = '#c77dff';
+                      }
+
+                      return (
+                        <div
+                          key={account.id}
+                          style={{
+                            background: 'rgba(255,255,255,0.02)',
+                            border: '1px solid var(--glass-border)',
+                            borderRadius: '8px',
+                            padding: '10px 12px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            transition: 'background 0.2s'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            {account.avatar ? (
+                              <img
+                                src={account.avatar}
+                                alt={account.username}
+                                style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover' }}
+                              />
+                            ) : (
+                              <div style={{
+                                width: '28px',
+                                height: '28px',
+                                borderRadius: '50%',
+                                background: 'rgba(255,255,255,0.1)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '14px',
+                                color: '#fff'
+                              }}>
+                                👤
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                              <span style={{ fontSize: '12px', fontWeight: 600, color: '#fff' }}>
+                                {account.username} {isCurrentUser && <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>(You)</span>}
+                              </span>
+                              {account.phone && (
+                                <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>📞 {account.phone}</span>
+                              )}
+                            </div>
+                          </div>
+                          
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{
+                              fontSize: '9px',
+                              fontWeight: 600,
+                              textTransform: 'uppercase',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              background: roleColor,
+                              border: `1px solid ${roleBorder}`,
+                              color: roleTextColor,
+                              letterSpacing: '0.5px'
+                            }}>
+                              {roleLabel}
+                            </span>
+                            <button
+                              onClick={() => canDelete && handleDeleteStaff(account.id, account.username)}
+                              disabled={!canDelete}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: canDelete ? '#ff4444' : 'rgba(255,255,255,0.15)',
+                                cursor: canDelete ? 'pointer' : 'not-allowed',
+                                fontSize: '14px',
+                                padding: '4px',
+                                transition: 'color 0.2s'
+                              }}
+                              title={
+                                isCurrentUser
+                                  ? "You cannot delete your own account"
+                                  : isOnlySuper
+                                    ? "Cannot delete the last Super Admin"
+                                    : "Delete Account"
+                              }
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column: Create Login Form */}
+              <div style={{
+                flex: '0.8',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px',
+                borderLeft: '1px solid var(--glass-border)',
+                paddingLeft: '24px'
+              }}>
+                <h4 style={{ margin: 0, fontSize: '13px', color: '#00e5ff', fontWeight: 600 }}>Create New Login</h4>
+                <form onSubmit={handleCreateStaff} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label style={{ fontSize: '11px' }}>Username *</label>
+                    <input
+                      type="text"
+                      className="modern-input"
+                      style={{ fontSize: '11px', padding: '6px 10px' }}
+                      placeholder="e.g. jdoe"
+                      value={newStaffUsername}
+                      onChange={(e) => setNewStaffUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                      required
+                    />
+                  </div>
+                  
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label style={{ fontSize: '11px' }}>PIN * (numeric, min 4 digits)</label>
+                    <input
+                      type="password"
+                      className="modern-input"
+                      style={{ fontSize: '11px', padding: '6px 10px' }}
+                      placeholder="••••"
+                      value={newStaffPin}
+                      onChange={(e) => setNewStaffPin(e.target.value.replace(/[^0-9]/g, ''))}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label style={{ fontSize: '11px' }}>Role Level *</label>
+                    <select
+                      className="modern-input"
+                      style={{ fontSize: '11px', padding: '6px 10px', background: '#0d1235' }}
+                      value={newStaffRole}
+                      onChange={(e) => setNewStaffRole(parseInt(e.target.value))}
+                    >
+                      <option value={1}>Staff (Level 1)</option>
+                      <option value={5}>Manager (Level 5)</option>
+                      <option value={9}>Super Admin (Level 9)</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label style={{ fontSize: '11px' }}>WhatsApp Phone (Optional)</label>
+                    <input
+                      type="text"
+                      className="modern-input"
+                      style={{ fontSize: '11px', padding: '6px 10px' }}
+                      placeholder="e.g. +234..."
+                      value={newStaffPhone}
+                      onChange={(e) => setNewStaffPhone(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label style={{ fontSize: '11px' }}>Security Question (Optional)</label>
+                    <input
+                      type="text"
+                      className="modern-input"
+                      style={{ fontSize: '11px', padding: '6px 10px' }}
+                      placeholder="e.g. First pet's name"
+                      value={newStaffQuestion}
+                      onChange={(e) => setNewStaffQuestion(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label style={{ fontSize: '11px' }}>Security Answer (Optional)</label>
+                    <input
+                      type="password"
+                      className="modern-input"
+                      style={{ fontSize: '11px', padding: '6px 10px' }}
+                      placeholder="Answer"
+                      value={newStaffAnswer}
+                      onChange={(e) => setNewStaffAnswer(e.target.value)}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="primary-btn"
+                    style={{
+                      marginTop: '10px',
+                      padding: '8px',
+                      fontSize: '11px',
+                      background: 'var(--accent)',
+                      color: 'var(--bg-deep)',
+                      fontWeight: 600,
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      border: 'none'
+                    }}
+                  >
+                    Create Account
+                  </button>
+                </form>
+              </div>
             </div>
           </div>
         </>
