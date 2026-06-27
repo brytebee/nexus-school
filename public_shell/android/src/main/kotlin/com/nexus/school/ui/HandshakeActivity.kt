@@ -461,7 +461,7 @@ class HandshakeActivity : AppCompatActivity() {
                                                                 modifier = Modifier.padding(end = 8.dp)
                                                             )
                                                             Text(
-                                                                text = "${students.size} Students Safely Digested",
+                                                                text = "${students.map { it.id }.distinct().size} Students Safely Digested",
                                                                 color = Color(0xFF00E676),
                                                                 fontSize = 14.sp,
                                                                 fontWeight = FontWeight.Bold
