@@ -42,6 +42,12 @@
             android:name=".ui.AttendanceActivity"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Role Based Activities -->
+        <activity android:name=".ui.ResultClerkActivity" />
+        <activity android:name=".ui.BursarActivity" />
+        <activity android:name=".ui.ItAdminActivity" />
+        <activity android:name=".ui.PrincipalActivity" />
+
         <!-- FileProvider for camera capture intents (API 24+) -->
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -27,6 +27,7 @@ import { AnalyticsDashboard } from "./views/AnalyticsDashboard";
 import { NotesMarketplace } from "./views/NotesMarketplace";
 import { SkillMastery } from "./views/SkillMastery";
 import UpdateBanner from "./components/UpdateBanner";
+import { AdModal } from "./components/AdModal";
 
 function App() {
   const [activeTab, setActiveTab] = useState<string>(() => {
@@ -40,6 +41,25 @@ function App() {
   const [isHelpOpen, setIsHelpOpen] = useState<boolean>(false);
   const [isGuideOpen, setIsGuideOpen] = useState<boolean>(false);
   const [guideModule, setGuideModule] = useState<string>("");
+
+  // ── Engagement Ad State ──────────────────────────────────────────────────
+  const [navClickCount, setNavClickCount] = useState(0);
+  const [currentAd, setCurrentAd] = useState<any>(null);
+  const [adsList, setAdsList] = useState<any[]>([]);
+
+  React.useEffect(() => {
+    const loadAds = async () => {
+      try {
+        if ((window as any).electronAPI?.fetchAds) {
+          const list = await (window as any).electronAPI.fetchAds();
+          if (Array.isArray(list)) setAdsList(list);
+        }
+      } catch (err) {
+        console.error('Failed to load ads list:', err);
+      }
+    };
+    loadAds();
+  }, []);
 
   // ── License enforcement ───────────────────────────────────────────────────
   const { license, loading: licenseLoading } = useLicense();
@@ -61,6 +81,28 @@ function App() {
   const navigateTo = (tab: string, pushToHistory = true) => {
     setActiveTab(tab);
     localStorage.setItem("nexus_nav_activeTab", tab);
+
+    // Click counter logic for Standalone / Silver ad displays
+    setNavClickCount((prevCount) => {
+      const nextCount = prevCount + 1;
+      if (nextCount >= 3) {
+        const isStandaloneOrSilver = !license?.tier || license.tier === 'Standalone' || license.tier === 'Silver';
+        const hasAdShownThisSession = sessionStorage.getItem('ad_shown') === '1';
+        const isGeneratingReport = (window as any).isReportGenerating === true;
+
+        if (isStandaloneOrSilver && !hasAdShownThisSession && !isGeneratingReport && adsList.length > 0) {
+          const lastAdIndex = parseInt(localStorage.getItem('ad_last_index') || '0', 10);
+          const nextIndex = (lastAdIndex + 1) % adsList.length;
+          localStorage.setItem('ad_last_index', nextIndex.toString());
+          
+          setCurrentAd(adsList[nextIndex]);
+          sessionStorage.setItem('ad_shown', '1');
+        }
+        return 0; // Reset
+      }
+      return nextCount;
+    });
+
     if (pushToHistory) {
       const newHistory = tabHistory.slice(0, historyIndex + 1);
       newHistory.push(tab);
@@ -241,6 +283,11 @@ function App() {
 
       {/* OTA Update Banner */}
       <UpdateBanner />
+
+      {/* Ad Modal Overlay */}
+      {currentAd && (
+        <AdModal ad={currentAd} onClose={() => setCurrentAd(null)} />
+      )}
     </>
   );
 }
