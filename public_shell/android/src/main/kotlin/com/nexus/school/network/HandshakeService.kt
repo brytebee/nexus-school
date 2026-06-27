@@ -9,6 +9,8 @@ import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.io.ByteArrayInputStream
+import java.util.zip.GZIPInputStream
 
 @Serializable
 data class Config(
@@ -101,7 +103,14 @@ class HandshakeService {
                 setBody(response)
             }
             if (httpResponse.status == HttpStatusCode.OK) {
-                val responseBody = httpResponse.bodyAsText()
+                val contentEncoding = httpResponse.headers[HttpHeaders.ContentEncoding]
+                val responseBody = if (contentEncoding?.contains("gzip", ignoreCase = true) == true) {
+                    val bytes = httpResponse.readBytes()
+                    val gzipInputStream = GZIPInputStream(ByteArrayInputStream(bytes))
+                    gzipInputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                } else {
+                    httpResponse.bodyAsText()
+                }
                 Json { ignoreUnknownKeys = true }.decodeFromString<HandshakeResponse>(responseBody)
             } else {
                 null
