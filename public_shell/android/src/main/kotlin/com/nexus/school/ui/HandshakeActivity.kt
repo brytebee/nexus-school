@@ -243,7 +243,9 @@ class HandshakeActivity : AppCompatActivity() {
                     device_model = deviceModel
                 )
 
-                val result = handshakeService.performHandshake(payload.ip, payload.port, response)
+                val result = kotlinx.coroutines.withTimeout(15_000L) {
+                    handshakeService.performHandshake(payload.ip, payload.port, response)
+                }
                 
                 runOnUiThread {
                     if (result != null) {
@@ -556,6 +558,12 @@ class HandshakeActivity : AppCompatActivity() {
                         android.widget.Toast.makeText(this@HandshakeActivity, "Handshake Failed. Check Server.", android.widget.Toast.LENGTH_LONG).show()
                         isHandshaking = false
                     }
+                }
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                Log.e("Handshake", "Handshake timed out", e)
+                runOnUiThread {
+                    android.widget.Toast.makeText(this@HandshakeActivity, "Server unreachable. Check WiFi.", android.widget.Toast.LENGTH_LONG).show()
+                    isHandshaking = false
                 }
             } catch (e: Exception) {
                 Log.e("Handshake", "Failed to parse or send handshake", e)

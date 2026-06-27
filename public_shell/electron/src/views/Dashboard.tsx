@@ -281,10 +281,13 @@ export function Dashboard({ onTabChange }: DashboardProps = {}) {
       if (!result.isConfirmed) return;
       Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Report compilation started…', showConfirmButton: false, timer: 3500, background: '#0d1235', color: '#fff' });
     }
+    (window as any).isReportGenerating = true;
     try {
       await window.electronAPI.generateReports({ scope: 'all' });
     } catch (err: any) {
       if (Swal) Swal.fire({ toast: true, position: 'top-end', icon: 'error', title: 'Report generation failed', showConfirmButton: false, timer: 3000, background: '#0d1235', color: '#fff' });
+    } finally {
+      (window as any).isReportGenerating = false;
     }
   };
 

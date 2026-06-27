@@ -1904,6 +1904,7 @@ export function Students() {
                         });
                         if (res?.success) {
                           setAddScoreValue('');
+                          setAddScoreSubject('');
                           await fetchGrades(detailStudent.id);
                           setGradesStatus('✅ Score added successfully.');
                         } else {

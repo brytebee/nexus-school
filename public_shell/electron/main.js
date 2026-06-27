@@ -3147,6 +3147,12 @@ ipcMain.handle("fetch-ads", async () => {
 ipcMain.handle("revoke-device", async (event, deviceId) => {
   console.log(`[License] Revoking device: ${deviceId}`);
   revokeDevice(deviceId);
+  logActivity({
+    device_id: 'DESKTOP',
+    actor_label: 'IT Admin',
+    event_type: 'DEVICE_REVOKED',
+    payload: { device_id: deviceId }
+  });
   if (mainWindow) {
     mainWindow.webContents.send("revoke-broadcast", deviceId);
   }

@@ -59,6 +59,7 @@ class ItAdminActivity : AppCompatActivity() {
                             val url = URL("http://$ip:$port/api/devices")
                             val conn = url.openConnection() as HttpURLConnection
                             conn.requestMethod = "GET"
+                            conn.setRequestProperty("X-Device-ID", identityManager.getDeviceId())
                             if (conn.responseCode == 200) {
                                 conn.inputStream.bufferedReader().use { it.readText() }
                             } else {
@@ -91,6 +92,7 @@ class ItAdminActivity : AppCompatActivity() {
                             val conn = url.openConnection() as HttpURLConnection
                             conn.requestMethod = "POST"
                             conn.setRequestProperty("Content-Type", "application/json")
+                            conn.setRequestProperty("X-Device-ID", identityManager.getDeviceId())
                             conn.doOutput = true
                             val payload = "{\"device_id\":\"$deviceId\"}"
                             conn.outputStream.use { os ->
