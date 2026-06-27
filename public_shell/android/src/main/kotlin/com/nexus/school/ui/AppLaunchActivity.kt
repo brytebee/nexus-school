@@ -133,10 +133,26 @@ class AppLaunchActivity : AppCompatActivity() {
 
                         Spacer(modifier = Modifier.height(48.dp))
 
+                        val role = identityManager.getRole() ?: "teacher"
+                        val buttonText = when (role.lowercase()) {
+                            "result_clerk" -> "Open Result Clerk Portal  →"
+                            "bursar" -> "Open Finance Hub  →"
+                            "it_admin" -> "Open Security Center  →"
+                            "principal" -> "Open Principal Portal  →"
+                            else -> "Open Class Roster  →"
+                        }
+
                         // Primary action
                         Button(
                             onClick = {
-                                val nextIntent = Intent(this@AppLaunchActivity, StudentRosterActivity::class.java)
+                                val targetClass = when (role.lowercase()) {
+                                    "result_clerk" -> ResultClerkActivity::class.java
+                                    "bursar" -> BursarActivity::class.java
+                                    "it_admin" -> ItAdminActivity::class.java
+                                    "principal" -> PrincipalActivity::class.java
+                                    else -> StudentRosterActivity::class.java
+                                }
+                                val nextIntent = Intent(this@AppLaunchActivity, targetClass)
                                 nextIntent.putExtra("school_name", schoolName)
                                 nextIntent.putExtra("primary_color", primaryColorHex)
                                 startActivity(nextIntent)
@@ -149,7 +165,7 @@ class AppLaunchActivity : AppCompatActivity() {
                             shape = RoundedCornerShape(14.dp)
                         ) {
                             Text(
-                                "Open Class Roster  →",
+                                buttonText,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.SemiBold
                             )

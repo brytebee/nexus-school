@@ -2954,6 +2954,38 @@ ipcMain.on("shell:openExternal", (event, url) => {
   shell.openExternal(url);
 });
 ipcMain.handle("get-platform", () => process.platform);
+ipcMain.handle("fetch-ads", async () => {
+  const portalBase = process.env.NEXUSOS_PORTAL_URL || 'https://nexusos.com.ng/portal';
+  const apiBase = portalBase.replace('/portal', '/api');
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const response = await fetch(`${apiBase}/ads`, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (response.ok) {
+      const data = await response.json();
+      if (data && Array.isArray(data.ads)) {
+        return data.ads;
+      }
+    }
+  } catch (err) {
+    console.warn("[Ads] Failed to fetch ads from server, falling back to local list:", err.message);
+  }
+  return [
+    {
+      youtube_id: "dQw4w9WgXcQ",
+      title: "Upgrade to Gold Plan to unlock Attendance & Sovereign Portal!",
+      skip_after_seconds: 5,
+      cta_link: "https://nexusos.com.ng/portal/billing"
+    },
+    {
+      youtube_id: "3tmd-ClpJxA",
+      title: "Unlock CBT Arena and AI Insights with Diamond Plan!",
+      skip_after_seconds: 7,
+      cta_link: "https://nexusos.com.ng/portal/billing"
+    }
+  ];
+});
 
 ipcMain.handle("revoke-device", async (event, deviceId) => {
   console.log(`[License] Revoking device: ${deviceId}`);

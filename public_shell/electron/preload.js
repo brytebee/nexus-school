@@ -230,6 +230,7 @@ const nexusAPI = {
     send:   (channel, data)  => ipcRenderer.send(channel, data),
     on:     (channel, cb)    => ipcRenderer.on(channel, (_event, value) => cb(value)),
     openExternal: (url)      => ipcRenderer.send('shell:openExternal', url),
+    fetchAds:     ()         => ipcRenderer.invoke('fetch-ads'),
     // ── Admin Management ──────────────────────────────────────────────
     getAdmins:    ()     => ipcRenderer.invoke('auth:get-admins'),
     createAdmin:  (data) => ipcRenderer.invoke('auth:create-admin', data),
