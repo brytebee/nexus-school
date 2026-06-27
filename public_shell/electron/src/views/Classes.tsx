@@ -10,6 +10,12 @@ export default function Classes() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [newArmName, setNewArmName] = useState('');
 
+  // Manual Class Creation Form states
+  const [createClassName, setCreateClassName] = useState('');
+  const [createMaxSubjects, setCreateMaxSubjects] = useState('10');
+  const [createPassMark, setCreatePassMark] = useState('');
+  const [createArms, setCreateArms] = useState('');
+
   // CSV Import state
   const [csvStatus, setCsvStatus] = useState<string | null>(null);
 
@@ -55,6 +61,72 @@ export default function Classes() {
     setCsvStatus('⏳ Ingesting and verifying Classes CSV data...');
     if ((window as any).electronAPI?.processClassesCSV) {
       (window as any).electronAPI.processClassesCSV(file.path);
+    }
+  };
+
+  const handleCreateClass = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const Swal = (window as any).Swal;
+    if (!createClassName.trim()) {
+      if (Swal) Swal.fire({ title: 'Error', text: 'Class name is required.', icon: 'error', background: '#0b0f19', color: '#fff' });
+      return;
+    }
+
+    const api = (window as any).electronAPI;
+    if (!api?.classes?.create) {
+      if (Swal) Swal.fire({ title: 'Error', text: 'Class creation is not supported on this platform.', icon: 'error', background: '#0b0f19', color: '#fff' });
+      return;
+    }
+
+    const parsedMax = parseInt(createMaxSubjects) || 10;
+    const parsedPass = createPassMark.trim() === '' ? null : parseInt(createPassMark);
+    const parsedArms = createArms
+      .split(/[,|]/)
+      .map(a => a.trim())
+      .filter(Boolean);
+
+    try {
+      const res = await api.classes.create({
+        className: createClassName.trim(),
+        maxSubjects: parsedMax,
+        passMarkOverride: parsedPass,
+        arms: parsedArms
+      });
+
+      if (res && res.success) {
+        if (Swal) {
+          Swal.fire({
+            title: 'Success!',
+            text: `Class "${createClassName.trim()}" created successfully.`,
+            icon: 'success',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#00E5FF'
+          });
+        }
+        // Clear form
+        setCreateClassName('');
+        setCreateMaxSubjects('10');
+        setCreatePassMark('');
+        setCreateArms('');
+        // Refresh class list & global settings
+        refresh();
+        fetchGlobalSettings();
+      } else {
+        if (Swal) {
+          Swal.fire({
+            title: 'Failed',
+            text: res?.error || 'Unknown error occurred.',
+            icon: 'error',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#ef4444'
+          });
+        }
+      }
+    } catch (err: any) {
+      console.error(err);
+      if (Swal) Swal.fire({ title: 'Error', text: err.message, icon: 'error', background: '#0b0f19', color: '#fff' });
     }
   };
   
@@ -408,6 +480,100 @@ export default function Classes() {
 
       {/* Main Grid: Class configs */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px', marginBottom: '40px' }}>
+        {/* Creation Card */}
+        <form 
+          onSubmit={handleCreateClass}
+          style={{
+            background: 'rgba(30, 41, 59, 0.25)',
+            border: '2px dashed rgba(0, 229, 255, 0.2)',
+            borderRadius: '12px',
+            padding: '20px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            backdropFilter: 'blur(8px)'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+            <span style={{ fontSize: '14px', fontWeight: 700, color: '#00E5FF' }}>➕ Create Class Manual</span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <label style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600 }}>Class Name</label>
+            <input 
+              type="text"
+              required
+              value={createClassName}
+              onChange={(e) => setCreateClassName(e.target.value)}
+              placeholder="e.g. JSS 4, SS 4"
+              className="modern-input"
+              style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#fff', padding: '6px 10px', fontSize: '12px' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600 }}>Max Subjects</label>
+              <input 
+                type="number"
+                min="1"
+                value={createMaxSubjects}
+                onChange={(e) => setCreateMaxSubjects(e.target.value)}
+                placeholder="10"
+                className="modern-input"
+                style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#fff', padding: '6px 10px', fontSize: '12px' }}
+              />
+            </div>
+
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600 }}>Pass Mark</label>
+              <input 
+                type="number"
+                min="0"
+                max="100"
+                value={createPassMark}
+                onChange={(e) => setCreatePassMark(e.target.value)}
+                placeholder={`Global: ${globalPassMark}`}
+                className="modern-input"
+                style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#fff', padding: '6px 10px', fontSize: '12px' }}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <label style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600 }}>Arms / Sections (Comma-separated)</label>
+            <input 
+              type="text"
+              value={createArms}
+              onChange={(e) => setCreateArms(e.target.value)}
+              placeholder="e.g. Gold, Ruby, Emerald"
+              className="modern-input"
+              style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#fff', padding: '6px 10px', fontSize: '12px' }}
+            />
+          </div>
+
+          <button
+            type="submit"
+            style={{
+              background: 'linear-gradient(135deg, #00E5FF 0%, #00B0FF 100%)',
+              border: 'none',
+              borderRadius: '6px',
+              color: '#020617',
+              fontSize: '12px',
+              fontWeight: 700,
+              padding: '8px',
+              cursor: 'pointer',
+              marginTop: '6px',
+              boxShadow: '0 4px 12px rgba(0, 229, 255, 0.2)',
+              transition: 'opacity 0.2s',
+            }}
+            onMouseOver={(e) => (e.currentTarget.style.opacity = '0.9')}
+            onMouseOut={(e) => (e.currentTarget.style.opacity = '1')}
+          >
+            Create Class
+          </button>
+        </form>
+
         {configs.map((c) => {
           const maxSubs = cardMaxSubjects[c.hierarchy_class] || '';
           const passMarkOver = cardPassOverride[c.hierarchy_class] || '';

@@ -159,6 +159,11 @@ export function Students() {
   const [gradesUnlocked, setGradesUnlocked] = useState(false);
   const [gradesStatus, setGradesStatus] = useState<string | null>(null);
 
+  // Manual Score Entry Form states
+  const [addScoreSubject, setAddScoreSubject] = useState('');
+  const [addScoreCompKey, setAddScoreCompKey] = useState('CA1');
+  const [addScoreValue, setAddScoreValue] = useState('');
+
   // Load filter metadata on mount (teachers + subjects from canonical allocation list)
   useEffect(() => {
     const loadFilterMeta = async () => {
@@ -1883,6 +1888,95 @@ export function Students() {
                       {gradesStatus}
                     </div>
                   )}
+
+                  {/* Add Score Inline Form */}
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!addScoreSubject) return;
+                      const val = parseFloat(addScoreValue) || 0;
+                      try {
+                        const res = await (window.electronAPI as any).insertScore({
+                          studentId: detailStudent.id,
+                          subject: addScoreSubject,
+                          componentKey: addScoreCompKey,
+                          score: val
+                        });
+                        if (res?.success) {
+                          setAddScoreValue('');
+                          await fetchGrades(detailStudent.id);
+                          setGradesStatus('✅ Score added successfully.');
+                        } else {
+                          setGradesStatus('❌ ' + (res?.error || 'Failed to add score'));
+                        }
+                      } catch (err: any) {
+                        setGradesStatus('❌ ' + err.message);
+                      }
+                      setTimeout(() => setGradesStatus(null), 3500);
+                    }}
+                    style={{
+                      padding: '12px 24px',
+                      background: 'rgba(255,255,255,0.02)',
+                      borderBottom: '1px solid var(--glass-border)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                      flexShrink: 0
+                    }}
+                  >
+                    <p style={{ fontSize: '10px', color: '#00E5FF', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>
+                      ➕ Enter Score Manually
+                    </p>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <select
+                        required
+                        value={addScoreSubject}
+                        onChange={e => setAddScoreSubject(e.target.value)}
+                        className="modern-input"
+                        style={{ flex: 2, fontSize: '12px', padding: '6px 8px', background: 'rgba(0,0,0,0.3)', color: '#fff', border: '1px solid var(--glass-border)' }}
+                      >
+                        <option value="">Select Subject</option>
+                        {(detailStudent.subjects && detailStudent.subjects.length > 0
+                          ? detailStudent.subjects
+                          : filterSubjects
+                        ).map(sub => (
+                          <option key={sub} value={sub}>{sub}</option>
+                        ))}
+                      </select>
+
+                      <select
+                        value={addScoreCompKey}
+                        onChange={e => setAddScoreCompKey(e.target.value)}
+                        className="modern-input"
+                        style={{ flex: 1, fontSize: '12px', padding: '6px 8px', background: 'rgba(0,0,0,0.3)', color: '#fff', border: '1px solid var(--glass-border)' }}
+                      >
+                        <option value="CA1">CA 1</option>
+                        <option value="CA2">CA 2</option>
+                        <option value="Exam">Exam</option>
+                      </select>
+
+                      <input
+                        type="number"
+                        required
+                        step="any"
+                        min="0"
+                        max="100"
+                        value={addScoreValue}
+                        onChange={e => setAddScoreValue(e.target.value)}
+                        placeholder="Score"
+                        className="modern-input"
+                        style={{ flex: 1, fontSize: '12px', padding: '6px 8px', background: 'rgba(0,0,0,0.3)', color: '#fff', border: '1px solid var(--glass-border)', width: '60px', textAlign: 'center' }}
+                      />
+
+                      <button
+                        type="submit"
+                        className="primary-btn"
+                        style={{ fontSize: '11px', padding: '6px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </form>
 
                   {/* Scrollable grades list */}
                   <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px' }}>
