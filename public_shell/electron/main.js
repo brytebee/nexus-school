@@ -1301,6 +1301,149 @@ ipcMain.handle("classes:removeArm", (event, { hierarchyClass, arm }) => {
   }
 });
 
+ipcMain.handle("create-class", async (event, { className, maxSubjects, passMarkOverride, arms }) => {
+  try {
+    if (!className || className.trim() === '') {
+      return { success: false, error: "Class name is required" };
+    }
+    const cleanClassName = className.trim();
+    const db = database.getDb();
+    
+    // Check lock state for registration (cannot add classes if registration is locked)
+    const isLocked = (() => {
+      try {
+        const lockRow = db.prepare("SELECT value FROM app_settings WHERE key = 'mobile_registration_locked'").get();
+        if (lockRow && lockRow.value === '1') return true;
+        const lockAtRow = db.prepare("SELECT value FROM app_settings WHERE key = 'mobile_registration_lock_at'").get();
+        if (lockAtRow && lockAtRow.value) {
+          const lockAtTime = new Date(lockAtRow.value).getTime();
+          if (!isNaN(lockAtTime) && Date.now() >= lockAtTime) return true;
+        }
+      } catch (e) {
+        console.error("Lock check error:", e);
+      }
+      return false;
+    })();
+
+    if (isLocked) {
+      return { success: false, error: "Registration is locked. You cannot create new classes." };
+    }
+
+    const setting = db.prepare("SELECT value FROM system_settings WHERE key = 'class_hierarchy'").get();
+    const hierarchy = setting ? JSON.parse(setting.value) : [];
+
+    if (hierarchy.map(c => c.toUpperCase()).includes(cleanClassName.toUpperCase())) {
+      return { success: false, error: "Class already exists in the system" };
+    }
+
+    db.transaction(() => {
+      // 1. Insert/update class_configs
+      db.prepare(`
+        INSERT INTO class_configs (hierarchy_class, max_subjects, pass_mark_override)
+        VALUES (?, ?, ?)
+        ON CONFLICT(hierarchy_class) DO UPDATE SET
+          max_subjects = excluded.max_subjects,
+          pass_mark_override = excluded.pass_mark_override
+      `).run(cleanClassName, maxSubjects || 10, passMarkOverride || null);
+
+      // 2. Insert arms if provided
+      if (Array.isArray(arms) && arms.length > 0) {
+        const insertArm = db.prepare("INSERT OR IGNORE INTO class_arms (hierarchy_class, arm) VALUES (?, ?)");
+        arms.forEach(arm => {
+          if (arm && arm.trim() !== '') {
+            insertArm.run(cleanClassName, arm.trim());
+          }
+        });
+      }
+
+      // 3. Update class_hierarchy setting
+      hierarchy.push(cleanClassName);
+      db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('class_hierarchy', ?)")
+        .run(JSON.stringify(hierarchy));
+    })();
+
+    return { success: true };
+  } catch (err) {
+    console.error("Failed to create class:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("insert-score", async (event, { studentId, subject, componentKey, score }) => {
+  try {
+    if (!studentId || !subject || !componentKey) {
+      return { success: false, error: "Missing required parameters: studentId, subject, componentKey" };
+    }
+    const cleanCompKey = componentKey.trim();
+    const cleanSubject = subject.trim();
+    const db = database.getDb();
+
+    // Check lock state for grading (cannot add scores if grading is locked)
+    const isLocked = (() => {
+      try {
+        const lockRow = db.prepare("SELECT value FROM app_settings WHERE key = 'mobile_grades_locked'").get();
+        if (lockRow && lockRow.value === '1') return true;
+        const lockAtRow = db.prepare("SELECT value FROM app_settings WHERE key = 'mobile_grades_lock_at'").get();
+        if (lockAtRow && lockAtRow.value) {
+          const lockAtTime = new Date(lockAtRow.value).getTime();
+          if (!isNaN(lockAtTime) && Date.now() >= lockAtTime) return true;
+        }
+      } catch (e) {
+        console.error("Lock check error:", e);
+      }
+      return false;
+    })();
+
+    if (isLocked) {
+      return { success: false, error: "Grading is locked. You cannot enter new scores." };
+    }
+
+    const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
+    if (!termConfig) {
+      return { success: false, error: "School term configuration not set" };
+    }
+    const { academic_session, term } = termConfig;
+
+    db.transaction(() => {
+      // 1. Fetch existing record to load current breakdown
+      const existing = db.prepare(`
+        SELECT breakdown FROM student_records 
+        WHERE student_id = ? AND academic_session = ? AND term = ? AND subject = ?
+      `).get(studentId, academic_session, term, cleanSubject);
+
+      let breakdown = {};
+      if (existing && existing.breakdown) {
+        try {
+          breakdown = JSON.parse(existing.breakdown) || {};
+        } catch (_) {}
+      }
+
+      // 2. Update the specific component
+      breakdown[cleanCompKey] = Math.round((Number(score) || 0) * 100) / 100;
+
+      // 3. Recalculate total score
+      const totalRaw = Object.values(breakdown).reduce((sum, v) => sum + (Number(v) || 0), 0);
+      const total = Math.round(totalRaw * 100) / 100;
+
+      // 4. Delete existing and insert new consolidated row
+      db.prepare(`
+        DELETE FROM student_records 
+        WHERE student_id = ? AND academic_session = ? AND term = ? AND subject = ?
+      `).run(studentId, academic_session, term, cleanSubject);
+
+      db.prepare(`
+        INSERT INTO student_records (student_id, academic_session, term, subject, assessment, score, breakdown)
+        VALUES (?, ?, ?, ?, 'FULL', ?, ?)
+      `).run(studentId, academic_session, term, cleanSubject, total, JSON.stringify(breakdown));
+    })();
+
+    return { success: true };
+  } catch (err) {
+    console.error("Failed to insert score:", err);
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle("dashboard:getSnapshot", async () => {
   try {
     const db = database.getDb();
