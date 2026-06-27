@@ -26,6 +26,7 @@ import { LiveQuiz } from "./views/LiveQuiz";
 import { AnalyticsDashboard } from "./views/AnalyticsDashboard";
 import { NotesMarketplace } from "./views/NotesMarketplace";
 import { SkillMastery } from "./views/SkillMastery";
+import UpdateBanner from "./components/UpdateBanner";
 
 function App() {
   const [activeTab, setActiveTab] = useState<string>(() => {
@@ -237,6 +238,9 @@ function App() {
 
       {/* Reusable right slide-in Setup Guide Drawer */}
       <SetupGuideDrawer isOpen={isGuideOpen} onClose={() => setIsGuideOpen(false)} moduleName={guideModule} />
+
+      {/* OTA Update Banner */}
+      <UpdateBanner />
     </>
   );
 }

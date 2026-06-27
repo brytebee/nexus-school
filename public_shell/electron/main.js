@@ -3379,12 +3379,15 @@ function createWindow() {
     autoUpdater.autoDownload    = true;  // download silently in background
     autoUpdater.autoInstallOnAppQuit = false; // let the user trigger install
     autoUpdater.on('update-available',  (info) => { _updaterAvailable = true;  mainWindow?.webContents.send('update-available',  info); });
-    autoUpdater.on('update-downloaded', (info) => { mainWindow?.webContents.send('update-downloaded', info); });
+    autoUpdater.on('update-downloaded', (info) => { 
+      mainWindow?.webContents.send('update-downloaded', info); 
+      mainWindow?.webContents.send('update:ready', info); 
+    });
     autoUpdater.on('download-progress', (p)    => { mainWindow?.webContents.send('update-progress',   p);    });
     autoUpdater.on('error',             (err)  => { mainWindow?.webContents.send('update-error', err.message); });
     // Check 30s after launch so it doesn't compete with app startup
-    setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch {} }, 30_000);
-    ipcMain.handle('updater:check',   () => autoUpdater.checkForUpdates());
+    setTimeout(() => { try { autoUpdater.checkForUpdatesAndNotify(); } catch {} }, 30_000);
+    ipcMain.handle('updater:check',   () => autoUpdater.checkForUpdatesAndNotify());
     ipcMain.handle('updater:install', () => { autoUpdater.quitAndInstall(false, true); });
   } catch (e) {
     // electron-updater not yet installed — no-op
@@ -3639,6 +3642,12 @@ function createWindow() {
   });
   globalShortcut.register("CommandOrControl+Alt+I", () => {
     if (mainWindow) mainWindow.webContents.toggleDevTools();
+  });
+  globalShortcut.register("CommandOrControl+Alt+U", () => {
+    if (mainWindow) {
+      console.log("[Dev] Simulating update:ready IPC dispatch...");
+      mainWindow.webContents.send("update:ready");
+    }
   });
 
   // Start the Handshake Server
