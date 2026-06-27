@@ -251,6 +251,8 @@ const nexusAPI = {
         onDownloaded:   (cb)   => ipcRenderer.on('update-downloaded', (_e, v) => cb(v)),
         onProgress:     (cb)   => ipcRenderer.on('update-progress',   (_e, v) => cb(v)),
         onError:        (cb)   => ipcRenderer.on('update-error',      (_e, v) => cb(v)),
+        onUpdateReady:  (cb)   => ipcRenderer.on('update:ready',      (_e, v) => cb(v)),
+        installUpdate:  ()     => ipcRenderer.invoke('updater:install'),
     },
 
     // ── Standalone Pack ───────────────────────────────────────────────
