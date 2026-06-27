@@ -3594,6 +3594,16 @@ function createWindow() {
     backgroundColor: "#0A0E2E",
   });
 
+  // Fix YouTube Error 153 in Electron's file:// protocol context by spoofing referrer/origin headers
+  mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
+    { urls: ['*://*.youtube.com/*', '*://*.youtube-nocookie.com/*'] },
+    (details, callback) => {
+      details.requestHeaders['Referer'] = 'https://nexusos.com.ng';
+      details.requestHeaders['Origin'] = 'https://nexusos.com.ng';
+      callback({ requestHeaders: details.requestHeaders });
+    }
+  );
+
   // (app name already set at module scope)
   // ── Boot: load lock screen first, unless developer bypass is active ────────
   // Set DEV_AUTO_LOGIN=true in .env to skip auth during testing and go straight
