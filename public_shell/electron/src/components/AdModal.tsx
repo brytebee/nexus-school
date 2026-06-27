@@ -12,69 +12,103 @@ interface AdModalProps {
   onClose: () => void;
 }
 
-// How long after iframe loads before we consider the video "playing"
-// and start the countdown. YouTube needs ~1–2s to handshake and begin playback.
-const PLAY_BUFFER_MS = 2000;
+// YouTube Player States
+const YT_UNSTARTED = -1;
+const YT_ENDED = 0;
+const YT_PLAYING = 1;
+const YT_PAUSED = 2;
+const YT_BUFFERING = 3;
+const YT_CUED = 5;
 
-// Hard fallback: if iframe never fires onLoad within this time, unlock anyway.
-const HARD_TIMEOUT_MS = 9000;
+const SAFETY_FALLBACK_MS = 10000; // 10s fallback to unlock if loading takes too long
 
 export function AdModal({ ad, onClose }: AdModalProps) {
-  const [countdown, setCountdown]   = useState(ad.skip_after_seconds);
-  const [videoReady, setVideoReady] = useState(false);
-  const [isMuted, setIsMuted]       = useState(true);
-  const timerRef    = useRef<ReturnType<typeof setInterval> | null>(null);
-  const playBufRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hardTimRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const iframeRef   = useRef<HTMLIFrameElement>(null);
+  const [countdown, setCountdown] = useState(ad.skip_after_seconds);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(true);
+  const [isFallbackActive, setIsFallbackActive] = useState(false);
 
-  // Build the embed URL.
-  // enablejsapi=0 — we don't rely on postMessage (broken in file:// Electron context).
-  const embedUrl = `https://www.youtube.com/embed/${ad.youtube_id}?autoplay=1&mute=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&showinfo=0`;
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  // When the ad changes reset everything
+  // Enable JS API so the player posts messages back to us
+  const embedUrl = `https://www.youtube.com/embed/${ad.youtube_id}?autoplay=1&mute=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&showinfo=0&enablejsapi=1`;
+
   useEffect(() => {
-    setVideoReady(false);
+    // 1. Reset state for new ad
     setCountdown(ad.skip_after_seconds);
-    setIsMuted(true);
+    setIsPlaying(false);
+    setIsBuffering(true);
+    setIsFallbackActive(false);
 
-    // Hard safety net in case iframe never loads
-    hardTimRef.current = setTimeout(() => {
-      setVideoReady(true);
-    }, HARD_TIMEOUT_MS);
+    // 2. Start safety fallback timer (if video fails to load or play, let them skip after 10s)
+    fallbackRef.current = setTimeout(() => {
+      setIsFallbackActive(true);
+      setIsPlaying(true);
+      setIsBuffering(false);
+    }, SAFETY_FALLBACK_MS);
+
+    // 3. Listen for postMessage events from the YouTube player
+    const handleMessage = (event: MessageEvent) => {
+      // Allow messages from youtube domains
+      if (!event.origin.includes('youtube.com') && !event.origin.includes('youtube-nocookie.com')) {
+        return;
+      }
+
+      let data: any;
+      try {
+        data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+      } catch (e) {
+        return;
+      }
+
+      if (data && data.event === 'onStateChange') {
+        const state = data.info;
+        if (state === YT_PLAYING) {
+          setIsPlaying(true);
+          setIsBuffering(false);
+          clearTimeout(fallbackRef.current!);
+        } else if (state === YT_BUFFERING) {
+          setIsPlaying(false);
+          setIsBuffering(true);
+        } else if (state === YT_PAUSED || state === YT_ENDED) {
+          setIsPlaying(false);
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
 
     return () => {
-      clearTimeout(hardTimRef.current!);
-      clearTimeout(playBufRef.current!);
-      clearInterval(timerRef.current!);
+      window.removeEventListener('message', handleMessage);
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (fallbackRef.current) clearTimeout(fallbackRef.current);
     };
   }, [ad]);
 
-  // Called when iframe finishes loading — wait a short buffer then start countdown
-  const handleIframeLoad = () => {
-    clearTimeout(hardTimRef.current!); // hard timer no longer needed
-    playBufRef.current = setTimeout(() => {
-      setVideoReady(true);
-    }, PLAY_BUFFER_MS);
-  };
-
-  // Countdown starts only once videoReady flips true
+  // 4. Timer effect: countdown only runs when isPlaying is true
   useEffect(() => {
-    if (!videoReady) return;
+    if (isPlaying && countdown > 0) {
+      timerRef.current = setInterval(() => {
+        setCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(timerRef.current!);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    }
 
-    setCountdown(ad.skip_after_seconds);
-    timerRef.current = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timerRef.current!);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timerRef.current!);
-  }, [videoReady, ad]);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isPlaying, countdown]);
 
   const handleCta = () => {
     if ((window as any).electronAPI?.openExternal) {
@@ -87,7 +121,7 @@ export function AdModal({ ad, onClose }: AdModalProps) {
       style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(5, 7, 18, 0.85)',
+        background: 'rgba(5, 7, 18, 0.9)',
         backdropFilter: 'blur(24px)',
         WebkitBackdropFilter: 'blur(24px)',
         display: 'flex',
@@ -101,10 +135,10 @@ export function AdModal({ ad, onClose }: AdModalProps) {
     >
       <style>{`
         @keyframes adFadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes adPulse  { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+        @keyframes adPulse  { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
       `}</style>
 
-      {/* Video wrapper */}
+      {/* Video frame */}
       <div
         style={{
           width: '100%',
@@ -118,20 +152,34 @@ export function AdModal({ ad, onClose }: AdModalProps) {
           position: 'relative',
         }}
       >
-        {/* Buffering overlay — hidden once videoReady */}
-        {!videoReady && (
+        {/* Buffering/Loading overlay */}
+        {isBuffering && !isFallbackActive && (
           <div
             style={{
               position: 'absolute', inset: 0, zIndex: 2,
               display: 'flex', flexDirection: 'column',
               alignItems: 'center', justifyContent: 'center',
-              background: 'rgba(0,0,0,0.82)', gap: '12px',
+              background: 'rgba(5,7,18,0.85)', gap: '12px',
             }}
           >
-            <div style={{ fontSize: '30px', animation: 'adPulse 1.4s ease-in-out infinite' }}>▶</div>
-            <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '13px', margin: 0 }}>
-              Loading ad…
+            <div style={{ fontSize: '32px', animation: 'adPulse 1.4s ease-in-out infinite' }}>⏳</div>
+            <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '13px', margin: 0, fontWeight: 500 }}>
+              Buffering ad stream…
             </p>
+          </div>
+        )}
+
+        {/* Fallback connection alert */}
+        {isFallbackActive && (
+          <div
+            style={{
+              position: 'absolute', top: '12px', left: '12px', right: '12px', zIndex: 3,
+              background: 'rgba(239,68,68,0.9)', color: '#fff', padding: '8px 12px',
+              borderRadius: '8px', fontSize: '11px', textAlign: 'center', fontWeight: 600,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+            }}
+          >
+            Slow connection detected. Skipping enabled.
           </div>
         )}
 
@@ -139,13 +187,12 @@ export function AdModal({ ad, onClose }: AdModalProps) {
           ref={iframeRef}
           src={embedUrl}
           title={ad.title}
-          onLoad={handleIframeLoad}
           style={{ width: '100%', height: '100%', border: 'none' }}
           allow="autoplay; encrypted-media"
         />
       </div>
 
-      {/* Bottom bar */}
+      {/* Bottom controls & info */}
       <div
         style={{
           width: '100%',
@@ -167,7 +214,7 @@ export function AdModal({ ad, onClose }: AdModalProps) {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {/* CTA */}
+          {/* CTA Link */}
           <button
             onClick={handleCta}
             style={{
@@ -190,24 +237,23 @@ export function AdModal({ ad, onClose }: AdModalProps) {
             Learn More
           </button>
 
-          {/* Skip chip — buffering → counting → skip */}
-          {!videoReady ? (
+          {/* Action indicator or countdown */}
+          {isBuffering && !isFallbackActive ? (
             <div style={{
               background: 'rgba(255,255,255,0.04)',
               border: '1px solid rgba(255,255,255,0.1)',
               borderRadius: '8px', padding: '10px 20px',
-              color: 'rgba(255,255,255,0.3)', fontSize: '13px',
+              color: 'rgba(255,255,255,0.4)', fontSize: '13px',
               minWidth: '120px', textAlign: 'center',
-              animation: 'adPulse 1.4s ease-in-out infinite',
             }}>
-              Buffering…
+              Waiting for stream…
             </div>
           ) : countdown > 0 ? (
             <div style={{
               background: 'rgba(255,255,255,0.05)',
               border: '1px solid rgba(255,255,255,0.15)',
               borderRadius: '8px', padding: '10px 20px',
-              color: 'rgba(255,255,255,0.5)',
+              color: 'rgba(255,255,255,0.6)',
               fontSize: '13px', fontWeight: 600,
               minWidth: '120px', textAlign: 'center',
             }}>
@@ -218,7 +264,7 @@ export function AdModal({ ad, onClose }: AdModalProps) {
               onClick={onClose}
               style={{
                 background: 'rgba(255,255,255,0.1)',
-                border: '1px solid rgba(255,255,255,0.2)',
+                border: '1px solid rgba(255,255,255,0.25)',
                 borderRadius: '8px', padding: '10px 20px',
                 color: '#fff', fontSize: '13px', fontWeight: 700,
                 cursor: 'pointer', transition: 'all 0.2s ease',
