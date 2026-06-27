@@ -1936,10 +1936,13 @@ export function Students() {
                         style={{ flex: 2, fontSize: '12px', padding: '6px 8px', background: 'rgba(0,0,0,0.3)', color: '#fff', border: '1px solid var(--glass-border)' }}
                       >
                         <option value="">Select Subject</option>
-                        {(detailStudent.subjects && detailStudent.subjects.length > 0
-                          ? detailStudent.subjects
-                          : filterSubjects
-                        ).map(sub => (
+                        {(() => {
+                          const recorded = (gradesData || []).map(g => g.subject);
+                          const all = detailStudent.subjects && detailStudent.subjects.length > 0
+                            ? detailStudent.subjects
+                            : filterSubjects;
+                          return all.filter(sub => !recorded.includes(sub));
+                        })().map(sub => (
                           <option key={sub} value={sub}>{sub}</option>
                         ))}
                       </select>
@@ -1952,6 +1955,7 @@ export function Students() {
                       >
                         <option value="CA1">CA 1</option>
                         <option value="CA2">CA 2</option>
+                        <option value="Assignment">Assignment</option>
                         <option value="Exam">Exam</option>
                       </select>
 
