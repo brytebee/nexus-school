@@ -46,6 +46,12 @@ class AppLaunchActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         val identityManager = IdentityManager(this)
+        val role            = identityManager.getRole()
+        if (role == null) {
+            startActivity(Intent(this, HandshakeActivity::class.java))
+            finish()
+            return
+        }
         val schoolName      = identityManager.getSchoolName()
         val primaryColorHex = identityManager.getPrimaryColor()
         val teacherName     = identityManager.getTeacherName()
@@ -133,8 +139,8 @@ class AppLaunchActivity : AppCompatActivity() {
 
                         Spacer(modifier = Modifier.height(48.dp))
 
-                        val role = identityManager.getRole() ?: "teacher"
-                        val buttonText = when (role.lowercase()) {
+                        val roleString = role
+                        val buttonText = when (roleString.lowercase()) {
                             "result_clerk" -> "Open Result Clerk Portal  →"
                             "bursar" -> "Open Finance Hub  →"
                             "it_admin" -> "Open Security Center  →"
@@ -145,7 +151,7 @@ class AppLaunchActivity : AppCompatActivity() {
                         // Primary action
                         Button(
                             onClick = {
-                                val targetClass = when (role.lowercase()) {
+                                val targetClass = when (roleString.lowercase()) {
                                     "result_clerk" -> ResultClerkActivity::class.java
                                     "bursar" -> BursarActivity::class.java
                                     "it_admin" -> ItAdminActivity::class.java

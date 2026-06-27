@@ -60,6 +60,7 @@ class BursarActivity : AppCompatActivity() {
                             val url = URL("http://$ip:$port/api/fees/summary")
                             val conn = url.openConnection() as HttpURLConnection
                             conn.requestMethod = "GET"
+                            conn.setRequestProperty("X-Device-ID", identityManager.getDeviceId())
                             if (conn.responseCode == 200) {
                                 conn.inputStream.bufferedReader().use { it.readText() }
                             } else {

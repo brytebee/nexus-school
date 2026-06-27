@@ -217,6 +217,7 @@ export function ResultStudio() {
     setGenStatus("⏳ Generating reports...");
     setGeneratedPath("");
     setLastImagePath(null);
+    (window as any).isReportGenerating = true;
 
     try {
       const identity = await window.electronAPI.getIdentity();
@@ -267,6 +268,7 @@ export function ResultStudio() {
       setGenStatus("❌ Error: " + err.message);
     } finally {
       setGenerating(false);
+      (window as any).isReportGenerating = false;
     }
   };
 

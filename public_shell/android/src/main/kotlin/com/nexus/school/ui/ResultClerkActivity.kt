@@ -203,6 +203,7 @@ class ResultClerkActivity : AppCompatActivity() {
                     val conn = url.openConnection() as HttpURLConnection
                     conn.requestMethod = "POST"
                     conn.setRequestProperty("Content-Type", "application/json")
+                    conn.setRequestProperty("X-Device-ID", identityManager.getDeviceId())
                     conn.doOutput = true
                     
                     val payload = "{\"class_name\":\"$className\"}"
