@@ -2954,37 +2954,51 @@ ipcMain.on("shell:openExternal", (event, url) => {
   shell.openExternal(url);
 });
 ipcMain.handle("get-platform", () => process.platform);
-ipcMain.handle("fetch-ads", async () => {
+// ── Ad cache — populated at launch so fetch-ads returns instantly ─────────────
+let _adCache = null;
+const AD_FALLBACK = [
+  {
+    youtube_id: "dQw4w9WgXcQ",
+    title: "Upgrade to Gold Plan to unlock Attendance & Sovereign Portal!",
+    skip_after_seconds: 5,
+    cta_link: "https://nexusos.com.ng/portal/billing"
+  },
+  {
+    youtube_id: "dQw4w9WgXcQ",
+    title: "Unlock CBT Arena and AI Insights with Diamond Plan!",
+    skip_after_seconds: 7,
+    cta_link: "https://nexusos.com.ng/portal/billing"
+  }
+];
+
+async function prefetchAds() {
   const portalBase = process.env.NEXUSOS_PORTAL_URL || 'https://nexusos.com.ng/portal';
   const apiBase = portalBase.replace('/portal', '/api');
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
     const response = await fetch(`${apiBase}/ads`, { signal: controller.signal });
     clearTimeout(timeoutId);
     if (response.ok) {
       const data = await response.json();
-      if (data && Array.isArray(data.ads)) {
-        return data.ads;
+      if (data && Array.isArray(data.ads) && data.ads.length > 0) {
+        _adCache = data.ads;
+        console.log(`[Ads] Pre-fetched ${_adCache.length} ad(s) from server.`);
+        return;
       }
     }
   } catch (err) {
-    console.warn("[Ads] Failed to fetch ads from server, falling back to local list:", err.message);
+    console.warn('[Ads] Pre-fetch failed, using fallback list:', err.message);
   }
-  return [
-    {
-      youtube_id: "dQw4w9WgXcQ",
-      title: "Upgrade to Gold Plan to unlock Attendance & Sovereign Portal!",
-      skip_after_seconds: 5,
-      cta_link: "https://nexusos.com.ng/portal/billing"
-    },
-    {
-      youtube_id: "dQw4w9WgXcQ",
-      title: "Unlock CBT Arena and AI Insights with Diamond Plan!",
-      skip_after_seconds: 7,
-      cta_link: "https://nexusos.com.ng/portal/billing"
-    }
-  ];
+  _adCache = AD_FALLBACK;
+  console.log('[Ads] Using fallback ad list.');
+}
+
+ipcMain.handle("fetch-ads", async () => {
+  // Return cached list immediately if available, otherwise fetch now
+  if (_adCache) return _adCache;
+  await prefetchAds();
+  return _adCache || AD_FALLBACK;
 });
 
 ipcMain.handle("revoke-device", async (event, deviceId) => {
@@ -4787,8 +4801,10 @@ if (app) {
     } else {
       console.log('[Electron] Launch type: NORMAL.');
     }
+  // Kick off ad pre-fetch in background — ready before the user ever clicks
+    prefetchAds();
 
-    // Clear Impact and Purge Handlers
+
     ipcMain.handle("db:get-clear-impact", async (event, { type }) => {
       try {
         const db = database.getDb();
