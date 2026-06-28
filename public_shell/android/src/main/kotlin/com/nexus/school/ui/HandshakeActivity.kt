@@ -559,6 +559,12 @@ class HandshakeActivity : AppCompatActivity() {
                         isHandshaking = false
                     }
                 }
+            } catch (e: com.nexus.school.network.HandshakeException) {
+                Log.e("Handshake", "Handshake rejected: ${e.errorCode}", e)
+                runOnUiThread {
+                    android.widget.Toast.makeText(this@HandshakeActivity, e.message, android.widget.Toast.LENGTH_LONG).show()
+                    isHandshaking = false
+                }
             } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
                 Log.e("Handshake", "Handshake timed out", e)
                 runOnUiThread {

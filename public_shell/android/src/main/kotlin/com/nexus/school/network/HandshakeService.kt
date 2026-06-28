@@ -113,11 +113,23 @@ class HandshakeService {
                 }
                 Json { ignoreUnknownKeys = true }.decodeFromString<HandshakeResponse>(responseBody)
             } else {
-                null
+                val errorText = httpResponse.bodyAsText()
+                var errCode = "HANDSHAKE_ERROR"
+                var errMsg = "Handshake failed."
+                try {
+                    val json = org.json.JSONObject(errorText)
+                    errCode = json.optString("error", "HANDSHAKE_ERROR")
+                    errMsg = json.optString("message", json.optString("error", "Handshake failed."))
+                } catch (_: Exception) {}
+                throw HandshakeException(errCode, errMsg)
             }
+        } catch (e: HandshakeException) {
+            throw e
         } catch (e: Exception) {
             e.printStackTrace()
             null
         }
     }
 }
+
+class HandshakeException(val errorCode: String, message: String) : Exception(message)
