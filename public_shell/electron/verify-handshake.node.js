@@ -4,8 +4,8 @@
  */
 const path = require('path');
 const os = require('os');
-const database = require('./database');
-const { startServer, handleCSVUpload } = require('./server');
+const { database, server } = require('@nexus/engine');
+const { startServer, handleCSVUpload } = server;
 const http = require('http');
 
 // 1. Initialize Temp DB

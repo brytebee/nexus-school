@@ -1,8 +1,8 @@
 const { app } = require('electron');
 const path = require('path');
 const http = require('http');
-const database = require('./database');
-const { startServer, handleCSVUpload } = require('./server');
+const { database, server } = require('@nexus/engine');
+const { startServer, handleCSVUpload } = server;
 
 app.setName('NexusSchoolOS');
 
