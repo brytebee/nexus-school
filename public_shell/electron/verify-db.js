@@ -1,6 +1,6 @@
 const { app } = require('electron');
 const path = require('path');
-const database = require('./database');
+const { database } = require('@nexus/engine');
 
 app.setName('NexusSchoolOS');
 

@@ -6,8 +6,8 @@
 const electron = require('electron');
 const { app } = typeof electron === 'object' ? electron : require('electron');
 const path = require('path');
-const database = require('./database');
-const { handleCSVUpload } = require('./server');
+const { database, server } = require('@nexus/engine');
+const { handleCSVUpload } = server;
 
 app.whenReady().then(async () => {
     const userDataPath = app.getPath('userData');

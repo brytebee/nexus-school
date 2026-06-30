@@ -1,7 +1,7 @@
 {
   "name": "nexusschoolos",
   "productName": "Nexus School OS",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "High-End School Management System — Desktop Shell",
   "author": "Nexus Infrastructure",
   "repository": {
@@ -11,16 +11,17 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "build": "vite build",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:report": "playwright show-report test-results/html-report",
     "videos:transcode": "node scripts/transcode-videos.js",
     "test:all": "npm run test && npm run test:e2e",
-    "predist:mac": "npm run test",
-    "predist:win": "npm run test",
-    "predist:all": "npm run test",
-    "prepublish:mac": "npm run test",
-    "prepublish:win": "npm run test",
+    "predist:mac": "npm run build && npm run test",
+    "predist:win": "npm run build && npm run test",
+    "predist:all": "npm run build && npm run test",
+    "prepublish:mac": "npm run build && npm run test",
+    "prepublish:win": "npm run build && npm run test",
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
     "dist:all": "electron-builder --mac --win",
@@ -39,10 +40,13 @@
       "node_modules/puppeteer/**",
       "node_modules/puppeteer-core/**"
     ],
+    "directories": {
+      "output": "release"
+    },
     "publish": [
       {
         "provider": "github",
-        "owner": "nexus-infrastructure",
+        "owner": "brytebee",
         "repo": "nexus-school-releases",
         "private": false,
         "releaseType": "release"
@@ -82,12 +86,27 @@
       "**/*",
       "!.env",
       "!.env.local",
-      "!dist/**",
+      "!release/**",
       "!private_engine/**",
       "!node_modules/whatsapp-web.js/.wwebjs_cache/**",
       "!node_modules/whatsapp-web.js/.wwebjs_auth/**",
       "!**/*.map",
-      "!**/*.ts"
+      "!**/*.ts",
+      "!nexus-engine-*.tgz",
+      "!nexus_school_electron_backup.zip",
+      "!*.sqlite",
+      "!*.sqlite-shm",
+      "!*.sqlite-wal",
+      "!*.sqlite.seed_backup",
+      "!tests/**",
+      "!playwright.config.js",
+      "!tsconfig*.json",
+      "!vite.config.ts",
+      "!verify-*.js",
+      "!patch_*.js",
+      "!run_init.js",
+      "!errors.txt",
+      "!Sample_*.csv"
     ],
     "extraResources": [
       {

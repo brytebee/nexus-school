@@ -105,10 +105,21 @@ ipcMain.handle('read-guide-file', async (event, filename) => {
         const fs = require('fs');
         const path = require('path');
         const cleanFilename = path.basename(filename);
-        const guidePath = path.join(__dirname, '..', '..', 'private_engine', 'docs', 'guides', cleanFilename);
-        if (fs.existsSync(guidePath)) {
-            return fs.readFileSync(guidePath, 'utf-8');
+
+        // Primary: development environment (private_engine alongside public_shell)
+        const devGuidePath = path.join(__dirname, '..', '..', 'private_engine', 'docs', 'guides', cleanFilename);
+        if (fs.existsSync(devGuidePath)) {
+            return fs.readFileSync(devGuidePath, 'utf-8');
         }
+
+        // Fallback: production — guides are bundled inside @nexus/engine
+        try {
+            const engineDir = path.dirname(require.resolve('@nexus/engine'));
+            const engineGuidePath = path.join(engineDir, '..', 'docs', 'guides', cleanFilename);
+            if (fs.existsSync(engineGuidePath)) {
+                return fs.readFileSync(engineGuidePath, 'utf-8');
+            }
+        } catch (_) { /* @nexus/engine not resolvable */ }
     } catch (err) {
         console.error("Failed to read guide file:", err);
     }
