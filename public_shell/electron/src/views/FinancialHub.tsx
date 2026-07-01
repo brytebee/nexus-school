@@ -49,7 +49,7 @@ interface Receipt {
   term: string;
   academic_session: string;
 }
-interface BankAccount   { bank: string; number: string; name: string; }
+interface BankAccount   { id?: number; bank: string; number: string; name: string; paystack_verified?: boolean; bank_code?: string | null; subaccount_code?: string | null; }
 interface InstallPlan   { label: string; percent: number; }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -98,6 +98,50 @@ const splitClass = (selected: string, configs: { hierarchy_class: string }[]) =>
   }
   return { class_name: selected, class_arm: '' };
 };
+
+// PaystackBankSelect helper component
+function PaystackBankSelect({ value, onChange }: { value: string; onChange: (name: string, code: string) => void }) {
+  const [banks, setBanks] = useState<{ name: string; code: string }[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const fetchBanks = async () => {
+      if (!window.electronAPI?.fees?.getBanks) return;
+      setLoading(true);
+      try {
+        const res = await window.electronAPI.fees.getBanks();
+        if (Array.isArray(res)) {
+          setBanks(res.map((b: any) => ({ name: b.name, code: b.code })));
+        }
+      } catch (err) {
+        console.error('Failed to load Paystack banks:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchBanks();
+  }, []);
+
+  return (
+    <select
+      value={value}
+      onChange={e => {
+        const selectedCode = e.target.value;
+        const selectedBank = banks.find(b => b.code === selectedCode);
+        if (selectedBank) {
+          onChange(selectedBank.name, selectedBank.code);
+        }
+      }}
+      className="modern-input"
+      style={{ flex: 1.2, fontSize: '11px', padding: '6px 10px', background: 'var(--bg-card)' }}
+    >
+      <option value="">{loading ? "Loading..." : "Select Bank"}</option>
+      {banks.map(b => (
+        <option key={b.code} value={b.code}>{b.name}</option>
+      ))}
+    </select>
+  );
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // FinancialHub
@@ -193,6 +237,7 @@ export function FinancialHub() {
   const [reminder1,        setReminder1]        = useState('');
   const [reminder2,        setReminder2]        = useState('');
   const [bankAccounts,     setBankAccounts]     = useState<BankAccount[]>([{ bank:'',number:'',name:'' }]);
+  const [activeBankAccountId, setActiveBankAccountId] = useState<number|null>(null);
   const [installPlans,     setInstallPlans]     = useState<InstallPlan[]>([{ label:'', percent:0 }]);
   const [gateEnabled,      setGateEnabled]      = useState(true);
   const [gateMode,         setGateMode]         = useState<'any'|'fixed'|'percent'>('fixed');
@@ -356,8 +401,16 @@ export function FinancialHub() {
     const { class_name } = splitClass(structClass, configs);
     const conf = configs.find(c => c.hierarchy_class === class_name);
     if (!conf) {
-      if (Swal) Swal.fire('Error', 'Class configuration not found.', 'error');
-      else alert('Class configuration not found.');
+      if (Swal) {
+        Swal.fire({
+          title: 'Error',
+          text: 'Class configuration not found.',
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444'
+        });
+      } else alert('Class configuration not found.');
       return;
     }
     const otherArms = (conf.arms || [])
@@ -365,8 +418,16 @@ export function FinancialHub() {
       .filter(armClass => armClass !== structClass);
 
     if (otherArms.length === 0) {
-      if (Swal) Swal.fire('Info', `No other arms found for class level "${class_name}".`, 'info');
-      else alert(`No other arms found for class level "${class_name}".`);
+      if (Swal) {
+        Swal.fire({
+          title: 'Info',
+          text: `No other arms found for class level "${class_name}".`,
+          icon: 'info',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#00E5FF'
+        });
+      } else alert(`No other arms found for class level "${class_name}".`);
       return;
     }
 
@@ -377,8 +438,8 @@ export function FinancialHub() {
           icon: 'warning',
           showCancelButton: true,
           confirmButtonText: 'Yes, copy',
-          confirmButtonColor: 'var(--gold)',
-          background: '#0A0E2E',
+          confirmButtonColor: '#f59e0b',
+          background: '#0b0f19',
           color: '#fff'
         })).isConfirmed
       : confirm(`Copy fee items from ${structClass} to: ${otherArms.join(', ')}?`);
@@ -397,12 +458,28 @@ export function FinancialHub() {
           });
         }
       }
-      if (Swal) Swal.fire('Success', `Successfully copied fee structure to: ${otherArms.join(', ')}`, 'success');
-      else alert(`Successfully copied fee structure to: ${otherArms.join(', ')}`);
+      if (Swal) {
+        Swal.fire({
+          title: 'Success',
+          text: `Successfully copied fee structure to: ${otherArms.join(', ')}`,
+          icon: 'success',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#00E5FF'
+        });
+      } else alert(`Successfully copied fee structure to: ${otherArms.join(', ')}`);
     } catch (err) {
       console.error('Failed to copy fee structure:', err);
-      if (Swal) Swal.fire('Error', 'An error occurred while copying fee structure.', 'error');
-      else alert('An error occurred while copying fee structure.');
+      if (Swal) {
+        Swal.fire({
+          title: 'Error',
+          text: 'An error occurred while copying fee structure.',
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444'
+        });
+      } else alert('An error occurred while copying fee structure.');
     } finally {
       setLoadingStruct(false);
     }
@@ -593,7 +670,16 @@ export function FinancialHub() {
     if (!structClass || !sessionRef.current || !termRef.current) return;
     const term = structTerm === 'All Terms' ? termRef.current : structTerm;
     const ok   = Swal
-      ? (await Swal.fire({ title:'Apply Fee Structure?', text:`Bill ALL students in ${structClass} for ${term}?`, icon:'warning', showCancelButton:true, confirmButtonColor:'var(--gold)', background:'#0A0E2E', color:'#fff' })).isConfirmed
+      ? (await Swal.fire({
+          title: 'Apply Fee Structure?',
+          text: `Bill ALL students in ${structClass} for ${term}?`,
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonText: 'Yes, Apply',
+          confirmButtonColor: '#f59e0b',
+          background: '#0b0f19',
+          color: '#fff'
+        })).isConfirmed
       : confirm(`Apply to ${structClass}?`);
     if (!ok) return;
     setApplyingFs(true);
@@ -702,6 +788,7 @@ export function FinancialHub() {
       setReminder1(s.reminder_date_1||'');
       setReminder2(s.reminder_date_2||'');
       setBankAccounts(s.bank_accounts?.length ? s.bank_accounts : [{ bank:'',number:'',name:'' }]);
+      setActiveBankAccountId(s.active_bank_account_id || null);
       setInstallPlans(s.installment_plans?.length ? s.installment_plans : [{ label:'',percent:0 }]);
       const thresh = Number(s.fee_gate_threshold)||0;
       setGateEnabled(s.fee_gate_enabled !== false);
@@ -715,12 +802,32 @@ export function FinancialHub() {
 
   const handleSaveSettings = async () => {
     if (!window.electronAPI?.fees?.saveSettings) return;
+
+    // Validate bank accounts
+    for (const acc of bankAccounts) {
+      if (acc.paystack_verified) {
+        if (!acc.bank_code || acc.number.length !== 10 || !acc.name || acc.name === 'Resolving...' || acc.name === 'Verification failed') {
+          showIndicator('❌ Please resolve all Paystack accounts correctly');
+          return;
+        }
+      } else {
+        // Manual validation: if any field is touched, all must be valid
+        if (acc.bank.trim() || acc.number.trim() || acc.name.trim()) {
+          if (!acc.bank.trim() || acc.number.length !== 10 || !acc.name.trim()) {
+            showIndicator('❌ Manual accounts must have name, 10-digit number & bank name');
+            return;
+          }
+        }
+      }
+    }
+
     setSavingSettings(true);
     try {
       const patch: any = {
         reminder_date_1: reminder1,
         reminder_date_2: reminder2,
         bank_accounts:   bankAccounts.filter(a => a.bank.trim() && a.number.trim()),
+        active_bank_account_id: activeBankAccountId,
         installment_plans: installPlans.filter(i => i.label.trim() && i.percent > 0),
         fee_gate_enabled:   gateEnabled,
         fee_gate_mode:      gateMode === 'any' ? 'fixed' : gateMode,
@@ -728,7 +835,12 @@ export function FinancialHub() {
       };
       if (isDiamond) { patch.fee_shield_enabled = shieldEnabled; patch.fee_shield_mode = shieldMode; }
       const res = await window.electronAPI.fees.saveSettings(patch);
-      if (res?.ok) { setSettingsOpen(false); showIndicator('✅ Settings saved'); }
+      if (res?.ok) {
+        setSettingsOpen(false);
+        showIndicator('✅ Settings saved');
+      } else {
+        showIndicator(`❌ ${res?.error || 'Failed to save settings'}`);
+      }
     } finally { setSavingSettings(false); }
   };
 
@@ -765,14 +877,32 @@ export function FinancialHub() {
   // ═══════════════════════════════════════════════════════════════════════════
   const handleTriggerPulse = async () => {
     const ok = Swal
-      ? (await Swal.fire({ title:'Trigger Fee Reminders?', text:'Send WhatsApp reminders to ALL parents with outstanding balances?', icon:'info', showCancelButton:true, confirmButtonColor:'var(--gold)', confirmButtonText:'🚀 Yes, Send', background:'#0A0E2E', color:'#fff', backdrop:false })).isConfirmed
+      ? (await Swal.fire({
+          title: 'Trigger Fee Reminders?',
+          text: 'Send WhatsApp reminders to ALL parents with outstanding balances?',
+          icon: 'info',
+          showCancelButton: true,
+          confirmButtonColor: '#f59e0b',
+          confirmButtonText: '🚀 Yes, Send',
+          background: '#0b0f19',
+          color: '#fff'
+        })).isConfirmed
       : confirm('Send outstanding fee reminders?');
     if (!ok) return;
     setDispatchPulse(true);
     window.electronAPI?.send('trigger-fee-reminders');
     window.electronAPI?.on?.('fee-reminders-sent', (data: any) => {
       setDispatchPulse(false);
-      if (Swal) Swal.fire({ title:'Pulse Dispatched', text:`Sent reminders to ${data.count} parents.`, icon:'success', background:'#0A0E2E', color:'#fff', backdrop:false });
+      if (Swal) {
+        Swal.fire({
+          title: 'Pulse Dispatched',
+          text: `Sent reminders to ${data.count} parents.`,
+          icon: 'success',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#00E5FF'
+        });
+      }
     });
   };
 
@@ -1340,16 +1470,182 @@ export function FinancialHub() {
               {/* Settlement Accounts */}
               <div className="card" style={{ padding:'16px', background:'rgba(255,255,255,0.02)', border:'1px solid var(--glass-border)' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px' }}>
-                  <p style={{ fontSize:'11px', color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'1px', fontWeight:700, margin:0 }}>🏦 Settlement Accounts</p>
-                  <button id="btn-fees-add-account" onClick={() => setBankAccounts(p => [...p,{bank:'',number:'',name:''}])} className="small-btn" style={{ padding:'4px 8px', fontSize:'10px' }}>+ Add Bank</button>
+                  <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
+                    <p style={{ fontSize:'11px', color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'1px', fontWeight:700, margin:0 }}>🏦 Settlement Accounts</p>
+                    {bankAccounts.some(a => a.paystack_verified && a.subaccount_code) && (
+                      <span style={{ fontSize:'9px', background:'rgba(76,175,80,0.12)', color:'#4CAF50', padding:'2px 6px', borderRadius:'4px', fontWeight:600 }}>Paystack Connected ✅</span>
+                    )}
+                  </div>
+                  <button 
+                    id="btn-fees-add-account" 
+                    onClick={() => {
+                      if (bankAccounts.length >= 3) return;
+                      setBankAccounts(p => [...p,{bank:'',number:'',name:'',paystack_verified:false}]);
+                    }} 
+                    disabled={bankAccounts.length >= 3}
+                    className="small-btn" 
+                    style={{ padding:'4px 8px', fontSize:'10px', opacity: bankAccounts.length >= 3 ? 0.5 : 1, cursor: bankAccounts.length >= 3 ? 'not-allowed' : 'pointer' }}
+                    title={bankAccounts.length >= 3 ? "Maximum 3 accounts reached" : ""}
+                  >
+                    {bankAccounts.length >= 3 ? "Max 3 Accounts" : "+ Add Bank"}
+                  </button>
                 </div>
-                <div id="fees-accounts-list" style={{ display:'flex', flexDirection:'column', gap:'8px', marginBottom:'8px' }}>
+                
+                <div id="fees-accounts-list" style={{ display:'flex', flexDirection:'column', gap:'12px', marginBottom:'8px' }}>
                   {bankAccounts.map((acc,i) => (
-                    <div key={i} style={{ display:'flex', gap:'8px', alignItems:'center' }}>
-                      <input type="text" placeholder="Bank Name" value={acc.bank} onChange={e => { const c=[...bankAccounts]; c[i].bank=e.target.value; setBankAccounts(c); }} className="modern-input" style={{ flex:1, fontSize:'11px', padding:'6px 10px' }} />
-                      <input type="text" placeholder="Account No." value={acc.number} onChange={e => { const c=[...bankAccounts]; c[i].number=e.target.value; setBankAccounts(c); }} className="modern-input" style={{ flex:1, fontSize:'11px', padding:'6px 10px' }} />
-                      <input type="text" placeholder="Account Name" value={acc.name} onChange={e => { const c=[...bankAccounts]; c[i].name=e.target.value; setBankAccounts(c); }} className="modern-input" style={{ flex:1, fontSize:'11px', padding:'6px 10px' }} />
-                      <button onClick={() => setBankAccounts(p => p.filter((_,j) => j!==i))} className="small-btn" style={{ color:'#ff6b6b', borderColor:'rgba(255,107,107,0.2)', padding:'4px 8px' }}>×</button>
+                    <div key={i} style={{ display:'flex', flexDirection:'column', gap:'6px', padding:'10px', background:'rgba(0,0,0,0.2)', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.04)' }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                        <div style={{ display:'flex', gap:'12px', alignItems:'center' }}>
+                          <label style={{ display:'flex', alignItems:'center', gap:'6px', fontSize:'10px', color:'var(--text-dim)', cursor:'pointer' }}>
+                            <input 
+                              type="checkbox" 
+                              checked={!!acc.paystack_verified} 
+                              onChange={e => {
+                                const c = [...bankAccounts];
+                                c[i].paystack_verified = e.target.checked;
+                                c[i].bank = '';
+                                c[i].number = '';
+                                c[i].name = '';
+                                c[i].bank_code = null;
+                                c[i].subaccount_code = null;
+                                setBankAccounts(c);
+                              }} 
+                            />
+                            Verify with Paystack
+                          </label>
+                          <label style={{ display:'flex', alignItems:'center', gap:'4px', fontSize:'10px', color: activeBankAccountId === acc.id ? '#4CAF50' : 'var(--text-dim)', cursor: acc.id ? 'pointer' : 'not-allowed', opacity: acc.id ? 1 : 0.5 }}>
+                            <input 
+                              type="radio" 
+                              name="active_bank_account"
+                              checked={activeBankAccountId !== null && activeBankAccountId === acc.id}
+                              disabled={!acc.id}
+                              onChange={() => {
+                                if (acc.id) {
+                                  setActiveBankAccountId(acc.id);
+                                }
+                              }} 
+                              title={!acc.id ? "Save settings first to enable this account" : ""}
+                            />
+                            Active Collection
+                          </label>
+                        </div>
+                        <button 
+                          onClick={() => setBankAccounts(p => p.filter((_,j) => j!==i))} 
+                          className="small-btn" 
+                          style={{ color:'#ff6b6b', borderColor:'rgba(255,107,107,0.2)', padding:'2px 6px', fontSize:'9px' }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+
+                      {acc.paystack_verified ? (
+                        <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
+                          <PaystackBankSelect 
+                            value={acc.bank_code || ''} 
+                            onChange={(bankName, bankCode) => {
+                              const c = [...bankAccounts];
+                              c[i].bank = bankName;
+                              c[i].bank_code = bankCode;
+                              c[i].name = '';
+                              setBankAccounts(c);
+                            }} 
+                          />
+                          <input 
+                            type="text" 
+                            placeholder="Account No." 
+                            value={acc.number} 
+                            maxLength={10}
+                            onChange={async e => {
+                              const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+                              const c = [...bankAccounts];
+                              c[i].number = val;
+                              setBankAccounts(c);
+                              
+                              if (val.length === 10 && c[i].bank_code) {
+                                c[i].name = 'Resolving...';
+                                setBankAccounts([...c]);
+                                try {
+                                  const res = await window.electronAPI.fees.resolveAccount({
+                                    accountNumber: val,
+                                    bankCode: c[i].bank_code
+                                  });
+                                  if (res && res.account_name) {
+                                    const updated = [...bankAccounts];
+                                    updated[i].name = res.account_name;
+                                    setBankAccounts(updated);
+                                  } else {
+                                    const updated = [...bankAccounts];
+                                    updated[i].name = 'Verification failed';
+                                    setBankAccounts(updated);
+                                  }
+                                } catch (err) {
+                                  const updated = [...bankAccounts];
+                                  updated[i].name = 'Verification failed';
+                                  setBankAccounts(updated);
+                                }
+                              }
+                            }} 
+                            className="modern-input" 
+                            style={{ flex:1, fontSize:'11px', padding:'6px 10px' }} 
+                          />
+                          <input 
+                            type="text" 
+                            placeholder="Account Name" 
+                            value={acc.name} 
+                            disabled 
+                            className="modern-input" 
+                            style={{ flex:1, fontSize:'11px', padding:'6px 10px', background:'rgba(255,255,255,0.03)', color: acc.name === 'Verification failed' ? '#ff6b6b' : acc.name === 'Resolving...' ? 'var(--text-dim)' : '#4CAF50', fontWeight: 600 }} 
+                          />
+                        </div>
+                      ) : (
+                        <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
+                          <input 
+                            type="text" 
+                            placeholder="Bank Name" 
+                            value={acc.bank} 
+                            onChange={e => {
+                              const c = [...bankAccounts];
+                              c[i].bank = e.target.value;
+                              setBankAccounts(c);
+                            }} 
+                            className="modern-input" 
+                            style={{ flex:1, fontSize:'11px', padding:'6px 10px' }} 
+                          />
+                          <input 
+                            type="text" 
+                            placeholder="Account No." 
+                            value={acc.number} 
+                            maxLength={10}
+                            onChange={e => {
+                              const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+                              const c = [...bankAccounts];
+                              c[i].number = val;
+                              setBankAccounts(c);
+                            }} 
+                            className="modern-input" 
+                            style={{ flex:1, fontSize:'11px', padding:'6px 10px' }} 
+                          />
+                          <input 
+                            type="text" 
+                            placeholder="Account Name" 
+                            value={acc.name} 
+                            onChange={e => {
+                              const c = [...bankAccounts];
+                              c[i].name = e.target.value;
+                              setBankAccounts(c);
+                            }} 
+                            className="modern-input" 
+                            style={{ flex:1, fontSize:'11px', padding:'6px 10px' }} 
+                          />
+                        </div>
+                      )}
+                      
+                      {acc.number && acc.number.length !== 10 && (
+                        <span style={{ fontSize:'9px', color:'#ff6b6b' }}>⚠️ Account number must be exactly 10 digits</span>
+                      )}
+                      {!acc.paystack_verified && acc.number.length === 10 && (!acc.bank.trim() || !acc.name.trim()) && (
+                        <span style={{ fontSize:'9px', color:'#e67e22' }}>⚠️ Bank name and Account name cannot be empty</span>
+                      )}
                     </div>
                   ))}
                 </div>

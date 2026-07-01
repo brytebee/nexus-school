@@ -25,6 +25,7 @@ const express = require('express');
 const { Bonjour } = require('bonjour-service');
 const bonjour = new Bonjour();
 const feeCalculator = require("./src/lib/fee-calculator");
+const paystackService = require("./paystack-service.js");
 
 // Set app name BEFORE createWindow so Menu.buildFromTemplate picks it up correctly
 app.setName("NexusSchoolOS");
@@ -147,6 +148,70 @@ ipcMain.on("pulse:set-autostart", (event, enabled) => {
     }
 });
 ipcMain.handle("pulse:status", () => pulseBot.getPulseStatus());
+
+// ── ui-ready: fired by App.tsx once React has mounted and licenseLoading=false ──
+// Registered HERE at module scope so it is in place before mainWindow.loadFile()
+// is called inside createWindow(). If registered later (inside createWindow()),
+// React can fire uiReady() before the handler is reached and the event is lost.
+// mainWindow and licenseStatus are module-level lets — the closure reads their
+// live values at call time, not at registration time.
+ipcMain.once("ui-ready", () => {
+  console.log('[AUTOSTART-DIAG] ▶ ui-ready fired — mainWindow present:', !!mainWindow);
+
+  if (!mainWindow) {
+    console.error('[AUTOSTART-DIAG] ✗ mainWindow is null — aborting.');
+    return;
+  }
+
+  mainWindow.webContents.send("qr-payload", qrPayload);
+  mainWindow.webContents.send("license-status", licenseStatus);
+  console.log('[AUTOSTART-DIAG] ✓ Sent qr-payload and license-status to renderer');
+
+  const tier = licenseStatus?.tier || 'Silver';
+  console.log('[AUTOSTART-DIAG] ✓ licenseStatus.tier =', JSON.stringify(tier));
+  console.log('[AUTOSTART-DIAG]   Full licenseStatus:', JSON.stringify(licenseStatus));
+
+  if (tier === 'Standalone' || tier === 'Silver') {
+    console.log('[AUTOSTART-DIAG] ✗ Tier is ' + tier + ' — auto-start skipped (Gold/Diamond required).');
+    return;
+  }
+
+  console.log('[AUTOSTART-DIAG] ✓ Tier eligible — starting message queue worker...');
+  startMessageQueueWorker();
+
+  console.log('[AUTOSTART-DIAG] ✓ Checking pulse_autostart in DB...');
+  try {
+    const db = database.getDb();
+    if (!db) {
+      console.error('[AUTOSTART-DIAG] ✗ database.getDb() returned null — DB not yet initialised?');
+      return;
+    }
+    const autoCfg = db
+      .prepare("SELECT value FROM app_settings WHERE key = 'pulse_autostart'")
+      .get();
+    console.log('[AUTOSTART-DIAG]   pulse_autostart row:', JSON.stringify(autoCfg));
+    if (!autoCfg) {
+      console.log('[AUTOSTART-DIAG] ✗ No pulse_autostart row in DB — toggle the checkbox to save it.');
+      return;
+    }
+    if (autoCfg.value !== 'true') {
+      console.log('[AUTOSTART-DIAG] ✗ pulse_autostart = "' + autoCfg.value + '" — auto-start is OFF.');
+      return;
+    }
+    const current = pulseBot.getPulseStatus();
+    console.log('[AUTOSTART-DIAG]   Current bot status:', JSON.stringify(current));
+    if (current.status !== 'disconnected') {
+      console.log('[AUTOSTART-DIAG] ✗ Bot already running (' + current.status + ') — skipping startPulse().');
+      return;
+    }
+    console.log('[AUTOSTART-DIAG] ✓ All checks passed — calling pulseBot.startPulse() now.');
+    pulseBot.startPulse();
+    console.log('[AUTOSTART-DIAG] ✓ startPulse() called (Chrome initialisation is async — watch for [Pulse Bot] logs).');
+  } catch (err) {
+    console.error('[AUTOSTART-DIAG] ✗ Auto-start threw:', err.message);
+    console.error(err.stack);
+  }
+});
 
   ipcMain.handle("database:backup", async () => {
     try {
@@ -809,6 +874,34 @@ ipcMain.handle('fee-structure:apply-to-class', (event, { className, academicSess
 
     console.log(`[Fee Structure] Applied ₦${total.toLocaleString()} to ${students.length} students in ${className}`);
     return { ok: true, count: students.length, totalBilled: total };
+});
+
+let banksCache = null;
+let banksCacheExpiry = 0;
+
+ipcMain.handle('paystack:get-banks', async () => {
+    const now = Date.now();
+    if (banksCache && now < banksCacheExpiry) {
+        return banksCache;
+    }
+    try {
+        const banks = await paystackService.getBanks();
+        banksCache = banks;
+        banksCacheExpiry = now + 24 * 60 * 60 * 1000;
+        return banks;
+    } catch (err) {
+        console.error('[Paystack IPC] Failed to fetch banks:', err.message);
+        throw err;
+    }
+});
+
+ipcMain.handle('paystack:resolve-account', async (event, { accountNumber, bankCode }) => {
+    try {
+        return await paystackService.resolveAccount(accountNumber, bankCode);
+    } catch (err) {
+        console.error('[Paystack IPC] Failed to resolve account:', err.message);
+        throw err;
+    }
 });
 
 ipcMain.handle('fee-structure:get-adjustments', (event, { studentId, academicSession, term } = {}) => {
@@ -2349,7 +2442,27 @@ ipcMain.handle("fees:get-transactions", (event, { student_id, academic_session, 
 ipcMain.handle("fees:get-settings", () => {
   try {
     const db = database.getDb();
-    return { ok: true, data: _parseFeeSettings(db) };
+    const settings = _parseFeeSettings(db);
+    
+    // Fetch bank accounts from DB
+    const bankAccounts = db.prepare(`
+      SELECT id, bank_name as bank, bank_code, account_number as number, account_name as name, paystack_verified, subaccount_code
+      FROM bank_accounts
+      WHERE is_active = 1
+      ORDER BY id ASC
+    `).all();
+
+    settings.bank_accounts = bankAccounts.map(acc => ({
+      id: acc.id,
+      bank: acc.bank,
+      bank_code: acc.bank_code,
+      number: acc.number,
+      name: acc.name,
+      paystack_verified: acc.paystack_verified === 1,
+      subaccount_code: acc.subaccount_code
+    }));
+
+    return { ok: true, data: settings };
   } catch (err) {
     return { ok: false, error: err.message, data: {} };
   }
@@ -2359,10 +2472,94 @@ ipcMain.handle("fees:get-settings", () => {
  * fees:save-settings — merges patch into existing settings object (partial-update safe).
  * Gold can update reminder_date_1/2; Diamond can also update fee_shield_* keys.
  */
-ipcMain.handle("fees:save-settings", (event, patch) => {
+ipcMain.handle("fees:save-settings", async (event, patch) => {
   try {
     const db = database.getDb();
-    const updated = { ..._parseFeeSettings(db), ...patch };
+    
+    // Enforce max 3 bank accounts limit
+    if (patch.bank_accounts && patch.bank_accounts.length > 3) {
+      return { ok: false, error: "Maximum of 3 settlement accounts is allowed." };
+    }
+
+    let schoolName = "Nexus School Extension";
+    try {
+      const row = db.prepare("SELECT value FROM app_settings WHERE key = 'school_name'").get();
+      if (row && row.value) schoolName = row.value;
+    } catch (_) {}
+
+    // If bank_accounts is provided, update the table
+    if (patch.bank_accounts) {
+      // Process subaccounts sequentially before executing DB transaction (since subaccount creation calls remote API)
+      const processedAccounts = [];
+      for (const acc of patch.bank_accounts) {
+        let subaccountCode = acc.subaccount_code || null;
+        if (acc.paystack_verified && !subaccountCode) {
+          try {
+            console.log(`[Paystack Subaccount] Creating subaccount for '${schoolName}' (Bank: ${acc.bank_code}, Account: ${acc.number})...`);
+            const subacc = await paystackService.createSubaccount(
+              schoolName,
+              acc.bank_code,
+              acc.number,
+              100 // 100% split
+            );
+            if (subacc && subacc.subaccount_code) {
+              subaccountCode = subacc.subaccount_code;
+              console.log(`[Paystack Subaccount] Created subaccount: ${subaccountCode}`);
+            }
+          } catch (err) {
+            console.error(`[Paystack Subaccount] Failed to create subaccount for account ${acc.number}:`, err.message);
+            return { ok: false, error: `Paystack subaccount creation failed: ${err.message}` };
+          }
+        }
+        processedAccounts.push({
+          ...acc,
+          subaccount_code: subaccountCode
+        });
+      }
+
+      db.transaction(() => {
+        // Mark all existing accounts as inactive first (soft delete)
+        db.prepare("UPDATE bank_accounts SET is_active = 0").run();
+        
+        const insertStmt = db.prepare(`
+          INSERT INTO bank_accounts (id, bank_name, bank_code, account_number, account_name, paystack_verified, subaccount_code, is_active)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+          ON CONFLICT(id) DO UPDATE SET
+            bank_name = excluded.bank_name,
+            bank_code = excluded.bank_code,
+            account_number = excluded.account_number,
+            account_name = excluded.account_name,
+            paystack_verified = excluded.paystack_verified,
+            subaccount_code = excluded.subaccount_code,
+            is_active = 1
+        `);
+
+        for (const acc of processedAccounts) {
+          insertStmt.run(
+            acc.id || null,
+            acc.bank || '',
+            acc.bank_code || null,
+            acc.number || '',
+            acc.name || '',
+            acc.paystack_verified ? 1 : 0,
+            acc.subaccount_code
+          );
+        }
+      })();
+    }
+
+    // Check if at least one paystack verified subaccount is configured
+    const paystackActive = db.prepare("SELECT COUNT(*) as count FROM bank_accounts WHERE paystack_verified = 1 AND is_active = 1").get().count > 0;
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('paystack_connected', ?)").run(paystackActive ? 'true' : 'false');
+
+    // Strip bank_accounts array from the patch before saving to app_settings key 'fee_settings' JSON
+    const settingsPatch = { ...patch };
+    delete settingsPatch.bank_accounts;
+
+    const existingSettings = _parseFeeSettings(db);
+    delete existingSettings.bank_accounts;
+
+    const updated = { ...existingSettings, ...settingsPatch };
     db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('fee_settings', ?)").run(JSON.stringify(updated));
     return { ok: true };
   } catch (err) {
@@ -3809,18 +4006,16 @@ function createWindow() {
   mainWindow.loadFile(bootFile, loadOptions);
 
 
-  // Start the message queue worker now that the main window exists
-  const bootTier = licenseStatus?.tier || 'Silver';
-  if (bootTier !== 'Standalone' && bootTier !== 'Silver') {
-    startMessageQueueWorker();
-    pulseBot.initPulseBot(mainWindow);
-    const dbApp = database.getDb();
-    const autoStart = dbApp.prepare("SELECT value FROM app_settings WHERE key = 'pulse_autostart'").get();
-    if (autoStart && autoStart.value === 'true') {
-      console.log('[Pulse] Auto-start is enabled. Starting bot...');
-      pulseBot.startPulse();
-    }
-  }
+  // ── Bot window reference — set unconditionally so sendStatus() always has a
+  // target. MUST happen right after mainWindow is created, before licenseStatus
+  // is populated (licenseStatus.tier is still undefined here). The tier gate
+  // belongs around startPulse() only, not around the window-ref init.
+  pulseBot.initPulseBot(mainWindow);
+
+  // Message queue worker is a tier-gated feature — start it once tier is known.
+  // licenseStatus.tier is set in the license block below (~line 4903).
+  // We defer startMessageQueueWorker to ui-ready where tier is confirmed.
+  // (No-op for Silver/Standalone; called inside the ui-ready handler.)
 
   pulseExporter.onSyncError = (message) => {
       if (mainWindow) mainWindow.webContents.send("pulse:sync-error", message);
@@ -4481,6 +4676,203 @@ function createWindow() {
     } catch (err) { return { ok: false, error: err.message }; }
   });
 
+  // ── Paystack Webhook Handler (Sprint 5) ───────────────────────────
+  portalApp.post('/webhook/paystack', async (req, res) => {
+    try {
+      const signature = req.headers['x-paystack-signature'];
+      const payload = req.body;
+
+      if (!signature) {
+        console.error("[Paystack Webhook] Missing x-paystack-signature header.");
+        return res.status(400).send("Missing signature");
+      }
+
+      // Verify HMAC signature
+      const crypto = require('crypto');
+      const paystackSecret = process.env.PAYSTACK_SECRET_KEY || "sk_test_f9ae27a1f05526497221e1456eaa5c8dfdac881b";
+      const hash = crypto.createHmac('sha512', paystackSecret).update(JSON.stringify(payload)).digest('hex');
+      
+      let isVerified = hash === signature;
+      const ref = payload.data?.reference;
+
+      // Fallback: verify directly with Paystack API if signature fails (highly robust against serialization mismatches)
+      if (!isVerified && ref) {
+        console.warn(`[Paystack Webhook] HMAC mismatch for ref ${ref}. Checking fallback verifyTransaction...`);
+        try {
+          const verification = await paystackService.verifyTransaction(ref);
+          if (verification && verification.status === 'success') {
+            isVerified = true;
+            payload.data = verification;
+          }
+        } catch (err) {
+          console.error(`[Paystack Webhook] Fallback verification failed: ${err.message}`);
+        }
+      }
+
+      if (!isVerified) {
+        console.error("[Paystack Webhook] Signature verification and fallback verifyTransaction both failed!");
+        return res.status(400).send("Invalid signature");
+      }
+
+      console.log(`[Paystack Webhook] Verified event '${payload.event}' received for reference: ${ref}`);
+
+      if (payload.event === 'charge.success') {
+        const db = database.getDb();
+        const session = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(ref);
+
+        if (!session) {
+          console.warn(`[Paystack Webhook] No payment session found matching reference ${ref}`);
+          return res.status(200).send("No matching session");
+        }
+
+        if (session.status !== 'pending') {
+          console.log(`[Paystack Webhook] Session ${ref} is already processed (Status: ${session.status})`);
+          return res.status(200).send("Already processed");
+        }
+
+        // Process fee payments splitting across siblings
+        const studentIds = session.student_ids.split(",");
+        const totalPaidNaira = Number(payload.data.amount / 100);
+        let remainingPaid = totalPaidNaira;
+
+        const termConfig = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get();
+        const academicSession = termConfig.academic_session;
+        const term = termConfig.term;
+
+        const receiptRecords = [];
+
+        db.transaction(() => {
+          // Update payment session
+          db.prepare("UPDATE fee_payment_sessions SET status = 'settled', settled_at = datetime('now') WHERE id = ?").run(session.id);
+
+          for (const studentId of studentIds) {
+            if (remainingPaid <= 0) break;
+
+            const feesRow = db.prepare(`
+              SELECT COALESCE(total_billed, 0) as total_billed, COALESCE(total_paid, 0) as total_paid 
+              FROM student_fees 
+              WHERE student_id = ? AND academic_session = ? AND term = ?
+            `).get(studentId, academicSession, term);
+
+            const totalBilled = feesRow?.total_billed || 0;
+            const totalPaid = feesRow?.total_paid || 0;
+            const balance = totalBilled - totalPaid;
+
+            if (balance <= 0) continue; // fees already cleared for this child
+
+            const allocation = Math.min(remainingPaid, balance);
+            remainingPaid -= allocation;
+
+            // Record transaction
+            db.prepare(`
+              INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+            `).run(studentId, academicSession, term, allocation, "paystack", ref, "Online Payment via Paystack Webhook");
+
+            // Recompute total paid
+            const { total_paid_sum } = db.prepare(`
+              SELECT COALESCE(SUM(amount), 0) AS total_paid_sum FROM fee_transactions
+              WHERE student_id = ? AND academic_session = ? AND term = ?
+            `).get(studentId, academicSession, term);
+
+            const status = feeCalculator.computeFeeStatus(totalBilled, total_paid_sum);
+
+            // Update student fee status
+            db.prepare(`
+              INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+              ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
+                total_paid = excluded.total_paid,
+                status     = excluded.status,
+                updated_at = datetime('now')
+            `).run(studentId, academicSession, term, totalBilled, total_paid_sum, status);
+
+            // Fetch student name
+            const sName = db.prepare("SELECT name FROM students WHERE id = ?").get(studentId)?.name || `Student ID ${studentId}`;
+            receiptRecords.push({
+              name: sName,
+              amount: allocation,
+              balance: Math.max(0, totalBilled - total_paid_sum)
+            });
+          }
+
+          // Handle leftover amount (allocate to first student)
+          if (remainingPaid > 0 && studentIds.length > 0) {
+            const studentId = studentIds[0];
+            db.prepare(`
+              INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+            `).run(studentId, academicSession, term, remainingPaid, "paystack", ref, "Online Payment Leftover");
+
+            const { total_paid_sum } = db.prepare(`
+              SELECT COALESCE(SUM(amount), 0) AS total_paid_sum FROM fee_transactions
+              WHERE student_id = ? AND academic_session = ? AND term = ?
+            `).get(studentId, academicSession, term);
+
+            const feesRow = db.prepare(`
+              SELECT COALESCE(total_billed, 0) as total_billed FROM student_fees 
+              WHERE student_id = ? AND academic_session = ? AND term = ?
+            `).get(studentId, academicSession, term) || { total_billed: 0 };
+
+            const status = feeCalculator.computeFeeStatus(feesRow.total_billed, total_paid_sum);
+
+            db.prepare(`
+              INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+              ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
+                total_paid = excluded.total_paid,
+                status     = excluded.status,
+                updated_at = datetime('now')
+            `).run(studentId, academicSession, term, feesRow.total_billed, total_paid_sum, status);
+
+            // Update first receipt record amount
+            if (receiptRecords.length > 0) {
+              receiptRecords[0].amount += remainingPaid;
+              receiptRecords[0].balance = Math.max(0, feesRow.total_billed - total_paid_sum);
+            }
+          }
+        })();
+
+        // Send successful payment confirmation receipt via WhatsApp
+        let schoolName = "the school";
+        try {
+          const nameRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_name'").get();
+          if (nameRow?.value) schoolName = nameRow.value;
+        } catch (_) {}
+
+        let receiptMsg = `✅ *Payment Confirmed!*\n\n`;
+        receiptMsg += `Thank you for your payment to *${schoolName}*.\n`;
+        receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
+        receiptMsg += `💳 *Transaction Details*:\n`;
+        receiptMsg += `   Reference:  ${ref}\n`;
+        receiptMsg += `   Total Paid: ₦${totalPaidNaira.toLocaleString('en-NG')}\n`;
+        receiptMsg += `   Channel:    Paystack Online\n`;
+        receiptMsg += `   Date:       ${new Date().toLocaleDateString('en-NG')}\n\n`;
+
+        receiptMsg += `👤 *Student Allocations*:\n`;
+        receiptRecords.forEach(rec => {
+          receiptMsg += `   • *${rec.name}*:\n`;
+          receiptMsg += `     Allocated: ₦${rec.amount.toLocaleString('en-NG')}\n`;
+          receiptMsg += `     New Balance: ₦${rec.balance.toLocaleString('en-NG')}\n`;
+        });
+        receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
+        receiptMsg += `_Your official school records have been updated automatically._\n_Powered by Nexus Pulse_ 🎓`;
+
+        try {
+          await pulseBot.sendRawMessage(session.parent_phone, receiptMsg);
+          console.log(`[Paystack Webhook] WhatsApp confirmation sent successfully to ${session.parent_phone}`);
+        } catch (botErr) {
+          console.error(`[Paystack Webhook] Failed to send WhatsApp confirmation:`, botErr.message);
+        }
+      }
+
+      res.status(200).send("Event processed");
+    } catch (err) {
+      console.error("[Paystack Webhook] Internal server error:", err);
+      res.status(500).send(`Internal server error: ${err.message}`);
+    }
+  });
+
   // Bind to 0.0.0.0 so the portal is reachable on ALL network interfaces:
   // school router Wi-Fi, phone hotspot, USB tethering — not just loopback.
   // ⚠  On Windows, the first launch may trigger a Firewall prompt — click "Allow".
@@ -4796,11 +5188,8 @@ function createWindow() {
     mainWindow.webContents.send("license-status", licenseStatus);
   });
 
-  ipcMain.on("ui-ready", () => {
-    mainWindow.webContents.send("qr-payload", qrPayload);
-    mainWindow.webContents.send("license-status", licenseStatus);
-    console.log("[Electron] Payload sent to UI");
-  });
+  // ui-ready handler is registered at module scope (line ~158) so it is
+  // in place before mainWindow.loadFile() — no duplicate registration here.
 
   ipcMain.on("process-csv", (event, filePath) => {
     handleCSVUpload(filePath, (count, err, result) => {
@@ -4932,7 +5321,7 @@ function createWindow() {
         const db = database.getDb();
         const termConfig = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get();
         const debtors = db.prepare(`
-            SELECT s.name, s.parent_phone, f.total_billed, f.total_paid 
+            SELECT s.id as student_id, s.name, s.class_name, s.class_arm, s.parent_phone, f.total_billed, f.total_paid 
             FROM students s
             JOIN student_fees f ON s.id = f.student_id
             WHERE f.academic_session = ? AND f.term = ? AND (f.total_billed - f.total_paid) > 0
@@ -4943,7 +5332,16 @@ function createWindow() {
         for (const debtor of debtors) {
             if (debtor.parent_phone) {
                 const balance = debtor.total_billed - debtor.total_paid;
-                await pulseBot.sendFeeReminder(debtor.parent_phone, debtor.name, identityPacket.name || "Nexus School", balance);
+                await pulseBot.sendFeeReminder(
+                    debtor.parent_phone, 
+                    debtor.name, 
+                    identityPacket.name || "Nexus School", 
+                    balance,
+                    debtor.student_id,
+                    debtor.class_name,
+                    debtor.class_arm,
+                    termConfig.term
+                );
                 // Simple rate limiting: 2s delay
                 await new Promise(r => setTimeout(r, 2000));
             }

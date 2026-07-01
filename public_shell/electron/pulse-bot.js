@@ -9,6 +9,7 @@ const path = require("path");
 const os   = require("os");
 const fs   = require("fs");
 const QRCode = require("qrcode");
+const paystackService = require("./paystack-service");
 
 // Suppress Puppeteer "Execution context was destroyed" noise that fires
 // when WhatsApp LOGOUT causes a page navigation mid-inject. This is expected
@@ -39,10 +40,14 @@ const SESSION_TTL_MS = 5 * 60 * 1000; // 5 minutes inactivity
 const _jidPhoneCache = new Map();
 
 const STATE = Object.freeze({
-  MENU:            "MENU",
-  SCOPE:           "SCOPE",
-  TERM_SELECT:     "TERM_SELECT",
-  AWAITING_RECEIPT:"AWAITING_RECEIPT",
+  MENU:                    "MENU",
+  SCOPE:                   "SCOPE",
+  TERM_SELECT:             "TERM_SELECT",
+  AWAITING_RECEIPT:        "AWAITING_RECEIPT",
+  AWAITING_PAYMENT_OPTION: "AWAITING_PAYMENT_OPTION",
+  AWAITING_ONLINE_OPTION:  "AWAITING_ONLINE_OPTION",
+  AWAITING_PARTIAL_PLAN:   "AWAITING_PARTIAL_PLAN",
+  AWAITING_CUSTOM_AMOUNT:  "AWAITING_CUSTOM_AMOUNT",
 });
 
 function createSession(students, termConfig, schoolName) {
@@ -98,6 +103,12 @@ async function startPulse() {
 
   console.log("[Pulse Bot] Starting...");
   sendStatus("starting");
+  // Re-broadcast "starting" after 900 ms — covers the tight window where the
+  // renderer's onPulseStatus listener registers just after the first event
+  // fires (e.g. auto-start triggered milliseconds before React mounts fully).
+  setTimeout(() => {
+    if (client && !isReady) sendStatus("starting");
+  }, 900);
 
   // ── Resolve Chromium path for packaged Electron app ───────────────────────
   // Puppeteer's bundled Chromium path changes when asar-packed.
@@ -670,7 +681,8 @@ async function sendFeeStatus(msg, session, matchable) {
   let text = `💳 *Fee Status*\n_${termConfig.term}, ${termConfig.academic_session}_\n${DIV}\n\n`;
 
   for (const student of students) {
-    text += `👤 *${student.name}* (${student.class_name})\n`;
+    const studentClassNameWithArm = student.class_name + (student.class_arm ? ' ' + student.class_arm : '');
+    text += `👤 *${student.name}* (${studentClassNameWithArm})\n`;
 
     const fees = db.prepare(`
       SELECT total_billed, total_paid
@@ -688,6 +700,27 @@ async function sendFeeStatus(msg, session, matchable) {
     const balance = (fees.total_billed || 0) - (fees.total_paid || 0);
     const cleared = balance <= 0;
 
+    // Fetch fee breakdown items
+    try {
+      const breakdown = db.prepare(`
+        SELECT item_name, amount
+        FROM   fee_structures
+        WHERE  class_name = ?
+          AND  (term = 'All Terms' OR term = ?)
+        ORDER BY item_name ASC
+      `).all(studentClassNameWithArm, termConfig.term);
+
+      if (breakdown.length > 0) {
+        text += `📋 *Fee Breakdown*:\n`;
+        for (const item of breakdown) {
+          text += `   • ${item.item_name}: ${fmt(item.amount)}\n`;
+        }
+        text += `   ─────────────────────\n`;
+      }
+    } catch (err) {
+      console.error("[Pulse Bot] Failed to query breakdown for status:", err);
+    }
+
     text += `${cleared ? '🟢' : '🔴'} *${cleared ? 'Fees Cleared ✅' : 'Outstanding Balance ⚠️'}*\n`;
     text += `   Billed : ${fmt(fees.total_billed)}\n`;
     text += `   Paid   : ${fmt(fees.total_paid)}\n`;
@@ -701,23 +734,29 @@ async function sendFeeStatus(msg, session, matchable) {
 
   // Show school bank accounts if configured
   try {
-    const settingsRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'fee_settings'`).get();
-    const settings = settingsRow ? JSON.parse(settingsRow.value) : {};
-    const accounts = settings.bank_accounts || [];
-    if (accounts.length) {
+    const accounts = db.prepare("SELECT id, bank_name as bank, account_number as number, account_name as name, paystack_verified FROM bank_accounts WHERE is_active = 1").all();
+    const paystackConnected = db.prepare("SELECT value FROM app_settings WHERE key = 'paystack_connected'").get()?.value === 'true';
+
+    if (paystackConnected) {
+      text += `${DIV}\n💬 *Payment Options*\n\n`;
+      text += `Reply *1* to *Pay Online* securely via Paystack\n`;
+      text += `Reply *2* to *Pay via Manual Bank Transfer/Cash*\n\n`;
+      text += `_Reply 0 to return to the main menu_`;
+      session.state = STATE.AWAITING_PAYMENT_OPTION;
+      if (matchable) setSession(matchable, session);
+    } else if (accounts.length) {
       text += `${DIV}\n🏦 *Payment Accounts*\n\n`;
       accounts.forEach(a => {
-        text += `*${a.bank}*\n${a.number} — ${a.name}\n\n`;
+        text += `*${a.bank}*${a.paystack_verified ? ' (✅ Verified)' : ''}\n${a.number} — ${a.name}\n\n`;
       });
-      // Prompt for receipt upload (Diamond: AI analysis; Gold: manual review)
       text += `${DIV}\n📤 *Submit Proof of Payment*\nReply to this message with a clear *photo or screenshot* of your transfer receipt and our team will verify and update your record.\n\n_Reply 0 to return to the main menu_`;
-      // Put the session into AWAITING_RECEIPT state
       session.state = STATE.AWAITING_RECEIPT;
       if (matchable) setSession(matchable, session);
     } else {
       text += `${DIV}\n_For payment enquiries, please contact the school office._\n_Powered by Nexus Pulse_ 🎓`;
     }
-  } catch (_) {
+  } catch (err) {
+    console.error("[Pulse Bot] sendFeeStatus accounts error:", err);
     text += `${DIV}\n_For payment enquiries, please contact the school office._\n_Powered by Nexus Pulse_ 🎓`;
   }
 
@@ -788,6 +827,14 @@ async function handleMessage(msg) {
       isBotHandled = true;
     } else if (session.state === STATE.AWAITING_RECEIPT && (text === '0' || msg.hasMedia)) {
       isBotHandled = true;
+    } else if (session.state === STATE.AWAITING_PAYMENT_OPTION && (text === '0' || numericInput !== null)) {
+      isBotHandled = true;
+    } else if (session.state === STATE.AWAITING_ONLINE_OPTION && (text === '0' || numericInput !== null)) {
+      isBotHandled = true;
+    } else if (session.state === STATE.AWAITING_PARTIAL_PLAN && (text === '0' || numericInput !== null)) {
+      isBotHandled = true;
+    } else if (session.state === STATE.AWAITING_CUSTOM_AMOUNT && (text === '0' || !isNaN(parseFloat(text)))) {
+      isBotHandled = true;
     }
   }
 
@@ -840,7 +887,7 @@ async function handleMessage(msg) {
   if (!session || !numericInput) {
     const db = database.getDb();
     const students = db
-      .prepare("SELECT id, name, class_name FROM students WHERE parent_phone LIKE ?")
+      .prepare("SELECT id, name, class_name, class_arm FROM students WHERE parent_phone LIKE ?")
       .all(`%${matchable}`);
 
     if (!students?.length) {
@@ -932,6 +979,199 @@ async function handleMessage(msg) {
     else await sendAttendance(msg, session, chosenTerm);
     return;
   }
+
+  // ── STATE: AWAITING_PAYMENT_OPTION ──────────────────────────────────────────
+  if (session.state === STATE.AWAITING_PAYMENT_OPTION) {
+    if (text === '0') {
+      clearSession(matchable);
+      await msg.reply(buildMainMenu(session.schoolName));
+      return;
+    }
+
+    if (numericInput === 1) {
+      // Pay Online
+      const db = database.getDb();
+      let totalBalance = 0;
+      const studentDetailsList = [];
+      
+      for (const std of session.students) {
+        const row = db.prepare("SELECT COALESCE(total_billed - total_paid, 0) as bal FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?").get(std.id, session.termConfig.academic_session, session.termConfig.term);
+        const bal = row?.bal || 0;
+        if (bal > 0) {
+          totalBalance += bal;
+          studentDetailsList.push({ id: std.id, name: std.name, balance: bal });
+        }
+      }
+
+      if (totalBalance <= 0) {
+        await msg.reply("🟢 All outstanding fees for this term have already been cleared. Thank you!");
+        clearSession(matchable);
+        return;
+      }
+
+      // Check if school has installment plans enabled
+      let installmentPlans = [];
+      try {
+        const settingsRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'fee_settings'`).get();
+        const settings = settingsRow ? JSON.parse(settingsRow.value) : {};
+        installmentPlans = settings.installment_plans || [];
+      } catch (_) {}
+
+      session.paymentContext = {
+        studentDetails: studentDetailsList,
+        totalBalance: totalBalance
+      };
+
+      if (installmentPlans.length > 0) {
+        let partMsg = `💳 *Pay Online via Paystack*\n\n`;
+        partMsg += `Total Outstanding Balance: ₦${totalBalance.toLocaleString('en-NG')}\n\n`;
+        partMsg += `Choose a payment plan:\n`;
+        partMsg += `Reply *1* to Pay in Full\n`;
+        partMsg += `Reply *2* to Choose a Part Payment milestone\n\n`;
+        partMsg += `_Reply 0 to cancel and return to main menu_`;
+
+        session.state = STATE.AWAITING_ONLINE_OPTION;
+        setSession(matchable, session);
+        await msg.reply(partMsg);
+      } else {
+        await generatePaystackLink(msg, session, matchable, totalBalance, "Full Payment");
+      }
+      return;
+    }
+
+    if (numericInput === 2) {
+      // Manual bank details transfer
+      const db = database.getDb();
+      const accounts = db.prepare("SELECT bank_name as bank, account_number as number, account_name as name, paystack_verified FROM bank_accounts WHERE is_active = 1").all();
+      
+      if (!accounts.length) {
+        await msg.reply("⚠️ No manual payment bank details are configured. Please contact the school office.");
+        clearSession(matchable);
+        return;
+      }
+
+      let manualMsg = `🏦 *Manual Payment Accounts*\n\n`;
+      accounts.forEach(a => {
+        manualMsg += `*${a.bank}*${a.paystack_verified ? ' (✅ Verified)' : ''}\n${a.number} — ${a.name}\n\n`;
+      });
+      manualMsg += `${DIV}\n📤 *Submit Proof of Payment*\nReply to this message with a clear *photo or screenshot* of your transfer receipt.\n\n_Reply 0 to return to the main menu_`;
+
+      session.state = STATE.AWAITING_RECEIPT;
+      setSession(matchable, session);
+      await msg.reply(manualMsg);
+      return;
+    }
+
+    await msg.reply("Please reply with *1* (Pay Online), *2* (Manual Transfer), or *0* (Cancel).");
+    return;
+  }
+
+  // ── STATE: AWAITING_ONLINE_OPTION ───────────────────────────────────────────
+  if (session.state === STATE.AWAITING_ONLINE_OPTION) {
+    if (text === '0') {
+      clearSession(matchable);
+      await msg.reply(buildMainMenu(session.schoolName));
+      return;
+    }
+
+    if (numericInput === 1) {
+      const totalBalance = session.paymentContext.totalBalance;
+      await generatePaystackLink(msg, session, matchable, totalBalance, "Full Payment");
+      return;
+    }
+
+    if (numericInput === 2) {
+      const db = database.getDb();
+      let installmentPlans = [];
+      try {
+        const settingsRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'fee_settings'`).get();
+        const settings = settingsRow ? JSON.parse(settingsRow.value) : {};
+        installmentPlans = settings.installment_plans || [];
+      } catch (_) {}
+
+      const totalBalance = session.paymentContext.totalBalance;
+
+      let milestoneMsg = `💳 *Select Milestone Payment*\n\n`;
+      installmentPlans.forEach((plan, index) => {
+        const amt = Math.round((plan.percent / 100) * totalBalance);
+        milestoneMsg += `Reply *${index + 1}* for *${plan.label}* — ${plan.percent}% (₦${amt.toLocaleString('en-NG')})\n`;
+      });
+      milestoneMsg += `Reply *9* for *Custom Amount*\n\n`;
+      milestoneMsg += `_Reply 0 to return to main menu_`;
+
+      session.state = STATE.AWAITING_PARTIAL_PLAN;
+      setSession(matchable, session);
+      await msg.reply(milestoneMsg);
+      return;
+    }
+
+    await msg.reply("Please reply with *1* (Pay in Full), *2* (Milestone Payment), or *0* (Cancel).");
+    return;
+  }
+
+  // ── STATE: AWAITING_PARTIAL_PLAN ───────────────────────────────────────────
+  if (session.state === STATE.AWAITING_PARTIAL_PLAN) {
+    if (text === '0') {
+      clearSession(matchable);
+      await msg.reply(buildMainMenu(session.schoolName));
+      return;
+    }
+
+    const db = database.getDb();
+    let installmentPlans = [];
+    try {
+      const settingsRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'fee_settings'`).get();
+      const settings = settingsRow ? JSON.parse(settingsRow.value) : {};
+      installmentPlans = settings.installment_plans || [];
+    } catch (_) {}
+
+    if (numericInput === 9) {
+      session.state = STATE.AWAITING_CUSTOM_AMOUNT;
+      setSession(matchable, session);
+      await msg.reply(`💳 *Custom Payment Amount*\n\nPlease enter the exact amount you wish to pay in Naira (e.g. *15000*):`);
+      return;
+    }
+
+    const selectedIndex = numericInput - 1;
+    const plan = installmentPlans[selectedIndex];
+
+    if (!plan) {
+      await msg.reply(`Please reply with a number from 1 to ${installmentPlans.length}, 9 for Custom, or 0 to cancel.`);
+      return;
+    }
+
+    const totalBalance = session.paymentContext.totalBalance;
+    const partialAmount = Math.round((plan.percent / 100) * totalBalance);
+    await generatePaystackLink(msg, session, matchable, partialAmount, `Milestone: ${plan.label} (${plan.percent}%)`, plan.percent);
+    return;
+  }
+
+  // ── STATE: AWAITING_CUSTOM_AMOUNT ──────────────────────────────────────────
+  if (session.state === STATE.AWAITING_CUSTOM_AMOUNT) {
+    if (text === '0') {
+      clearSession(matchable);
+      await msg.reply(buildMainMenu(session.schoolName));
+      return;
+    }
+
+    const customAmt = parseFloat(text.replace(/,/g, ''));
+    const totalBalance = session.paymentContext.totalBalance;
+
+    if (isNaN(customAmt) || customAmt <= 0) {
+      await msg.reply("⚠️ Invalid amount. Please enter a valid number greater than 0 (e.g. *10000*):");
+      return;
+    }
+
+    if (customAmt > totalBalance) {
+      await msg.reply(`⚠️ The amount entered (₦${customAmt.toLocaleString('en-NG')}) exceeds your outstanding balance (₦${totalBalance.toLocaleString('en-NG')}).\nPlease enter a smaller amount:`);
+      return;
+    }
+
+    const percentage = Math.round((customAmt / totalBalance) * 100);
+    await generatePaystackLink(msg, session, matchable, customAmt, "Custom Partial Payment", percentage);
+    return;
+  }
+
   // ── STATE: AWAITING_RECEIPT — parent is expected to send a media file ─────────
   if (session.state === STATE.AWAITING_RECEIPT) {
     // Allow "0" to cancel
@@ -1059,12 +1299,90 @@ async function handleMessage(msg) {
     return;
   }
 }
+// ─── Paystack Transaction Link Generator ───────────────────────────────────────
+async function generatePaystackLink(msg, session, matchable, amount, paymentType, percentage = null) {
+  const db = database.getDb();
+  
+  // 1. Find parent email
+  let parentEmail = null;
+  for (const std of session.students) {
+    const studentRow = db.prepare("SELECT parent_email FROM students WHERE id = ?").get(std.id);
+    if (studentRow?.parent_email) {
+      parentEmail = studentRow.parent_email;
+      break;
+    }
+  }
+  if (!parentEmail) {
+    parentEmail = `parent-${matchable}@nexusos.com.ng`;
+  }
+
+  // 2. Query active collection subaccount code
+  let activeAcc = null;
+  try {
+    const activeAccRow = db.prepare("SELECT value FROM app_settings WHERE key = 'fee_settings'").get();
+    const settings = activeAccRow ? JSON.parse(activeAccRow.value) : {};
+    const activeId = settings.active_bank_account_id;
+    if (activeId) {
+      activeAcc = db.prepare("SELECT subaccount_code FROM bank_accounts WHERE id = ? AND paystack_verified = 1").get(activeId);
+    }
+  } catch (_) {}
+
+  if (!activeAcc) {
+    activeAcc = db.prepare("SELECT subaccount_code FROM bank_accounts WHERE is_active = 1 AND paystack_verified = 1 AND subaccount_code IS NOT NULL LIMIT 1").get();
+  }
+
+  const subaccountCode = activeAcc?.subaccount_code;
+
+  if (!subaccountCode) {
+    await msg.reply("⚠️ The school has not fully set up their Paystack settlement account. Please contact the school office.");
+    clearSession(matchable);
+    return;
+  }
+
+  // 3. Generate Paystack reference
+  const reference = `PAY-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+  try {
+    await msg.reply("⏳ _Generating your secure checkout link..._");
+    
+    const tx = await paystackService.initializeTransaction(
+      parentEmail,
+      amount,
+      reference,
+      subaccountCode
+    );
+
+    if (tx && tx.authorization_url) {
+      const studentIds = session.students.map(s => s.id).join(",");
+      db.prepare(`
+        INSERT INTO fee_payment_sessions (parent_phone, student_ids, total_amount, payment_type, partial_percent, paystack_ref, paystack_access_code, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+      `).run(matchable, studentIds, amount, paymentType, percentage, reference, tx.access_code);
+
+      let payLinkMsg = `🔗 *Secure Checkout Link*\n\n`;
+      payLinkMsg += `Plan: *${paymentType}*\n`;
+      payLinkMsg += `Amount: *₦${amount.toLocaleString('en-NG')}*\n\n`;
+      payLinkMsg += `Click the link below to complete your payment:\n`;
+      payLinkMsg += `${tx.authorization_url}\n\n`;
+      payLinkMsg += `_Once payment is successful, your school records will update automatically._`;
+
+      clearSession(matchable);
+      await msg.reply(payLinkMsg);
+    } else {
+      throw new Error("Invalid transaction response");
+    }
+  } catch (err) {
+    console.error("[Pulse Bot] Paystack transaction initialization failed:", err.message);
+    await msg.reply(`⚠️ Failed to generate online payment checkout link: ${err.message}.\nPlease choose Manual Transfer instead.`);
+  }
+}
 
 // ─── Module Exports ────────────────────────────────────────────────────────────
 module.exports = {
   initPulseBot,
   startPulse,
   destroyPulse,
+  sendFeeStatus,
   getPulseStatus: () => {
     if (!client) return { status: "disconnected" };
     if (isReady) return { status: "ready" };
@@ -1094,14 +1412,40 @@ module.exports = {
     
     await client.sendMessage(target, message);
   },
-  sendFeeReminder: async (phone, studentName, schoolName, balance) => {
+  sendFeeReminder: async (phone, studentName, schoolName, balance, studentId, className, classArm, term) => {
     if (!client || !isReady) return;
     let target = phone.replace(/\D/g, "");
     if (target.length === 10) target = "234" + target;
     else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
     if (!target.includes("@c.us")) target += "@c.us";
 
-    const message = `💳 *Nexus Pulse: Fee Reminder*\n\nHello! This is a friendly reminder from *${schoolName}* regarding *${studentName}'s* outstanding balance.\n\n*Current Balance:* ₦${balance.toLocaleString()}\n\nPlease kindly clear this balance at your earliest convenience to avoid any disruption to academic activities.\n\n_Thank you for your partnership._`;
+    let breakdownText = "";
+    if (studentId && className) {
+      try {
+        const db = database.getDb();
+        const fmt = (n) => `₦${Number(n || 0).toLocaleString('en-NG')}`;
+        const fullClassName = className + (classArm ? ' ' + classArm : '');
+        const breakdown = db.prepare(`
+          SELECT item_name, amount
+          FROM   fee_structures
+          WHERE  class_name = ?
+            AND  (term = 'All Terms' OR term = ?)
+          ORDER BY item_name ASC
+        `).all(fullClassName, term);
+
+        if (breakdown.length > 0) {
+          breakdownText += `📋 *Fee Breakdown*:\n`;
+          for (const item of breakdown) {
+            breakdownText += `   • ${item.item_name}: ${fmt(item.amount)}\n`;
+          }
+          breakdownText += `   ─────────────────────\n\n`;
+        }
+      } catch (err) {
+        console.error("[Pulse Bot] Failed to query breakdown for reminder:", err);
+      }
+    }
+
+    const message = `💳 *Nexus Pulse: Fee Reminder*\n\nHello! This is a friendly reminder from *${schoolName}* regarding *${studentName}'s* outstanding balance.\n\n${breakdownText}*Current Balance:* ₦${balance.toLocaleString()}\n\nPlease kindly clear this balance at your earliest convenience to avoid any disruption to academic activities.\n\n_Thank you for your partnership._`;
     
     await client.sendMessage(target, message);
   },

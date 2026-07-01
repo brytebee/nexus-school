@@ -711,7 +711,7 @@ export function NexusPulse() {
                 </div>
 
                 {/* Cloud Bridge configuration sync section */}
-                <div style={{ background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-lg)', padding: '22px', maxWidth: '576px', width: '100%', alignSelf: 'center', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                <div style={{ background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-lg)', padding: '22px', maxWidth: '576px', width: '100%', alignSelf: 'center', display: 'flex', flexDirection: 'column', gap: '18px', flexShrink: 0 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--glass-border)', paddingBottom: '12px' }}>
                     <div>
                       <h4 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent-gold)', display: 'flex', alignItems: 'center', gap: '6px', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>
