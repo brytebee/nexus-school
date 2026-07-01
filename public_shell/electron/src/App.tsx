@@ -78,6 +78,20 @@ function App() {
   const { identity } = useIdentity();
   const schoolName = identity?.name || "Nexus School OS";
 
+  // ── Signal to main process that the React app is fully mounted ────────────
+  // This must fire AFTER licenseLoading is false (app shell is rendering) so
+  // that any IPC events sent in response (e.g. auto-start bot sendStatus)
+  // are received by a mounted renderer with active listeners.
+  const uiReadySent = React.useRef(false);
+  React.useEffect(() => {
+    if (!licenseLoading && !uiReadySent.current) {
+      uiReadySent.current = true;
+      if ((window as any).electronAPI?.uiReady) {
+        (window as any).electronAPI.uiReady();
+      }
+    }
+  }, [licenseLoading]);
+
   const navigateTo = (tab: string, pushToHistory = true) => {
     setActiveTab(tab);
     localStorage.setItem("nexus_nav_activeTab", tab);

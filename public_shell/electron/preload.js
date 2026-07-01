@@ -129,6 +129,8 @@ const nexusAPI = {
         getTransactions: (params) => ipcRenderer.invoke('fees:get-transactions',  params),
         getSettings:     ()       => ipcRenderer.invoke('fees:get-settings'),
         saveSettings:    (patch)  => ipcRenderer.invoke('fees:save-settings',     patch),
+        getBanks:        ()       => ipcRenderer.invoke('paystack:get-banks'),
+        resolveAccount:  (params) => ipcRenderer.invoke('paystack:resolve-account', params),
     },
     receipts: {
         getPending:  ()       => ipcRenderer.invoke('receipts:get-pending'),

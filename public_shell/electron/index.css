@@ -1888,6 +1888,7 @@ code {
     text-align: center;
     position: relative;
     min-height: 300px;
+    flex-shrink: 0;
 }
 .pulse-bot-qr-wrapper {
     background: white;
