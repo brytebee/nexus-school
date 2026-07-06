@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 "use strict";
 
-const { Client, LocalAuth } = require("whatsapp-web.js");
+const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 const { database } = require("@nexus/engine");
 const path = require("path");
 const os   = require("os");
@@ -1569,6 +1569,16 @@ module.exports = {
     else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
     if (!target.includes("@c.us")) target += "@c.us";
     await client.sendMessage(target, message);
+  },
+
+  sendReceiptPdf: async (phone, filename, pdfBuffer, caption = "") => {
+    if (!client || !isReady) throw new Error('WhatsApp bot not connected');
+    let target = phone.replace(/\D/g, "");
+    if (target.length === 10) target = "234" + target;
+    else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
+    if (!target.includes("@c.us")) target += "@c.us";
+    const media = new MessageMedia("application/pdf", pdfBuffer.toString("base64"), filename);
+    await client.sendMessage(target, media, { caption });
   }
 };
 

@@ -132,6 +132,9 @@ const nexusAPI = {
         getBanks:        ()       => ipcRenderer.invoke('paystack:get-banks'),
         resolveAccount:  (params) => ipcRenderer.invoke('paystack:resolve-account', params),
         clearData:       (params) => ipcRenderer.invoke('fees:clear-data',         params),
+        refund:          (params) => ipcRenderer.invoke('fees:refund',             params),
+        sendReceiptPdf:  (params) => ipcRenderer.invoke('fees:send-receipt-pdf',   params),
+        printReceipt:    (params) => ipcRenderer.invoke('fees:print-receipt',       params),
     },
     receipts: {
         getPending:  ()       => ipcRenderer.invoke('receipts:get-pending'),
