@@ -247,6 +247,7 @@ export function FinancialHub() {
   const [gateThreshold,    setGateThreshold]    = useState('');
   const [shieldEnabled,    setShieldEnabled]    = useState(false);
   const [shieldMode,       setShieldMode]       = useState<'warn'|'watermark'|'block'>('warn');
+  const [fallbackEmail,    setFallbackEmail]    = useState('');
   const [savingSettings,   setSavingSettings]   = useState(false);
 
   // ── UI indicator ──────────────────────────────────────────────────────────
@@ -1149,6 +1150,7 @@ export function FinancialHub() {
       setGateThreshold(thresh ? String(thresh) : '');
       setShieldEnabled(!!s.fee_shield_enabled);
       setShieldMode(s.fee_shield_mode||'warn');
+      setFallbackEmail(s.fallback_email || '');
       setSettingsOpen(true);
     } catch (e) { console.error(e); }
   };
@@ -1205,6 +1207,7 @@ export function FinancialHub() {
         fee_gate_enabled:   gateEnabled,
         fee_gate_mode:      gateMode === 'any' ? 'fixed' : gateMode,
         fee_gate_threshold: gateMode === 'any' ? 0 : (Number(gateThreshold)||0),
+        fallback_email:     fallbackEmail.trim(),
       };
       if (isDiamond) { patch.fee_shield_enabled = shieldEnabled; patch.fee_shield_mode = shieldMode; }
       const res = await window.electronAPI.fees.saveSettings(patch);
@@ -1911,6 +1914,28 @@ export function FinancialHub() {
                     <Lbl>Second Reminder Date</Lbl>
                     <input type="date" id="fees-reminder-2" value={reminder2} onChange={e => setReminder2(e.target.value)} className="modern-input" style={{ width:'100%', fontSize:'12px' }} />
                   </div>
+                </div>
+              </div>
+
+              {/* Fallback Parent Email */}
+              <div className="card" style={{ padding:'16px', background:'rgba(0,229,255,0.03)', border:'1px solid rgba(0,229,255,0.12)' }}>
+                <p style={{ fontSize:'11px', color:'var(--accent)', textTransform:'uppercase', letterSpacing:'1px', fontWeight:700, marginBottom:'8px' }}>📧 WhatsApp Checkout — Fallback Email</p>
+                <p style={{ fontSize:'11px', color:'var(--text-dim)', marginBottom:'14px', lineHeight:1.6 }}>
+                  Used when a parent pays via WhatsApp and has <strong>no email on record</strong> or chooses to skip providing one. Paystack requires an email to generate checkout links.
+                  <br/><br/>
+                  If left blank, the bot will auto-generate a placeholder. It is <strong style={{ color:'var(--accent)' }}>strongly recommended</strong> you set a real school email (e.g. <em>bursary@yourschool.edu.ng</em>) so Paystack receipts are traceable.
+                </p>
+                <div>
+                  <Lbl>Fallback Email Address</Lbl>
+                  <input
+                    type="email"
+                    id="fees-fallback-email"
+                    value={fallbackEmail}
+                    onChange={e => setFallbackEmail(e.target.value)}
+                    placeholder="e.g. bursary@yourschool.edu.ng"
+                    className="modern-input"
+                    style={{ width:'100%', fontSize:'13px' }}
+                  />
                 </div>
               </div>
 

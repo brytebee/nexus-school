@@ -48,6 +48,7 @@ const STATE = Object.freeze({
   AWAITING_ONLINE_OPTION:  "AWAITING_ONLINE_OPTION",
   AWAITING_PARTIAL_PLAN:   "AWAITING_PARTIAL_PLAN",
   AWAITING_CUSTOM_AMOUNT:  "AWAITING_CUSTOM_AMOUNT",
+  AWAITING_EMAIL_INPUT:    "AWAITING_EMAIL_INPUT",
 });
 
 function createSession(students, termConfig, schoolName) {
@@ -835,6 +836,8 @@ async function handleMessage(msg) {
       isBotHandled = true;
     } else if (session.state === STATE.AWAITING_CUSTOM_AMOUNT && (text === '0' || !isNaN(parseFloat(text)))) {
       isBotHandled = true;
+    } else if (session.state === STATE.AWAITING_EMAIL_INPUT) {
+      isBotHandled = true;
     }
   }
 
@@ -1034,7 +1037,7 @@ async function handleMessage(msg) {
         setSession(matchable, session);
         await msg.reply(partMsg);
       } else {
-        await generatePaystackLink(msg, session, matchable, totalBalance, "Full Payment");
+        await checkOrPromptEmail(msg, session, totalBalance, "Full Payment");
       }
       return;
     }
@@ -1076,7 +1079,7 @@ async function handleMessage(msg) {
 
     if (numericInput === 1) {
       const totalBalance = session.paymentContext.totalBalance;
-      await generatePaystackLink(msg, session, matchable, totalBalance, "Full Payment");
+      await checkOrPromptEmail(msg, session, totalBalance, "Full Payment");
       return;
     }
 
@@ -1142,7 +1145,7 @@ async function handleMessage(msg) {
 
     const totalBalance = session.paymentContext.totalBalance;
     const partialAmount = Math.round((plan.percent / 100) * totalBalance);
-    await generatePaystackLink(msg, session, matchable, partialAmount, `Milestone: ${plan.label} (${plan.percent}%)`, plan.percent);
+    await checkOrPromptEmail(msg, session, partialAmount, `Milestone: ${plan.label} (${plan.percent}%)`, plan.percent);
     return;
   }
 
@@ -1168,7 +1171,7 @@ async function handleMessage(msg) {
     }
 
     const percentage = Math.round((customAmt / totalBalance) * 100);
-    await generatePaystackLink(msg, session, matchable, customAmt, "Custom Partial Payment", percentage);
+    await checkOrPromptEmail(msg, session, customAmt, "Custom Partial Payment", percentage);
     return;
   }
 
@@ -1298,23 +1301,109 @@ async function handleMessage(msg) {
     }
     return;
   }
+
+  // ── STATE: AWAITING_EMAIL_INPUT ──────────────────────────────────────────────
+  if (session.state === STATE.AWAITING_EMAIL_INPUT) {
+    if (text === '0') {
+      clearSession(matchable);
+      await msg.reply(buildMainMenu(session.schoolName));
+      return;
+    }
+
+    const txContext = session.paymentContext?.pendingTx;
+    if (!txContext) {
+      clearSession(matchable);
+      await msg.reply("⚠️ Session error. Please request your fees menu again to start over.");
+      return;
+    }
+
+    const input = text.trim();
+    let emailToUse = null;
+
+    if (input === '1' && session.paymentContext.existingEmail) {
+      emailToUse = session.paymentContext.existingEmail;
+    } else if (input === '2') {
+      // Fetch fallback email from fee settings
+      const db = database.getDb();
+      try {
+        const settingsRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'fee_settings'`).get();
+        const settings = settingsRow ? JSON.parse(settingsRow.value) : {};
+        emailToUse = settings.fallback_email || `parent-${matchable}@nexusos.com.ng`;
+      } catch (_) {
+        emailToUse = `parent-${matchable}@nexusos.com.ng`;
+      }
+    } else {
+      // Check if it is a valid email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (emailRegex.test(input)) {
+        emailToUse = input;
+        // Update database for all students in this session to clean data!
+        const db = database.getDb();
+        try {
+          db.transaction(() => {
+            const updateStmt = db.prepare("UPDATE students SET parent_email = ? WHERE id = ?");
+            for (const std of session.students) {
+              updateStmt.run(input, std.id);
+            }
+          })();
+          await msg.reply("✅ Email address updated in our school records.");
+        } catch (dbErr) {
+          console.error("[Pulse Bot] Failed to update parent email:", dbErr.message);
+        }
+      } else {
+        await msg.reply("⚠️ Invalid input. Please type a valid email address (e.g. *parent@domain.com*) or reply *2* to skip and use fallback email.");
+        return;
+      }
+    }
+
+    // Direct checkout initialization
+    await generatePaystackLink(msg, session, matchable, txContext.amount, txContext.paymentType, emailToUse, txContext.percentage);
+    return;
+  }
 }
-// ─── Paystack Transaction Link Generator ───────────────────────────────────────
-async function generatePaystackLink(msg, session, matchable, amount, paymentType, percentage = null) {
+
+// ─── Paystack Email Validation / Collection Hook ──────────────────────────────
+async function checkOrPromptEmail(msg, session, amount, paymentType, percentage = null) {
   const db = database.getDb();
-  
-  // 1. Find parent email
-  let parentEmail = null;
+  let existingEmail = null;
   for (const std of session.students) {
     const studentRow = db.prepare("SELECT parent_email FROM students WHERE id = ?").get(std.id);
     if (studentRow?.parent_email) {
-      parentEmail = studentRow.parent_email;
+      existingEmail = studentRow.parent_email;
       break;
     }
   }
-  if (!parentEmail) {
-    parentEmail = `parent-${matchable}@nexusos.com.ng`;
+
+  // Save transaction details to continue after email is confirmed
+  session.paymentContext = {
+    ...session.paymentContext,
+    pendingTx: { amount, paymentType, percentage },
+    existingEmail
+  };
+  session.state = STATE.AWAITING_EMAIL_INPUT;
+  setSession(msg.from, session);
+
+  if (existingEmail) {
+    let confirmMsg = `📧 *Confirm Your Email Address*\n\n`;
+    confirmMsg += `Paystack requires a valid email address to send your payment receipt.\n\n`;
+    confirmMsg += `Registered Email: *${existingEmail}*\n\n`;
+    confirmMsg += `Reply *1* to use this email.\n`;
+    confirmMsg += `Reply *2* to skip and use the school's fallback address.\n\n`;
+    confirmMsg += `_Or type a new email address directly to update it._`;
+    await msg.reply(confirmMsg);
+  } else {
+    let promptMsg = `📧 *Email Address Required*\n\n`;
+    promptMsg += `Paystack requires a valid email address to send your payment receipt.\n\n`;
+    promptMsg += `Currently: *None registered*\n\n`;
+    promptMsg += `- *Type your email address* directly (e.g. *parent@example.com*) to save it.\n`;
+    promptMsg += `- Reply *2* to skip and use the school's fallback address.`;
+    await msg.reply(promptMsg);
   }
+}
+
+// ─── Paystack Transaction Link Generator ───────────────────────────────────────
+async function generatePaystackLink(msg, session, matchable, amount, paymentType, parentEmail, percentage = null) {
+  const db = database.getDb();
 
   // 2. Query active collection subaccount code
   let activeAcc = null;
@@ -1345,12 +1434,13 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
   try {
     await msg.reply("⏳ _Generating your secure checkout link..._");
     
-    const tx = await paystackService.initializeTransaction(
-      parentEmail,
-      amount,
-      reference,
-      subaccountCode
-    );
+    // Fix: call initializeTransaction passing a single object parameter, with amount in kobo
+    const tx = await paystackService.initializeTransaction({
+      email: parentEmail,
+      amount: amount * 100, // convert to kobo (Paystack expected unit)
+      reference: reference,
+      subaccountCode: subaccountCode
+    });
 
     if (tx && tx.authorization_url) {
       const studentIds = session.students.map(s => s.id).join(",");
@@ -1376,6 +1466,7 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
     await msg.reply(`⚠️ Failed to generate online payment checkout link: ${err.message}.\nPlease choose Manual Transfer instead.`);
   }
 }
+
 
 // ─── Module Exports ────────────────────────────────────────────────────────────
 module.exports = {
