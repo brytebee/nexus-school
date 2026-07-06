@@ -1059,7 +1059,7 @@ async function processSuccessfulPayment(ref, amountInKobo) {
       db.prepare(`
         INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(studentId, academicSession, term, allocation, "paystack", ref, "Online Payment via Paystack (Auto-Verified)");
+      `).run(studentId, academicSession, term, allocation, "transfer", ref, "Online Payment via Paystack (Auto-Verified)");
 
       const { total_paid_sum } = db.prepare(`
         SELECT COALESCE(SUM(amount), 0) AS total_paid_sum FROM fee_transactions
@@ -1087,7 +1087,7 @@ async function processSuccessfulPayment(ref, amountInKobo) {
       db.prepare(`
         INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(studentId, academicSession, term, remainingPaid, "paystack", ref, "Online Payment Leftover");
+      `).run(studentId, academicSession, term, remainingPaid, "transfer", ref, "Online Payment Leftover (Paystack)");
 
       const { total_paid_sum } = db.prepare(`
         SELECT COALESCE(SUM(amount), 0) AS total_paid_sum FROM fee_transactions
