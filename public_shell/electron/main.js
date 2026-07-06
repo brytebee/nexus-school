@@ -1260,7 +1260,9 @@ async function processSuccessfulPayment(ref, amountInKobo, transactionId = null)
   }
 
   const studentIds = session.student_ids.split(",");
-  const totalPaidNaira = Number(amountInKobo / 100);
+  // Fix: Only record the base amount raised (session.total_amount) in the school's ledger database.
+  // The full charge paid by the parent is stored in Paystack metadata/dashboard.
+  const totalPaidNaira = session.total_amount;
   let remainingPaid = totalPaidNaira;
 
   const termConfig = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get();
