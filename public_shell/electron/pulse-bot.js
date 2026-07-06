@@ -1445,7 +1445,8 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
       email: parentEmail,
       amount: amount * 100, // convert to kobo (Paystack expected unit)
       reference: reference,
-      subaccountCode: subaccountCode
+      subaccountCode: subaccountCode,
+      callbackUrl: "https://nexusos.com.ng/payment-complete"
     });
 
     if (tx && tx.authorization_url) {
