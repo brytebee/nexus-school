@@ -887,7 +887,12 @@ async function handleMessage(msg) {
   }
 
   // ── Any non-numeric input OR new session → show main menu ───────────────────
-  if (!session || !numericInput) {
+  // Exception: states that expect free-text input must bypass this gate so the
+  // parent's typed email / custom amount reaches the correct handler below.
+  const FREE_TEXT_STATES = [STATE.AWAITING_EMAIL_INPUT, STATE.AWAITING_CUSTOM_AMOUNT, STATE.AWAITING_RECEIPT];
+  const inFreeTextState  = session && FREE_TEXT_STATES.includes(session.state);
+
+  if (!inFreeTextState && (!session || !numericInput)) {
     const db = database.getDb();
     const students = db
       .prepare("SELECT id, name, class_name, class_arm FROM students WHERE parent_phone LIKE ?")
@@ -920,6 +925,7 @@ async function handleMessage(msg) {
     await msg.reply(buildMainMenu(schoolName));
     return;
   }
+
 
   // ── STATE: MENU — waiting for topic selection (1, 2, 3) ─────────────────────
   if (session.state === STATE.MENU) {
