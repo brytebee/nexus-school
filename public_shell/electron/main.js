@@ -1067,10 +1067,10 @@ ipcMain.handle('fees:print-receipt', async (event, { txRef, studentId, format })
         });
     }
 
-    let schoolName = "The School";
-    let schoolAddress = "";
-    let schoolPhone = "";
-    let schoolLogoB64 = "";
+    let schoolName = identityPacket?.name || "The School";
+    let schoolAddress = identityPacket?.address || "";
+    let schoolPhone = identityPacket?.principalPhone || "";
+    let schoolLogoB64 = identityPacket?.logoBase64 || "";
 
     try {
         const nameRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_name'").get();
@@ -1389,10 +1389,10 @@ async function sendBrandedReceiptHelper(db, ref, session) {
     });
   }
 
-  let schoolName = "the school";
-  let schoolAddress = "";
-  let schoolPhone = "";
-  let schoolLogoB64 = "";
+  let schoolName = identityPacket?.name || "the school";
+  let schoolAddress = identityPacket?.address || "";
+  let schoolPhone = identityPacket?.principalPhone || "";
+  let schoolLogoB64 = identityPacket?.logoBase64 || "";
 
   try {
     const nameRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_name'").get();
