@@ -1037,7 +1037,7 @@ async function handleMessage(msg) {
         setSession(matchable, session);
         await msg.reply(partMsg);
       } else {
-        await checkOrPromptEmail(msg, session, totalBalance, "Full Payment");
+        await checkOrPromptEmail(msg, session, matchable, totalBalance, "Full Payment");
       }
       return;
     }
@@ -1079,7 +1079,7 @@ async function handleMessage(msg) {
 
     if (numericInput === 1) {
       const totalBalance = session.paymentContext.totalBalance;
-      await checkOrPromptEmail(msg, session, totalBalance, "Full Payment");
+      await checkOrPromptEmail(msg, session, matchable, totalBalance, "Full Payment");
       return;
     }
 
@@ -1145,7 +1145,7 @@ async function handleMessage(msg) {
 
     const totalBalance = session.paymentContext.totalBalance;
     const partialAmount = Math.round((plan.percent / 100) * totalBalance);
-    await checkOrPromptEmail(msg, session, partialAmount, `Milestone: ${plan.label} (${plan.percent}%)`, plan.percent);
+    await checkOrPromptEmail(msg, session, matchable, partialAmount, `Milestone: ${plan.label} (${plan.percent}%)`, plan.percent);
     return;
   }
 
@@ -1171,7 +1171,7 @@ async function handleMessage(msg) {
     }
 
     const percentage = Math.round((customAmt / totalBalance) * 100);
-    await checkOrPromptEmail(msg, session, customAmt, "Custom Partial Payment", percentage);
+    await checkOrPromptEmail(msg, session, matchable, customAmt, "Custom Partial Payment", percentage);
     return;
   }
 
@@ -1363,7 +1363,7 @@ async function handleMessage(msg) {
 }
 
 // ─── Paystack Email Validation / Collection Hook ──────────────────────────────
-async function checkOrPromptEmail(msg, session, amount, paymentType, percentage = null) {
+async function checkOrPromptEmail(msg, session, matchable, amount, paymentType, percentage = null) {
   const db = database.getDb();
   let existingEmail = null;
   for (const std of session.students) {
@@ -1381,7 +1381,7 @@ async function checkOrPromptEmail(msg, session, amount, paymentType, percentage 
     existingEmail
   };
   session.state = STATE.AWAITING_EMAIL_INPUT;
-  setSession(msg.from, session);
+  setSession(matchable, session); // ← keyed on matchable, NOT msg.from
 
   if (existingEmail) {
     let confirmMsg = `📧 *Confirm Your Email Address*\n\n`;
