@@ -1447,7 +1447,7 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
 
     const tx = await paystackService.initializeTransaction({
       email: parentEmail,
-      amount: Math.round(gross * 100), // gross in kobo — parent bears the fee
+      amount: Math.round(amount * 100), // pass the base amount in kobo; Paystack adds charges automatically at checkout
       reference: reference,
       subaccountCode: subaccountCode,
       callbackUrl: "https://nexusos.com.ng/payment-complete",
