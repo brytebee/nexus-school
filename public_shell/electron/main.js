@@ -26,6 +26,7 @@ const { Bonjour } = require('bonjour-service');
 const bonjour = new Bonjour();
 const feeCalculator = require("./src/lib/fee-calculator");
 const paystackService = require("./paystack-service.js");
+const { toDisplayTier } = require("./src/tierDisplay.js");
 
 // Set app name BEFORE createWindow so Menu.buildFromTemplate picks it up correctly
 app.setName("NexusSchoolOS");
@@ -4910,35 +4911,100 @@ function createWindow() {
     '2025/2026': { T1:{ start:'2025-09-08', end:'2025-12-13' }, T2:{ start:'2026-01-05', end:'2026-04-04' }, T3:{ start:'2026-04-27', end:'2026-07-18' } },
     '2026/2027': { T1:{ start:'2026-09-07', end:'2026-12-12' }, T2:{ start:'2027-01-04', end:'2027-04-03' }, T3:{ start:'2027-04-26', end:'2027-07-17' } },
   };
-  const GRACE_MS = 14 * 24 * 60 * 60 * 1000;
+  const GRACE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days — matches calendar.ts
 
   function getTermWindow(key) {
     const [session, term] = key.split('-');
     return NIGERIAN_CALENDAR[session]?.[term] ?? null;
   }
 
-  /** Returns 'active' | 'grace' | 'expired' — no internet needed */
+  /**
+   * Returns true if any full calendar term sits inside the gap between two licensed terms.
+   * Used to prevent treating an unlicensed term (e.g. T2) as a simple school holiday.
+   */
+  function isCalendarTermInGap(afterEndDate, beforeStartDate) {
+    const gapStart = new Date(afterEndDate   + 'T23:59:59Z').getTime();
+    const gapEnd   = new Date(beforeStartDate + 'T00:00:00Z').getTime();
+    for (const session of Object.values(NIGERIAN_CALENDAR)) {
+      for (const term of Object.values(session)) {
+        const tStart = new Date(term.start + 'T00:00:00Z').getTime();
+        const tEnd   = new Date(term.end   + 'T23:59:59Z').getTime();
+        // A calendar term sits fully inside the gap
+        if (tStart >= gapStart && tEnd <= gapEnd) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Asymmetric summer grace helper.
+   * When the last licensed term is T3, grace anchors to the NEXT session's T1
+   * start — not to T3's end. Schools retain full access through the summer so
+   * they can complete new-intake registration before committing to a headcount
+   * and a tier. Returns next T1 start in ms, or null if not in calendar.
+   */
+  function findNextT1Start(t3Key) {
+    const session   = t3Key.split('-')[0];                    // "2025/2026"
+    const startYear = parseInt(session.split('/')[0], 10);    // 2025
+    const nextSession = `${startYear + 1}/${startYear + 2}`; // "2026/2027"
+    const nextT1 = NIGERIAN_CALENDAR[nextSession]?.T1;
+    return nextT1 ? new Date(nextT1.start + 'T00:00:00Z').getTime() : null;
+  }
+
+  /**
+   * Returns 'active' | 'grace' | 'expired' — no internet needed.
+   *
+   * Grace anchoring rules:
+   *  - T1 renewal (summer gap): grace anchors to NEXT T1 start.
+   *    App stays active all summer; 30-day window opens on T1 day-1.
+   *  - T2 / T3 renewals: grace anchors to preceding term end (30 days).
+   */
   function checkCalendarStatus(licensedTerms, nowMs = Date.now()) {
-    let latestEnd = 0;
-    const windows = licensedTerms.map(getTermWindow).filter(Boolean);
+    let latestEnd    = 0;
+    let latestTermKey = null;
+
+    const keyedWindows = licensedTerms
+      .map(k => ({ key: k, w: getTermWindow(k) }))
+      .filter(x => x.w);
+
     // Check if now falls within any licensed term
-    for (const w of windows) {
+    for (const { key, w } of keyedWindows) {
       const s = new Date(w.start + 'T00:00:00Z').getTime();
       const e = new Date(w.end   + 'T23:59:59Z').getTime();
       if (nowMs >= s && nowMs <= e) return 'active';
-      if (e > latestEnd) latestEnd = e;
+      // Only track as a candidate if this term has already ended
+      if (e < nowMs && e > latestEnd) { latestEnd = e; latestTermKey = key; }
     }
-    // Check holiday windows between consecutive licensed terms
-    const sorted = windows.sort((a,b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+
+    // Bridge adjacent licensed terms across holidays ONLY if no calendar term sits in the gap.
+    // A school that paid T1+T3 but not T2 should NOT be 'active' during T2.
+    const sorted = keyedWindows
+      .map(x => x.w)
+      .sort((a,b) => new Date(a.start).getTime() - new Date(b.start).getTime());
     for (let i = 0; i < sorted.length - 1; i++) {
       const hStart = new Date(sorted[i].end   + 'T23:59:59Z').getTime();
       const hEnd   = new Date(sorted[i+1].start + 'T00:00:00Z').getTime();
-      if (nowMs > hStart && nowMs < hEnd) return 'active';
+      if (!isCalendarTermInGap(sorted[i].end, sorted[i+1].start) && nowMs > hStart && nowMs < hEnd) return 'active';
     }
+
     if (latestEnd === 0) return 'expired';
+
+    // ── Asymmetric summer grace ──────────────────────────────────────────────
+    // Last licensed term was T3 → full summer access, grace from T1 start.
+    if (latestTermKey && latestTermKey.endsWith('-T3')) {
+      const nextT1Ms = findNextT1Start(latestTermKey);
+      if (nextT1Ms !== null) {
+        if (nowMs < nextT1Ms)             return 'active'; // still summer
+        if (nowMs <= nextT1Ms + GRACE_MS) return 'grace';  // 30 days into T1
+        return 'expired';
+      }
+    }
+
+    // Standard grace for T1→T2 and T2→T3 gaps (term-end anchored)
     if (nowMs <= latestEnd + GRACE_MS) return 'grace';
     return 'expired';
   }
+
 
   /** Verify tweetnacl-style Ed25519 token: base64url(payload).base64url(sig) */
   function verifyNexusToken(token) {
@@ -5011,8 +5077,9 @@ function createWindow() {
             // 2b. Tier allowlist — must be one of the four canonical values.
             //     A valid Ed25519 signature with an unknown tier indicates either
             //     a rogue signing key or a future attack vector; lock immediately.
-            const VALID_TIERS = ['Standalone', 'Silver', 'Gold', 'Diamond'];
-            if (!VALID_TIERS.includes(payload.tier)) {
+            const VALID_TIERS = ['standalone', 'silver', 'gold', 'diamond'];
+            const normalisedTier = (payload.tier || '').toLowerCase();
+            if (!VALID_TIERS.includes(normalisedTier)) {
               console.error(`[Security] Invalid tier '${payload.tier}' in verified token — locking.`);
               licenseStatus = {
                 locked: true,
@@ -5028,47 +5095,67 @@ function createWindow() {
             // 4. Provisional (not yet hardware-bound) — allow but prompt
             } else if (!payload.hardware_id) {
               licenseStatus = {
-                locked: false, message: 'PROVISIONAL', tier: payload.tier,
+                locked: false, message: 'PROVISIONAL', tier: toDisplayTier(normalisedTier),
                 student_count: payload.student_cap, licensed_terms: payload.licensed_terms,
                 needs_activation: true,
               };
               setSchoolLicense({ payload: JSON.stringify(payload) });
 
             } else {
-              // 5. Calendar-based expiry (offline — Silver always uses this)
-              const calStatus = checkCalendarStatus(payload.licensed_terms || []);
-
-              // 6. For Gold/Diamond: also check heartbeat cache (server-authoritative clock)
-              let effectiveStatus = calStatus;
-              const tier = (payload.tier || 'Silver').toLowerCase();
-              if ((tier === 'gold' || tier === 'diamond') && heartbeatCache.valid_until > Date.now()) {
-                effectiveStatus = heartbeatCache.term_status;
-              }
-
-              if (effectiveStatus === 'expired') {
+              if (normalisedTier === 'standalone') {
                 licenseStatus = {
-                  locked: true,
-                  message: 'License expired. Please renew to continue.',
-                  reason: 'expired',
-                  tier: payload.tier,
-                };
-              } else {
-                const isGrace = effectiveStatus === 'grace';
-                licenseStatus = {
-                  locked:        false,
-                  message:       isGrace ? 'GRACE' : 'VALID',
-                  tier:          payload.tier,
-                  student_count: payload.student_cap,
-                  licensed_terms: payload.licensed_terms,
-                  in_grace:      isGrace,
+                  locked:          false,
+                  message:         'VALID',
+                  tier:            toDisplayTier(normalisedTier),
+                  student_count:   payload.student_cap,
+                  licensed_terms:  payload.licensed_terms,
                   needs_activation: false,
                 };
                 setSchoolLicense({ payload: JSON.stringify(payload) });
-                console.log(`[License] ✅ ${payload.tier} (${effectiveStatus}) — ${payload.student_cap} students`);
+                console.log(`[License] ✅ Standalone (perpetual) — ${payload.student_cap} students`);
+              } else {
+                // 5. Calendar-based expiry (offline — Silver always uses this)
+                const calStatus = checkCalendarStatus(payload.licensed_terms || []);
 
-                // 7. Schedule heartbeat for Gold/Diamond (non-blocking)
-                if (tier === 'gold' || tier === 'diamond') {
-                  _scheduleHeartbeat(token, hardwareId, payload.school_id, sysConfPath);
+                // 6. For Gold/Diamond: also check heartbeat cache (server-authoritative clock)
+                let effectiveStatus = calStatus;
+                const tier = normalisedTier;
+                if ((tier === 'gold' || tier === 'diamond') && heartbeatCache.valid_until > Date.now()) {
+                  effectiveStatus = heartbeatCache.term_status;
+                }
+
+                if (effectiveStatus === 'expired') {
+                  licenseStatus = {
+                    locked: true,
+                    message: 'License expired. Please renew to continue.',
+                    reason: 'expired',
+                    tier: toDisplayTier(normalisedTier),
+                  };
+                } else {
+                  const isGrace = effectiveStatus === 'grace';
+                  let latestEnd = 0;
+                  const windows = (payload.licensed_terms || []).map(getTermWindow).filter(Boolean);
+                  for (const w of windows) {
+                    const e = new Date(w.end + 'T23:59:59Z').getTime();
+                    if (e > latestEnd) latestEnd = e;
+                  }
+                  licenseStatus = {
+                    locked:        false,
+                    message:       isGrace ? 'GRACE' : 'VALID',
+                    tier:          toDisplayTier(normalisedTier),
+                    student_count: payload.student_cap,
+                    licensed_terms: payload.licensed_terms,
+                    in_grace:      isGrace,
+                    grace_deadline: isGrace ? new Date(latestEnd + GRACE_MS).toISOString() : null,
+                    needs_activation: false,
+                  };
+                  setSchoolLicense({ payload: JSON.stringify(payload) });
+                  console.log(`[License] ✅ ${toDisplayTier(normalisedTier)} (${effectiveStatus}) — ${payload.student_cap} students`);
+
+                  // 7. Schedule heartbeat for Gold/Diamond (non-blocking)
+                  if (tier === 'gold' || tier === 'diamond') {
+                    _scheduleHeartbeat(token, hardwareId, payload.school_id, sysConfPath);
+                  }
                 }
               }
             }

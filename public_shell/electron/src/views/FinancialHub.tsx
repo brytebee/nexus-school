@@ -613,9 +613,45 @@ export function FinancialHub() {
         )
       );
       const failed = results.filter(r => !r?.ok);
-      if (failed.length) showIndicator(`⚠️ ${failed.length} save(s) failed`, '#FF5252');
-      else { showIndicator('✅ All changes saved'); setPendingEdits({}); }
+      if (failed.length) {
+        showIndicator(`⚠️ ${failed.length} save(s) failed`, '#FF5252');
+        if (Swal) {
+          Swal.fire({
+            title: 'Saves Partially Failed',
+            text: `${failed.length} of ${entries.length} student updates could not be saved.`,
+            icon: 'warning',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#ef4444'
+          });
+        }
+      } else {
+        showIndicator('✅ All changes saved');
+        if (Swal) {
+          Swal.fire({
+            title: 'Changes Saved',
+            text: 'All pending edits to the fee roster have been successfully saved.',
+            icon: 'success',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#00E5FF'
+          });
+        }
+        setPendingEdits({});
+      }
       doLoadRoster(sessionRef.current, termRef.current, rosterPage, searchQuery, statusFilter);
+    } catch (err) {
+      showIndicator('❌ Error saving changes');
+      if (Swal) {
+        Swal.fire({
+          title: 'Error',
+          text: err.message || 'An unexpected error occurred while saving.',
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444'
+        });
+      }
     } finally { setLoading(false); }
   };
 
@@ -661,9 +697,37 @@ export function FinancialHub() {
   };
 
   const handleDeleteItem = async (id: number) => {
-    if (!confirm('Delete this fee item?')) return;
-    await window.electronAPI.feeStructure?.deleteItem(id);
-    loadStructure();
+    const ok = Swal
+      ? (await Swal.fire({
+          title: 'Delete Fee Item?',
+          text: 'Are you sure you want to delete this fee item?',
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonText: 'Yes, Delete',
+          confirmButtonColor: '#ef4444',
+          background: '#0b0f19',
+          color: '#fff'
+        })).isConfirmed
+      : confirm('Delete this fee item?');
+    if (!ok) return;
+    try {
+      await window.electronAPI.feeStructure?.deleteItem(id);
+      loadStructure();
+      showIndicator('✅ Fee item deleted');
+    } catch (err) {
+      if (Swal) {
+        Swal.fire({
+          title: 'Error',
+          text: err.message || 'Failed to delete fee item',
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444'
+        });
+      } else {
+        alert(err.message || 'Failed to delete fee item');
+      }
+    }
   };
 
   const handleApplyToClass = async () => {
@@ -685,7 +749,43 @@ export function FinancialHub() {
     setApplyingFs(true);
     try {
       const res = await window.electronAPI.feeStructure.applyToClass({ className:structClass, academicSession:sessionRef.current, term });
-      if (res?.ok) showIndicator(`✅ Billed ₦${fmt(res.totalBilled)} to ${res.count} students`);
+      if (res?.ok) {
+        showIndicator(`✅ Billed ₦${fmt(res.totalBilled)} to ${res.count} students`);
+        if (Swal) {
+          Swal.fire({
+            title: 'Billing Applied',
+            text: `Successfully billed ₦${fmt(res.totalBilled)} to ${res.count} students.`,
+            icon: 'success',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#00E5FF'
+          });
+        }
+      } else {
+        showIndicator('❌ Billing failed');
+        if (Swal) {
+          Swal.fire({
+            title: 'Billing Failed',
+            text: res?.error || 'Failed to apply fee structure.',
+            icon: 'error',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#ef4444'
+          });
+        }
+      }
+    } catch (err) {
+      showIndicator('❌ Billing error');
+      if (Swal) {
+        Swal.fire({
+          title: 'Billing Error',
+          text: err.message || 'An unexpected error occurred.',
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444'
+        });
+      }
     } finally { setApplyingFs(false); }
   };
 
@@ -720,15 +820,77 @@ export function FinancialHub() {
         setIsAdjOpen(false);
         setAdjStudentStr(''); setAdjStudentId(''); setAdjAmount(''); setAdjDesc('');
         showIndicator('✅ Adjustment applied');
+        if (Swal) {
+          Swal.fire({
+            title: 'Adjustment Applied',
+            text: 'Fee adjustment has been applied successfully.',
+            icon: 'success',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#00E5FF'
+          });
+        }
         loadAdjustments();
+      } else {
+        showIndicator('❌ Adjustment failed');
+        if (Swal) {
+          Swal.fire({
+            title: 'Adjustment Failed',
+            text: res?.error || 'Failed to apply adjustment.',
+            icon: 'error',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#ef4444'
+          });
+        }
+      }
+    } catch (err) {
+      showIndicator('❌ Adjustment error');
+      if (Swal) {
+        Swal.fire({
+          title: 'Adjustment Error',
+          text: err.message || 'An unexpected error occurred.',
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444'
+        });
       }
     } finally { setApplyingAdj(false); }
   };
 
   const handleDeleteAdj = async (id: number) => {
-    if (!confirm("Delete this adjustment? It won't auto-reverse the student's bill.")) return;
-    await window.electronAPI.feeStructure?.deleteAdjustment(id);
-    loadAdjustments();
+    const ok = Swal
+      ? (await Swal.fire({
+          title: 'Delete Adjustment?',
+          text: "Delete this adjustment? It won't auto-reverse the student's bill.",
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonText: 'Yes, Delete',
+          confirmButtonColor: '#ef4444',
+          background: '#0b0f19',
+          color: '#fff'
+        })).isConfirmed
+      : confirm("Delete this adjustment? It won't auto-reverse the student's bill.");
+    if (!ok) return;
+    try {
+      await window.electronAPI.feeStructure?.deleteAdjustment(id);
+      showIndicator('✅ Adjustment deleted');
+      loadAdjustments();
+    } catch (err) {
+      if (Swal) {
+        Swal.fire({
+          title: 'Error',
+          text: err.message || 'Failed to delete adjustment.',
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444'
+        });
+      } else {
+        alert(err.message || 'Failed to delete adjustment.');
+      }
+    }
   };
 
 
@@ -758,12 +920,65 @@ export function FinancialHub() {
   const handleApproveSubmit = async () => {
     if (!approveR || !approveAmt) return;
     const amt = parseFloat(approveAmt);
-    if (!amt || isNaN(amt)) { alert('Enter the payment amount.'); return; }
+    if (!amt || isNaN(amt)) {
+      if (Swal) {
+        Swal.fire({
+          title: 'Validation Error',
+          text: 'Please enter a valid payment amount.',
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#00E5FF'
+        });
+      } else {
+        alert('Enter the payment amount.');
+      }
+      return;
+    }
     setApprovingR(true);
     try {
       const res = await window.electronAPI.receipts.approve({ receiptId:approveR.id, amount:amt, method:approveMethod, reference:approveRef.trim(), note:approveNote.trim(), term:approveTerm, session:approveSession });
-      if (res?.ok) { setApproveR(null); showIndicator('✅ Receipt approved & recorded'); loadReceipts(); }
-      else alert('Error: '+(res?.error||'Unknown'));
+      if (res?.ok) {
+        setApproveR(null);
+        showIndicator('✅ Receipt approved & recorded');
+        if (Swal) {
+          Swal.fire({
+            title: 'Receipt Approved',
+            text: 'Payment receipt has been approved and transaction recorded successfully.',
+            icon: 'success',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#00E5FF'
+          });
+        }
+        loadReceipts();
+      } else {
+        if (Swal) {
+          Swal.fire({
+            title: 'Approval Failed',
+            text: res?.error || 'Unknown error occurred.',
+            icon: 'error',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#ef4444'
+          });
+        } else {
+          alert('Error: '+(res?.error||'Unknown'));
+        }
+      }
+    } catch (err) {
+      if (Swal) {
+        Swal.fire({
+          title: 'Approval Error',
+          text: err.message || 'An unexpected error occurred.',
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444'
+        });
+      } else {
+        alert('Error: '+err.message);
+      }
     } finally { setApprovingR(false); }
   };
 
@@ -772,8 +987,47 @@ export function FinancialHub() {
     setRejectingR(true);
     try {
       const res = await window.electronAPI.receipts.reject({ receiptId:rejectR.id, reason:rejectReason.trim() });
-      if (res?.ok) { setRejectR(null); setRejectReason(''); showIndicator('❌ Receipt rejected'); loadReceipts(); }
-      else alert('Error: '+(res?.error||'Unknown'));
+      if (res?.ok) {
+        setRejectR(null); setRejectReason('');
+        showIndicator('❌ Receipt rejected');
+        if (Swal) {
+          Swal.fire({
+            title: 'Receipt Rejected',
+            text: 'The payment receipt was rejected.',
+            icon: 'info',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#00E5FF'
+          });
+        }
+        loadReceipts();
+      } else {
+        if (Swal) {
+          Swal.fire({
+            title: 'Rejection Failed',
+            text: res?.error || 'Unknown error occurred.',
+            icon: 'error',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#ef4444'
+          });
+        } else {
+          alert('Error: '+(res?.error||'Unknown'));
+        }
+      }
+    } catch (err) {
+      if (Swal) {
+        Swal.fire({
+          title: 'Rejection Error',
+          text: err.message || 'An unexpected error occurred.',
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444'
+        });
+      } else {
+        alert('Error: '+err.message);
+      }
     } finally { setRejectingR(false); }
   };
 
@@ -808,6 +1062,16 @@ export function FinancialHub() {
       if (acc.paystack_verified) {
         if (!acc.bank_code || acc.number.length !== 10 || !acc.name || acc.name === 'Resolving...' || acc.name === 'Verification failed') {
           showIndicator('❌ Please resolve all Paystack accounts correctly');
+          if (Swal) {
+            Swal.fire({
+              title: 'Validation Error',
+              text: 'Please resolve all Paystack accounts correctly before saving settings.',
+              icon: 'error',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#ef4444'
+            });
+          }
           return;
         }
       } else {
@@ -815,6 +1079,16 @@ export function FinancialHub() {
         if (acc.bank.trim() || acc.number.trim() || acc.name.trim()) {
           if (!acc.bank.trim() || acc.number.length !== 10 || !acc.name.trim()) {
             showIndicator('❌ Manual accounts must have name, 10-digit number & bank name');
+            if (Swal) {
+              Swal.fire({
+                title: 'Validation Error',
+                text: 'Manual settlement accounts must have a name, bank name, and a 10-digit account number.',
+                icon: 'error',
+                background: '#0b0f19',
+                color: '#fff',
+                confirmButtonColor: '#ef4444'
+              });
+            }
             return;
           }
         }
@@ -838,8 +1112,40 @@ export function FinancialHub() {
       if (res?.ok) {
         setSettingsOpen(false);
         showIndicator('✅ Settings saved');
+        if (Swal) {
+          Swal.fire({
+            title: 'Settings Saved',
+            text: 'Financial settings and settlement bank accounts have been saved successfully.',
+            icon: 'success',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#00E5FF'
+          });
+        }
       } else {
         showIndicator(`❌ ${res?.error || 'Failed to save settings'}`);
+        if (Swal) {
+          Swal.fire({
+            title: 'Error Saving Settings',
+            text: res?.error || 'Failed to save settings.',
+            icon: 'error',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#ef4444'
+          });
+        }
+      }
+    } catch (err) {
+      showIndicator('❌ Save settings error');
+      if (Swal) {
+        Swal.fire({
+          title: 'Error',
+          text: err.message || 'An unexpected error occurred.',
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444'
+        });
       }
     } finally { setSavingSettings(false); }
   };
@@ -855,8 +1161,45 @@ export function FinancialHub() {
         student_id:payStudent.id, academic_session:sessionRef.current, term:termRef.current,
         amount:Number(payAmount), payment_method:payMethod, reference_number:payRef.trim(), note:payNote.trim(),
       });
-      if (res?.ok) { setPayStudent(null); showIndicator('✅ Payment recorded'); doLoadRoster(sessionRef.current,termRef.current,rosterPage,searchQuery,statusFilter); }
-      else showIndicator('⚠️ '+(res?.error||'Failed'), '#FF5252');
+      if (res?.ok) {
+        setPayStudent(null);
+        showIndicator('✅ Payment recorded');
+        if (Swal) {
+          Swal.fire({
+            title: 'Payment Recorded',
+            text: `Successfully recorded payment of ₦${fmt(Number(payAmount))} for ${payStudent.name}.`,
+            icon: 'success',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#00E5FF'
+          });
+        }
+        doLoadRoster(sessionRef.current,termRef.current,rosterPage,searchQuery,statusFilter);
+      } else {
+        showIndicator('❌ Payment record failed');
+        if (Swal) {
+          Swal.fire({
+            title: 'Recording Failed',
+            text: res?.error || 'Failed to record fee payment.',
+            icon: 'error',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#ef4444'
+          });
+        }
+      }
+    } catch (err) {
+      showIndicator('❌ Payment recording error');
+      if (Swal) {
+        Swal.fire({
+          title: 'Error',
+          text: err.message || 'An unexpected error occurred.',
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444'
+        });
+      }
     } finally { setRecordingPay(false); }
   };
 
