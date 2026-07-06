@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.5.0] - 2026-07-06
+
+### Added
+- **Paystack Refund API (Diamond)**: Support for triggering full or partial refunds for online transactions directly from the ledger. Handles automatic creation of negative reversal entries in `fee_transactions`, decrementing student outstanding payments, registering refund logs in `fee_refunds`, and sending immediate WhatsApp reversal notifications.
+- **Branded PDF Receipts via WhatsApp (Diamond)**: Automatic generation of styled A4 PDF receipts utilizing `pdfkit` (including school logo, metadata, and item allocation breakdowns) dispatched to parents' WhatsApp numbers immediately upon online payment success, with manual re-send capabilities from the roster.
+- **Local On-Site Print Hub (Diamond)**: Hidden browser window print dispatcher using `receipt-print.html` allowing admins to print A4 sheets or 80mm thermal receipts directly to physical printers.
+- **Scrollable Roster Layout**: Added overflow-x auto and minimum widths to the fee roster table to permit smooth horizontal scrolling on smaller laptop displays.
+
+### Fixed
+- **Pre-existing Calendar Status Test Failure**: Fixed missing vitest imports causing describe/test failures.
+- **WhatsApp State Resilience**: Added comprehensive unit test suites covering the AWAITING_EMAIL_INPUT state machine and PDF receipt buffer generation.
+
 ## [2.4.0] - 2026-07-06
 
 ### Added
