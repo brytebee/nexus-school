@@ -80,6 +80,22 @@ async function verifyTransaction(reference) {
   return paystackFetch(`/transaction/verify/${encodeURIComponent(reference)}`);
 }
 
+async function initiateRefund(transactionIdOrRef, amountKobo = null, reason = "") {
+  const body = {
+    transaction: transactionIdOrRef,
+  };
+  if (amountKobo) {
+    body.amount = amountKobo;
+  }
+  if (reason) {
+    body.customer_note = reason;
+  }
+  return paystackFetch('/refund', {
+    method: 'POST',
+    body: JSON.stringify(body)
+  });
+}
+
 function verifyWebhookSignature(body, signature) {
   const secret = process.env.PAYSTACK_WEBHOOK_SECRET || process.env.PAYSTACK_SECRET_KEY;
   if (!secret || !signature) return false;
@@ -98,5 +114,7 @@ module.exports = {
   createSubaccount,
   initializeTransaction,
   verifyTransaction,
+  initiateRefund,
   verifyWebhookSignature,
 };
+

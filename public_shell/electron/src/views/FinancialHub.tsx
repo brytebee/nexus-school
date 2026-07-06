@@ -233,6 +233,16 @@ export function FinancialHub() {
   const [ledgerTx,      setLedgerTx]      = useState<any[]>([]);
   const [loadingLedger, setLoadingLedger] = useState(false);
 
+  // ── Refund & Receipts Modal States ─────────────────────────────────────────
+  const [refundTarget, setRefundTarget] = useState<{ studentId: string; txRef: string; amount: number; maxAmount: number }|null>(null);
+  const [refundAmt, setRefundAmt] = useState('');
+  const [refundReason, setRefundReason] = useState('');
+  const [submittingRefund, setSubmittingRefund] = useState(false);
+
+  const [receiptTarget, setReceiptTarget] = useState<{ studentId: string; txRef: string; isOnline: boolean }|null>(null);
+  const [sendingReceipt, setSendingReceipt] = useState(false);
+  const [printingReceipt, setPrintingReceipt] = useState(false);
+
   // ── Settings panel ────────────────────────────────────────────────────────
   const [settingsOpen,     setSettingsOpen]     = useState(false);
   const [reminder1,        setReminder1]        = useState('');
@@ -1317,6 +1327,133 @@ export function FinancialHub() {
     } finally { setLoadingLedger(false); }
   };
 
+  const handleRefundSubmit = async () => {
+    if (!refundTarget || !refundAmt || Number(refundAmt) <= 0 || !refundReason.trim()) return;
+    
+    if (Number(refundAmt) > refundTarget.maxAmount) {
+      if (Swal) {
+        Swal.fire({
+          title: 'Invalid Amount',
+          text: `Refund amount cannot exceed ₦${refundTarget.maxAmount.toLocaleString('en-NG')}`,
+          icon: 'warning',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#b8860b'
+        });
+      }
+      return;
+    }
+
+    setSubmittingRefund(true);
+    try {
+      const res = await window.electronAPI.fees.refund({
+        studentId: refundTarget.studentId,
+        txRef: refundTarget.txRef,
+        amount: Number(refundAmt),
+        reason: refundReason.trim()
+      });
+
+      if (res?.ok) {
+        if (Swal) {
+          Swal.fire({
+            title: 'Refund Processed',
+            text: 'Refund has been successfully initiated and recorded.',
+            icon: 'success',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#4CAF50'
+          });
+        }
+        setRefundTarget(null);
+        setRefundAmt('');
+        setRefundReason('');
+        
+        // Refresh Ledger
+        if (ledgerStudent) {
+          openLedger(ledgerStudent.id, ledgerStudent.name);
+        }
+        // Refresh roster
+        doLoadRoster(sessionRef.current, termRef.current, rosterPage, searchQuery, statusFilter);
+      } else {
+        throw new Error(res?.error || 'Refund initiation failed.');
+      }
+    } catch (err: any) {
+      if (Swal) {
+        Swal.fire({
+          title: 'Refund Error',
+          text: err.message,
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444'
+        });
+      }
+    } finally {
+      setSubmittingRefund(false);
+    }
+  };
+
+  const handleSendReceiptPdf = async () => {
+    if (!receiptTarget) return;
+    setSendingReceipt(true);
+    try {
+      const res = await window.electronAPI.fees.sendReceiptPdf({
+        studentId: receiptTarget.studentId,
+        txRef: receiptTarget.txRef
+      });
+      if (res?.ok) {
+        showIndicator('✅ PDF Receipt dispatched to WhatsApp!');
+        setReceiptTarget(null);
+      } else {
+        throw new Error(res?.error || 'Failed to dispatch WhatsApp PDF receipt.');
+      }
+    } catch (err: any) {
+      if (Swal) {
+        Swal.fire({
+          title: 'WhatsApp Failed',
+          text: err.message,
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444'
+        });
+      }
+    } finally {
+      setSendingReceipt(false);
+    }
+  };
+
+  const handlePrintReceipt = async (format: 'a4' | 'thermal') => {
+    if (!receiptTarget) return;
+    setPrintingReceipt(true);
+    try {
+      const res = await window.electronAPI.fees.printReceipt({
+        studentId: receiptTarget.studentId,
+        txRef: receiptTarget.txRef,
+        format
+      });
+      if (res?.ok) {
+        showIndicator('🖨️ Local print job sent to spooler!');
+        setReceiptTarget(null);
+      } else {
+        throw new Error(res?.error || 'Local printing failed.');
+      }
+    } catch (err: any) {
+      if (Swal) {
+        Swal.fire({
+          title: 'Print Error',
+          text: err.message,
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444'
+        });
+      }
+    } finally {
+      setPrintingReceipt(false);
+    }
+  };
+
   // ═══════════════════════════════════════════════════════════════════════════
   // FEE PULSE
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1504,8 +1641,8 @@ export function FinancialHub() {
             </div>
 
             {/* Fee Roster Table — V1 exact */}
-            <div className="table-container" style={{ flex:1, overflowY:'auto' }}>
-              <table className="data-table" id="fees-table">
+            <div className="table-container" style={{ flex:1, overflowY:'auto', overflowX:'auto' }}>
+              <table className="data-table" id="fees-table" style={{ minWidth: '750px' }}>
                 <thead>
                   <tr>
                     <th style={{ width:'32px' }}>#</th>
@@ -2440,7 +2577,7 @@ export function FinancialHub() {
       ══════════════════════════════════════════════════════════════════════ */}
       {ledgerStudent && (
         <div id="modal-ledger" style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', backdropFilter:'blur(6px)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }} onClick={() => setLedgerStudent(null)}>
-          <div style={{ background:'var(--bg-panel)', border:'1px solid var(--glass-border)', borderRadius:'16px', padding:'28px 32px', width:'580px', maxWidth:'94vw', maxHeight:'80vh', display:'flex', flexDirection:'column' }} onClick={e => e.stopPropagation()}>
+          <div style={{ background:'var(--bg-panel)', border:'1px solid var(--glass-border)', borderRadius:'16px', padding:'28px 32px', width:'720px', maxWidth:'96vw', maxHeight:'85vh', display:'flex', flexDirection:'column' }} onClick={e => e.stopPropagation()}>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'16px' }}>
               <div>
                 <h3 style={{ fontSize:'16px', marginBottom:'2px' }}>Payment History</h3>
@@ -2450,27 +2587,165 @@ export function FinancialHub() {
             </div>
             <div style={{ overflowY:'auto', flex:1 }}>
               <table className="data-table" id="ledger-table">
-                <thead><tr><th>Date</th><th style={{ textAlign:'right' }}>Amount (₦)</th><th>Method</th><th>Reference</th><th>Note</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th style={{ textAlign:'right' }}>Amount (₦)</th>
+                    <th>Method</th>
+                    <th>Reference</th>
+                    <th>Note</th>
+                    <th style={{ textAlign:'center', width:'130px' }}>Actions</th>
+                  </tr>
+                </thead>
                 <tbody id="ledger-tbody">
                   {loadingLedger ? (
-                    <tr><td colSpan={5} style={{ textAlign:'center', padding:'30px', color:'var(--text-dim)' }}>Loading…</td></tr>
+                    <tr><td colSpan={6} style={{ textAlign:'center', padding:'30px', color:'var(--text-dim)' }}>Loading…</td></tr>
                   ) : ledgerTx.length === 0 ? (
-                    <tr><td colSpan={5} style={{ textAlign:'center', padding:'30px', color:'var(--text-dim)' }}>No transactions recorded.</td></tr>
-                  ) : ledgerTx.map((tx,i) => (
-                    <tr key={i}>
-                      <td style={{ fontSize:'12px', whiteSpace:'nowrap' }}>{fmtDate(tx.created_at)}</td>
-                      <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', color:'#4CAF50' }}>₦{fmt(tx.amount)}</td>
-                      <td style={{ fontSize:'12px' }}>{PAY_LABELS[tx.payment_method]||tx.payment_method}</td>
-                      <td style={{ fontSize:'12px', fontFamily:'var(--font-mono)', color:'var(--text-dim)' }}>{tx.reference_number||'—'}</td>
-                      <td style={{ fontSize:'12px', color:'var(--text-dim)' }}>{tx.note||'—'}</td>
-                    </tr>
-                  ))}
+                    <tr><td colSpan={6} style={{ textAlign:'center', padding:'30px', color:'var(--text-dim)' }}>No transactions recorded.</td></tr>
+                  ) : ledgerTx.map((tx,i) => {
+                    const isPositive = tx.amount > 0;
+                    const isPaystack = isPositive && tx.reference_number && tx.reference_number.startsWith('PAY-');
+                    return (
+                      <tr key={i}>
+                        <td style={{ fontSize:'12px', whiteSpace:'nowrap' }}>{fmtDate(tx.created_at)}</td>
+                        <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'12px', color: tx.amount < 0 ? '#FF5252' : '#4CAF50', fontWeight: 600 }}>
+                          {tx.amount < 0 ? '-' : ''}₦{fmt(Math.abs(tx.amount))}
+                        </td>
+                        <td style={{ fontSize:'12px' }}>{PAY_LABELS[tx.payment_method]||tx.payment_method}</td>
+                        <td style={{ fontSize:'12px', fontFamily:'var(--font-mono)', color:'var(--text-dim)' }}>{tx.reference_number||'—'}</td>
+                        <td style={{ fontSize:'12px', color:'var(--text-dim)' }}>{tx.note||'—'}</td>
+                        <td style={{ textAlign:'center', whiteSpace:'nowrap' }}>
+                          {isPositive ? (
+                            <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                              <button 
+                                onClick={() => setReceiptTarget({ studentId: ledgerStudent.id, txRef: tx.reference_number, isOnline: !!isPaystack })}
+                                className="small-btn"
+                                style={{ fontSize: '10px', padding: '3px 6px', background: 'rgba(76,175,80,0.1)', color: '#4CAF50', borderColor: 'rgba(76,175,80,0.3)' }}
+                                title="Print / Send Receipt"
+                              >
+                                📄 Receipt
+                              </button>
+                              {isPaystack && (
+                                <button 
+                                  onClick={() => setRefundTarget({ studentId: ledgerStudent.id, txRef: tx.reference_number, amount: tx.amount, maxAmount: tx.amount })}
+                                  className="small-btn"
+                                  style={{ fontSize: '10px', padding: '3px 6px', background: 'rgba(255,193,7,0.1)', color: '#FFC107', borderColor: 'rgba(255,193,7,0.3)' }}
+                                  title="Issue Online Refund"
+                                >
+                                  ↩️ Refund
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic' }}>Reversal</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           </div>
         </div>
       )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          MODAL: Refund Transaction (Diamond)
+      ══════════════════════════════════════════════════════════════════════ */}
+      {refundTarget && (
+        <div id="modal-refund" style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', backdropFilter:'blur(6px)', zIndex:1500, display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <div style={{ background:'var(--bg-panel)', border:'1px solid var(--glass-border)', borderRadius:'16px', padding:'28px 32px', width:'440px', maxWidth:'94vw' }}>
+            <h3 style={{ marginBottom:'4px', fontSize:'16px' }}>↩️ Process Online Refund</h3>
+            <p style={{ fontSize:'12px', color:'var(--text-dim)', marginBottom:'16px' }}>
+              Reference: <strong style={{ fontFamily: 'monospace' }}>{refundTarget.txRef}</strong>
+            </p>
+            <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
+              <div>
+                <label style={{ fontSize:'11px', color:'var(--text-dim)' }}>Refund Amount (₦) (Max: ₦{refundTarget.maxAmount.toLocaleString()})</label>
+                <input 
+                  type="number" 
+                  placeholder="e.g. 5000" 
+                  value={refundAmt} 
+                  onChange={e => setRefundAmt(e.target.value)} 
+                  className="modern-input" 
+                  style={{ marginTop:'4px', width:'100%', background:'rgba(255,255,255,0.06)', border:'1px solid var(--glass-border)', borderRadius:'6px', color:'#fff', padding:'8px 12px' }} 
+                />
+              </div>
+              <div>
+                <label style={{ fontSize:'11px', color:'var(--text-dim)' }}>Reason for Refund</label>
+                <textarea 
+                  rows={3} 
+                  placeholder="e.g. Duplicate payment, sibling fee reallocation..." 
+                  value={refundReason} 
+                  onChange={e => setRefundReason(e.target.value)} 
+                  className="modern-input" 
+                  style={{ marginTop:'4px', resize:'none', width:'100%', background:'rgba(255,255,255,0.06)', border:'1px solid var(--glass-border)', borderRadius:'6px', color:'#fff', padding:'8px 12px' }} 
+                />
+              </div>
+            </div>
+            <div style={{ display:'flex', gap:'10px', marginTop:'20px', justifyContent:'flex-end' }}>
+              <button className="small-btn" onClick={() => { setRefundTarget(null); setRefundAmt(''); setRefundReason(''); }}>Cancel</button>
+              <button 
+                onClick={handleRefundSubmit} 
+                disabled={submittingRefund || !refundAmt || Number(refundAmt) <= 0 || !refundReason.trim()} 
+                className="primary-btn" 
+                style={{ background:'rgba(255,193,7,0.1)', borderColor:'rgba(255,193,7,0.3)', color: '#FFC107' }}
+              >
+                {submittingRefund ? 'Processing…' : 'Confirm Refund'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          MODAL: Receipt Picker (Print/Send)
+      ══════════════════════════════════════════════════════════════════════ */}
+      {receiptTarget && (
+        <div id="modal-receipt-picker" style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', backdropFilter:'blur(6px)', zIndex:1500, display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <div style={{ background:'var(--bg-panel)', border:'1px solid var(--glass-border)', borderRadius:'16px', padding:'28px 32px', width:'420px', maxWidth:'94vw', textAlign:'center' }}>
+            <h3 style={{ marginBottom:'6px', fontSize:'16px' }}>📄 Receipt Actions</h3>
+            <p style={{ fontSize:'12px', color:'var(--text-dim)', marginBottom:'20px' }}>
+              Reference: <span style={{ fontFamily: 'monospace' }}>{receiptTarget.txRef}</span>
+            </p>
+            
+            <div style={{ display:'flex', flexDirection:'column', gap: '10px' }}>
+              <button 
+                onClick={() => handlePrintReceipt('a4')} 
+                disabled={printingReceipt}
+                className="primary-btn"
+                style={{ width: '100%', padding: '12px', justifyContent: 'center', background: 'rgba(255,255,255,0.05)', borderColor: 'var(--glass-border)', color: '#fff' }}
+              >
+                🖨️ Local Print (A4 Portrait)
+              </button>
+              <button 
+                onClick={() => handlePrintReceipt('thermal')} 
+                disabled={printingReceipt}
+                className="primary-btn"
+                style={{ width: '100%', padding: '12px', justifyContent: 'center', background: 'rgba(255,255,255,0.05)', borderColor: 'var(--glass-border)', color: '#fff' }}
+              >
+                🧾 Local Print (80mm Thermal)
+              </button>
+              {receiptTarget.isOnline && (
+                <button 
+                  onClick={handleSendReceiptPdf} 
+                  disabled={sendingReceipt}
+                  className="primary-btn"
+                  style={{ width: '100%', padding: '12px', justifyContent: 'center', background: 'rgba(0,229,255,0.1)', borderColor: 'rgba(0,229,255,0.3)', color: '#00e5ff' }}
+                >
+                  💬 {sendingReceipt ? 'Sending PDF...' : 'Send Branded PDF to Parent (WhatsApp)'}
+                </button>
+              )}
+            </div>
+
+            <div style={{ marginTop:'20px', display:'flex', justifyContent:'center' }}>
+              <button className="small-btn" onClick={() => setReceiptTarget(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* ══════════════════════════════════════════════════════════════════════
           MODAL: Approve Receipt

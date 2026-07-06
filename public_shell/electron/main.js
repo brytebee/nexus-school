@@ -27,6 +27,8 @@ const bonjour = new Bonjour();
 const feeCalculator = require("./src/lib/fee-calculator");
 const paystackService = require("./paystack-service.js");
 const { toDisplayTier } = require("./src/tierDisplay.js");
+const receiptGenerator = require('./receipt-generator.js');
+
 
 // Set app name BEFORE createWindow so Menu.buildFromTemplate picks it up correctly
 app.setName("NexusSchoolOS");
@@ -906,6 +908,238 @@ ipcMain.handle('paystack:resolve-account', async (event, { accountNumber, bankCo
     }
 });
 
+let printWindow = null;
+let activePrintData = null;
+
+const PAY_LABELS_VALUE = {
+  cash: 'Cash Payment',
+  transfer: 'Bank Transfer',
+  pos: 'POS Terminal',
+  bank_teller: 'Bank Teller Receipt'
+};
+
+ipcMain.handle('fees:refund', async (event, { studentId, txRef, amount, reason }) => {
+    if (licenseStatus?.tier !== 'Diamond') {
+        return { ok: false, error: 'Diamond tier license is required to issue automated refunds.' };
+    }
+    if (!currentAdminSession) {
+        return { ok: false, error: 'Unauthorized: Admin session required.' };
+    }
+
+    const db = database.getDb();
+    
+    const tx = db.prepare("SELECT * FROM fee_transactions WHERE reference_number = ? AND student_id = ?").get(txRef, studentId);
+    if (!tx) {
+        return { ok: false, error: `Transaction with reference ${txRef} not found for this student.` };
+    }
+
+    const totalRefundedRow = db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM fee_refunds WHERE tx_ref = ? AND status = 'success'").get(txRef);
+    const availableToRefund = tx.amount - totalRefundedRow.total;
+    if (amount > availableToRefund) {
+        return { ok: false, error: `Requested refund amount (₦${amount.toLocaleString()}) exceeds the refundable balance (₦${availableToRefund.toLocaleString()}).` };
+    }
+
+    const session = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(txRef);
+    const paystackTxId = session?.paystack_tx_id;
+
+    let paystackRefundRef = null;
+
+    if (paystackTxId) {
+        try {
+            const amountKobo = Math.round(amount * 100);
+            const refundRes = await paystackService.initiateRefund(paystackTxId, amountKobo, reason);
+            paystackRefundRef = refundRes.reference;
+        } catch (paystackErr) {
+            console.error('[Refund IPC] Paystack Refund API failed:', paystackErr.message);
+            return { ok: false, error: `Paystack Refund failed: ${paystackErr.message}` };
+        }
+    } else {
+        return { ok: false, error: 'Refunds are only supported for online payments made via Paystack.' };
+    }
+
+    try {
+        db.transaction(() => {
+            db.prepare(`
+                INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, recorded_by, note)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(studentId, tx.academic_session, tx.term, -amount, tx.payment_method, txRef, currentAdminSession.username || 'Admin', `Reversal/Refund: ${reason}`);
+
+            db.prepare(`
+                INSERT INTO fee_refunds (student_id, tx_ref, paystack_ref, amount, reason, initiated_by, status)
+                VALUES (?, ?, ?, ?, ?, ?, 'success')
+            `).run(studentId, txRef, paystackRefundRef, amount, reason, currentAdminSession.username || 'Admin');
+
+            const { total_paid_sum } = db.prepare(`
+                SELECT COALESCE(SUM(amount), 0) AS total_paid_sum FROM fee_transactions
+                WHERE student_id = ? AND academic_session = ? AND term = ?
+            `).get(studentId, tx.academic_session, tx.term);
+
+            const billedRow = db.prepare(`
+                SELECT total_billed FROM student_fees 
+                WHERE student_id = ? AND academic_session = ? AND term = ?
+            `).get(studentId, tx.academic_session, tx.term);
+
+            const billed = billedRow?.total_billed || 0;
+            const newStatus = feeCalculator.computeFeeStatus(billed, total_paid_sum);
+
+            db.prepare(`
+                UPDATE student_fees 
+                SET total_paid = ?, status = ?, updated_at = datetime('now')
+                WHERE student_id = ? AND academic_session = ? AND term = ?
+            `).run(total_paid_sum, newStatus, studentId, tx.academic_session, tx.term);
+
+            db.prepare(`
+                INSERT INTO audit_logs (admin_id, action, target, details)
+                VALUES (?, 'REFUND_TRANSACTION', 'fee_transactions', ?)
+            `).run(currentAdminSession.id, `Refunded ₦${amount} for ref ${txRef}. Reason: ${reason}`);
+        })();
+
+        try {
+            const parentPhone = session.parent_phone;
+            const sName = db.prepare("SELECT name FROM students WHERE id = ?").get(studentId)?.name || 'student';
+            const refundMsg = `↩️ *Online Refund Initiated*\n\nDear Parent, an online refund of *₦${amount.toLocaleString('en-NG')}* has been processed for *${sName}*.\n\n*Details*:\n   Reference: ${txRef}\n   Reason:    ${reason}\n\n_Powered by Nexus Pulse_ 🎓`;
+            await pulseBot.sendRawMessage(parentPhone, refundMsg);
+        } catch (botErr) {
+            console.error('[Refund IPC] Failed to send WhatsApp refund notification:', botErr.message);
+        }
+
+        return { ok: true };
+    } catch (dbErr) {
+        console.error('[Refund IPC] Database transaction failed:', dbErr.message);
+        return { ok: false, error: `Database update failed: ${dbErr.message}` };
+    }
+});
+
+ipcMain.handle('fees:send-receipt-pdf', async (event, { studentId, txRef }) => {
+    if (licenseStatus?.tier !== 'Diamond') {
+        return { ok: false, error: 'Diamond license required.' };
+    }
+    const db = database.getDb();
+    const session = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(txRef);
+    if (!session) {
+        return { ok: false, error: 'Payment session not found for this reference.' };
+    }
+
+    try {
+        const success = await sendBrandedReceiptHelper(db, txRef, session);
+        return { ok: success };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+});
+
+ipcMain.handle('fees:print-receipt', async (event, { txRef, studentId, format }) => {
+    const db = database.getDb();
+    
+    const tx = db.prepare("SELECT * FROM fee_transactions WHERE reference_number = ? AND student_id = ?").get(txRef, studentId);
+    if (!tx) {
+        return { ok: false, error: 'Transaction record not found.' };
+    }
+
+    const sRow = db.prepare("SELECT name, class_name FROM students WHERE id = ?").get(studentId);
+    const studentName = sRow?.name || "Student";
+    const studentClass = sRow?.class_name || "—";
+
+    const session = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(txRef);
+    const amountPaid = tx.amount;
+
+    let allocations = [];
+    if (session) {
+        const studentIds = session.student_ids.split(",");
+        for (const sid of studentIds) {
+            const allocRow = db.prepare("SELECT amount FROM fee_transactions WHERE student_id = ? AND reference_number = ?").get(sid, txRef);
+            const feeRow = db.prepare("SELECT total_billed, total_paid FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?").get(sid, tx.academic_session, tx.term);
+            const balance = (feeRow?.total_billed || 0) - (feeRow?.total_paid || 0);
+            const sName = db.prepare("SELECT name FROM students WHERE id = ?").get(sid)?.name || `Student ID ${sid}`;
+            allocations.push({
+                name: sName,
+                amount: allocRow?.amount || 0,
+                balance: Math.max(0, balance)
+            });
+        }
+    } else {
+        const feeRow = db.prepare("SELECT total_billed, total_paid FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?").get(studentId, tx.academic_session, tx.term);
+        const balance = (feeRow?.total_billed || 0) - (feeRow?.total_paid || 0);
+        allocations.push({
+            name: studentName,
+            amount: tx.amount,
+            balance: Math.max(0, balance)
+        });
+    }
+
+    let schoolName = "The School";
+    let schoolAddress = "";
+    let schoolPhone = "";
+    let schoolLogoB64 = "";
+
+    try {
+        const nameRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_name'").get();
+        if (nameRow?.value) schoolName = nameRow.value;
+        const addrRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_address'").get();
+        if (addrRow?.value) schoolAddress = addrRow.value;
+        const phoneRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_phone'").get();
+        if (phoneRow?.value) schoolPhone = phoneRow.value;
+        const logoRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_logo_b64'").get();
+        if (logoRow?.value) schoolLogoB64 = logoRow.value;
+    } catch (_) {}
+
+    const printData = {
+        schoolName,
+        schoolAddress,
+        schoolPhone,
+        schoolLogoB64,
+        studentName,
+        studentClass,
+        academicSession: tx.academic_session,
+        term: tx.term,
+        reference: txRef,
+        amountPaid: session ? session.total_amount : amountPaid,
+        paymentMethod: PAY_LABELS_VALUE[tx.payment_method] || tx.payment_method,
+        paymentDate: new Date(tx.created_at).toLocaleDateString('en-NG'),
+        allocations
+    };
+
+    activePrintData = { data: printData, format };
+
+    if (printWindow) {
+        printWindow.destroy();
+    }
+
+    printWindow = new BrowserWindow({
+        show: false,
+        webPreferences: {
+            nodeIntegration: true,
+            contextIsolation: false
+        }
+    });
+
+    printWindow.loadFile(path.join(__dirname, 'receipt-print.html'));
+
+    printWindow.webContents.on('did-finish-load', () => {
+        printWindow.webContents.send('print:load-data', activePrintData);
+    });
+
+    return { ok: true };
+});
+
+ipcMain.on('print:ready-to-print', () => {
+    if (printWindow) {
+        printWindow.webContents.print({
+            silent: false,
+            printBackground: true,
+            color: true
+        }, (success, errorType) => {
+            if (!success) {
+                console.warn('[Print Hub] Local print dialog canceled/failed:', errorType);
+            }
+            if (printWindow) {
+                printWindow.destroy();
+                printWindow = null;
+            }
+        });
+    }
+});
+
 ipcMain.handle('fee-structure:get-adjustments', (event, { studentId, academicSession, term } = {}) => {
     const db = database.getDb();
     const termConfig = db.prepare('SELECT * FROM school_term_config WHERE id = 1').get();
@@ -1011,7 +1245,7 @@ function startMessageQueueWorker() {
 // ── Module-scope Paystack Payment Processors ──────────────────────────────────
 // These MUST live at module scope so the ui-ready handler and the poller
 // can call them. Defining them inside createWindow() made them unreachable.
-async function processSuccessfulPayment(ref, amountInKobo) {
+async function processSuccessfulPayment(ref, amountInKobo, transactionId = null) {
   const db = database.getDb();
   const session = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(ref);
 
@@ -1036,7 +1270,7 @@ async function processSuccessfulPayment(ref, amountInKobo) {
   const receiptRecords = [];
 
   db.transaction(() => {
-    db.prepare("UPDATE fee_payment_sessions SET status = 'settled', settled_at = datetime('now') WHERE id = ?").run(session.id);
+    db.prepare("UPDATE fee_payment_sessions SET status = 'settled', settled_at = datetime('now'), paystack_tx_id = ? WHERE id = ?").run(transactionId, session.id);
 
     for (const studentId of studentIds) {
       if (remainingPaid <= 0) break;
@@ -1117,37 +1351,106 @@ async function processSuccessfulPayment(ref, amountInKobo) {
     }
   })();
 
-  let schoolName = "the school";
+  // Trigger branded PDF generation and dispatch via helper
   try {
-    const nameRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_name'").get();
-    if (nameRow?.value) schoolName = nameRow.value;
-  } catch (_) {}
-
-  let receiptMsg  = `✅ *Payment Confirmed!*\n\n`;
-  receiptMsg += `Thank you for your payment to *${schoolName}*.\n`;
-  receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
-  receiptMsg += `💳 *Transaction Details*:\n`;
-  receiptMsg += `   Reference:  ${ref}\n`;
-  receiptMsg += `   Total Paid: ₦${totalPaidNaira.toLocaleString('en-NG')}\n`;
-  receiptMsg += `   Channel:    Paystack Online\n`;
-  receiptMsg += `   Date:       ${new Date().toLocaleDateString('en-NG')}\n\n`;
-  receiptMsg += `👤 *Student Allocations*:\n`;
-  receiptRecords.forEach(rec => {
-    receiptMsg += `   • *${rec.name}*:\n`;
-    receiptMsg += `     Allocated:   ₦${rec.amount.toLocaleString('en-NG')}\n`;
-    receiptMsg += `     New Balance: ₦${rec.balance.toLocaleString('en-NG')}\n`;
-  });
-  receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
-  receiptMsg += `_Your official school records have been updated automatically._\n_Powered by Nexus Pulse_ 🎓`;
-
-  try {
-    await pulseBot.sendRawMessage(session.parent_phone, receiptMsg);
-    console.log(`[Payment Processor] WhatsApp confirmation sent to ${session.parent_phone}`);
-  } catch (botErr) {
-    console.error(`[Payment Processor] Failed to send WhatsApp confirmation:`, botErr.message);
+    const updatedSession = db.prepare("SELECT * FROM fee_payment_sessions WHERE id = ?").get(session.id);
+    await sendBrandedReceiptHelper(db, ref, updatedSession);
+  } catch (err) {
+    console.error(`[Payment Processor] PDF receipt dispatch failed:`, err.message);
   }
 
   return true;
+}
+
+async function sendBrandedReceiptHelper(db, ref, session) {
+  const studentIds = session.student_ids.split(",");
+  const termConfig = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get();
+  const academicSession = termConfig.academic_session;
+  const term = termConfig.term;
+
+  const firstStudentId = studentIds[0];
+  const sRow = db.prepare("SELECT name, class_name FROM students WHERE id = ?").get(firstStudentId);
+  const studentName = sRow?.name || "Student";
+  const studentClass = sRow?.class_name || "—";
+
+  const receiptRecords = [];
+  for (const studentId of studentIds) {
+    const allocRow = db.prepare("SELECT amount FROM fee_transactions WHERE student_id = ? AND reference_number = ?").get(studentId, ref);
+    const amount = allocRow?.amount || 0;
+
+    const feeRow = db.prepare("SELECT total_billed, total_paid FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?").get(studentId, academicSession, term);
+    const balance = (feeRow?.total_billed || 0) - (feeRow?.total_paid || 0);
+
+    const sName = db.prepare("SELECT name FROM students WHERE id = ?").get(studentId)?.name || `Student ID ${studentId}`;
+    receiptRecords.push({
+      name: sName,
+      amount: amount,
+      balance: Math.max(0, balance)
+    });
+  }
+
+  let schoolName = "the school";
+  let schoolAddress = "";
+  let schoolPhone = "";
+  let schoolLogoB64 = "";
+
+  try {
+    const nameRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_name'").get();
+    if (nameRow?.value) schoolName = nameRow.value;
+    const addrRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_address'").get();
+    if (addrRow?.value) schoolAddress = addrRow.value;
+    const phoneRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_phone'").get();
+    if (phoneRow?.value) schoolPhone = phoneRow.value;
+    const logoRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_logo_b64'").get();
+    if (logoRow?.value) schoolLogoB64 = logoRow.value;
+  } catch (_) {}
+
+  const receiptData = {
+    schoolName,
+    schoolAddress,
+    schoolPhone,
+    schoolLogoB64,
+    studentName,
+    studentClass,
+    academicSession,
+    term,
+    reference: ref,
+    amountPaid: session.total_amount,
+    paymentMethod: "Paystack Online",
+    paymentDate: new Date(session.settled_at || Date.now()).toLocaleDateString('en-NG'),
+    allocations: receiptRecords
+  };
+
+  try {
+    const pdfBuffer = await receiptGenerator.generateReceiptPdf(receiptData);
+    const caption = `🎓 *Branded PDF Receipt* for *${studentName}*\nTotal Paid: ₦${session.total_amount.toLocaleString('en-NG')}\nReference: ${ref}\nThank you!`;
+    await pulseBot.sendReceiptPdf(session.parent_phone, `Receipt-${ref}.pdf`, pdfBuffer, caption);
+    console.log(`[Payment Processor] PDF receipt sent successfully to ${session.parent_phone}`);
+    return true;
+  } catch (err) {
+    console.error(`[Payment Processor] PDF receipt sending failed, falling back to text:`, err.message);
+    
+    // Text fallback
+    let receiptMsg  = `✅ *Payment Confirmed!*\n\n`;
+    receiptMsg += `Thank you for your payment to *${schoolName}*.\n`;
+    receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
+    receiptMsg += `💳 *Transaction Details*:\n`;
+    receiptMsg += `   Reference:  ${ref}\n`;
+    receiptMsg += `   Total Paid: ₦${session.total_amount.toLocaleString('en-NG')}\n`;
+    receiptMsg += `   Channel:    Paystack Online\n`;
+    receiptMsg += `   Date:       ${new Date().toLocaleDateString('en-NG')}\n\n`;
+    receiptMsg += `👤 *Student Allocations*:\n`;
+    receiptRecords.forEach(rec => {
+      receiptMsg += `   • *${rec.name}*:\n`;
+      receiptMsg += `     Allocated:   ₦${rec.amount.toLocaleString('en-NG')}\n`;
+      receiptMsg += `     New Balance: ₦${rec.balance.toLocaleString('en-NG')}\n`;
+    });
+    receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
+    receiptMsg += `_Your official school records have been updated automatically._\n_Powered by Nexus Pulse_ 🎓`;
+    
+    await pulseBot.sendRawMessage(session.parent_phone, receiptMsg);
+    return false;
+  }
 }
 
 async function processFailedPayment(ref, reason) {
@@ -1212,7 +1515,7 @@ function startPaystackPollingWorker() {
           const verification = await paystackService.verifyTransaction(ref);
           if (verification && verification.status === 'success') {
             console.log(`[Paystack Poller] ${ref} → SUCCESS. Processing...`);
-            await processSuccessfulPayment(ref, verification.amount);
+            await processSuccessfulPayment(ref, verification.amount, verification.id);
           } else if (verification && (verification.status === 'failed' || verification.status === 'reversed')) {
             console.warn(`[Paystack Poller] ${ref} → FAILED (${verification.status}).`);
             await processFailedPayment(ref, verification.gateway_response || "Transaction failed.");
@@ -5016,7 +5319,7 @@ function createWindow() {
       console.log(`[Paystack Webhook] Verified event '${payload.event}' received for reference: ${ref}`);
 
       if (payload.event === 'charge.success') {
-        const success = await processSuccessfulPayment(ref, payload.data.amount);
+        const success = await processSuccessfulPayment(ref, payload.data.amount, payload.data.id);
         if (!success) {
           return res.status(200).send("No matching session");
         }
