@@ -1008,6 +1008,239 @@ function startMessageQueueWorker() {
     console.log('[Queue] WhatsApp message queue worker started.');
 }
 
+// ── Module-scope Paystack Payment Processors ──────────────────────────────────
+// These MUST live at module scope so the ui-ready handler and the poller
+// can call them. Defining them inside createWindow() made them unreachable.
+async function processSuccessfulPayment(ref, amountInKobo) {
+  const db = database.getDb();
+  const session = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(ref);
+
+  if (!session) {
+    console.warn(`[Payment Processor] No payment session found matching reference ${ref}`);
+    return false;
+  }
+
+  if (session.status !== 'pending') {
+    console.log(`[Payment Processor] Session ${ref} is already processed (Status: ${session.status})`);
+    return true;
+  }
+
+  const studentIds = session.student_ids.split(",");
+  const totalPaidNaira = Number(amountInKobo / 100);
+  let remainingPaid = totalPaidNaira;
+
+  const termConfig = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get();
+  const academicSession = termConfig.academic_session;
+  const term = termConfig.term;
+
+  const receiptRecords = [];
+
+  db.transaction(() => {
+    db.prepare("UPDATE fee_payment_sessions SET status = 'settled', settled_at = datetime('now') WHERE id = ?").run(session.id);
+
+    for (const studentId of studentIds) {
+      if (remainingPaid <= 0) break;
+
+      const feesRow = db.prepare(`
+        SELECT COALESCE(total_billed, 0) as total_billed, COALESCE(total_paid, 0) as total_paid 
+        FROM student_fees 
+        WHERE student_id = ? AND academic_session = ? AND term = ?
+      `).get(studentId, academicSession, term);
+
+      const totalBilled = feesRow?.total_billed || 0;
+      const totalPaid   = feesRow?.total_paid   || 0;
+      const balance     = totalBilled - totalPaid;
+
+      if (balance <= 0) continue;
+
+      const allocation = Math.min(remainingPaid, balance);
+      remainingPaid -= allocation;
+
+      db.prepare(`
+        INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(studentId, academicSession, term, allocation, "paystack", ref, "Online Payment via Paystack (Auto-Verified)");
+
+      const { total_paid_sum } = db.prepare(`
+        SELECT COALESCE(SUM(amount), 0) AS total_paid_sum FROM fee_transactions
+        WHERE student_id = ? AND academic_session = ? AND term = ?
+      `).get(studentId, academicSession, term);
+
+      const status = feeCalculator.computeFeeStatus(totalBilled, total_paid_sum);
+
+      db.prepare(`
+        INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
+          total_paid = excluded.total_paid,
+          status     = excluded.status,
+          updated_at = datetime('now')
+      `).run(studentId, academicSession, term, totalBilled, total_paid_sum, status);
+
+      const sName = db.prepare("SELECT name FROM students WHERE id = ?").get(studentId)?.name || `Student ID ${studentId}`;
+      receiptRecords.push({ name: sName, amount: allocation, balance: Math.max(0, totalBilled - total_paid_sum) });
+    }
+
+    // Leftover → first student
+    if (remainingPaid > 0 && studentIds.length > 0) {
+      const studentId = studentIds[0];
+      db.prepare(`
+        INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(studentId, academicSession, term, remainingPaid, "paystack", ref, "Online Payment Leftover");
+
+      const { total_paid_sum } = db.prepare(`
+        SELECT COALESCE(SUM(amount), 0) AS total_paid_sum FROM fee_transactions
+        WHERE student_id = ? AND academic_session = ? AND term = ?
+      `).get(studentId, academicSession, term);
+
+      const feesRow2 = db.prepare(`
+        SELECT COALESCE(total_billed, 0) as total_billed FROM student_fees 
+        WHERE student_id = ? AND academic_session = ? AND term = ?
+      `).get(studentId, academicSession, term) || { total_billed: 0 };
+
+      const status = feeCalculator.computeFeeStatus(feesRow2.total_billed, total_paid_sum);
+
+      db.prepare(`
+        INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
+          total_paid = excluded.total_paid,
+          status     = excluded.status,
+          updated_at = datetime('now')
+      `).run(studentId, academicSession, term, feesRow2.total_billed, total_paid_sum, status);
+
+      if (receiptRecords.length > 0) {
+        receiptRecords[0].amount  += remainingPaid;
+        receiptRecords[0].balance  = Math.max(0, feesRow2.total_billed - total_paid_sum);
+      }
+    }
+  })();
+
+  let schoolName = "the school";
+  try {
+    const nameRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_name'").get();
+    if (nameRow?.value) schoolName = nameRow.value;
+  } catch (_) {}
+
+  let receiptMsg  = `✅ *Payment Confirmed!*\n\n`;
+  receiptMsg += `Thank you for your payment to *${schoolName}*.\n`;
+  receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
+  receiptMsg += `💳 *Transaction Details*:\n`;
+  receiptMsg += `   Reference:  ${ref}\n`;
+  receiptMsg += `   Total Paid: ₦${totalPaidNaira.toLocaleString('en-NG')}\n`;
+  receiptMsg += `   Channel:    Paystack Online\n`;
+  receiptMsg += `   Date:       ${new Date().toLocaleDateString('en-NG')}\n\n`;
+  receiptMsg += `👤 *Student Allocations*:\n`;
+  receiptRecords.forEach(rec => {
+    receiptMsg += `   • *${rec.name}*:\n`;
+    receiptMsg += `     Allocated:   ₦${rec.amount.toLocaleString('en-NG')}\n`;
+    receiptMsg += `     New Balance: ₦${rec.balance.toLocaleString('en-NG')}\n`;
+  });
+  receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
+  receiptMsg += `_Your official school records have been updated automatically._\n_Powered by Nexus Pulse_ 🎓`;
+
+  try {
+    await pulseBot.sendRawMessage(session.parent_phone, receiptMsg);
+    console.log(`[Payment Processor] WhatsApp confirmation sent to ${session.parent_phone}`);
+  } catch (botErr) {
+    console.error(`[Payment Processor] Failed to send WhatsApp confirmation:`, botErr.message);
+  }
+
+  return true;
+}
+
+async function processFailedPayment(ref, reason) {
+  const db = database.getDb();
+  const session = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(ref);
+
+  if (!session) {
+    console.warn(`[Payment Processor] No payment session found matching reference ${ref}`);
+    return false;
+  }
+
+  if (session.status !== 'pending') {
+    console.log(`[Payment Processor] Session ${ref} is already processed (Status: ${session.status})`);
+    return true;
+  }
+
+  db.prepare("UPDATE fee_payment_sessions SET status = 'failed', settled_at = datetime('now') WHERE id = ?").run(session.id);
+
+  let failMsg  = `❌ *Online Payment Failed*\n\n`;
+  failMsg += `Your online payment attempt could not be processed.\n`;
+  failMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
+  failMsg += `📋 *Details*:\n`;
+  failMsg += `   Reference: ${ref}\n`;
+  failMsg += `   Reason:    ${reason || 'Transaction failed or was canceled.'}\n\n`;
+  failMsg += `Please try again or choose *Bank Transfer* to complete your payment. 🎓\n`;
+  failMsg += `_Powered by Nexus Pulse_`;
+
+  try {
+    await pulseBot.sendRawMessage(session.parent_phone, failMsg);
+    console.log(`[Payment Processor] WhatsApp failure notification sent to ${session.parent_phone}`);
+  } catch (botErr) {
+    console.error(`[Payment Processor] Failed to send WhatsApp failure notification:`, botErr.message);
+  }
+
+  return true;
+}
+
+function startPaystackPollingWorker() {
+  console.log("[Paystack Poller] Active. Scanning for pending payment checkouts every 15s...");
+  const POLL_INTERVAL_MS = 15000;
+
+  setInterval(async () => {
+    const db = database.getDb();
+    if (!db) return;
+
+    try {
+      const pendingSessions = db.prepare(`
+        SELECT * FROM fee_payment_sessions 
+        WHERE status = 'pending' 
+          AND created_at >= datetime('now', '-24 hours')
+      `).all();
+
+      if (pendingSessions.length === 0) return;
+
+      console.log(`[Paystack Poller] Checking ${pendingSessions.length} pending transaction(s)...`);
+
+      for (const session of pendingSessions) {
+        const ref = session.paystack_ref;
+        try {
+          const verification = await paystackService.verifyTransaction(ref);
+          if (verification && verification.status === 'success') {
+            console.log(`[Paystack Poller] ${ref} → SUCCESS. Processing...`);
+            await processSuccessfulPayment(ref, verification.amount);
+          } else if (verification && (verification.status === 'failed' || verification.status === 'reversed')) {
+            console.warn(`[Paystack Poller] ${ref} → FAILED (${verification.status}).`);
+            await processFailedPayment(ref, verification.gateway_response || "Transaction failed.");
+          } else {
+            // Ongoing/abandoned — expire after 2 hours
+            const elapsedHours = (Date.now() - new Date(session.created_at).getTime()) / 3600000;
+            if (elapsedHours > 2) {
+              console.warn(`[Paystack Poller] ${ref} expired after ${elapsedHours.toFixed(1)}h. Marking failed.`);
+              await processFailedPayment(ref, "Checkout link expired after 2 hours.");
+            }
+          }
+        } catch (pollErr) {
+          // Paystack returns an error for references it hasn't seen (link not opened yet)
+          if (pollErr.message && pollErr.message.toLowerCase().includes("not found")) {
+            const elapsedMins = (Date.now() - new Date(session.created_at).getTime()) / 60000;
+            if (elapsedMins > 30) {
+              console.warn(`[Paystack Poller] ${ref} never opened after 30 min. Expiring.`);
+              await processFailedPayment(ref, "Checkout link expired (never opened).");
+            }
+          } else {
+            console.error(`[Paystack Poller] Error verifying ${ref}:`, pollErr.message);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[Paystack Poller] Polling cycle error:", err.message);
+    }
+  }, POLL_INTERVAL_MS);
+}
+
 ipcMain.handle("pulse:trigger-digest", async (event, { class_name }) => {
   try {
     const db = database.getDb();
@@ -4735,258 +4968,12 @@ function createWindow() {
     } catch (err) { return { ok: false, error: err.message }; }
   });
 
-  // ── Reusable Paystack Payment Processors ───────────────────────────
-  async function processSuccessfulPayment(ref, amountInKobo) {
-    const db = database.getDb();
-    const session = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(ref);
+  // ── Paystack Payment Processors and Polling Worker are at module scope ──
+  //    See processSuccessfulPayment / processFailedPayment / startPaystackPollingWorker
+  //    defined above createWindow() so they are reachable from the ui-ready handler.
 
-    if (!session) {
-      console.warn(`[Payment Processor] No payment session found matching reference ${ref}`);
-      return false;
-    }
-
-    if (session.status !== 'pending') {
-      console.log(`[Payment Processor] Session ${ref} is already processed (Status: ${session.status})`);
-      return true;
-    }
-
-    // Process fee payments splitting across siblings
-    const studentIds = session.student_ids.split(",");
-    const totalPaidNaira = Number(amountInKobo / 100);
-    let remainingPaid = totalPaidNaira;
-
-    const termConfig = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get();
-    const academicSession = termConfig.academic_session;
-    const term = termConfig.term;
-
-    const receiptRecords = [];
-
-    db.transaction(() => {
-      // Update payment session
-      db.prepare("UPDATE fee_payment_sessions SET status = 'settled', settled_at = datetime('now') WHERE id = ?").run(session.id);
-
-      for (const studentId of studentIds) {
-        if (remainingPaid <= 0) break;
-
-        const feesRow = db.prepare(`
-          SELECT COALESCE(total_billed, 0) as total_billed, COALESCE(total_paid, 0) as total_paid 
-          FROM student_fees 
-          WHERE student_id = ? AND academic_session = ? AND term = ?
-        `).get(studentId, academicSession, term);
-
-        const totalBilled = feesRow?.total_billed || 0;
-        const totalPaid = feesRow?.total_paid || 0;
-        const balance = totalBilled - totalPaid;
-
-        if (balance <= 0) continue; // fees already cleared for this child
-
-        const allocation = Math.min(remainingPaid, balance);
-        remainingPaid -= allocation;
-
-        // Record transaction
-        db.prepare(`
-          INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(studentId, academicSession, term, allocation, "paystack", ref, "Online Payment via Paystack (Auto-Verified)");
-
-        // Recompute total paid
-        const { total_paid_sum } = db.prepare(`
-          SELECT COALESCE(SUM(amount), 0) AS total_paid_sum FROM fee_transactions
-          WHERE student_id = ? AND academic_session = ? AND term = ?
-        `).get(studentId, academicSession, term);
-
-        const status = feeCalculator.computeFeeStatus(totalBilled, total_paid_sum);
-
-        // Update student fee status
-        db.prepare(`
-          INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-          ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
-            total_paid = excluded.total_paid,
-            status     = excluded.status,
-            updated_at = datetime('now')
-        `).run(studentId, academicSession, term, totalBilled, total_paid_sum, status);
-
-        // Fetch student name
-        const sName = db.prepare("SELECT name FROM students WHERE id = ?").get(studentId)?.name || `Student ID ${studentId}`;
-        receiptRecords.push({
-          name: sName,
-          amount: allocation,
-          balance: Math.max(0, totalBilled - total_paid_sum)
-        });
-      }
-
-      // Handle leftover amount (allocate to first student)
-      if (remainingPaid > 0 && studentIds.length > 0) {
-        const studentId = studentIds[0];
-        db.prepare(`
-          INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(studentId, academicSession, term, remainingPaid, "paystack", ref, "Online Payment Leftover");
-
-        const { total_paid_sum } = db.prepare(`
-          SELECT COALESCE(SUM(amount), 0) AS total_paid_sum FROM fee_transactions
-          WHERE student_id = ? AND academic_session = ? AND term = ?
-        `).get(studentId, academicSession, term);
-
-        const feesRow = db.prepare(`
-          SELECT COALESCE(total_billed, 0) as total_billed FROM student_fees 
-          WHERE student_id = ? AND academic_session = ? AND term = ?
-        `).get(studentId, academicSession, term) || { total_billed: 0 };
-
-        const status = feeCalculator.computeFeeStatus(feesRow.total_billed, total_paid_sum);
-
-        db.prepare(`
-          INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-          ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
-            total_paid = excluded.total_paid,
-            status     = excluded.status,
-            updated_at = datetime('now')
-        `).run(studentId, academicSession, term, feesRow.total_billed, total_paid_sum, status);
-
-        // Update first receipt record amount
-        if (receiptRecords.length > 0) {
-          receiptRecords[0].amount += remainingPaid;
-          receiptRecords[0].balance = Math.max(0, feesRow.total_billed - total_paid_sum);
-        }
-      }
-    })();
-
-    // Send successful payment confirmation receipt via WhatsApp
-    let schoolName = "the school";
-    try {
-      const nameRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_name'").get();
-      if (nameRow?.value) schoolName = nameRow.value;
-    } catch (_) {}
-
-    let receiptMsg = `✅ *Payment Confirmed!*\n\n`;
-    receiptMsg += `Thank you for your payment to *${schoolName}*.\n`;
-    receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
-    receiptMsg += `💳 *Transaction Details*:\n`;
-    receiptMsg += `   Reference:  ${ref}\n`;
-    receiptMsg += `   Total Paid: ₦${totalPaidNaira.toLocaleString('en-NG')}\n`;
-    receiptMsg += `   Channel:    Paystack Online\n`;
-    receiptMsg += `   Date:       ${new Date().toLocaleDateString('en-NG')}\n\n`;
-
-    receiptMsg += `👤 *Student Allocations*:\n`;
-    receiptRecords.forEach(rec => {
-      receiptMsg += `   • *${rec.name}*:\n`;
-      receiptMsg += `     Allocated: ₦${rec.amount.toLocaleString('en-NG')}\n`;
-      receiptMsg += `     New Balance: ₦${rec.balance.toLocaleString('en-NG')}\n`;
-    });
-    receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
-    receiptMsg += `_Your official school records have been updated automatically._\n_Powered by Nexus Pulse_ 🎓`;
-
-    try {
-      await pulseBot.sendRawMessage(session.parent_phone, receiptMsg);
-      console.log(`[Payment Processor] WhatsApp confirmation sent successfully to ${session.parent_phone}`);
-    } catch (botErr) {
-      console.error(`[Payment Processor] Failed to send WhatsApp confirmation:`, botErr.message);
-    }
-
-    return true;
-  }
-
-  async function processFailedPayment(ref, reason) {
-    const db = database.getDb();
-    const session = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(ref);
-
-    if (!session) {
-      console.warn(`[Payment Processor] No payment session found matching reference ${ref}`);
-      return false;
-    }
-
-    if (session.status !== 'pending') {
-      console.log(`[Payment Processor] Session ${ref} is already processed (Status: ${session.status})`);
-      return true;
-    }
-
-    db.prepare("UPDATE fee_payment_sessions SET status = 'failed', settled_at = datetime('now') WHERE id = ?").run(session.id);
-
-    let failMsg = `❌ *Online Payment Failed*\n\n`;
-    failMsg += `Your online payment attempt could not be processed.\n`;
-    failMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
-    failMsg += `📋 *Details*:\n`;
-    failMsg += `   Reference: ${ref}\n`;
-    failMsg += `   Reason:    ${reason || 'Transaction failed or was canceled.'}\n\n`;
-    failMsg += `Please try again or choose bank transfer to complete your payment. 🎓\n`;
-    failMsg += `_Powered by Nexus Pulse_`;
-
-    try {
-      await pulseBot.sendRawMessage(session.parent_phone, failMsg);
-      console.log(`[Payment Processor] WhatsApp failure notification sent to ${session.parent_phone}`);
-    } catch (botErr) {
-      console.error(`[Payment Processor] Failed to send WhatsApp failure notification:`, botErr.message);
-    }
-
-    return true;
-  }
-
-  // ── Background Transaction Verification Polling Worker ───────────────────
-  function startPaystackPollingWorker() {
-    console.log("[Paystack Poller] Active. Scanning for pending payment checkouts...");
-    const POLL_INTERVAL_MS = 15000; // Scan every 15 seconds
-
-    setInterval(async () => {
-      const db = database.getDb();
-      if (!db) return;
-
-      try {
-        // Query pending sessions created within the last 24 hours
-        const pendingSessions = db.prepare(`
-          SELECT * FROM fee_payment_sessions 
-          WHERE status = 'pending' 
-            AND created_at >= datetime('now', '-24 hours')
-        `).all();
-
-        if (pendingSessions.length === 0) return;
-
-        console.log(`[Paystack Poller] Checking ${pendingSessions.length} pending transaction(s)...`);
-
-        for (const session of pendingSessions) {
-          const ref = session.paystack_ref;
-          try {
-            const verification = await paystackService.verifyTransaction(ref);
-            if (verification && verification.status === 'success') {
-              console.log(`[Paystack Poller] Reference ${ref} verified SUCCESS! Processing payment...`);
-              await processSuccessfulPayment(ref, verification.amount);
-            } else if (verification && (verification.status === 'failed' || verification.status === 'reversed')) {
-              console.warn(`[Paystack Poller] Reference ${ref} verified FAILED. Status: ${verification.status}`);
-              await processFailedPayment(ref, verification.gateway_response || "Transaction failed.");
-            } else {
-              // Still pending or abandoned. Check if it's older than 2 hours to expire it gracefully
-              const sessionTime = new Date(session.created_at).getTime();
-              const nowTime = Date.now();
-              const elapsedHours = (nowTime - sessionTime) / (1000 * 60 * 60);
-
-              if (elapsedHours > 2) {
-                console.warn(`[Paystack Poller] Reference ${ref} has expired (elapsed: ${elapsedHours.toFixed(1)}h). Marking failed.`);
-                await processFailedPayment(ref, "Transaction link expired after 2 hours.");
-              }
-            }
-          } catch (pollErr) {
-            // If the transaction reference doesn't exist yet on Paystack (e.g. parent hasn't clicked/opened checkout page yet),
-            // Paystack verify returns 404/error. Handle this case gracefully.
-            if (pollErr.message && pollErr.message.toLowerCase().includes("not found")) {
-              const sessionTime = new Date(session.created_at).getTime();
-              const nowTime = Date.now();
-              const elapsedMinutes = (nowTime - sessionTime) / (1000 * 60);
-              
-              if (elapsedMinutes > 30) {
-                console.warn(`[Paystack Poller] Reference ${ref} not created on Paystack after 30 mins. Expiring.`);
-                await processFailedPayment(ref, "Checkout link expired (never opened).");
-              }
-            } else {
-              console.error(`[Paystack Poller] Error verifying reference ${ref}:`, pollErr.message);
-            }
-          }
-        }
-      } catch (err) {
-        console.error("[Paystack Poller] Error in background polling cycle:", err.message);
-      }
-    }, POLL_INTERVAL_MS);
-  }
+  // ── (placeholder to retain line continuity) ─────────────────────────────
+  void 0; // no-op
 
   // ── Paystack Webhook Handler (Sprint 5) ───────────────────────────
   portalApp.post('/webhook/paystack', async (req, res) => {
