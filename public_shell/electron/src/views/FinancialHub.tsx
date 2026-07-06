@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLicense } from '../hooks/useLicense';
 import { useClassArms } from '../hooks/useClassArms';
 import { Combobox } from '../components/Combobox';
+import { generateSessionsList } from '../lib/sessions';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 interface RosterRow {
@@ -236,6 +237,8 @@ export function FinancialHub() {
   const [settingsOpen,     setSettingsOpen]     = useState(false);
   const [reminder1,        setReminder1]        = useState('');
   const [reminder2,        setReminder2]        = useState('');
+  const [clearScope,       setClearScope]       = useState<'term'|'session'|'all'>('term');
+  const [clearingData,     setClearingData]     = useState(false);
   const [bankAccounts,     setBankAccounts]     = useState<BankAccount[]>([{ bank:'',number:'',name:'' }]);
   const [activeBankAccountId, setActiveBankAccountId] = useState<number|null>(null);
   const [installPlans,     setInstallPlans]     = useState<InstallPlan[]>([{ label:'', percent:0 }]);
@@ -295,6 +298,15 @@ export function FinancialHub() {
               color: '#fff',
               confirmButtonColor: '#ef4444'
             });
+          } else if (type === 'structure') {
+            Swal.fire({
+              title: 'Structure Imported!',
+              html: `<p>${res.count} row${res.count === 1 ? '' : 's'} imported.</p><p style="margin-top:10px;font-size:13px;color:#94a3b8;">Next step: go to the <strong style="color:#00E5FF">Fee Structure</strong> tab, select a class, and click <strong style="color:#00E5FF">Apply to Class</strong> to bill students for this term.</p>`,
+              icon: 'success',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#00E5FF'
+            });
           } else {
             Swal.fire({
               title: 'Success!',
@@ -325,10 +337,8 @@ export function FinancialHub() {
   // MOUNT — replicate feesInit exactly
   // ═══════════════════════════════════════════════════════════════════════════
   useEffect(() => {
-    // 1. Build session list
-    const year = new Date().getFullYear();
-    const list: string[] = [];
-    for (let y = year; y >= year - 2; y--) list.push(`${y-1}/${y}`);
+    // 1. Build session list — unified with PrintHub, Dashboard, Classes
+    const list = generateSessionsList();
     setSessions(list);
 
     const boot = async () => {
@@ -508,6 +518,7 @@ export function FinancialHub() {
         limit:  PAGE_SIZE,
         offset: page * PAGE_SIZE,
         search: search || '',
+        filter: _filter || 'all',
       });
       if (res?.ok) {
         setRoster(res.data  || []);
@@ -581,6 +592,94 @@ export function FinancialHub() {
     termRef.current    = selectedTerm;
     setRosterPage(0);
     doLoadRoster(selectedSession, selectedTerm, 0, searchQuery, statusFilter);
+  };
+
+  const handleClearData = async () => {
+    const api = (window as any).electronAPI;
+    if (!Swal || !api?.auth) return;
+    // Step 1: get admins list
+    let admins: { id: number; username: string; role_level: number; avatar?: string }[] = [];
+    try { admins = await api.auth.getAdmins(); } catch (_) {}
+    if (!admins.length) {
+      Swal.fire({ title: 'No Admins Found', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+      return;
+    }
+    const adminOptions = admins.map((a: any) => `<option value="${a.id}">${a.username} (Level ${a.role_level})</option>`).join('');
+    // Step 2: PIN prompt
+    const pinResult = await Swal.fire({
+      title: '🔐 Admin Verification Required',
+      html: `
+        <p style="font-size:13px;color:#94a3b8;margin-bottom:16px">Authenticate to continue with this destructive action.</p>
+        <select id="swal-admin-select" class="swal2-input" style="margin-bottom:8px">${adminOptions}</select>
+        <input id="swal-pin-input" type="password" class="swal2-input" placeholder="Enter PIN / Password" autocomplete="current-password" />
+      `,
+      background: '#0b0f19',
+      color: '#fff',
+      confirmButtonColor: '#ef4444',
+      confirmButtonText: 'Verify',
+      showCancelButton: true,
+      cancelButtonText: 'Cancel',
+      focusConfirm: false,
+      preConfirm: () => {
+        const adminId = (document.getElementById('swal-admin-select') as HTMLSelectElement)?.value;
+        const pin = (document.getElementById('swal-pin-input') as HTMLInputElement)?.value;
+        if (!adminId || !pin) { Swal.showValidationMessage('Please select an admin and enter your PIN.'); return false; }
+        return { adminId: Number(adminId), pin };
+      }
+    });
+    if (!pinResult.isConfirmed || !pinResult.value) return;
+    // Step 3: verify PIN
+    let verified = false;
+    try {
+      const vr = await api.auth.verifyPin(pinResult.value);
+      verified = !!vr?.ok;
+      if (!verified) {
+        Swal.fire({ title: 'Incorrect PIN', text: vr?.error || 'PIN verification failed.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+        return;
+      }
+    } catch (e) {
+      Swal.fire({ title: 'Verification Error', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+      return;
+    }
+    // Step 4: type-DELETE confirm
+    const scopeLabel = clearScope === 'term' ? `${selectedTerm}, ${selectedSession}` : clearScope === 'session' ? `all of ${selectedSession}` : 'ALL financial records (including fee structures)';
+    const deleteConfirm = await Swal.fire({
+      title: '⚠️ Final Confirmation',
+      html: `<p style="font-size:13px;color:#fca5a5">You are about to permanently delete <strong>${scopeLabel}</strong>. This <strong>cannot be undone</strong>.</p><p style="margin-top:12px;font-size:13px;color:#94a3b8">Type <strong style="color:#ef4444">DELETE</strong> to confirm:</p>`,
+      input: 'text',
+      inputPlaceholder: 'Type DELETE here',
+      background: '#0b0f19',
+      color: '#fff',
+      confirmButtonColor: '#ef4444',
+      confirmButtonText: 'Clear Data',
+      showCancelButton: true,
+      inputValidator: (v) => v !== 'DELETE' ? 'You must type DELETE exactly to confirm.' : null
+    });
+    if (!deleteConfirm.isConfirmed) return;
+    // Step 5: execute
+    setClearingData(true);
+    try {
+      const res = await api.fees.clearData({ scope: clearScope, academic_session: selectedSession, term: selectedTerm });
+      if (res?.ok) {
+        const c = res.counts || {};
+        Swal.fire({
+          title: 'Data Cleared',
+          html: `<p style="font-size:13px;color:#94a3b8">Deleted: ${c.fees ?? 0} fee records, ${c.transactions ?? 0} transactions, ${c.adjustments ?? 0} adjustments${c.structures != null ? `, ${c.structures} fee structure items` : ''}.</p>`,
+          icon: 'success',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#00E5FF'
+        });
+        setSettingsOpen(false);
+        doLoadRoster(sessionRef.current, termRef.current, 0, searchQuery, statusFilter);
+      } else {
+        Swal.fire({ title: 'Clear Failed', text: res?.error || 'Unknown error.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+      }
+    } catch (err: any) {
+      Swal.fire({ title: 'Error', text: err?.message || 'Unexpected error.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+    } finally {
+      setClearingData(false);
+    }
   };
 
   const handlePage = (p: number) => {
@@ -1378,7 +1477,12 @@ export function FinancialHub() {
               </div>
               <div className="ph-config-group">
                 <Lbl>Filter</Lbl>
-                <select id="fees-status-filter" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+                <select id="fees-status-filter" value={statusFilter} onChange={e => {
+                    const newFilter = e.target.value;
+                    setStatusFilter(newFilter);
+                    setRosterPage(0);
+                    doLoadRoster(sessionRef.current, termRef.current, 0, searchQuery, newFilter);
+                  }}
                   className="modern-input" style={{ width:'130px', fontSize:'12px' }}>
                   <option value="all">All Students</option>
                   <option value="unpaid">Unpaid Only</option>
@@ -2068,6 +2172,46 @@ export function FinancialHub() {
                   )}
                 </div>
               )}
+
+              {/* Danger Zone */}
+              <div className="card" style={{ padding:'16px', background:'rgba(239,68,68,0.04)', border:'1px solid rgba(239,68,68,0.3)' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
+                  <p style={{ fontSize:'11px', color:'#f87171', textTransform:'uppercase', letterSpacing:'1px', fontWeight:700, margin:0 }}>⚠️ Danger Zone</p>
+                </div>
+                <p style={{ fontSize:'11px', color:'var(--text-dim)', marginBottom:'14px', lineHeight:1.6 }}>
+                  Permanently delete financial records. This action is <strong style={{ color:'#f87171' }}>irreversible</strong> and requires admin PIN verification.
+                </p>
+                <div style={{ marginBottom:'10px' }}>
+                  <label style={{ fontSize:'11px', color:'var(--text-dim)', display:'block', marginBottom:'6px', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.6px' }}>Scope</label>
+                  <select
+                    id="fees-clear-scope"
+                    value={clearScope}
+                    onChange={e => setClearScope(e.target.value as 'term'|'session'|'all')}
+                    className="modern-input"
+                    style={{ width:'100%', fontSize:'12px' }}
+                  >
+                    <option value="term">Current Term Only ({selectedTerm}, {selectedSession})</option>
+                    <option value="session">Entire Session ({selectedSession}, all terms)</option>
+                    <option value="all">Everything (all sessions + fee structures)</option>
+                  </select>
+                </div>
+                <button
+                  id="btn-fees-clear-data"
+                  onClick={handleClearData}
+                  disabled={clearingData}
+                  style={{
+                    width:'100%', padding:'9px', borderRadius:'8px', border:'1px solid rgba(239,68,68,0.5)',
+                    background: clearingData ? 'rgba(239,68,68,0.08)' : 'rgba(239,68,68,0.12)',
+                    color:'#f87171', fontWeight:700, fontSize:'13px', cursor: clearingData ? 'not-allowed' : 'pointer',
+                    opacity: clearingData ? 0.6 : 1, transition:'background 0.2s',
+                  }}
+                  onMouseEnter={e => { if (!clearingData) e.currentTarget.style.background='rgba(239,68,68,0.22)'; }}
+                  onMouseLeave={e => { if (!clearingData) e.currentTarget.style.background='rgba(239,68,68,0.12)'; }}
+                >
+                  {clearingData ? '⌛ Clearing…' : '🗑 Clear Financial Data'}
+                </button>
+              </div>
+
             </div>
             {/* Save footer */}
             <div style={{ padding:'16px 20px', borderTop:'1px solid var(--glass-border)', flexShrink:0 }}>
