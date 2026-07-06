@@ -28,7 +28,12 @@ function generateReceiptPdf(data) {
       let headerY = 35;
       if (data.schoolLogoB64) {
         try {
-          const logoBuffer = Buffer.from(data.schoolLogoB64, 'base64');
+          // Strip the data URI prefix ("data:image/...;base64,") if present —
+          // Buffer.from() requires raw base64, not a data URI string.
+          const rawB64 = data.schoolLogoB64.includes(',') 
+            ? data.schoolLogoB64.split(',')[1] 
+            : data.schoolLogoB64;
+          const logoBuffer = Buffer.from(rawB64, 'base64');
           doc.image(logoBuffer, 40, headerY, { width: 60, height: 60 });
           doc.fillColor('#0f172a') // Slate 900
              .fontSize(18)

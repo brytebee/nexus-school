@@ -64,6 +64,18 @@ describe('Receipt PDF Generator', () => {
       .resolves.toBeInstanceOf(Buffer);
   });
 
+  it('renders correctly when schoolLogoB64 is a data URI (data:image/png;base64,...)', async () => {
+    // This is the exact format identityPacket.logoBase64 stores —
+    // the fix strips the prefix before Buffer.from() to prevent silent corruption.
+    // A 1×1 transparent PNG in data URI form:
+    const DATA_URI_LOGO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const buf = await generateReceiptPdf({ ...BASE_DATA, schoolLogoB64: DATA_URI_LOGO });
+    expect(buf).toBeInstanceOf(Buffer);
+    expect(buf.subarray(0, 4).toString('ascii')).toBe('%PDF');
+    // Must produce a valid PDF regardless of the logo format
+    expect(buf.length).toBeGreaterThan(500);
+  });
+
   it('produces a larger buffer when there are more allocation rows', async () => {
     const sparse = await generateReceiptPdf({ ...BASE_DATA, allocations: [] });
     const rich   = await generateReceiptPdf({
