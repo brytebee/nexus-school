@@ -131,6 +131,7 @@ const nexusAPI = {
         saveSettings:    (patch)  => ipcRenderer.invoke('fees:save-settings',     patch),
         getBanks:        ()       => ipcRenderer.invoke('paystack:get-banks'),
         resolveAccount:  (params) => ipcRenderer.invoke('paystack:resolve-account', params),
+        clearData:       (params) => ipcRenderer.invoke('fees:clear-data',         params),
     },
     receipts: {
         getPending:  ()       => ipcRenderer.invoke('receipts:get-pending'),

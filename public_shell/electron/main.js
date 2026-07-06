@@ -2288,12 +2288,21 @@ function isStudentFeeGated(db, studentId, session, termOrNull) {
  * fees:get-roster — students LEFT-JOINed with student_fees for a given term.
  * balance = total_billed - total_paid is computed dynamically; never stored.
  */
-ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, offset = 0, search = "" }) => {
+ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, offset = 0, search = "", filter = "all" }) => {
   try {
     const db = database.getDb();
     const query = search ? `%${search}%` : "%";
 
-    const total = db.prepare("SELECT COUNT(*) as total FROM students WHERE name LIKE ? OR id LIKE ?").get(query, query).total;
+    const total = db.prepare(`
+      SELECT COUNT(*) as total
+      FROM students s
+      LEFT JOIN student_fees f
+        ON  f.student_id       = s.id
+        AND f.academic_session = ?
+        AND f.term             = ?
+      WHERE (s.name LIKE ? OR s.id LIKE ?)
+        AND (? = 'all' OR COALESCE(f.status, 'unpaid') = ?)
+    `).get(academic_session, term, query, query, filter, filter).total;
 
     const rows = db.prepare(`
       SELECT
@@ -2312,10 +2321,11 @@ ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, 
         ON  f.student_id       = s.id
         AND f.academic_session = ?
         AND f.term             = ?
-      WHERE s.name LIKE ? OR s.id LIKE ?
+      WHERE (s.name LIKE ? OR s.id LIKE ?)
+        AND (? = 'all' OR COALESCE(f.status, 'unpaid') = ?)
       ORDER BY s.class_name ASC, s.name ASC
       LIMIT ? OFFSET ?
-    `).all(academic_session, term, query, query, limit, offset);
+    `).all(academic_session, term, query, query, filter, filter, limit, offset);
     
     return { ok: true, data: rows, total };
   } catch (err) {
@@ -2351,6 +2361,53 @@ ipcMain.handle("fees:get-summary", (event, { academic_session, term, search = ""
   } catch (err) {
     console.error("[Fees] get-summary error:", err);
     return { ok: false, error: err.message, data: { outstanding: 0, cleared: 0, partial: 0, unpaid: 0, total: 0 } };
+  }
+});
+
+/**
+ * fees:clear-data — Admin-authenticated destructive wipe of financial records.
+ * scope: 'term'    → wipes student_fees, fee_transactions, fee_adjustments for one term
+ *        'session' → same tables for the entire academic_session
+ *        'all'     → all four tables for all sessions (nuclear option)
+ */
+ipcMain.handle("fees:clear-data", (event, { scope, academic_session, term }) => {
+  if (!currentAdminSession) return { ok: false, error: "Unauthorized. No active admin session." };
+  if (!["term", "session", "all"].includes(scope)) return { ok: false, error: "Invalid scope." };
+
+  const db = database.getDb();
+  try {
+    let counts = { fees: 0, transactions: 0, adjustments: 0, structures: null };
+    db.transaction(() => {
+      if (scope === "term") {
+        counts.fees         = db.prepare("DELETE FROM student_fees WHERE academic_session = ? AND term = ?").run(academic_session, term).changes;
+        counts.transactions = db.prepare("DELETE FROM fee_transactions WHERE academic_session = ? AND term = ?").run(academic_session, term).changes;
+        counts.adjustments  = db.prepare("DELETE FROM fee_adjustments WHERE academic_session = ? AND term = ?").run(academic_session, term).changes;
+      } else if (scope === "session") {
+        counts.fees         = db.prepare("DELETE FROM student_fees WHERE academic_session = ?").run(academic_session).changes;
+        counts.transactions = db.prepare("DELETE FROM fee_transactions WHERE academic_session = ?").run(academic_session).changes;
+        counts.adjustments  = db.prepare("DELETE FROM fee_adjustments WHERE academic_session = ?").run(academic_session).changes;
+      } else {
+        // scope === "all"
+        counts.fees         = db.prepare("DELETE FROM student_fees").run().changes;
+        counts.transactions = db.prepare("DELETE FROM fee_transactions").run().changes;
+        counts.adjustments  = db.prepare("DELETE FROM fee_adjustments").run().changes;
+        counts.structures   = db.prepare("DELETE FROM fee_structures").run().changes;
+      }
+      const detail = scope === "term"
+        ? `term=${term}, session=${academic_session}`
+        : scope === "session"
+        ? `session=${academic_session}`
+        : "ALL sessions and structures";
+      db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'CLEAR_FINANCIAL_DATA', 'student_fees', ?)").run(
+        currentAdminSession.id,
+        `Scope: ${scope} (${detail}) — fees:${counts.fees}, txns:${counts.transactions}, adj:${counts.adjustments}${counts.structures != null ? `, struct:${counts.structures}` : ""}`
+      );
+    })();
+    console.log(`[Fees] clear-data: scope=${scope}, counts=`, counts);
+    return { ok: true, counts };
+  } catch (err) {
+    console.error("[Fees] clear-data error:", err);
+    return { ok: false, error: err.message };
   }
 });
 
