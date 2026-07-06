@@ -1195,7 +1195,9 @@ function startPaystackPollingWorker() {
 
     try {
       const pendingSessions = db.prepare(`
-        SELECT * FROM fee_payment_sessions 
+        SELECT *, 
+               CAST((strftime('%s', 'now') - strftime('%s', created_at)) / 60.0 AS REAL) AS elapsed_minutes
+        FROM fee_payment_sessions 
         WHERE status = 'pending' 
           AND created_at >= datetime('now', '-24 hours')
       `).all();
@@ -1215,18 +1217,16 @@ function startPaystackPollingWorker() {
             console.warn(`[Paystack Poller] ${ref} → FAILED (${verification.status}).`);
             await processFailedPayment(ref, verification.gateway_response || "Transaction failed.");
           } else {
-            // Ongoing/abandoned — expire after 2 hours
-            const elapsedHours = (Date.now() - new Date(session.created_at).getTime()) / 3600000;
-            if (elapsedHours > 2) {
-              console.warn(`[Paystack Poller] ${ref} expired after ${elapsedHours.toFixed(1)}h. Marking failed.`);
+            // Ongoing/abandoned — expire after 2 hours (120 minutes)
+            if (session.elapsed_minutes > 120) {
+              console.warn(`[Paystack Poller] ${ref} expired after ${session.elapsed_minutes.toFixed(1)}m. Marking failed.`);
               await processFailedPayment(ref, "Checkout link expired after 2 hours.");
             }
           }
         } catch (pollErr) {
           // Paystack returns an error for references it hasn't seen (link not opened yet)
           if (pollErr.message && pollErr.message.toLowerCase().includes("not found")) {
-            const elapsedMins = (Date.now() - new Date(session.created_at).getTime()) / 60000;
-            if (elapsedMins > 30) {
+            if (session.elapsed_minutes > 30) {
               console.warn(`[Paystack Poller] ${ref} never opened after 30 min. Expiring.`);
               await processFailedPayment(ref, "Checkout link expired (never opened).");
             }
