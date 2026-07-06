@@ -2,6 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useLicense } from '../hooks/useLicense';
 import { useIdentity } from '../hooks/useIdentity';
 import { MessageSquare, Send, Reply } from 'lucide-react';
+import {
+  buildThreads,
+  filterUnread,
+  findLatestIncoming,
+  botStatusReducer,
+  autostartPersist,
+  applyNewMessage,
+} from '../lib/pulseUtils';
 
 interface InboxMessage {
   id: string | number;
@@ -110,47 +118,20 @@ export function NexusPulse() {
   useEffect(() => {
     if (window.electronAPI?.on) {
       window.electronAPI.on('pulse:new-message', (newMsg: InboxMessage) => {
-        setMessages(prev => {
-          if (prev.some(m => m.id === newMsg.id)) return prev;
-          return [newMsg, ...prev];
-        });
+        setMessages(prev => applyNewMessage(prev, newMsg));
       });
     }
   }, []);
 
   const threads = React.useMemo(() => {
-    const map: { [phone: string]: ConversationThread } = {};
-    const sorted = [...messages].sort((a, b) => new Date(a.received_at).getTime() - new Date(b.received_at).getTime());
-    
-    sorted.forEach(msg => {
-      const phone = msg.sender_phone;
-      if (!map[phone]) {
-        map[phone] = {
-          sender_phone: phone,
-          sender_name: msg.sender_name,
-          latest_message: msg,
-          messages: []
-        };
-      }
-      map[phone].messages.push(msg);
-      if (new Date(msg.received_at).getTime() >= new Date(map[phone].latest_message.received_at).getTime()) {
-        map[phone].latest_message = msg;
-        if (msg.sender_name !== 'Unknown Parent') {
-          map[phone].sender_name = msg.sender_name;
-        }
-      }
-    });
-    
-    return Object.values(map).sort((a, b) => 
-      new Date(b.latest_message.received_at).getTime() - new Date(a.latest_message.received_at).getTime()
-    );
+    return buildThreads(messages);
   }, [messages]);
 
   const activeThread = threads.find(t => t.sender_phone === activePhone) || null;
 
   const handleSelectThread = async (thread: ConversationThread) => {
     setActivePhone(thread.sender_phone);
-    const unreadMessages = thread.messages.filter(m => m.direction !== 'outgoing' && m.status === 'unread');
+    const unreadMessages = filterUnread(thread.messages);
     if (unreadMessages.length > 0 && window.electronAPI?.invoke) {
       for (const msg of unreadMessages) {
         try {
@@ -167,7 +148,7 @@ export function NexusPulse() {
     if (activePhone && window.electronAPI?.invoke) {
       const activeThreadObj = threads.find(t => t.sender_phone === activePhone);
       if (activeThreadObj) {
-        const unreadMessages = activeThreadObj.messages.filter(m => m.direction !== 'outgoing' && m.status === 'unread');
+        const unreadMessages = filterUnread(activeThreadObj.messages);
         unreadMessages.forEach(async (msg) => {
           try {
             await window.electronAPI.invoke('pulse-inbox:mark-read', msg.id);
@@ -182,37 +163,11 @@ export function NexusPulse() {
 
   // Handle WhatsApp bot status updates from Electron
   const handleBotStatusChange = (val: { status: any; data?: any }) => {
-    const { status, data } = val;
-    setBotStatus(status);
-    setLoadingAction(false);
-
-    switch (status) {
-      case 'starting':
-        setBotStatusDesc('Please wait while the WhatsApp engine starts.');
-        setQrCodeDataUrl('');
-        break;
-      case 'qr':
-        setBotStatusDesc('Open WhatsApp on the school phone → Linked Devices → Link a Device → Scan code.');
-        if (data) setQrCodeDataUrl(data);
-        break;
-      case 'authenticated':
-        setBotStatusDesc('Session verified. The bot will be ready in a moment.');
-        setQrCodeDataUrl('');
-        break;
-      case 'ready':
-        setBotStatusDesc('Parents can now WhatsApp the school number to check results, attendance & fees.');
-        setQrCodeDataUrl('');
-        break;
-      case 'error':
-        setBotStatusDesc(data ? `Error: ${data}` : 'Bot encountered an initialization error.');
-        setQrCodeDataUrl('');
-        break;
-      case 'disconnected':
-      default:
-        setBotStatusDesc('Click "Start Bot" to initialise the WhatsApp engine. Scan the QR code.');
-        setQrCodeDataUrl('');
-        break;
-    }
+    const next = botStatusReducer(val);
+    setBotStatus(next.botStatus);
+    setBotStatusDesc(next.botStatusDesc);
+    setQrCodeDataUrl(next.qrCodeDataUrl);
+    setLoadingAction(next.loadingAction);
   };
 
   // Register WhatsApp status listeners
@@ -320,19 +275,14 @@ export function NexusPulse() {
 
   const handleAutostartToggle = (checked: boolean) => {
     setAutostartBot(checked);
-    localStorage.setItem('nexus_pulse_autostart', checked ? 'true' : 'false');
-    if (window.electronAPI?.send) {
-      window.electronAPI.send('pulse:set-autostart', checked);
-    }
+    autostartPersist(checked, localStorage, window.electronAPI);
   };
 
   const handleReplyMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!replyText.trim() || !activeThread) return;
 
-    const latestIncoming = [...activeThread.messages]
-      .reverse()
-      .find(m => m.direction !== 'outgoing');
+    const latestIncoming = findLatestIncoming(activeThread.messages);
 
     if (!latestIncoming) return;
     
@@ -516,7 +466,7 @@ export function NexusPulse() {
                     <h3>
                       <MessageSquare size={14} style={{ color: 'var(--accent)' }} />
                       Pulse Queue
-                      {messages.filter(m => m.direction !== 'outgoing' && m.status === 'unread').length > 0 && (
+                      {filterUnread(messages).length > 0 && (
                         <span style={{
                           marginLeft: '6px',
                           background: 'var(--danger)',
@@ -527,7 +477,7 @@ export function NexusPulse() {
                           borderRadius: '9999px',
                           lineHeight: 1
                         }}>
-                          {messages.filter(m => m.direction !== 'outgoing' && m.status === 'unread').length}
+                          {filterUnread(messages).length}
                         </span>
                       )}
                     </h3>
@@ -581,7 +531,7 @@ export function NexusPulse() {
                         }}>Inbox is live ✓</span>
                       </div>
                     ) : threads.map(thread => {
-                      const hasUnread = thread.messages.some(m => m.direction !== 'outgoing' && m.status === 'unread');
+                      const hasUnread = filterUnread(thread.messages).length > 0;
                       const displayStatus = hasUnread ? 'unread' : thread.latest_message.status;
                       const isOutgoing = thread.latest_message.direction === 'outgoing';
 

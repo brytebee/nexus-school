@@ -3,6 +3,7 @@ import { useLicense } from '../hooks/useLicense';
 import { useClassArms } from '../hooks/useClassArms';
 import { Combobox } from '../components/Combobox';
 import { generateSessionsList } from '../lib/sessions';
+import { applyInlineEdit, validatePaymentInput, validateRefundInput, validateBankAccounts } from '../lib/financialUtils';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 interface RosterRow {
@@ -700,11 +701,7 @@ export function FinancialHub() {
 
   // Inline edit (Gold)
   const handleInlineChange = (sid: string, field: string, val: string) => {
-    setPendingEdits(prev => {
-      const base = roster.find(r => r.student_id === sid) || { total_billed:0, total_paid:0, next_due_date:'' };
-      const cur  = prev[sid] || { total_billed: base.total_billed, total_paid: base.total_paid, next_due_date: base.next_due_date };
-      return { ...prev, [sid]: { ...cur, [field]: field === 'next_due_date' ? val : (Number(val) || 0) } };
-    });
+    setPendingEdits(prev => applyInlineEdit({ sid, field, val, roster, prevEdits: prev }));
   };
 
   const handleSaveAll = async () => {
@@ -1168,42 +1165,20 @@ export function FinancialHub() {
   const handleSaveSettings = async () => {
     if (!window.electronAPI?.fees?.saveSettings) return;
 
-    // Validate bank accounts
-    for (const acc of bankAccounts) {
-      if (acc.paystack_verified) {
-        if (!acc.bank_code || acc.number.length !== 10 || !acc.name || acc.name === 'Resolving...' || acc.name === 'Verification failed') {
-          showIndicator('❌ Please resolve all Paystack accounts correctly');
-          if (Swal) {
-            Swal.fire({
-              title: 'Validation Error',
-              text: 'Please resolve all Paystack accounts correctly before saving settings.',
-              icon: 'error',
-              background: '#0b0f19',
-              color: '#fff',
-              confirmButtonColor: '#ef4444'
-            });
-          }
-          return;
-        }
-      } else {
-        // Manual validation: if any field is touched, all must be valid
-        if (acc.bank.trim() || acc.number.trim() || acc.name.trim()) {
-          if (!acc.bank.trim() || acc.number.length !== 10 || !acc.name.trim()) {
-            showIndicator('❌ Manual accounts must have name, 10-digit number & bank name');
-            if (Swal) {
-              Swal.fire({
-                title: 'Validation Error',
-                text: 'Manual settlement accounts must have a name, bank name, and a 10-digit account number.',
-                icon: 'error',
-                background: '#0b0f19',
-                color: '#fff',
-                confirmButtonColor: '#ef4444'
-              });
-            }
-            return;
-          }
-        }
+    const bankValidation = validateBankAccounts(bankAccounts);
+    if (!bankValidation.ok) {
+      showIndicator(`❌ ${bankValidation.error}`);
+      if (Swal) {
+        Swal.fire({
+          title: 'Validation Error',
+          text: bankValidation.error,
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444'
+        });
       }
+      return;
     }
 
     setSavingSettings(true);
@@ -1266,7 +1241,11 @@ export function FinancialHub() {
   // DIAMOND: Record Payment
   // ═══════════════════════════════════════════════════════════════════════════
   const handlePaymentSubmit = async () => {
-    if (!payStudent || !payAmount || Number(payAmount)<=0) return;
+    const payValidation = validatePaymentInput(payStudent, payAmount, payMethod, payRef);
+    if (!payValidation.ok) {
+      showIndicator(`❌ ${payValidation.error}`);
+      return;
+    }
     setRecordingPay(true);
     try {
       const res = await window.electronAPI.fees.recordPayment({
@@ -1328,13 +1307,12 @@ export function FinancialHub() {
   };
 
   const handleRefundSubmit = async () => {
-    if (!refundTarget || !refundAmt || Number(refundAmt) <= 0 || !refundReason.trim()) return;
-    
-    if (Number(refundAmt) > refundTarget.maxAmount) {
+    const refValidation = validateRefundInput(refundTarget, refundAmt, refundReason);
+    if (!refValidation.ok) {
       if (Swal) {
         Swal.fire({
-          title: 'Invalid Amount',
-          text: `Refund amount cannot exceed ₦${refundTarget.maxAmount.toLocaleString('en-NG')}`,
+          title: 'Validation Error',
+          text: refValidation.error,
           icon: 'warning',
           background: '#0b0f19',
           color: '#fff',
