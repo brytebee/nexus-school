@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.4.0] - 2026-07-06
+
+### Added
+- **WhatsApp Parent Email Verification**: Interactive verification flow asking parents to confirm on file email, type new address to auto-update SQLite `students.parent_email` table, or skip.
+- **Fallback Checkout Email Setting**: School-level fallback email configurator inside Financial Hub Settings drawer for skipped WhatsApp checkouts.
+- **Settings Danger Zone**: A secure, red-styled card in Financial Hub Settings permitting administrative data wipes (Current Term / Full Session / Everything) protected by admin PIN authentication and double `"DELETE"` prompt.
+- **DB Performance Indexes**: Added compound SQLite indexes `idx_students_class_name` and `idx_student_fees_session_term_status` to support 100k-record scale queries.
+
+### Fixed
+- **Paystack Positional Param Contract**: Resolved failures in `paystackService.initializeTransaction` by matching single object parameter signature and converting amount to kobo.
+- **Financial Hub Session Dropdowns**: Unified school academic session lists with other modules using the central `generateSessionsList()` generator.
+- **Roster Status Filtering**: Forwarded filter selections to `fees:get-roster` IPC, executing matching server-side queries for Unpaid/Partial/Cleared rosters.
+
+---
+
 ## [2.3.0] - 2026-06-27
 
 ### Added
