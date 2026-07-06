@@ -10,6 +10,7 @@ const os   = require("os");
 const fs   = require("fs");
 const QRCode = require("qrcode");
 const paystackService = require("./paystack-service");
+const { calculatePaystackCharge, formatNaira } = require("./src/lib/paystackUtils");
 
 // Suppress Puppeteer "Execution context was destroyed" noise that fires
 // when WhatsApp LOGOUT causes a page navigation mid-inject. This is expected
@@ -1439,26 +1440,47 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
 
   try {
     await msg.reply("⏳ _Generating your secure checkout link..._");
-    
-    // Fix: call initializeTransaction passing a single object parameter, with amount in kobo
+
+    // Calculate gross amount so the school receives exactly `amount` after
+    // Paystack deducts its processing fee — the fee is passed on to the parent.
+    const { gross, charge } = calculatePaystackCharge(amount);
+
     const tx = await paystackService.initializeTransaction({
       email: parentEmail,
-      amount: amount * 100, // convert to kobo (Paystack expected unit)
+      amount: Math.round(gross * 100), // gross in kobo — parent bears the fee
       reference: reference,
       subaccountCode: subaccountCode,
-      callbackUrl: "https://nexusos.com.ng/payment-complete"
+      callbackUrl: "https://nexusos.com.ng/payment-complete",
+      metadata: {
+        // School ledger records only `amount` (base); these fields give full
+        // transparency in the Paystack dashboard and receipt emails.
+        base_amount:      amount,
+        paystack_charge:  charge,
+        gross_amount:     gross,
+        custom_fields: [
+          { display_name: 'School Fee',      variable_name: 'base_amount', value: formatNaira(amount) },
+          { display_name: 'Processing Fee',  variable_name: 'charge',      value: formatNaira(charge) },
+          { display_name: 'Total Charged',   variable_name: 'gross',       value: formatNaira(gross)  },
+        ]
+      }
     });
 
     if (tx && tx.authorization_url) {
       const studentIds = session.students.map(s => s.id).join(",");
+      // Store the BASE amount only — this is what the school actually receives
+      // and what will be credited to student_fees when the webhook fires.
       db.prepare(`
         INSERT INTO fee_payment_sessions (parent_phone, student_ids, total_amount, payment_type, partial_percent, paystack_ref, paystack_access_code, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
       `).run(matchable, studentIds, amount, paymentType, percentage, reference, tx.access_code);
 
+      // Show itemised breakdown so the parent is never surprised
       let payLinkMsg = `🔗 *Secure Checkout Link*\n\n`;
       payLinkMsg += `Plan: *${paymentType}*\n`;
-      payLinkMsg += `Amount: *₦${amount.toLocaleString('en-NG')}*\n\n`;
+      payLinkMsg += `School Fee:      *${formatNaira(amount)}*\n`;
+      payLinkMsg += `Processing Fee:  *${formatNaira(charge)}*\n`;
+      payLinkMsg += `─────────────────────────\n`;
+      payLinkMsg += `Total to Pay:    *${formatNaira(gross)}*\n\n`;
       payLinkMsg += `Click the link below to complete your payment:\n`;
       payLinkMsg += `${tx.authorization_url}\n\n`;
       payLinkMsg += `_Once payment is successful, your school records will update automatically._`;
