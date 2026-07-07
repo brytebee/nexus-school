@@ -111,6 +111,26 @@
             }
           } catch(e) { console.warn('[Settings] Pipeline hydration failed:', e); }
         }
+
+        // ── S8-4: Load SMTP config for Gold/Diamond schools ──────────────
+        if (_schoolTier === 'Gold' || _schoolTier === 'Diamond') {
+          const smtpCard = document.getElementById('smtp-settings-card');
+          if (smtpCard) smtpCard.style.display = 'block';
+          try {
+            const smtpCfg = await window.electronAPI.smtp.get();
+            if (smtpCfg) {
+              const h = document.getElementById('smtp-host');
+              const p = document.getElementById('smtp-port');
+              const u = document.getElementById('smtp-user');
+              const f = document.getElementById('smtp-from');
+              if (h) h.value = smtpCfg.host  || '';
+              if (p) p.value = smtpCfg.port  || 587;
+              if (u) u.value = smtpCfg.user  || '';
+              if (f) f.value = smtpCfg.from  || '';
+              // password is intentionally NOT rehydrated (encrypted at rest)
+            }
+          } catch(e) { console.warn('[Settings] SMTP config load failed:', e); }
+        }
       }
 
       function renderClassHierarchy() {
@@ -909,3 +929,70 @@ window.initAdminManagement = async function () {
 
 initSettingsListeners();
 
+// ── S8-4: SMTP Save & Test ────────────────────────────────────────────────
+async function smtpSave() {
+  const statusEl = document.getElementById('smtp-status');
+  const btn      = document.getElementById('smtp-save-btn');
+  const host = document.getElementById('smtp-host')?.value.trim();
+  const port = document.getElementById('smtp-port')?.value.trim() || '587';
+  const user = document.getElementById('smtp-user')?.value.trim();
+  const pass = document.getElementById('smtp-pass')?.value;
+  const from = document.getElementById('smtp-from')?.value.trim();
+
+  if (!host || !user) {
+    if (statusEl) statusEl.textContent = '⚠️ Host and Username are required.';
+    return;
+  }
+
+  if (btn) btn.disabled = true;
+  if (statusEl) statusEl.textContent = '⏳ Saving…';
+
+  try {
+    const result = await window.electronAPI.smtp.save({ host, port, user, pass, from });
+    if (result.ok) {
+      if (statusEl) { statusEl.style.color = '#4ade80'; statusEl.textContent = '✅ SMTP settings saved securely.'; }
+      // Clear the password field after save (it's encrypted server-side now)
+      const passEl = document.getElementById('smtp-pass');
+      if (passEl) passEl.value = '';
+    } else {
+      if (statusEl) { statusEl.style.color = '#ff6b6b'; statusEl.textContent = '❌ Save failed: ' + (result.error || 'Unknown error'); }
+    }
+  } catch (e) {
+    if (statusEl) { statusEl.style.color = '#ff6b6b'; statusEl.textContent = '❌ Error: ' + e.message; }
+  } finally {
+    if (btn) btn.disabled = false;
+    setTimeout(() => { if (statusEl) statusEl.style.color = ''; }, 4000);
+  }
+}
+
+async function smtpTest() {
+  const statusEl = document.getElementById('smtp-status');
+  const btn      = document.getElementById('smtp-test-btn');
+  const host = document.getElementById('smtp-host')?.value.trim();
+  const port = document.getElementById('smtp-port')?.value.trim() || '587';
+  const user = document.getElementById('smtp-user')?.value.trim();
+  const pass = document.getElementById('smtp-pass')?.value;
+  const from = document.getElementById('smtp-from')?.value.trim();
+
+  if (!host || !user || !pass) {
+    if (statusEl) statusEl.textContent = '⚠️ Host, Username, and Password are required to test.';
+    return;
+  }
+
+  if (btn) btn.disabled = true;
+  if (statusEl) statusEl.textContent = '⏳ Testing connection…';
+
+  try {
+    const result = await window.electronAPI.smtp.test({ host, port, user, pass, from });
+    if (result.ok) {
+      if (statusEl) { statusEl.style.color = '#4ade80'; statusEl.textContent = '✅ Connection successful! SMTP server is reachable.'; }
+    } else {
+      if (statusEl) { statusEl.style.color = '#ff6b6b'; statusEl.textContent = '❌ Connection failed: ' + (result.error || 'Check credentials'); }
+    }
+  } catch (e) {
+    if (statusEl) { statusEl.style.color = '#ff6b6b'; statusEl.textContent = '❌ Error: ' + e.message; }
+  } finally {
+    if (btn) btn.disabled = false;
+    setTimeout(() => { if (statusEl) statusEl.style.color = ''; }, 5000);
+  }
+}

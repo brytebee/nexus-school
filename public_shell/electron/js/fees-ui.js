@@ -620,11 +620,23 @@
     const div = document.createElement("div");
     div.className = "fee-setting-row";
     div.style = "display:flex;gap:8px;align-items:center;margin-bottom:6px;";
+    
+    const count = inst.max_occurrences !== undefined ? Number(inst.max_occurrences) : 0;
+    let selectOpts = `<option value="0" ${count === 0 ? 'selected' : ''}>Unlimited</option>`;
+    for (let i = 1; i <= 7; i++) {
+      selectOpts += `<option value="${i}" ${count === i ? 'selected' : ''}>${i} time${i > 1 ? 's' : ''}</option>`;
+    }
+
     div.innerHTML = `
       <input type="text" placeholder="Milestone Label (e.g. 1st Installment)" class="modern-input inst-label" value="${inst.label || ""}" style="flex:2;font-size:11px;padding:6px 10px;">
       <div style="display:flex;align-items:center;flex:1;gap:4px;">
         <input type="number" placeholder="%" class="modern-input inst-pct" value="${inst.percent || ""}" min="1" max="100" style="width:100%;font-size:11px;padding:6px 10px;">
         <span style="font-size:11px;color:var(--text-dim);">%</span>
+      </div>
+      <div style="display:flex;align-items:center;flex:1.5;gap:4px;">
+        <select class="modern-input inst-occurrences" style="width:100%;font-size:11px;padding:6px 10px;background:#0d1235;color:var(--text);border:1px solid var(--border);border-radius:4px;">
+          ${selectOpts}
+        </select>
       </div>
       <button class="small-btn btn-remove-row" style="color:#ff6b6b;border-color:rgba(255,107,107,0.2);">×</button>
     `;
@@ -663,6 +675,10 @@
       }
     }
 
+    // Payment Channels
+    if ($["allow-manual-payments"]) $["allow-manual-payments"].checked = s.allow_manual_payments !== false;
+    if ($["allow-custom-payments"]) $["allow-custom-payments"].checked = s.allow_custom_payments !== false;
+
     // ── Fee Gate Config ─────────────────────────────────────────────────────
     const gateEnabled = s.fee_gate_enabled !== false; // default on
     const gateMode    = s.fee_gate_mode || 'fixed';
@@ -692,6 +708,8 @@
       reminder_date_2: $["fees-reminder-2"]?.value || "",
       bank_accounts: [],
       installment_plans: [],
+      allow_manual_payments: $["allow-manual-payments"] ? $["allow-manual-payments"].checked : true,
+      allow_custom_payments: $["allow-custom-payments"] ? $["allow-custom-payments"].checked : true,
     };
 
     // Serialize accounts
@@ -708,8 +726,9 @@
     document.querySelectorAll("#fees-installments-list .fee-setting-row").forEach(row => {
       const label = row.querySelector(".inst-label").value.trim();
       const pct   = row.querySelector(".inst-pct").value;
+      const occurrences = row.querySelector(".inst-occurrences") ? Number(row.querySelector(".inst-occurrences").value) : 0;
       if (label && pct) {
-        patch.installment_plans.push({ label, percent: Number(pct) });
+        patch.installment_plans.push({ label, percent: Number(pct), max_occurrences: occurrences });
       }
     });
 
