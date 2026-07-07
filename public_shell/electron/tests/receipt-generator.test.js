@@ -21,6 +21,7 @@ const BASE_DATA = {
   schoolPhone:     '08012345678',
   studentName:     'Ada Okonkwo',
   studentClass:    'JSS 2B',
+  parentEmail:     'parent@example.com',
   academicSession: '2025/2026',
   term:            'Third Term',
   reference:       'PAY-TEST-001',
@@ -54,6 +55,12 @@ describe('Receipt PDF Generator', () => {
 
   it('works when allocations array is empty', async () => {
     const buf = await generateReceiptPdf({ ...BASE_DATA, allocations: [] });
+    expect(buf).toBeInstanceOf(Buffer);
+    expect(buf.length).toBeGreaterThan(500);
+  });
+
+  it('works when parentEmail is not provided', async () => {
+    const buf = await generateReceiptPdf({ ...BASE_DATA, parentEmail: undefined });
     expect(buf).toBeInstanceOf(Buffer);
     expect(buf.length).toBeGreaterThan(500);
   });
