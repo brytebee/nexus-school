@@ -102,6 +102,25 @@ export function ResultStudio() {
   const [brandPrimary, setBrandPrimary] = useState("#1A237E");
   const [brandSecondary, setBrandSecondary] = useState("#00E5FF");
 
+  // S8-4 & S8-5: Dispatch and Publish state
+  const [sendWA, setSendWA] = useState(true);
+  const [sendEmail, setSendEmail] = useState(false);
+  const [dispatching, setDispatching] = useState(false);
+  const [dispatchStatus, setDispatchStatus] = useState("");
+
+  const [publishingPortal, setPublishingPortal] = useState(false);
+  const [publishProgress, setPublishProgress] = useState("");
+  const [publishStatus, setPublishStatus] = useState("");
+
+  // Listen to IPC portal publish progress updates
+  useEffect(() => {
+    if ((window as any).electronAPI?.results?.onPublishProgress) {
+      (window as any).electronAPI.results.onPublishProgress((progress: any) => {
+        setPublishProgress(progress.message || "");
+      });
+    }
+  }, []);
+
   // Reset img error when template changes
   useEffect(() => {
     setImgError(false);
@@ -207,6 +226,73 @@ export function ResultStudio() {
       }
     } catch (err: any) {
       setQueryMessage("❌ Error: " + err.message);
+    }
+  };
+
+  // S8-4: Dispatch Results via WhatsApp/Email (Gold/Diamond)
+  const handleDispatch = async () => {
+    if (!queryResults.length || !(window as any).electronAPI?.results?.dispatch) return;
+    setDispatching(true);
+    setDispatchStatus("⏳ Dispatching to " + queryResults.length + " student(s)…");
+    try {
+      const cfg = await window.electronAPI.getTermConfig();
+      const term = cfg?.term || "First Term";
+      const session = cfg?.academic_session || "2024/2025";
+      const channels = [];
+      if (sendWA) channels.push("whatsapp");
+      if (sendEmail) channels.push("email");
+
+      const res = await (window as any).electronAPI.results.dispatch({
+        scope,
+        studentId: scope === "student" ? selectedStudentId : null,
+        className: scope === "class" ? selectedClass : null,
+        term,
+        academicSession: session,
+        channels
+      });
+
+      if (res?.ok) {
+        const parts = [];
+        if (res.dispatched) parts.push(res.dispatched + " sent");
+        if (res.queued)     parts.push(res.queued + " queued (email)");
+        if (res.skipped)    parts.push(res.skipped + " skipped");
+        setDispatchStatus("✅ Done — " + parts.join(" · "));
+      } else {
+        setDispatchStatus("❌ Dispatch failed: " + (res?.error || "Unknown error"));
+      }
+    } catch (err: any) {
+      setDispatchStatus("❌ Error: " + err.message);
+    } finally {
+      setDispatching(false);
+    }
+  };
+
+  // S8-5: Publish Results to parent portal
+  const handlePublishToPortal = async () => {
+    if (!queryResults.length || !(window as any).electronAPI?.results?.publish) return;
+    setPublishingPortal(true);
+    setPublishProgress("Generating PDFs…");
+    setPublishStatus("");
+    try {
+      const cfg = await window.electronAPI.getTermConfig();
+      const term = cfg?.term || "First Term";
+      const session = cfg?.academic_session || "2024/2025";
+
+      const res = await (window as any).electronAPI.results.publish({
+        term,
+        academicSession: session
+      });
+
+      if (res?.ok) {
+        setPublishStatus("✅ Published " + (res.published || 0) + " results successfully!");
+      } else {
+        setPublishStatus("❌ Failed: " + (res?.error || "Unknown error"));
+      }
+    } catch (err: any) {
+      setPublishStatus("❌ Error: " + err.message);
+    } finally {
+      setPublishingPortal(false);
+      setPublishProgress("");
     }
   };
 
@@ -1079,6 +1165,82 @@ export function ResultStudio() {
                   {queryMessage}
                 </span>
               </div>
+
+              {/* WhatsApp/Email Dispatch Card (Gold+) */}
+              {tier !== "Silver" && tier !== "Standalone" && queryResults.length > 0 && (
+                <div
+                  className="card"
+                  style={{
+                    padding: "16px 20px",
+                    background: "rgba(0, 229, 255, 0.03)",
+                    border: "1px solid rgba(0, 229, 255, 0.15)",
+                    margin: "0 20px 16px",
+                    flexShrink: 0,
+                  }}
+                >
+                  <p style={{ fontSize: "11px", color: "var(--accent)", textTransform: "uppercase", letterSpacing: "1.5px", fontWeight: 700, margin: "0 0 12px 0" }}>
+                    📤 Send Results to Parents (Nexus Pulse)
+                  </p>
+                  <div style={{ display: "flex", gap: "16px", alignItems: "center", flexWrap: "wrap" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "12px" }}>
+                      <input type="checkbox" checked={sendWA} onChange={e => setSendWA(e.target.checked)} style={{ width: "14px", height: "14px", accentColor: "var(--accent)" }} />
+                      <span>WhatsApp PDF Attachment 💬</span>
+                    </label>
+
+                    <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "12px" }}>
+                      <input type="checkbox" checked={sendEmail} onChange={e => setSendEmail(e.target.checked)} style={{ width: "14px", height: "14px", accentColor: "var(--accent)" }} />
+                      <span>Email PDF Attachment 📧</span>
+                    </label>
+
+                    <button
+                      className="primary-btn"
+                      onClick={handleDispatch}
+                      disabled={dispatching || (!sendWA && !sendEmail)}
+                      style={{ padding: "6px 14px", fontSize: "12px", background: "var(--accent)", color: "#000", border: "none", animation: "none", boxShadow: "none" }}
+                    >
+                      {dispatching ? "⚡ Sending…" : "⚡ Dispatch Results"}
+                    </button>
+                    {dispatchStatus && (
+                      <span style={{ fontSize: "12px", color: "var(--text-dim)" }}>{dispatchStatus}</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* S8-5: Publish to Parent Portal Card */}
+              {queryResults.length > 0 && (
+                <div
+                  className="card"
+                  style={{
+                    padding: "16px 20px",
+                    background: "rgba(0, 229, 255, 0.02)",
+                    border: "1px solid rgba(0, 229, 255, 0.1)",
+                    margin: "0 20px 16px",
+                    flexShrink: 0,
+                  }}
+                >
+                  <p style={{ fontSize: "11px", color: "var(--accent)", textTransform: "uppercase", letterSpacing: "1.5px", fontWeight: 700, margin: "0 0 12px 0" }}>
+                    🌐 E-Portal Result Publishing
+                  </p>
+                  <p style={{ fontSize: "11px", color: "var(--text-dim)", margin: "0 0 12px 0", lineHeight: 1.5 }}>
+                    Publish this term's results to the parent web portal. This generates and uploads report card PDFs automatically.
+                  </p>
+                  <div style={{ display: "flex", gap: "16px", alignItems: "center", flexWrap: "wrap" }}>
+                    <button
+                      className="primary-btn"
+                      onClick={handlePublishToPortal}
+                      disabled={publishingPortal}
+                      style={{ padding: "6px 14px", fontSize: "12px", animation: "none", boxShadow: "none" }}
+                    >
+                      {publishingPortal ? `⏳ ${publishProgress || "Publishing…"}` : "🌐 Publish to Portal"}
+                    </button>
+                    {publishStatus && (
+                      <span style={{ fontSize: "12px", color: "var(--text-dim)" }}>{publishStatus}</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div
                 className="table-container"
                 id="rs-preview-container"

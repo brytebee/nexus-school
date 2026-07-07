@@ -169,6 +169,11 @@ const PAID_TEMPLATES = ['prestige', 'azure', 'royal', 'monarch', 'sovereign', 's
           }
           document.getElementById("rs-preview-label").textContent = `${_rsResults.length} student(s) · ${session}, ${term}`;
           status.textContent = "";
+          // Show dispatch card for Gold/Diamond tiers when there are results
+          const dispatchCard = document.getElementById('rs-dispatch-card');
+          if (dispatchCard && _rsResults.length > 0 && window._rsTier && window._rsTier !== 'Silver') {
+            dispatchCard.style.display = 'block';
+          }
           // Scroll preview into view
           previewContainer.scrollIntoView({ behavior: "smooth", block: "nearest" });
         } catch(err) {
@@ -229,5 +234,59 @@ const PAID_TEMPLATES = ['prestige', 'azure', 'royal', 'monarch', 'sovereign', 's
           status.textContent = r.ok ? "📋 Image copied to clipboard!" : "❌ Copy failed: " + r.error;
         } catch(e) {
           status.textContent = "❌ Copy error: " + e.message;
+        }
+      }
+
+      // ── S8-4: Dispatch Results (WhatsApp / Email) ─────────────────────────
+      async function rsDispatch() {
+        if (!_rsResults || !_rsResults.length) {
+          alert("Click Preview first to load results before dispatching.");
+          return;
+        }
+        const statusEl   = document.getElementById('rs-dispatch-status');
+        const btn        = document.getElementById('rs-dispatch-btn');
+        const sendWA     = document.getElementById('rs-dispatch-wa')?.checked;
+        const sendEmail  = document.getElementById('rs-dispatch-email')?.checked;
+
+        if (!sendWA && !sendEmail) {
+          if (statusEl) statusEl.textContent = '⚠️ Select at least one channel (WhatsApp or Email).';
+          return;
+        }
+
+        try {
+          const cfg     = await window.electronAPI.getTermConfig();
+          const scope   = document.getElementById('rs-scope')?.value     || 'all';
+          const stuId   = document.getElementById('rs-student-pick')?.value || '';
+          const clsName = document.getElementById('rs-class-pick')?.value  || '';
+          const channels = [];
+          if (sendWA)    channels.push('whatsapp');
+          if (sendEmail) channels.push('email');
+
+          if (statusEl) statusEl.textContent = `⏳ Dispatching to ${_rsResults.length} student(s)…`;
+          if (btn)      btn.disabled = true;
+
+          const result = await window.electronAPI.results.dispatch({
+            scope,
+            studentId:       stuId || null,
+            className:       clsName || null,
+            term:            cfg.term || 'First Term',
+            academicSession: cfg.academic_session || '2024/2025',
+            channels
+          });
+
+          if (result.ok) {
+            const parts = [];
+            if (result.dispatched) parts.push(`${result.dispatched} sent`);
+            if (result.queued)     parts.push(`${result.queued} queued (email)`);
+            if (result.skipped)    parts.push(`${result.skipped} skipped`);
+            if (statusEl) statusEl.textContent = `✅ Done — ${parts.join(' · ')}`;
+          } else {
+            if (statusEl) statusEl.textContent = `❌ Dispatch failed: ${result.error || 'Unknown error'}`;
+          }
+        } catch (e) {
+          console.error('[rsDispatch] error:', e);
+          if (statusEl) statusEl.textContent = `❌ Error: ${e.message}`;
+        } finally {
+          if (btn) btn.disabled = false;
         }
       }

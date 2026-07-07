@@ -1260,6 +1260,22 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
           </div>
 
           <div className="form-group">
+            <label>Parent Portal URL Slug</label>
+            <input
+              type="text"
+              id="school-portalslug-input"
+              className="modern-input"
+              placeholder="e.g. green-valley-high"
+              value={portalSlug}
+              onChange={(e) => setPortalSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+            />
+            <span style={{ fontSize: '10px', color: 'var(--text-dim)', display: 'block', marginTop: '4px' }}>
+              Your portal will be accessible at:{' '}
+              <strong>https://sch.nexusos.com.ng/{portalSlug || 'your-slug'}/parent</strong>
+            </span>
+          </div>
+
+          <div className="form-group">
             <label>Principal's Name (Digital Signature)</label>
             <input
               type="text"

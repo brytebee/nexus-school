@@ -136,6 +136,16 @@ const nexusAPI = {
         sendReceiptPdf:  (params) => ipcRenderer.invoke('fees:send-receipt-pdf',   params),
         printReceipt:    (params) => ipcRenderer.invoke('fees:print-receipt',       params),
     },
+    results: {
+        dispatch:          (params) => ipcRenderer.invoke('results:dispatch', params),
+        publish:           (params) => ipcRenderer.invoke('results:publish',  params),
+        onPublishProgress: (cb)     => ipcRenderer.on('publish:progress', (_e, v) => cb(v)),
+    },
+    smtp: {
+        save: (config) => ipcRenderer.invoke('settings:smtp:save', config),
+        get:  ()       => ipcRenderer.invoke('settings:smtp:get'),
+        test: (params) => ipcRenderer.invoke('settings:smtp:test', params),
+    },
     receipts: {
         getPending:  ()       => ipcRenderer.invoke('receipts:get-pending'),
         getCount:    ()       => ipcRenderer.invoke('receipts:get-count'),

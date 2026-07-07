@@ -28,6 +28,7 @@ const feeCalculator = require("./src/lib/fee-calculator");
 const paystackService = require("./paystack-service.js");
 const { toDisplayTier } = require("./src/tierDisplay.js");
 const receiptGenerator = require('./receipt-generator.js');
+const resultDispatcher = require("../../private_engine/src/result-dispatcher");
 
 
 // Set app name BEFORE createWindow so Menu.buildFromTemplate picks it up correctly
@@ -1512,7 +1513,12 @@ function startPaystackPollingWorker() {
 
   setInterval(async () => {
     const db = database.getDb();
-    if (!db) return;
+    // V2: Drain the pending emails queue
+    try {
+      await resultDispatcher.processEmailQueue();
+    } catch (err) {
+      console.error("[Email Queue Poller] Error draining pending email queue:", err.message);
+    }
 
     try {
       const pendingSessions = db.prepare(`
@@ -4324,11 +4330,145 @@ ipcMain.handle("generate-reports", async (event, payload) => {
   }
 });
 
+ipcMain.handle("results:dispatch", async (event, payload) => {
+  try {
+    const result = await resultDispatcher.dispatchResults(payload);
+    return { ok: true, ...result };
+  } catch (err) {
+    console.error("[main.js] results:dispatch error:", err);
+    return { ok: false, error: err.message };
+  }
+});
 
+// ── S8-5: Publish results to the parent portal (nexus-api) ─────────────────
+ipcMain.handle("results:publish", async (event, { term, academicSession }) => {
+  try {
+    const db = database.getDb();
 
+    // Read school identity file (contains portalSlug set during onboarding)
+    let identity = {};
+    try {
+      identity = JSON.parse(require("fs").readFileSync(identityFilePath, "utf8"));
+    } catch (_) {}
 
+    const slug = identity.portalSlug;
+    if (!slug) {
+      return { ok: false, error: "No portal slug configured. Go to Settings → School Metadata and set your portal slug." };
+    }
 
+    const NEXUS_API        = process.env.NEXUS_API_URL    || "https://api.nexusos.com.ng";
+    const NEXUS_API_SECRET = process.env.NEXUS_API_SECRET || "";
 
+    // ── Step 1: Generate all student PDFs + upload to Cloudinary ──────────────
+    const baseDir = require("path").join(__dirname, "..");
+    event.sender.send("publish:progress", { stage: "generating", message: "Generating result PDFs…" });
+
+    const { results, parentMap, skipped, total } =
+      await resultDispatcher.compileBatchAndUpload(db, term, academicSession, baseDir);
+
+    if (results.length === 0 && total === 0) {
+      return { ok: false, error: `No students with results found for ${term} ${academicSession}. Ensure scores have been entered for this term.` };
+    }
+
+    event.sender.send("publish:progress", {
+      stage:   "uploading",
+      message: `Uploaded ${results.length} of ${total} PDFs (${skipped} skipped). Publishing to portal…`,
+    });
+
+    // ── Step 2: POST to nexus-api (publish terms + PDF URLs + parentMap) ───────
+    const res = await fetch(
+      `${NEXUS_API}/api/schools/${slug}/results/published-terms`,
+      {
+        method:  "POST",
+        headers: {
+          "Content-Type":   "application/json",
+          "x-nexus-secret": NEXUS_API_SECRET,
+        },
+        body: JSON.stringify({
+          schoolId:        identity.schoolId || slug,
+          schoolName:      identity.name,
+          themePrimary:    identity.themePrimary,
+          term,
+          academicSession,
+          parentMap,
+          results,
+        }),
+        signal: AbortSignal.timeout(60_000),
+      }
+    );
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, error: data.error || `API error ${res.status}` };
+    }
+
+    return {
+      ok:             true,
+      published:      results.length,
+      skipped,
+      total,
+      publishedTerms: data.publishedTerms,
+    };
+  } catch (err) {
+    console.error("[main.js] results:publish error:", err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("settings:smtp:save", async (event, config) => {
+  try {
+    const db = database.getDb();
+    const encPass = resultDispatcher.encrypt(config.pass);
+    const savedConfig = {
+      host: config.host || "",
+      port: Number(config.port) || 587,
+      user: config.user || "",
+      pass: encPass,
+      from: config.from || ""
+    };
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('smtp_config', ?)").run(JSON.stringify(savedConfig));
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("settings:smtp:get", async (event) => {
+  try {
+    const db = database.getDb();
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'smtp_config'").get();
+    if (!row?.value) return null;
+    const parsed = JSON.parse(row.value);
+    // Don't decrypt password for get — frontend doesn't need it (it's write-only)
+    parsed.pass = '';
+    return parsed;
+  } catch (err) {
+    return null;
+  }
+});
+
+ipcMain.handle("settings:smtp:test", async (event, params) => {
+  try {
+    // params contains live form fields: { host, port, user, pass, from }
+    if (!params?.host || !params?.user || !params?.pass) {
+      return { ok: false, error: "Host, Username, and Password are required." };
+    }
+    const nodemailer = require("nodemailer");
+    const transporter = nodemailer.createTransport({
+      host: params.host,
+      port: Number(params.port) || 587,
+      secure: Number(params.port) === 465,
+      auth: {
+        user: params.user,
+        pass: params.pass
+      }
+    });
+    await transporter.verify();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
 
 function createWindow() {
   // ── Initialize Persistence First ──────────────────────────────────────────
@@ -4342,6 +4482,9 @@ function createWindow() {
 
     const betterSqlite3 = require("better-sqlite3");
     database.init(dbPath, betterSqlite3);
+    try {
+      require("../../private_engine/src/database").init(dbPath, betterSqlite3);
+    } catch (_) {}
     
     // FINAL DEMO CHECK: Print the number of records found
     try {

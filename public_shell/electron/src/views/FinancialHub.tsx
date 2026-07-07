@@ -253,6 +253,8 @@ export function FinancialHub() {
   const [bankAccounts,     setBankAccounts]     = useState<BankAccount[]>([{ bank:'',number:'',name:'' }]);
   const [activeBankAccountId, setActiveBankAccountId] = useState<number|null>(null);
   const [installPlans,     setInstallPlans]     = useState<InstallPlan[]>([{ label:'', percent:0 }]);
+  const [allowManualPayments, setAllowManualPayments] = useState(true);
+  const [allowCustomPayments, setAllowCustomPayments] = useState(true);
   const [gateEnabled,      setGateEnabled]      = useState(true);
   const [gateMode,         setGateMode]         = useState<'any'|'fixed'|'percent'>('fixed');
   const [gateThreshold,    setGateThreshold]    = useState('');
@@ -1150,7 +1152,13 @@ export function FinancialHub() {
       setReminder2(s.reminder_date_2||'');
       setBankAccounts(s.bank_accounts?.length ? s.bank_accounts : [{ bank:'',number:'',name:'' }]);
       setActiveBankAccountId(s.active_bank_account_id || null);
-      setInstallPlans(s.installment_plans?.length ? s.installment_plans : [{ label:'',percent:0 }]);
+      setInstallPlans(s.installment_plans?.length ? s.installment_plans.map((p: any) => ({
+        label: p.label || '',
+        percent: p.percent || 0,
+        max_occurrences: p.max_occurrences !== undefined ? p.max_occurrences : 1
+      })) : [{ label:'', percent:0, max_occurrences: 1 }]);
+      setAllowManualPayments(s.allow_manual_payments !== false);
+      setAllowCustomPayments(s.allow_custom_payments !== false);
       const thresh = Number(s.fee_gate_threshold)||0;
       setGateEnabled(s.fee_gate_enabled !== false);
       setGateMode(thresh===0 && s.fee_gate_mode==='fixed' ? 'any' : (s.fee_gate_mode||'fixed'));
@@ -1188,7 +1196,15 @@ export function FinancialHub() {
         reminder_date_2: reminder2,
         bank_accounts:   bankAccounts.filter(a => a.bank.trim() && a.number.trim()),
         active_bank_account_id: activeBankAccountId,
-        installment_plans: installPlans.filter(i => i.label.trim() && i.percent > 0),
+        installment_plans: installPlans
+          .filter(i => i.label.trim() && i.percent > 0)
+          .map(i => ({
+            label: i.label.trim(),
+            percent: i.percent,
+            max_occurrences: i.max_occurrences !== undefined ? i.max_occurrences : 1
+          })),
+        allow_manual_payments: allowManualPayments,
+        allow_custom_payments: allowCustomPayments,
         fee_gate_enabled:   gateEnabled,
         fee_gate_mode:      gateMode === 'any' ? 'fixed' : gateMode,
         fee_gate_threshold: gateMode === 'any' ? 0 : (Number(gateThreshold)||0),
@@ -2243,7 +2259,7 @@ export function FinancialHub() {
               <div className="card" style={{ padding:'16px', background:'rgba(255,255,255,0.02)', border:'1px solid var(--glass-border)' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px' }}>
                   <p style={{ fontSize:'11px', color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'1px', fontWeight:700, margin:0 }}>💳 Installment Plans</p>
-                  <button id="btn-fees-add-installment" onClick={() => setInstallPlans(p => [...p,{label:'',percent:0}])} className="small-btn" style={{ padding:'4px 8px', fontSize:'10px' }}>+ Add Milestone</button>
+                  <button id="btn-fees-add-installment" onClick={() => setInstallPlans(p => [...p,{label:'',percent:0,max_occurrences:1}])} className="small-btn" style={{ padding:'4px 8px', fontSize:'10px' }}>+ Add Milestone</button>
                 </div>
                 <div id="fees-installments-list" style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
                   {installPlans.map((inst,i) => (
@@ -2251,9 +2267,39 @@ export function FinancialHub() {
                       <input type="text" placeholder="Milestone (e.g. 1st Installment)" value={inst.label} onChange={e => { const c=[...installPlans]; c[i].label=e.target.value; setInstallPlans(c); }} className="modern-input" style={{ flex:2, fontSize:'11px', padding:'6px 10px' }} />
                       <input type="number" placeholder="%" value={inst.percent||''} min={1} max={100} onChange={e => { const c=[...installPlans]; c[i].percent=parseInt(e.target.value)||0; setInstallPlans(c); }} className="modern-input" style={{ flex:1, fontSize:'11px', padding:'6px 10px' }} />
                       <span style={{ fontSize:'11px', color:'var(--text-dim)' }}>%</span>
+                      <select
+                        value={inst.max_occurrences !== undefined ? inst.max_occurrences : 1}
+                        onChange={e => { const c=[...installPlans]; c[i].max_occurrences=parseInt(e.target.value); setInstallPlans(c); }}
+                        className="modern-input"
+                        style={{ flex:1.5, fontSize:'10px', padding:'6px' }}
+                      >
+                        <option value={1}>Limit: 1 Loop</option>
+                        <option value={2}>Limit: 2 Loops</option>
+                        <option value={3}>Limit: 3 Loops</option>
+                        <option value={4}>Limit: 4 Loops</option>
+                        <option value={5}>Limit: 5 Loops</option>
+                        <option value={6}>Limit: 6 Loops</option>
+                        <option value={7}>Limit: 7 Loops</option>
+                      </select>
                       <button onClick={() => setInstallPlans(p => p.filter((_,j) => j!==i))} className="small-btn" style={{ color:'#ff6b6b', borderColor:'rgba(255,107,107,0.2)', padding:'4px 8px' }}>×</button>
                     </div>
                   ))}
+                </div>
+              </div>
+
+              {/* Payment Channels (S8-3) */}
+              <div className="card" style={{ padding:'16px', background:'rgba(255,255,255,0.02)', border:'1px solid var(--glass-border)' }}>
+                <p style={{ fontSize:'11px', color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'1px', fontWeight:700, marginBottom:'10px', margin:0 }}>🌐 Payment Channels</p>
+                <p style={{ fontSize:'11px', color:'var(--text-dim)', marginBottom:'12px', marginTop:'6px', lineHeight:1.5 }}>Configure which payment options are presented to parents.</p>
+                <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
+                  <label style={{ display:'flex', alignItems:'center', gap:'8px', cursor:'pointer', fontSize:'12px', color:'var(--text-dim)' }}>
+                    <input type="checkbox" checked={allowManualPayments} onChange={e => setAllowManualPayments(e.target.checked)} style={{ width:'14px', height:'14px', accentColor:'var(--accent)' }} />
+                    <span>Allow Bank Transfer / Manual payments</span>
+                  </label>
+                  <label style={{ display:'flex', alignItems:'center', gap:'8px', cursor:'pointer', fontSize:'12px', color:'var(--text-dim)' }}>
+                    <input type="checkbox" checked={allowCustomPayments} onChange={e => setAllowCustomPayments(e.target.checked)} style={{ width:'14px', height:'14px', accentColor:'var(--accent)' }} />
+                    <span>Allow Custom Amount entry on WhatsApp</span>
+                  </label>
                 </div>
               </div>
 

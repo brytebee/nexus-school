@@ -19,14 +19,17 @@
     "test:all": "npm run test && npm run test:e2e",
     "predist:mac": "npm run build && npm run test",
     "predist:win": "npm run build && npm run test",
+    "predist:linux": "npm run build && npm run test",
     "predist:all": "npm run build && npm run test",
     "prepublish:mac": "npm run build && npm run test",
     "prepublish:win": "npm run build && npm run test",
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
-    "dist:all": "electron-builder --mac --win",
+    "dist:linux": "electron-builder --linux",
+    "dist:all": "electron-builder --mac --win --linux",
     "publish:mac": "electron-builder --mac --publish always",
-    "publish:win": "electron-builder --win --publish always"
+    "publish:win": "electron-builder --win --publish always",
+    "publish:linux": "electron-builder --linux --publish always"
   },
   "build": {
     "appId": "ng.nexusos.schoolos",
@@ -75,6 +78,37 @@
         }
       ],
       "icon": "assets/icon.ico"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "Education",
+      "maintainer": "Nexus Infrastructure Ltd <support@nexusos.com.ng>",
+      "synopsis": "High-End School Management System"
+    },
+    "deb": {
+      "depends": [
+        "libglib2.0-0",
+        "libnss3",
+        "libatk1.0-0",
+        "libatk-bridge2.0-0",
+        "libgtk-3-0",
+        "libgbm1",
+        "libasound2"
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -130,6 +164,7 @@
     "handlebars": "^4.7.9",
     "lucide-react": "^1.16.0",
     "mammoth": "^1.12.0",
+    "nodemailer": "^6.10.1",
     "pdf-parse": "^2.4.5",
     "pdfkit": "^0.19.1",
     "qrcode": "^1.5.4",

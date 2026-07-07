@@ -736,17 +736,28 @@ async function sendFeeStatus(msg, session, matchable) {
 
   // Show school bank accounts if configured
   try {
+    let allowManual = true;
+    try {
+      const settingsRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'fee_settings'`).get();
+      const settings = settingsRow ? JSON.parse(settingsRow.value) : {};
+      allowManual = settings.allow_manual_payments !== false;
+    } catch (_) {}
+
     const accounts = db.prepare("SELECT id, bank_name as bank, account_number as number, account_name as name, paystack_verified FROM bank_accounts WHERE is_active = 1").all();
     const paystackConnected = db.prepare("SELECT value FROM app_settings WHERE key = 'paystack_connected'").get()?.value === 'true';
 
     if (paystackConnected) {
       text += `${DIV}\n💬 *Payment Options*\n\n`;
       text += `Reply *1* to *Pay Online* securely via Paystack\n`;
-      text += `Reply *2* to *Pay via Manual Bank Transfer/Cash*\n\n`;
+      if (allowManual) {
+        text += `Reply *2* to *Pay via Manual Bank Transfer/Cash*\n\n`;
+      } else {
+        text += `\n`;
+      }
       text += `_Reply 0 to return to the main menu_`;
       session.state = STATE.AWAITING_PAYMENT_OPTION;
       if (matchable) setSession(matchable, session);
-    } else if (accounts.length) {
+    } else if (accounts.length && allowManual) {
       text += `${DIV}\n🏦 *Payment Accounts*\n\n`;
       accounts.forEach(a => {
         text += `*${a.bank}*${a.paystack_verified ? ' (✅ Verified)' : ''}\n${a.number} — ${a.name}\n\n`;
@@ -1052,6 +1063,18 @@ async function handleMessage(msg) {
     if (numericInput === 2) {
       // Manual bank details transfer
       const db = database.getDb();
+      let allowManual = true;
+      try {
+        const settingsRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'fee_settings'`).get();
+        const settings = settingsRow ? JSON.parse(settingsRow.value) : {};
+        allowManual = settings.allow_manual_payments !== false;
+      } catch (_) {}
+
+      if (!allowManual) {
+        await msg.reply("⚠️ Manual bank transfer payments are disabled. Please use the Pay Online option or contact the school office.");
+        return;
+      }
+
       const accounts = db.prepare("SELECT bank_name as bank, account_number as number, account_name as name, paystack_verified FROM bank_accounts WHERE is_active = 1").all();
       
       if (!accounts.length) {
@@ -1093,20 +1116,53 @@ async function handleMessage(msg) {
     if (numericInput === 2) {
       const db = database.getDb();
       let installmentPlans = [];
+      let allowCustom = true;
       try {
         const settingsRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'fee_settings'`).get();
         const settings = settingsRow ? JSON.parse(settingsRow.value) : {};
         installmentPlans = settings.installment_plans || [];
+        allowCustom = settings.allow_custom_payments !== false;
       } catch (_) {}
 
+      // V2: Filter plans that have reached max occurrences
+      const activePlans = [];
+      for (const plan of installmentPlans) {
+        const limit = plan.max_occurrences !== undefined ? Number(plan.max_occurrences) : 0;
+        if (limit > 0) {
+          const mLabel = `Milestone: ${plan.label} (${plan.percent}%)`;
+          const countRow = db.prepare(`
+            SELECT COUNT(*) as count 
+            FROM fee_payment_sessions 
+            WHERE parent_phone = ? 
+              AND status = 'settled' 
+              AND payment_type = ?
+          `).get(matchable, mLabel);
+          const count = countRow?.count || 0;
+          if (count >= limit) {
+            continue; // Skip this plan
+          }
+        }
+        activePlans.push(plan);
+      }
+
+      if (activePlans.length === 0) {
+        await msg.reply("⚠️ Milestone payment plans are either completed or unavailable. Please pay the remaining balance in full.");
+        return;
+      }
+
+      session.paymentContext.activePlans = activePlans;
       const totalBalance = session.paymentContext.totalBalance;
 
       let milestoneMsg = `💳 *Select Milestone Payment*\n\n`;
-      installmentPlans.forEach((plan, index) => {
+      activePlans.forEach((plan, index) => {
         const amt = Math.round((plan.percent / 100) * totalBalance);
         milestoneMsg += `Reply *${index + 1}* for *${plan.label}* — ${plan.percent}% (₦${amt.toLocaleString('en-NG')})\n`;
       });
-      milestoneMsg += `Reply *9* for *Custom Amount*\n\n`;
+      if (allowCustom) {
+        milestoneMsg += `Reply *9* for *Custom Amount*\n\n`;
+      } else {
+        milestoneMsg += `\n`;
+      }
       milestoneMsg += `_Reply 0 to return to main menu_`;
 
       session.state = STATE.AWAITING_PARTIAL_PLAN;
@@ -1127,15 +1183,20 @@ async function handleMessage(msg) {
       return;
     }
 
+    const activePlans = session.paymentContext.activePlans || [];
     const db = database.getDb();
-    let installmentPlans = [];
+    let allowCustom = true;
     try {
       const settingsRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'fee_settings'`).get();
       const settings = settingsRow ? JSON.parse(settingsRow.value) : {};
-      installmentPlans = settings.installment_plans || [];
+      allowCustom = settings.allow_custom_payments !== false;
     } catch (_) {}
 
     if (numericInput === 9) {
+      if (!allowCustom) {
+        await msg.reply("⚠️ Custom payment amounts are disabled. Please select one of the defined milestone plans.");
+        return;
+      }
       session.state = STATE.AWAITING_CUSTOM_AMOUNT;
       setSession(matchable, session);
       await msg.reply(`💳 *Custom Payment Amount*\n\nPlease enter the exact amount you wish to pay in Naira (e.g. *15000*):`);
@@ -1143,10 +1204,10 @@ async function handleMessage(msg) {
     }
 
     const selectedIndex = numericInput - 1;
-    const plan = installmentPlans[selectedIndex];
+    const plan = activePlans[selectedIndex];
 
     if (!plan) {
-      await msg.reply(`Please reply with a number from 1 to ${installmentPlans.length}, 9 for Custom, or 0 to cancel.`);
+      await msg.reply(`Please reply with a number from 1 to ${activePlans.length}, 9 for Custom, or 0 to cancel.`);
       return;
     }
 
