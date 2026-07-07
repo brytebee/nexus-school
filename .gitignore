@@ -14,3 +14,21 @@ build/
 
 public_shell/android/gradle.properties
 public_shell/android/local.properties
+
+# ── IDE & Tool Artifacts (never commit) ───────────────────────────────────────
+.aider*
+**/.idea/
+*.nexpack
+
+# ── Electron build outputs ────────────────────────────────────────────────────
+public_shell/electron/dist/
+public_shell/electron/test-results/
+public_shell/electron/tests/e2e/videos/
+
+# ── Scratch / debug files ─────────────────────────────────────────────────────
+raw_jsons/
+fix_index.py
+test_syntax.js
+nexus-app-simulator.html
+nexpack-builder.js
+public_shell/electron/release/
