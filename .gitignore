@@ -12,3 +12,5 @@ build/
 .idea/
 *.jks
 
+public_shell/android/gradle.properties
+public_shell/android/local.properties
