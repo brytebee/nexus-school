@@ -1107,10 +1107,18 @@ ipcMain.handle('fees:print-receipt', async (event, { txRef, studentId, format })
 
     printWindow = new BrowserWindow({
         show: false,
+        width: format === 'thermal' ? 400 : 850,
+        height: 850,
+        title: "Receipt Print Preview",
+        autoHideMenuBar: true,
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false
         }
+    });
+
+    printWindow.on('closed', () => {
+        printWindow = null;
     });
 
     printWindow.loadFile(path.join(__dirname, 'receipt-print.html'));
@@ -1124,6 +1132,8 @@ ipcMain.handle('fees:print-receipt', async (event, { txRef, studentId, format })
 
 ipcMain.on('print:ready-to-print', () => {
     if (printWindow) {
+        printWindow.show();
+        printWindow.focus();
         printWindow.webContents.print({
             silent: false,
             printBackground: true,
@@ -1131,10 +1141,12 @@ ipcMain.on('print:ready-to-print', () => {
         }, (success, errorType) => {
             if (!success) {
                 console.warn('[Print Hub] Local print dialog canceled/failed:', errorType);
-            }
-            if (printWindow) {
-                printWindow.destroy();
-                printWindow = null;
+            } else {
+                // Only destroy the preview window automatically on successful print
+                if (printWindow) {
+                    printWindow.destroy();
+                    printWindow = null;
+                }
             }
         });
     }
