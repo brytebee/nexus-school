@@ -1036,9 +1036,10 @@ ipcMain.handle('fees:print-receipt', async (event, { txRef, studentId, format })
         return { ok: false, error: 'Transaction record not found.' };
     }
 
-    const sRow = db.prepare("SELECT name, class_name FROM students WHERE id = ?").get(studentId);
+    const sRow = db.prepare("SELECT name, class_name, parent_email FROM students WHERE id = ?").get(studentId);
     const studentName = sRow?.name || "Student";
     const studentClass = sRow?.class_name || "—";
+    const parentEmail = sRow?.parent_email || "—";
 
     const session = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(txRef);
     const amountPaid = tx.amount;
@@ -1090,6 +1091,7 @@ ipcMain.handle('fees:print-receipt', async (event, { txRef, studentId, format })
         schoolLogoB64,
         studentName,
         studentClass,
+        parentEmail,
         academicSession: tx.academic_session,
         term: tx.term,
         reference: txRef,
@@ -1383,9 +1385,10 @@ async function sendBrandedReceiptHelper(db, ref, session) {
   const term = termConfig.term;
 
   const firstStudentId = studentIds[0];
-  const sRow = db.prepare("SELECT name, class_name FROM students WHERE id = ?").get(firstStudentId);
+  const sRow = db.prepare("SELECT name, class_name, parent_email FROM students WHERE id = ?").get(firstStudentId);
   const studentName = sRow?.name || "Student";
   const studentClass = sRow?.class_name || "—";
+  const parentEmail = sRow?.parent_email || "—";
 
   const receiptRecords = [];
   for (const studentId of studentIds) {
@@ -1426,6 +1429,7 @@ async function sendBrandedReceiptHelper(db, ref, session) {
     schoolLogoB64,
     studentName,
     studentClass,
+    parentEmail,
     academicSession,
     term,
     reference: ref,

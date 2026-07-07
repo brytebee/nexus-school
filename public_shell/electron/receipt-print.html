@@ -286,7 +286,8 @@
 
       if (data.schoolLogoB64 && format === 'a4') {
         const logo = document.getElementById('logo-img');
-        logo.src = `data:image/png;base64,${data.schoolLogoB64}`;
+        const hasPrefix = data.schoolLogoB64.startsWith('data:');
+        logo.src = hasPrefix ? data.schoolLogoB64 : `data:image/png;base64,${data.schoolLogoB64}`;
         logo.style.display = 'block';
       }
 
@@ -303,7 +304,8 @@
             <div class="meta-content">
               <strong>${data.studentName}</strong><br>
               Class: ${data.studentClass}<br>
-              Session: ${data.academicSession} · Term: ${data.term}
+              Session: ${data.academicSession} · Term: ${data.term}<br>
+              Email: ${data.parentEmail || '—'}
             </div>
           </div>
           <div>
@@ -328,6 +330,7 @@
         metaContainer.innerHTML = `
           <div class="meta-item"><span class="meta-title">Student:</span><span>${data.studentName}</span></div>
           <div class="meta-item"><span class="meta-title">Class:</span><span>${data.studentClass}</span></div>
+          <div class="meta-item"><span class="meta-title">Email:</span><span>${data.parentEmail || '—'}</span></div>
           <div class="meta-item"><span class="meta-title">Term:</span><span>${data.term} (${data.academicSession})</span></div>
           <div class="meta-item"><span class="meta-title">Ref:</span><span>${data.reference}</span></div>
           <div class="meta-item"><span class="meta-title">Date:</span><span>${data.paymentDate || '—'}</span></div>

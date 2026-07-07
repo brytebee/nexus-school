@@ -69,7 +69,8 @@ function generateReceiptPdf(data) {
       doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text(data.studentName || "Student Name", 40, infoY + 15);
       doc.fontSize(9).font('Helvetica').fillColor('#475569')
          .text(`Class: ${data.studentClass || "—"}`, 40, infoY + 30)
-         .text(`Session: ${data.academicSession || "—"} | Term: ${data.term || "—"}`, 40, infoY + 43);
+         .text(`Session: ${data.academicSession || "—"} | Term: ${data.term || "—"}`, 40, infoY + 43)
+         .text(`Email: ${data.parentEmail || "—"}`, 40, infoY + 56);
 
       // Right Column: Payment Details
       doc.fontSize(10).font('Helvetica-Bold').fillColor('#64748b').text('TRANSACTION DETAILS:', 320, infoY);
