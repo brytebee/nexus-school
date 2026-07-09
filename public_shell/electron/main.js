@@ -11,7 +11,7 @@ const crypto = require("crypto");
 const os = require("os");
 const dgram = require("dgram");
 const Handlebars = require("handlebars");
-const { database, server, reports } = require("@nexus/engine");
+const { database, server, reports, resultDispatcher } = require("@nexus/engine");
 const scholar = require("@nexus/engine/src/scholar");
 const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, logActivity,
         handleCSVUpload, handleGradesCSVUpload, handleAttendanceCSVUpload, handleClassesCSVUpload,
@@ -28,7 +28,7 @@ const feeCalculator = require("./src/lib/fee-calculator");
 const paystackService = require("./paystack-service.js");
 const { toDisplayTier } = require("./src/tierDisplay.js");
 const receiptGenerator = require('./receipt-generator.js');
-const resultDispatcher = require("../../private_engine/src/result-dispatcher");
+
 
 
 // Set app name BEFORE createWindow so Menu.buildFromTemplate picks it up correctly
