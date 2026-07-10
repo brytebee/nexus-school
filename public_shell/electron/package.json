@@ -95,7 +95,7 @@
           ]
         }
       ],
-      "icon": "assets/icon.png",
+      "icon": "assets/icons",
       "category": "Education",
       "maintainer": "Nexus Infrastructure Ltd <support@nexusos.com.ng>",
       "synopsis": "High-End School Management System"
