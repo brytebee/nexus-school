@@ -722,23 +722,35 @@ ipcMain.handle('auth:change-pin', (event, { adminId, newPin, authType }) => {
 });
 
 // auth:create-admin — Super-admins can add new staff accounts
-ipcMain.handle('auth:create-admin', (event, { username, pin, roleLevel, displayName, phone, question, answer }) => {
+ipcMain.handle('auth:create-admin', (event, { username, pin, authType, roleLevel, displayName, phone, question, answer }) => {
     try {
         const db = database.getDb();
-        if (!username?.trim() || !pin?.trim()) return { ok: false, error: 'Username and PIN are required.' };
+        const type = authType === 'password' ? 'password' : 'pin';
+        const secretName = type === 'password' ? 'password' : 'PIN';
+
+        if (!username?.trim() || !pin?.trim()) {
+            return { ok: false, error: `Username and ${secretName} are required.` };
+        }
         const exists = db.prepare('SELECT id FROM admin_users WHERE username = ?').get(username.trim());
         if (exists) return { ok: false, error: `Username "${username.trim()}" is already taken.` };
-        if (pin.trim().length < 4) return { ok: false, error: 'PIN must be at least 4 characters.' };
+
+        if (type === 'pin') {
+            if (pin.trim().length < 4) return { ok: false, error: 'PIN must be at least 4 digits.' };
+            if (!/^\d+$/.test(pin.trim())) return { ok: false, error: 'PIN must contain digits only.' };
+        } else {
+            if (pin.trim().length < 6) return { ok: false, error: 'Password must be at least 6 characters.' };
+        }
+
         const hash = Buffer.from(pin.trim()).toString('base64');
-        
         const qHash = answer?.trim() ? Buffer.from(answer.trim().toLowerCase()).toString('base64') : null;
         
         const result = db.prepare(`
             INSERT INTO admin_users (username, secret_hash, auth_type, role_level, phone, recovery_question, recovery_answer_hash) 
-            VALUES (?, ?, 'pin', ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         `).run(
             username.trim(), 
-            hash, 
+            hash,
+            type,
             parseInt(roleLevel) || 1, 
             phone ? phone.trim() : null, 
             question ? question.trim() : null, 
