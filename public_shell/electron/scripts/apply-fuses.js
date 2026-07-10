@@ -6,15 +6,16 @@ module.exports = async function(context) {
   const { appOutDir, packager } = context;
   const platform = packager.platform.name;
   
+  const execName = packager.executableName || packager.appInfo.productFilename;
   let executablePath;
   if (platform === 'mac') {
     const appBundlePath = path.join(appOutDir, `${packager.appInfo.productFilename}.app`);
     executablePath = path.join(appBundlePath, 'Contents', 'MacOS', packager.appInfo.productFilename);
   } else if (platform === 'windows') {
-    executablePath = path.join(appOutDir, `${packager.appInfo.productFilename}.exe`);
+    executablePath = path.join(appOutDir, `${execName}.exe`);
   } else {
     // Linux (e.g. AppImage / unpacked dir)
-    executablePath = path.join(appOutDir, packager.appInfo.productFilename);
+    executablePath = path.join(appOutDir, execName);
   }
 
   if (!fs.existsSync(executablePath)) {
