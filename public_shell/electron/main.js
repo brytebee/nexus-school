@@ -4784,9 +4784,14 @@ function createWindow() {
         loadOptions = { query: { firstRun: '1' } };
         console.log('[Boot] First-run detected — no admins exist. Loading admin setup screen.');
       }
-      // else: bootFile stays \'lock.html\' — normal PIN login
+      // else: bootFile stays 'lock.html' — normal PIN login
     } catch (e) {
-      console.warn('[Boot] Admin count check failed:', e.message);
+      // DB not initialised yet (fresh install) or table missing — always treat as first run.
+      // Showing the PIN lock screen here would be a dead end with no admin to log in with.
+      console.warn('[Boot] Admin count check failed (treating as first-run):', e.message);
+      bootFile = 'dist/renderer.html';
+      loadOptions = { query: { firstRun: '1' } };
+      console.log('[Boot] Defaulting to admin setup screen.');
     }
   }
   mainWindow.loadFile(bootFile, loadOptions);
