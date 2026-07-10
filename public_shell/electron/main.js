@@ -5669,8 +5669,12 @@ function createWindow() {
     const sigBytes     = b64urlDecode(parts[1]);
     const pubKey = Buffer.from(NEXUS_PUBLIC_KEY_HEX, 'hex');
     if (pubKey.length !== 32) throw new Error('Public key not configured');
-    // Use Node crypto to verify Ed25519 detached signature (raw 32-byte key — type must be 'ed25519', not 'spki')
-    const keyObj = crypto.createPublicKey({ key: pubKey, format: 'raw', type: 'ed25519' });
+    // Node.js crypto cannot infer the algorithm from a raw buffer alone.
+    // Wrap the 32-byte Ed25519 public key in its SPKI DER container before importing.
+    // SPKI prefix = ASN.1 SEQUENCE { SEQUENCE { OID 1.3.101.112 } BITSTRING }
+    const SPKI_ED25519_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
+    const spkiDer = Buffer.concat([SPKI_ED25519_PREFIX, pubKey]);
+    const keyObj = crypto.createPublicKey({ key: spkiDer, format: 'der', type: 'spki' });
     const valid = crypto.verify(null, payloadBytes, keyObj, sigBytes);
     if (!valid) throw new Error('Invalid signature');
     return JSON.parse(payloadBytes.toString('utf8'));
