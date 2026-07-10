@@ -4719,7 +4719,20 @@ function createWindow() {
   );
 
   // (app name already set at module scope)
-  // ── Boot: load lock screen first, unless developer bypass is active ────────
+
+  // ── Early license pre-check (determines boot file) ─────────────────────────
+  // Full verification (hardware binding, expiry, heartbeat) runs in Phase 4.
+  // This pre-check only detects a missing license file so the correct screen
+  // loads immediately — avoids the admin-login flash on first install.
+  {
+    const _earlyLicensePath = path.join(app.getPath('userData'), 'license.nexus');
+    if (!fs.existsSync(_earlyLicensePath)) {
+      licenseStatus = { locked: true, reason: 'no_license', message: 'NO_LICENSE' };
+      console.log('[License] No license file found — booting to activation screen.');
+    }
+  }
+
+  // ── Boot: load the appropriate screen based on license status ───────────────
   // Set DEV_AUTO_LOGIN=true in .env to skip auth during testing and go straight
   // to the main app. This flag must NEVER appear in production builds.
   if (process.env.DEV_TEST_LOCK) {
@@ -4759,6 +4772,22 @@ function createWindow() {
     }
     console.log(`[Auth] DEV_AUTO_LOGIN active — skipping lock screen. Logged in as: ${currentAdminSession.username || 'Developer'} (ID: ${currentAdminSession.id})`);
     bootFile = process.env.USE_REACT_UI === 'true' ? 'dist/renderer.html' : 'index.html';
+  } else {
+    // ── First-run detection: valid license but no admins created yet ───────────────
+    // Boot to the React AdminSetupScreen instead of the PIN login screen.
+    // Once the admin is created, the screen calls app:load-lock to continue.
+    try {
+      const db = database.getDb();
+      const adminCount = db.prepare('SELECT COUNT(*) as c FROM admin_users').get().c;
+      if (adminCount === 0) {
+        bootFile = 'dist/renderer.html';
+        loadOptions = { query: { firstRun: '1' } };
+        console.log('[Boot] First-run detected — no admins exist. Loading admin setup screen.');
+      }
+      // else: bootFile stays \'lock.html\' — normal PIN login
+    } catch (e) {
+      console.warn('[Boot] Admin count check failed:', e.message);
+    }
   }
   mainWindow.loadFile(bootFile, loadOptions);
 
@@ -5526,14 +5555,17 @@ function createWindow() {
   // To rotate: regenerate keypair, update this hex, re-issue all licenses.
   const NEXUS_PUBLIC_KEY_HEX = process.env.NEXUS_LICENSE_PUBLIC_KEY ||
     '3a963a04b3da96bd402eb5d8a4ffd200e8c695f9fa4633c789649fa188db0daa'; // generated 2026-05-19
-
-  // ── Nigerian Secondary School Calendar (offline expiry — must match nexus-api/src/lib/calendar.ts) ──
+  // ── Nigerian Secondary School Calendar ─────────────────────────────────────
+  // ⚠️  MUST STAY IN SYNC WITH nexusos/src/lib/calendar.ts
+  // When adding a new session here, add it there too (and vice versa).
   const NIGERIAN_CALENDAR = {
     '2024/2025': { T1:{ start:'2024-09-09', end:'2024-12-14' }, T2:{ start:'2025-01-06', end:'2025-04-05' }, T3:{ start:'2025-04-28', end:'2025-07-19' } },
     '2025/2026': { T1:{ start:'2025-09-08', end:'2025-12-13' }, T2:{ start:'2026-01-05', end:'2026-04-04' }, T3:{ start:'2026-04-27', end:'2026-07-18' } },
     '2026/2027': { T1:{ start:'2026-09-07', end:'2026-12-12' }, T2:{ start:'2027-01-04', end:'2027-04-03' }, T3:{ start:'2027-04-26', end:'2027-07-17' } },
+    '2027/2028': { T1:{ start:'2027-09-06', end:'2027-12-11' }, T2:{ start:'2028-01-03', end:'2028-04-01' }, T3:{ start:'2028-04-24', end:'2028-07-15' } },
   };
   const GRACE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days — matches calendar.ts
+
 
   function getTermWindow(key) {
     const [session, term] = key.split('-');
@@ -5851,6 +5883,17 @@ function createWindow() {
     const portalBase = process.env.NEXUSOS_PORTAL_URL || 'https://nexusos.com.ng/portal';
     shell.openExternal(`${portalBase}/activate?hwid=${encodeURIComponent(hardwareId)}`);
     return { ok: true };
+  });
+
+  // ── Relaunch — clean restart after license import so Phase 4 re-runs ─────────
+  ipcMain.handle('app:relaunch', () => {
+    app.relaunch();
+    app.exit(0);
+  });
+
+  // ── Load lock screen — called by AdminSetupScreen after first admin is created ──
+  ipcMain.handle('app:load-lock', () => {
+    if (mainWindow) mainWindow.loadFile('lock.html');
   });
 
 

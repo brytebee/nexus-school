@@ -669,50 +669,31 @@
           message: "The license file on this device appears to be tampered with or corrupted.",
           buttonText: "Contact Support",
           buttonUrl: "mailto:sch-support@nexusos.com.ng?subject=License%20Integrity%20Error&body=Support%20Code:%20TAMPERED",
-          icon: "🚨",
-          color: "#FF5C5C",
-          bg: "rgba(255,92,92,0.1)",
-          border: "rgba(255,92,92,0.3)"
+          icon: "🚨", color: "#FF5C5C", bg: "rgba(255,92,92,0.1)", border: "rgba(255,92,92,0.3)"
         },
         expired: {
           title: "License Expired",
-          message: "Your subscription has expired. Please renew to continue using the software.",
-          buttonText: "Renew Subscription",
-          buttonUrl: "https://nexusos.com.ng/portal",
-          icon: "⏳",
-          color: "#F59E0B",
-          bg: "rgba(245,158,11,0.1)",
-          border: "rgba(245,158,11,0.3)"
+          message: "Your subscription has expired. Import your renewal license file or visit the portal to renew.",
+          icon: "⏳", color: "#F59E0B", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.3)"
         },
         revoked: {
           title: "Device Revoked",
           message: "This device's synchronization access has been revoked by the administrator.",
           buttonText: "Contact Support",
           buttonUrl: "mailto:sch-support@nexusos.com.ng?subject=Device%20Revoked&body=Support%20Code:%20REVOKED",
-          icon: "🚨",
-          color: "#FF5C5C",
-          bg: "rgba(255,92,92,0.1)",
-          border: "rgba(255,92,92,0.3)"
+          icon: "🚨", color: "#FF5C5C", bg: "rgba(255,92,92,0.1)", border: "rgba(255,92,92,0.3)"
         },
         invalid: {
-          title: "No License Found",
-          message: "No valid license file was found on this system. Please activate your license.",
-          buttonText: "Contact Support",
-          buttonUrl: "mailto:sch-support@nexusos.com.ng?subject=No%20License%20Found&body=Support%20Code:%20INVALID",
-          icon: "🔒",
-          color: "#FF5C5C",
-          bg: "rgba(255,92,92,0.1)",
-          border: "rgba(255,92,92,0.3)"
+          title: "License Required",
+          message: "No valid license file was found. Import your license file or activate online to get started.",
+          icon: "🔑", color: "#00E5FF", bg: "rgba(0,229,255,0.1)", border: "rgba(0,229,255,0.3)"
         },
         trial_end: {
           title: "Trial Ended",
           message: "Your trial period has ended. Please upgrade to a payment plan to continue.",
           buttonText: "Upgrade to Payment Plan",
           buttonUrl: "https://nexusos.com.ng/portal",
-          icon: "🗓️",
-          color: "#F59E0B",
-          bg: "rgba(245,158,11,0.1)",
-          border: "rgba(245,158,11,0.3)"
+          icon: "🗓️", color: "#F59E0B", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.3)"
         }
       };
 
@@ -721,30 +702,68 @@
         message: "Access to the system is temporarily restricted.",
         buttonText: "Contact Support",
         buttonUrl: "mailto:sch-support@nexusos.com.ng",
-        icon: "🔒",
-        color: "#00E5FF",
-        bg: "rgba(0,229,255,0.1)",
-        border: "rgba(0,229,255,0.3)"
+        icon: "🔒", color: "#00E5FF", bg: "rgba(0,229,255,0.1)", border: "rgba(0,229,255,0.3)"
       };
+
+      const isActivationScreen = (reasonCode === 'invalid' || reasonCode === 'expired');
+
+      const actionsHtml = isActivationScreen ? `
+        <button id="lock-import-btn" class="key" style="width:100%;height:50px;background:${reason.bg};border:1px solid ${reason.border};color:${reason.color};font-weight:700;font-size:14px;margin-top:10px;gap:8px;display:flex;align-items:center;justify-content:center;">
+          📂&nbsp; Import License File
+        </button>
+        <button id="lock-activate-btn" class="key" style="width:100%;height:44px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.45);font-size:13px;margin-top:8px;">
+          🌐&nbsp; Activate Online
+        </button>
+        <p style="font-size:11px;color:rgba(255,255,255,0.25);margin-top:14px;line-height:1.5;">
+          Don't have a license? Visit <span style="color:${reason.color};cursor:pointer;" id="portal-link">nexusos.com.ng/portal</span>
+        </p>
+      ` : `
+        <button id="lock-action-btn" class="key" style="width:100%;height:48px;background:${reason.bg};border:1px solid ${reason.border};color:${reason.color};font-weight:600;font-size:14px;margin-top:10px;">
+          ${reason.buttonText}
+        </button>
+      `;
 
       const card = document.querySelector('.admin-card');
       card.innerHTML = `
-        <div style="text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px;">
-          <div style="font-size: 56px; filter: drop-shadow(0 0 15px ${reason.color}44); line-height: 1;">${reason.icon}</div>
-          <h2 style="font-size: 18px; font-weight: 700; color: #fff; letter-spacing: 0.05em; text-transform: uppercase; margin-top: 8px;">${reason.title}</h2>
-          <div class="divider" style="margin: 8px 0; background: var(--border);"></div>
-          <p style="font-size: 13px; color: rgba(255,255,255,0.75); line-height: 1.6; padding: 0 10px; margin-bottom: 8px;">${reason.message}</p>
-          <button id="lock-action-btn" class="key" style="width: 100%; height: 48px; background: ${reason.bg}; border: 1px solid ${reason.border}; color: ${reason.color}; font-weight: 600; font-size: 14px; margin-top: 10px;">
-            ${reason.buttonText}
-          </button>
+        <div style="text-align:center;display:flex;flex-direction:column;align-items:center;gap:16px;">
+          <div style="font-size:56px;filter:drop-shadow(0 0 15px ${reason.color}44);line-height:1;">${reason.icon}</div>
+          <h2 style="font-size:18px;font-weight:700;color:#fff;letter-spacing:0.05em;text-transform:uppercase;margin-top:8px;">${reason.title}</h2>
+          <div class="divider" style="margin:8px 0;background:var(--border);width:100%;"></div>
+          <p style="font-size:13px;color:rgba(255,255,255,0.75);line-height:1.6;padding:0 10px;margin-bottom:8px;">${reason.message}</p>
+          ${actionsHtml}
         </div>
       `;
-
       card.style.borderColor = reason.color + '44';
 
-      document.getElementById('lock-action-btn').onclick = () => {
-        api.openExternal(reason.buttonUrl);
-      };
+      if (isActivationScreen) {
+        document.getElementById('portal-link').onclick = () => api.openExternal('https://nexusos.com.ng/portal');
+
+        const importBtn = document.getElementById('lock-import-btn');
+        importBtn.onclick = async () => {
+          importBtn.innerHTML = '⏳&nbsp; Selecting file...';
+          importBtn.disabled = true;
+          try {
+            const result = await api.invoke('license:import');
+            if (result.ok) {
+              importBtn.innerHTML = '✅&nbsp; Imported! Restarting...';
+              await api.invoke('app:relaunch');
+            } else if (result.reason === 'cancelled') {
+              importBtn.innerHTML = '📂&nbsp; Import License File';
+              importBtn.disabled = false;
+            } else {
+              importBtn.innerHTML = '❌&nbsp; Import failed — try again';
+              setTimeout(() => { importBtn.innerHTML = '📂&nbsp; Import License File'; importBtn.disabled = false; }, 3000);
+            }
+          } catch(e) {
+            importBtn.innerHTML = '📂&nbsp; Import License File';
+            importBtn.disabled = false;
+          }
+        };
+
+        document.getElementById('lock-activate-btn').onclick = () => api.invoke('license:activate-online');
+      } else {
+        document.getElementById('lock-action-btn').onclick = () => api.openExternal(reason.buttonUrl);
+      }
     }
 
     // ── Boot ──────────────────────────────────────────────────────
@@ -755,7 +774,22 @@
     } else {
       loadBranding();
       loadAdmins();
+      // Fallback listener: handles 'expired' and any locked state where Phase 4
+      // runs after loadFile() (e.g. valid license file exists but is expired —
+      // no early pre-check covers that case). Renders the correct screen on IPC.
+      api.onLicenseStatus((status) => {
+        if (status && status.locked && status.reason) {
+          const reasonMap = {
+            no_license: 'invalid', expired: 'expired', revoked: 'revoked',
+            trial_end: 'trial_end', tampered: 'tampered',
+            invalid_tier: 'tampered', hardware_mismatch: 'tampered', internal_error: 'tampered'
+          };
+          const mappedHash = reasonMap[status.reason];
+          if (mappedHash) { loadBranding(); renderLockScreen(mappedHash); }
+        }
+      });
     }
+
   </script>
 </body>
 </html>
