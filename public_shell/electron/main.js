@@ -5704,14 +5704,13 @@ function createWindow() {
     const userDataPath = app.getPath('userData');
     const licensePath  = path.join(userDataPath, 'license.nexus');
     const sysConfPath  = path.join(userDataPath, 'nexus_sys.json');
+    const db = database.getDb();
 
     // Developer Override
     if (process.env.DEV_MODE === 'true') {
       const DEV_VALID_TIERS = ['Standalone', 'Silver', 'Gold', 'Diamond'];
       const devTier = process.env.DEV_MOCK_TIER || 'Diamond';
       if (!DEV_VALID_TIERS.includes(devTier)) {
-        // Unknown tier even in dev → lock so the locked-screen UI can be tested
-        // and the bypass path cannot be exploited in a leaked dev build.
         console.error(`[Security] DEV_MOCK_TIER '${devTier}' is not a recognised tier — locking.`);
         licenseStatus = {
           locked: true,
@@ -5725,7 +5724,7 @@ function createWindow() {
         setSchoolLicense({ payload: JSON.stringify(licenseStatus) });
       }
     } else {
-      // 1. Anti-rollback guard
+      // 1. Anti-rollback guard (Dual-Store clock check)
       let lastRunTs = 0;
       let sysConf   = {};
       if (fs.existsSync(sysConfPath)) {
@@ -5733,11 +5732,36 @@ function createWindow() {
         lastRunTs            = sysConf.last_run_timestamp || 0;
         heartbeatCache       = sysConf.heartbeat_cache   || heartbeatCache;
       }
-      if (Date.now() < (lastRunTs - 60_000)) {
-        licenseStatus = { locked: true, message: 'System clock tampering detected. Contact your administrator.' };
+
+      // Query SQLite for DB-sourced last run timestamp
+      let dbLastRun = 0;
+      try {
+        const row = db.prepare("SELECT value FROM system_settings WHERE key = '_sys_last_run'").get();
+        if (row && row.value) dbLastRun = parseInt(row.value, 10) || 0;
+      } catch (e) {
+        console.warn('[Security] Could not query _sys_last_run from SQLite:', e.message);
+      }
+
+      const effectiveLastRun = Math.max(lastRunTs, dbLastRun);
+
+      if (Date.now() < (effectiveLastRun - 60_000)) {
+        licenseStatus = { locked: true, message: 'System clock tampering detected. Contact your administrator.', reason: 'tampered' };
       } else {
         sysConf.last_run_timestamp = Date.now();
-        fs.writeFileSync(sysConfPath, JSON.stringify(sysConf));
+        try {
+          fs.writeFileSync(sysConfPath, JSON.stringify(sysConf, null, 2));
+          db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_last_run', ?)").run(String(Date.now()));
+        } catch (e) {
+          console.error('[Security] Failed to write sys timestamp stores:', e.message);
+        }
+      }
+
+      // 1b. Persistent server revocation check (Gold/Diamond/etc. lockout after 30-min window)
+      if (!licenseStatus.locked && sysConf.revoked_at) {
+        const elapsedRevocation = Date.now() - sysConf.revoked_at;
+        if (elapsedRevocation > 30 * 60 * 1000) {
+          licenseStatus = { locked: true, message: 'License revoked. Please contact support.', reason: 'revoked' };
+        }
       }
 
       // 2. License file check
@@ -5750,8 +5774,6 @@ function createWindow() {
             const payload = verifyNexusToken(token);
 
             // 2b. Tier allowlist — must be one of the four canonical values.
-            //     A valid Ed25519 signature with an unknown tier indicates either
-            //     a rogue signing key or a future attack vector; lock immediately.
             const VALID_TIERS = ['standalone', 'silver', 'gold', 'diamond'];
             const normalisedTier = (payload.tier || '').toLowerCase();
             if (!VALID_TIERS.includes(normalisedTier)) {
@@ -5778,16 +5800,64 @@ function createWindow() {
 
             } else {
               if (normalisedTier === 'standalone') {
-                licenseStatus = {
-                  locked:          false,
-                  message:         'VALID',
-                  tier:            toDisplayTier(normalisedTier),
-                  student_count:   payload.student_cap,
-                  licensed_terms:  payload.licensed_terms,
-                  needs_activation: false,
-                };
-                setSchoolLicense({ payload: JSON.stringify(payload) });
-                console.log(`[License] ✅ Standalone (perpetual) — ${payload.student_cap} students`);
+                // Layer 5: Standalone maximum 5-year validity check
+                if (payload.valid_until) {
+                  const expiryDate = new Date(payload.valid_until);
+                  if (expiryDate.getTime() < Date.now()) {
+                    licenseStatus = {
+                      locked: true,
+                      message: 'Standalone license has reached its 5-year maximum lifespan. Please renew.',
+                      reason: 'expired',
+                      tier: 'Standalone'
+                    };
+                  }
+                }
+
+                if (!licenseStatus.locked) {
+                  licenseStatus = {
+                    locked:          false,
+                    message:         'VALID',
+                    tier:            toDisplayTier(normalisedTier),
+                    student_count:   payload.student_cap,
+                    licensed_terms:  payload.licensed_terms,
+                    needs_activation: false,
+                  };
+                  setSchoolLicense({ payload: JSON.stringify(payload) });
+                  console.log(`[License] ✅ Standalone — ${payload.student_cap} students`);
+
+                  // Layer 3: Annual checkin scheduler (requires connection every 365 + 30 days)
+                  let lastCheckin = sysConf.standalone_last_checkin;
+                  if (!lastCheckin) {
+                    try {
+                      const row = db.prepare("SELECT value FROM system_settings WHERE key = '_sys_standalone_last_checkin'").get();
+                      if (row && row.value) lastCheckin = parseInt(row.value, 10);
+                    } catch (_) {}
+                  }
+
+                  if (!lastCheckin) {
+                    lastCheckin = Date.now();
+                    sysConf.standalone_last_checkin = lastCheckin;
+                    try {
+                      fs.writeFileSync(sysConfPath, JSON.stringify(sysConf, null, 2));
+                      db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_standalone_last_checkin', ?)").run(String(lastCheckin));
+                    } catch (_) {}
+                  }
+
+                  const timeSinceCheckin = Date.now() - lastCheckin;
+                  const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+                  const GRACE_30_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+                  if (timeSinceCheckin > (ONE_YEAR_MS + GRACE_30_DAYS_MS)) {
+                    licenseStatus = {
+                      locked: true,
+                      message: 'Standalone license annual check-in required. Please connect to the internet to verify your license.',
+                      reason: 'expired',
+                      tier: 'Standalone'
+                    };
+                  } else {
+                    _scheduleStandaloneCheckin(token, hardwareId, payload.school_id, sysConfPath, lastCheckin);
+                  }
+                }
               } else {
                 // 5. Calendar-based expiry (offline — Silver always uses this)
                 const calStatus = checkCalendarStatus(payload.licensed_terms || []);
@@ -5807,29 +5877,74 @@ function createWindow() {
                     tier: toDisplayTier(normalisedTier),
                   };
                 } else {
-                  const isGrace = effectiveStatus === 'grace';
-                  let latestEnd = 0;
-                  const windows = (payload.licensed_terms || []).map(getTermWindow).filter(Boolean);
-                  for (const w of windows) {
-                    const e = new Date(w.end + 'T23:59:59Z').getTime();
-                    if (e > latestEnd) latestEnd = e;
-                  }
-                  licenseStatus = {
-                    locked:        false,
-                    message:       isGrace ? 'GRACE' : 'VALID',
-                    tier:          toDisplayTier(normalisedTier),
-                    student_count: payload.student_cap,
-                    licensed_terms: payload.licensed_terms,
-                    in_grace:      isGrace,
-                    grace_deadline: isGrace ? new Date(latestEnd + GRACE_MS).toISOString() : null,
-                    needs_activation: false,
-                  };
-                  setSchoolLicense({ payload: JSON.stringify(payload) });
-                  console.log(`[License] ✅ ${toDisplayTier(normalisedTier)} (${effectiveStatus}) — ${payload.student_cap} students`);
+                  // Layer 2: Silver One-Time Online Activation (30-day grace offline)
+                  if (normalisedTier === 'silver') {
+                    let activationToken = sysConf.silver_activation_token;
+                    if (!activationToken) {
+                      try {
+                        const row = db.prepare("SELECT value FROM system_settings WHERE key = '_sys_activation_token'").get();
+                        if (row && row.value) activationToken = row.value;
+                      } catch (_) {}
+                    }
 
-                  // 7. Schedule heartbeat for Gold/Diamond (non-blocking)
-                  if (tier === 'gold' || tier === 'diamond') {
-                    _scheduleHeartbeat(token, hardwareId, payload.school_id, sysConfPath);
+                    if (!activationToken) {
+                      let pendingStart = sysConf.silver_activation_pending_since;
+                      if (!pendingStart) {
+                        try {
+                          const row = db.prepare("SELECT value FROM system_settings WHERE key = '_sys_activation_pending_since'").get();
+                          if (row && row.value) pendingStart = parseInt(row.value, 10);
+                        } catch (_) {}
+                      }
+
+                      if (!pendingStart) {
+                        pendingStart = Date.now();
+                        sysConf.silver_activation_pending_since = pendingStart;
+                        try {
+                          fs.writeFileSync(sysConfPath, JSON.stringify(sysConf, null, 2));
+                          db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_activation_pending_since', ?)").run(String(pendingStart));
+                        } catch (_) {}
+                      }
+
+                      const elapsedDays = (Date.now() - pendingStart) / (24 * 60 * 60 * 1000);
+                      if (elapsedDays > 30) {
+                        licenseStatus = {
+                          locked: true,
+                          message: 'Silver license online activation required. Please connect to the internet to complete setup.',
+                          reason: 'expired',
+                          tier: 'Silver'
+                        };
+                        effectiveStatus = 'expired';
+                      } else {
+                        _scheduleSilverActivation(token, hardwareId, payload.school_id, sysConfPath);
+                      }
+                    }
+                  }
+
+                  if (effectiveStatus !== 'expired') {
+                    const isGrace = effectiveStatus === 'grace';
+                    let latestEnd = 0;
+                    const windows = (payload.licensed_terms || []).map(getTermWindow).filter(Boolean);
+                    for (const w of windows) {
+                      const e = new Date(w.end + 'T23:59:59Z').getTime();
+                      if (e > latestEnd) latestEnd = e;
+                    }
+                    licenseStatus = {
+                      locked:        false,
+                      message:       isGrace ? 'GRACE' : 'VALID',
+                      tier:          toDisplayTier(normalisedTier),
+                      student_count: payload.student_cap,
+                      licensed_terms: payload.licensed_terms,
+                      in_grace:      isGrace,
+                      grace_deadline: isGrace ? new Date(latestEnd + GRACE_MS).toISOString() : null,
+                      needs_activation: false,
+                    };
+                    setSchoolLicense({ payload: JSON.stringify(payload) });
+                    console.log(`[License] ✅ ${toDisplayTier(normalisedTier)} (${effectiveStatus}) — ${payload.student_cap} students`);
+
+                    // 7. Schedule heartbeat for Gold/Diamond (non-blocking)
+                    if (tier === 'gold' || tier === 'diamond') {
+                      _scheduleHeartbeat(token, hardwareId, payload.school_id, sysConfPath);
+                    }
                   }
                 }
               }
@@ -5837,7 +5952,6 @@ function createWindow() {
           } catch (verifyErr) {
             console.error('[License] Verification error:', verifyErr.message);
             licenseStatus = { locked: true, message: 'License file is corrupted or tampered.', reason: 'tampered' };
-
           }
         }
       }
@@ -5860,14 +5974,40 @@ function createWindow() {
         });
         if (!res.ok) return;
         const data = await res.json();
-        // Cache the heartbeat result
+        
         let sysConf = {};
         if (fs.existsSync(sysConfPath)) { try { sysConf = JSON.parse(fs.readFileSync(sysConfPath,'utf-8')); } catch {} }
+        
         sysConf.heartbeat_cache = { valid_until: data.heartbeat_valid_until || 0, term_status: data.term_status || 'active' };
-        fs.writeFileSync(sysConfPath, JSON.stringify(sysConf));
-        // If server says expired/revoked, show banner but don't hard-lock mid-session
-        if (!data.valid && mainWindow) {
-          mainWindow.webContents.send('license-status', { ...licenseStatus, server_revoked: true });
+        
+        if (!data.valid) {
+          // If server returned invalid (revoked), initialize revocation timestamp if not present
+          if (!sysConf.revoked_at) {
+            sysConf.revoked_at = Date.now();
+          }
+          fs.writeFileSync(sysConfPath, JSON.stringify(sysConf, null, 2));
+
+          if (mainWindow) {
+            mainWindow.webContents.send('license-status', { ...licenseStatus, server_revoked: true });
+            
+            // Hard lockout after 30 minutes
+            const elapsed = Date.now() - sysConf.revoked_at;
+            const delay = Math.max(0, (30 * 60 * 1000) - elapsed);
+            setTimeout(() => {
+              let freshConf = {};
+              if (fs.existsSync(sysConfPath)) { try { freshConf = JSON.parse(fs.readFileSync(sysConfPath,'utf-8')); } catch {} }
+              if (freshConf.revoked_at && mainWindow) {
+                licenseStatus = { locked: true, message: 'License revoked. Please contact support.', reason: 'revoked' };
+                mainWindow.loadFile('lock.html', { hash: 'revoked' });
+              }
+            }, delay);
+          }
+        } else {
+          // Clean revoked_at if it's currently valid again
+          if (sysConf.revoked_at) {
+            delete sysConf.revoked_at;
+          }
+          fs.writeFileSync(sysConfPath, JSON.stringify(sysConf, null, 2));
         }
       } catch { /* offline — use cached heartbeat */ }
     }
@@ -5875,6 +6015,103 @@ function createWindow() {
     setTimeout(doHeartbeat, 2 * 60 * 1000);
     // Weekly refresh
     setInterval(doHeartbeat, 7 * 24 * 60 * 60 * 1000);
+  }
+
+  // ── Silver License Activation helper (One-time online handshake) ─────────────
+  function _scheduleSilverActivation(token, hwId, schoolId, sysConfPath) {
+    const API_BASE = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
+    const db = database.getDb();
+    async function doActivate() {
+      try {
+        const res = await fetch(`${API_BASE}/api/license/activate-silver`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, hardware_id: hwId, school_id: schoolId }),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.ok && data.activation_token) {
+          let sysConf = {};
+          if (fs.existsSync(sysConfPath)) { try { sysConf = JSON.parse(fs.readFileSync(sysConfPath,'utf-8')); } catch {} }
+          sysConf.silver_activation_token = data.activation_token;
+          delete sysConf.silver_activation_pending_since;
+          fs.writeFileSync(sysConfPath, JSON.stringify(sysConf, null, 2));
+          try {
+            db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_activation_token', ?)").run(data.activation_token);
+            db.prepare("DELETE FROM system_settings WHERE key = '_sys_activation_pending_since'").run();
+          } catch (_) {}
+          console.log('[License] ✅ Silver license online activation successful.');
+        }
+      } catch (e) {
+        console.warn('[License] Silver activation check-in failed (retrying next boot):', e.message);
+      }
+    }
+    // Try after 1 minute
+    setTimeout(doActivate, 60 * 1000);
+  }
+
+  // ── Standalone Check-in helper (sends annual ping to check revocation) ──────────
+  function _scheduleStandaloneCheckin(token, hwId, schoolId, sysConfPath, lastCheckin) {
+    const API_BASE = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
+    const db = database.getDb();
+    const timeSinceCheckin = Date.now() - lastCheckin;
+    const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+    
+    // Only query server if we are near or past the 1-year mark
+    if (timeSinceCheckin < ONE_YEAR_MS) return;
+
+    async function doCheckin() {
+      try {
+        const res = await fetch(`${API_BASE}/api/license/validate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, hardware_id: hwId, school_id: schoolId }),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.valid) {
+          let sysConf = {};
+          if (fs.existsSync(sysConfPath)) { try { sysConf = JSON.parse(fs.readFileSync(sysConfPath,'utf-8')); } catch {} }
+          sysConf.standalone_last_checkin = Date.now();
+          fs.writeFileSync(sysConfPath, JSON.stringify(sysConf, null, 2));
+          try {
+            db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_standalone_last_checkin', ?)").run(String(Date.now()));
+          } catch (_) {}
+          console.log('[License] ✅ Standalone license annual check-in successful.');
+        } else {
+          // If server explicitly says license is invalid (revoked)
+          let sysConf = {};
+          if (fs.existsSync(sysConfPath)) { try { sysConf = JSON.parse(fs.readFileSync(sysConfPath,'utf-8')); } catch {} }
+          
+          if (!sysConf.revoked_at) {
+            sysConf.revoked_at = Date.now();
+          }
+          fs.writeFileSync(sysConfPath, JSON.stringify(sysConf, null, 2));
+
+          if (mainWindow) {
+            mainWindow.webContents.send('license-status', { ...licenseStatus, server_revoked: true });
+            
+            // Lock out after 30 minutes
+            const elapsed = Date.now() - sysConf.revoked_at;
+            const delay = Math.max(0, (30 * 60 * 1000) - elapsed);
+            setTimeout(() => {
+              let freshConf = {};
+              if (fs.existsSync(sysConfPath)) { try { freshConf = JSON.parse(fs.readFileSync(sysConfPath,'utf-8')); } catch {} }
+              if (freshConf.revoked_at && mainWindow) {
+                licenseStatus = { locked: true, message: 'License revoked. Please contact support.', reason: 'revoked' };
+                mainWindow.loadFile('lock.html', { hash: 'revoked' });
+              }
+            }, delay);
+          }
+        }
+      } catch (e) {
+        console.warn('[License] Standalone annual check-in failed (offline):', e.message);
+      }
+    }
+    // First check: 5 minutes after boot
+    setTimeout(doCheckin, 5 * 60 * 1000);
   }
 
   // ── Import license file (used by lock screen + About page) ───────────────────
