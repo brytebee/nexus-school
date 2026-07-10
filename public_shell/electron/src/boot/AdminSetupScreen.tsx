@@ -23,6 +23,7 @@ const SECURITY_QUESTIONS = [
 
 export function AdminSetupScreen() {
   const [step, setStep] = useState<Step>('credentials');
+  const [authType, setAuthType] = useState<'pin' | 'password'>('pin');
   const [form, setForm] = useState<FormState>({
     username: '', pin: '', confirmPin: '',
     phone: '', question: SECURITY_QUESTIONS[0], answer: '',
@@ -54,10 +55,18 @@ export function AdminSetupScreen() {
     const e: Partial<FormState> = {};
     if (!form.username.trim()) e.username = 'Name is required.';
     else if (form.username.trim().length < 2) e.username = 'Name must be at least 2 characters.';
-    if (!form.pin.trim()) e.pin = 'PIN is required.';
-    else if (form.pin.trim().length < 4) e.pin = 'PIN must be at least 4 digits.';
-    else if (!/^\d+$/.test(form.pin.trim())) e.pin = 'PIN must be digits only.';
-    if (form.pin !== form.confirmPin) e.confirmPin = 'PINs do not match.';
+
+    if (authType === 'pin') {
+      if (!form.pin.trim()) e.pin = 'PIN is required.';
+      else if (form.pin.trim().length < 4) e.pin = 'PIN must be at least 4 digits.';
+      else if (!/^\d+$/.test(form.pin.trim())) e.pin = 'PIN must be digits only.';
+      if (form.pin !== form.confirmPin) e.confirmPin = 'PINs do not match.';
+    } else {
+      if (!form.pin.trim()) e.pin = 'Password is required.';
+      else if (form.pin.trim().length < 6) e.pin = 'Password must be at least 6 characters.';
+      if (form.pin !== form.confirmPin) e.confirmPin = 'Passwords do not match.';
+    }
+    
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -79,6 +88,7 @@ export function AdminSetupScreen() {
       const result = await api.invoke('auth:create-admin', {
         username: form.username.trim(),
         pin: form.pin.trim(),
+        authType: authType,
         roleLevel: 9,
         displayName: form.username.trim(),
         phone: form.phone.trim() || null,
@@ -188,16 +198,58 @@ export function AdminSetupScreen() {
                 />
               </Field>
 
-              <Field label="PIN" hint="Numbers only, minimum 4 digits" error={errors.pin} style={{ marginTop: 20 }}>
+              {/* Authentication Type Selector */}
+              <div style={{ marginTop: 20 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.6)', marginBottom: 8, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                  Security Method
+                </label>
+                <div style={{
+                  display: 'flex', background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: 3, border: '1px solid rgba(255,255,255,0.08)'
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => { setAuthType('pin'); setErrors({}); }}
+                    style={{
+                      flex: 1, padding: '8px 0', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s',
+                      background: authType === 'pin' ? '#00E5FF' : 'transparent',
+                      color: authType === 'pin' ? '#000' : 'rgba(255,255,255,0.6)',
+                    }}
+                  >
+                    🔢 PIN Code
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setAuthType('password'); setErrors({}); }}
+                    style={{
+                      flex: 1, padding: '8px 0', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s',
+                      background: authType === 'password' ? '#00E5FF' : 'transparent',
+                      color: authType === 'password' ? '#000' : 'rgba(255,255,255,0.6)',
+                    }}
+                  >
+                    🔑 Password
+                  </button>
+                </div>
+              </div>
+
+              <Field
+                label={authType === 'pin' ? 'PIN' : 'Password'}
+                hint={authType === 'pin' ? 'Numbers only, minimum 4 digits' : 'Alphanumeric, minimum 6 characters'}
+                error={errors.pin}
+                style={{ marginTop: 20 }}
+              >
                 <div style={{ position: 'relative' }}>
                   <input
                     type={pinVisible ? 'text' : 'password'}
-                    inputMode="numeric"
-                    placeholder="••••"
+                    inputMode={authType === 'pin' ? 'numeric' : 'text'}
+                    placeholder={authType === 'pin' ? '••••' : 'Enter security password'}
                     value={form.pin}
                     onChange={set('pin')}
-                    maxLength={8}
-                    style={{ ...inputStyle(!!errors.pin), paddingRight: 44, letterSpacing: form.pin ? '0.3em' : 'normal' }}
+                    maxLength={authType === 'pin' ? 8 : 32}
+                    style={{
+                      ...inputStyle(!!errors.pin),
+                      paddingRight: 44,
+                      letterSpacing: (authType === 'pin' && form.pin && !pinVisible) ? '0.3em' : 'normal'
+                    }}
                   />
                   <button type="button" onClick={() => setPinVisible(v => !v)} style={{
                     position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
@@ -207,15 +259,18 @@ export function AdminSetupScreen() {
                 </div>
               </Field>
 
-              <Field label="Confirm PIN" error={errors.confirmPin} style={{ marginTop: 20 }}>
+              <Field label={authType === 'pin' ? 'Confirm PIN' : 'Confirm Password'} error={errors.confirmPin} style={{ marginTop: 20 }}>
                 <input
                   type={pinVisible ? 'text' : 'password'}
-                  inputMode="numeric"
-                  placeholder="••••"
+                  inputMode={authType === 'pin' ? 'numeric' : 'text'}
+                  placeholder={authType === 'pin' ? '••••' : 'Confirm security password'}
                   value={form.confirmPin}
                   onChange={set('confirmPin')}
-                  maxLength={8}
-                  style={{ ...inputStyle(!!errors.confirmPin), letterSpacing: form.confirmPin ? '0.3em' : 'normal' }}
+                  maxLength={authType === 'pin' ? 8 : 32}
+                  style={{
+                    ...inputStyle(!!errors.confirmPin),
+                    letterSpacing: (authType === 'pin' && form.confirmPin && !pinVisible) ? '0.3em' : 'normal'
+                  }}
                 />
               </Field>
 
