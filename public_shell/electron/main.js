@@ -20,7 +20,8 @@ const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, logActivit
 const address = require("address");
 const pulseBot     = require('./pulse-bot.js');
 const pulseExporter = require('./pulse-exporter.js');
-const receiptAnalysis = require('./receipt-analysis.js');
+let receiptAnalysis = null;
+try { receiptAnalysis = require('./receipt-analysis.js'); } catch (e) { console.warn('[receipt-analysis] Failed to load (canvas/pdf-parse unavailable):', e.message); }
 const express = require('express');
 const { Bonjour } = require('bonjour-service');
 const bonjour = new Bonjour();
