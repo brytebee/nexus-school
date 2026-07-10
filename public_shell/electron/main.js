@@ -5669,8 +5669,8 @@ function createWindow() {
     const sigBytes     = b64urlDecode(parts[1]);
     const pubKey = Buffer.from(NEXUS_PUBLIC_KEY_HEX, 'hex');
     if (pubKey.length !== 32) throw new Error('Public key not configured');
-    // Use Node crypto to verify Ed25519 detached signature
-    const keyObj = crypto.createPublicKey({ key: pubKey, format: 'raw', type: 'spki' });
+    // Use Node crypto to verify Ed25519 detached signature (raw 32-byte key — type must be 'ed25519', not 'spki')
+    const keyObj = crypto.createPublicKey({ key: pubKey, format: 'raw', type: 'ed25519' });
     const valid = crypto.verify(null, payloadBytes, keyObj, sigBytes);
     if (!valid) throw new Error('Invalid signature');
     return JSON.parse(payloadBytes.toString('utf8'));
