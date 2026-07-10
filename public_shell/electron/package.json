@@ -35,9 +35,8 @@
     "appId": "ng.nexusos.schoolos",
     "productName": "Nexus School OS",
     "copyright": "Copyright © 2026 Nexus Infrastructure Ltd.",
-    "npmRebuild": true,
+    "npmRebuild": false,
     "asar": true,
-    "asarIntegrity": true,
     "afterPack": "./scripts/apply-fuses.js",
     "asarUnpack": [
       "node_modules/better-sqlite3/**",

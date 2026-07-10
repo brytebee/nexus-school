@@ -30,6 +30,7 @@ module.exports = async function(context) {
       [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false, // Disable NODE_OPTIONS
       [FuseV1Options.EnableNodeCliInspectArguments]: false, // Disable --inspect
       [FuseV1Options.OnlyLoadAppFromAsar]: true, // Enforce loading from app.asar only
+      [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true, // Enforce ASAR integrity check
     });
     console.log('[Fuses] Security fuses successfully applied.');
   } catch (err) {
