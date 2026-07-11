@@ -35,7 +35,7 @@
     "appId": "ng.nexusos.schoolos",
     "productName": "Nexus School OS",
     "copyright": "Copyright © 2026 Nexus Infrastructure Ltd.",
-    "npmRebuild": false,
+    "npmRebuild": true,
     "asar": true,
     "afterPack": "./scripts/apply-fuses.js",
     "asarUnpack": [
