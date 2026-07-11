@@ -29,8 +29,11 @@ const nexusAPI = {
     getIdentity: () => ipcRenderer.invoke('get-identity'),
     saveIdentity: (packet) => ipcRenderer.invoke('save-identity', packet),
     generateReports: (payload) => ipcRenderer.invoke('generate-reports', payload),
-    resetAppData: () => ipcRenderer.invoke('reset-app-data'),
-    wasRestored:  () => ipcRenderer.invoke('app:was-restored'),
+    resetAppData:     () => ipcRenderer.invoke('reset-app-data'),
+    // Push event — main fires this right before app.exit(0) so the renderer
+    // can render a "Resetting..." screen for the 400 ms before the process dies.
+    onFactoryReset:   (cb) => ipcRenderer.on('app:factory-reset-complete', (_e) => cb()),
+    wasRestored:      () => ipcRenderer.invoke('app:was-restored'),
 
     getTeachers: () => ipcRenderer.invoke('get-teachers'),
     setTeacher: (data) => ipcRenderer.invoke('set-teacher', data),

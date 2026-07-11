@@ -127,6 +127,19 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
     checkRestore();
   }, []);
 
+  // ── Factory Reset Overlay ─────────────────────────────────────────────────
+  // When main.js completes the wipe it sends 'app:factory-reset-complete'
+  // BEFORE calling app.exit(0) (with a 400ms delay). We show a full-screen
+  // resetting screen for that window so the user never sees a broken state.
+  const [isResetting, setIsResetting] = useState(false);
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (!api?.onFactoryReset) return;
+    api.onFactoryReset(() => setIsResetting(true));
+  }, []);
+  // Helper — used in handleResetData instead of window.location.reload()
+  const triggerResetComplete = () => setIsResetting(true);
+
   const ThemeColorLoad = (prim?: string, sec?: string) => {
     if (prim) setThemePrimary(prim);
     if (sec) setThemeSecondary(sec);
@@ -217,9 +230,20 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
     }
   };
 
-  // Load admin profile on mount (to render avatar in header if set)
+  // Load admin profile and session on mount
   useEffect(() => {
     loadAdminProfile();
+    const fetchSession = async () => {
+      try {
+        if (window.electronAPI?.invoke) {
+          const session = await (window as any).electronAPI.invoke('auth:get-session');
+          setCurrentAdminUser(session);
+        }
+      } catch (err) {
+        console.error('Failed to load session on settings mount:', err);
+      }
+    };
+    fetchSession();
   }, []);
 
 
@@ -248,6 +272,21 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
   };
 
   const handleOpenStaffModal = () => {
+    if (!currentAdminUser || currentAdminUser.role_level < 9) {
+      const Swal = (window as any).Swal;
+      if (Swal) {
+        Swal.fire({
+          title: 'Access Denied',
+          text: 'Superadmin access is required to manage staff accounts.',
+          icon: 'error',
+          background: '#0d1235',
+          color: '#fff',
+        });
+      } else {
+        alert('Superadmin access is required.');
+      }
+      return;
+    }
     requireSudo(
       () => {
         setIsStaffModalOpen(true);
@@ -663,6 +702,22 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
       return;
     }
 
+    if (!currentAdminUser || currentAdminUser.role_level < 9) {
+      const Swal = (window as any).Swal;
+      if (Swal) {
+        Swal.fire({
+          title: 'Access Denied',
+          text: 'Superadmin access is required to reset database.',
+          icon: 'error',
+          background: '#0d1235',
+          color: '#fff',
+        });
+      } else {
+        alert('Superadmin access is required.');
+      }
+      return;
+    }
+
     const Swal = (window as any).Swal;
 
     // 1. Request global admin PIN authorization using useSudoAuth
@@ -673,7 +728,7 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
           if (window.confirm("Reset all data now? This will delete everything.")) {
             await window.electronAPI.resetAppData();
             alert('System Reset Completed. Reloading...');
-            window.location.reload();
+            triggerResetComplete();
           }
           return;
         }
@@ -726,9 +781,8 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
               }
               if (onResetSuccess) {
                 onResetSuccess();
-              } else {
-                window.location.reload();
               }
+              triggerResetComplete();
             } else {
               // Backup failed or unconfigured
               const backupPrompt = await Swal.fire({
@@ -757,9 +811,8 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
                 }
                 if (onResetSuccess) {
                   onResetSuccess();
-                } else {
-                  window.location.reload();
                 }
+                triggerResetComplete();
               }
               // If cancelled, do nothing — data is safe
             }
@@ -786,9 +839,8 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
                 }
                 if (onResetSuccess) {
                   onResetSuccess();
-                } else {
-                  window.location.reload();
                 }
+                triggerResetComplete();
               }
             });
           }
@@ -806,9 +858,8 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
             }
             if (onResetSuccess) {
               onResetSuccess();
-            } else {
-              window.location.reload();
             }
+            triggerResetComplete();
           } catch (resetErr: any) {
             Swal.fire({
               title: 'Error',
@@ -864,6 +915,22 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
 
   // Restore Database Backup helper
   const handleRestoreDatabase = async () => {
+    if (!currentAdminUser || currentAdminUser.role_level < 9) {
+      const Swal = (window as any).Swal;
+      if (Swal) {
+        Swal.fire({
+          title: 'Access Denied',
+          text: 'Superadmin access is required to restore database.',
+          icon: 'error',
+          background: '#0d1235',
+          color: '#fff',
+        });
+      } else {
+        alert('Superadmin access is required.');
+      }
+      return;
+    }
+
     const Swal = (window as any).Swal;
     if (!Swal) {
       if (!confirm('This will completely replace the current database with the selected backup. All existing changes will be lost, and the application will restart. Continue?')) {
@@ -939,6 +1006,33 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
 
   return (
     <div className="animate-in fade-in duration-300 h-full flex flex-col min-h-0">
+      {/* Factory Reset Overlay — shown for the 400ms window between clearData()
+          completing and app.exit(0) firing. Prevents the user seeing a
+          half-destroyed UI before the process dies and relaunches. */}
+      {isResetting && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'linear-gradient(135deg, #0d1235 0%, #060d24 100%)',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: '24px',
+        }}>
+          <div style={{
+            width: 64, height: 64, borderRadius: '50%',
+            border: '4px solid #1e293b',
+            borderTop: '4px solid #00e5ff',
+            animation: 'spin 0.8s linear infinite',
+          }} />
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ color: '#00e5ff', fontSize: 18, fontWeight: 700, margin: 0 }}>
+              Resetting System
+            </p>
+            <p style={{ color: '#64748b', fontSize: 13, marginTop: 8 }}>
+              Clearing all data and relaunching…
+            </p>
+          </div>
+        </div>
+      )}
       {/* View Header */}
       <div className="view-header">
         <div>
@@ -982,38 +1076,40 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
               <span style={{ fontSize: '16px', color: '#fff' }}>👤</span>
             )}
           </button>
-          <button
-            onClick={handleOpenStaffModal}
-            id="staff-accounts-btn"
-            style={{
-              background: 'rgba(255,255,255,0.05)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: '50%',
-              width: '34px',
-              height: '34px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-              boxShadow: '0 0 10px rgba(0,0,0,0.2)',
-              fontSize: '16px',
-              color: '#fff'
-            }}
-            title="Manage Staff Accounts"
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(0,229,255,0.4)';
-              e.currentTarget.style.boxShadow = '0 0 12px rgba(0,229,255,0.2)';
-              e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
-              e.currentTarget.style.boxShadow = '0 0 10px rgba(0,0,0,0.2)';
-              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-            }}
-          >
-            👥
-          </button>
+          {(!currentAdminUser || currentAdminUser.role_level >= 9) && (
+            <button
+              onClick={handleOpenStaffModal}
+              id="staff-accounts-btn"
+              style={{
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: '50%',
+                width: '34px',
+                height: '34px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                boxShadow: '0 0 10px rgba(0,0,0,0.2)',
+                fontSize: '16px',
+                color: '#fff'
+              }}
+              title="Manage Staff Accounts"
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(0,229,255,0.4)';
+                e.currentTarget.style.boxShadow = '0 0 12px rgba(0,229,255,0.2)';
+                e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
+                e.currentTarget.style.boxShadow = '0 0 10px rgba(0,0,0,0.2)';
+                e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+              }}
+            >
+              👥
+            </button>
+          )}
           <button
             id="data-templates-btn"
             onClick={() => setIsTemplateDrawerOpen(true)}
@@ -1046,38 +1142,40 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
           >
             📋
           </button>
-          <button
-            onClick={handleResetData}
-            id="reset-btn"
-            style={{
-              background: 'rgba(255,68,68,0.05)',
-              border: '1px solid rgba(255,68,68,0.2)',
-              borderRadius: '50%',
-              width: '34px',
-              height: '34px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-              boxShadow: '0 0 10px rgba(0,0,0,0.2)',
-              fontSize: '16px',
-              color: '#ff4444'
-            }}
-            title="Reset System Data"
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(255,68,68,0.6)';
-              e.currentTarget.style.boxShadow = '0 0 12px rgba(255,68,68,0.3)';
-              e.currentTarget.style.background = 'rgba(255,68,68,0.15)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(255,68,68,0.2)';
-              e.currentTarget.style.boxShadow = '0 0 10px rgba(0,0,0,0.2)';
-              e.currentTarget.style.background = 'rgba(255,68,68,0.05)';
-            }}
-          >
-            🗑️
-          </button>
+          {(!currentAdminUser || currentAdminUser.role_level >= 9) && (
+            <button
+              onClick={handleResetData}
+              id="reset-btn"
+              style={{
+                background: 'rgba(255,68,68,0.05)',
+                border: '1px solid rgba(255,68,68,0.2)',
+                borderRadius: '50%',
+                width: '34px',
+                height: '34px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                boxShadow: '0 0 10px rgba(0,0,0,0.2)',
+                fontSize: '16px',
+                color: '#ff4444'
+              }}
+              title="Reset System Data"
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(255,68,68,0.6)';
+                e.currentTarget.style.boxShadow = '0 0 12px rgba(255,68,68,0.3)';
+                e.currentTarget.style.background = 'rgba(255,68,68,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(255,68,68,0.2)';
+                e.currentTarget.style.boxShadow = '0 0 10px rgba(0,0,0,0.2)';
+                e.currentTarget.style.background = 'rgba(255,68,68,0.05)';
+              }}
+            >
+              🗑️
+            </button>
+          )}
         </div>
       </div>
 
@@ -1269,10 +1367,32 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
               value={portalSlug}
               onChange={(e) => setPortalSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
             />
+            {portalSlug.length > 0 && portalSlug.length < 4 && (
+              <span style={{ fontSize: '10px', color: '#ff4444', display: 'block', marginTop: '4px' }}>
+                ❌ Too short (minimum 4 characters)
+              </span>
+            )}
+            {portalSlug.length > 30 && (
+              <span style={{ fontSize: '10px', color: '#ff4444', display: 'block', marginTop: '4px' }}>
+                ❌ Too long (maximum 30 characters)
+              </span>
+            )}
             <span style={{ fontSize: '10px', color: 'var(--text-dim)', display: 'block', marginTop: '4px' }}>
               Your portal will be accessible at:{' '}
               <strong>https://sch.nexusos.com.ng/{portalSlug || 'your-slug'}/parent</strong>
             </span>
+            <div style={{
+              marginTop: '8px',
+              padding: '8px 12px',
+              background: 'rgba(255, 193, 7, 0.05)',
+              border: '1px solid rgba(255, 193, 7, 0.2)',
+              borderRadius: '6px',
+              fontSize: '10.5px',
+              color: '#ffc107',
+              lineHeight: 1.4
+            }}>
+              ⚠️ Portal slugs are not verified for uniqueness. Contact your Nexus operator to confirm this slug is reserved before sharing the portal URL with parents.
+            </div>
           </div>
 
           <div className="form-group">
@@ -1660,45 +1780,66 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
         </div>
 
         {/* Database Restore */}
-        <div
-          className="form-group"
-          style={{
-            background: 'rgba(239, 68, 68, 0.05)',
-            padding: '16px',
-            borderRadius: '8px',
-            border: '1px dashed rgba(239, 68, 68, 0.3)',
-            marginTop: '8px',
-          }}
-        >
-          <label style={{ color: '#ef4444', fontSize: '13px', marginBottom: '8px', display: 'block' }}>
-            🔄 Restore Database Backup
-          </label>
-          <p style={{ fontSize: '11px', color: '#aaa', marginBottom: '10px' }}>
-            Restore your database from an existing <code>.sqlite</code> copy. This will overwrite all current school records.
-          </p>
-          <button
-            onClick={handleRestoreDatabase}
-            id="restore-db-btn"
-            className="secondary-btn"
+        {(!currentAdminUser || currentAdminUser.role_level >= 9) ? (
+          <div
+            className="form-group"
             style={{
-              width: '100%',
-              fontSize: '12px',
-              padding: '8px',
-              borderColor: '#ef4444',
-              color: '#ef4444',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px',
-              background: 'transparent',
-              cursor: 'pointer',
-              border: '1px solid',
-              borderRadius: '6px',
+              background: 'rgba(239, 68, 68, 0.05)',
+              padding: '16px',
+              borderRadius: '8px',
+              border: '1px dashed rgba(239, 68, 68, 0.3)',
+              marginTop: '8px',
             }}
           >
-            🔄 Select Backup file
-          </button>
-        </div>
+            <label style={{ color: '#ef4444', fontSize: '13px', marginBottom: '8px', display: 'block' }}>
+              🔄 Restore Database Backup
+            </label>
+            <p style={{ fontSize: '11px', color: '#aaa', marginBottom: '10px' }}>
+              Restore your database from an existing <code>.sqlite</code> copy. This will overwrite all current school records.
+            </p>
+            <button
+              onClick={handleRestoreDatabase}
+              id="restore-db-btn"
+              className="secondary-btn"
+              style={{
+                width: '100%',
+                fontSize: '12px',
+                padding: '8px',
+                borderColor: '#ef4444',
+                color: '#ef4444',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                background: 'transparent',
+                cursor: 'pointer',
+                border: '1px solid',
+                borderRadius: '6px',
+              }}
+            >
+              🔄 Select Backup file
+            </button>
+          </div>
+        ) : (
+          <div
+            className="form-group"
+            style={{
+              background: 'rgba(255,255,255,0.02)',
+              padding: '16px',
+              borderRadius: '8px',
+              border: '1px solid rgba(255,255,255,0.05)',
+              marginTop: '8px',
+              opacity: 0.6
+            }}
+          >
+            <label style={{ color: '#aaa', fontSize: '13px', marginBottom: '8px', display: 'block' }}>
+              🔒 Database Operations Locked
+            </label>
+            <p style={{ fontSize: '11px', color: '#777', margin: 0 }}>
+              Database backup, restore, and factory reset require Superadmin credentials.
+            </p>
+          </div>
+        )}
       </div>{/* end scrollable body */}
     </div>{/* end drawer panel */}
   </>
@@ -2289,6 +2430,9 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
                 paddingLeft: '24px'
               }}>
                 <h4 style={{ margin: 0, fontSize: '13px', color: '#00e5ff', fontWeight: 600 }}>Create New Login</h4>
+                <div style={{ fontSize: '10px', color: (staffAccounts.length >= (currentTier === 'Diamond' ? Infinity : (currentTier === 'Gold' ? 5 : 2))) ? '#ff4444' : '#888', marginTop: '-4px', fontWeight: 600 }}>
+                  Accounts: {staffAccounts.length} / {currentTier === 'Diamond' ? '∞' : (currentTier === 'Gold' ? 5 : 2)} used ({currentTier} plan)
+                </div>
                 <form onSubmit={handleCreateStaff} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <div className="form-group" style={{ margin: 0 }}>
                     <label style={{ fontSize: '11px' }}>Username *</label>
@@ -2366,23 +2510,38 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
                     />
                   </div>
 
-                  <button
-                    type="submit"
-                    className="primary-btn"
-                    style={{
-                      marginTop: '10px',
-                      padding: '8px',
+                  {staffAccounts.length >= (currentTier === 'Diamond' ? Infinity : (currentTier === 'Gold' ? 5 : 2)) ? (
+                    <div style={{
                       fontSize: '11px',
-                      background: 'var(--accent)',
-                      color: 'var(--bg-deep)',
-                      fontWeight: 600,
+                      color: '#ff4444',
+                      background: 'rgba(255, 68, 68, 0.1)',
+                      border: '1px solid rgba(255, 68, 68, 0.2)',
+                      padding: '8px 10px',
                       borderRadius: '6px',
-                      cursor: 'pointer',
-                      border: 'none'
-                    }}
-                  >
-                    Create Account
-                  </button>
+                      marginTop: '6px',
+                      lineHeight: 1.4
+                    }}>
+                      ⚠️ Account limit reached ({currentTier === 'Diamond' ? '∞' : (currentTier === 'Gold' ? 5 : 2)} max for {currentTier}). Upgrade your plan to add more staff logins.
+                    </div>
+                  ) : (
+                    <button
+                      type="submit"
+                      className="primary-btn"
+                      style={{
+                        marginTop: '10px',
+                        padding: '8px',
+                        fontSize: '11px',
+                        background: 'var(--accent)',
+                        color: 'var(--bg-deep)',
+                        fontWeight: 600,
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        border: 'none'
+                      }}
+                    >
+                      Create Account
+                    </button>
+                  )}
                 </form>
               </div>
             </div>

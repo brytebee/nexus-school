@@ -846,18 +846,34 @@ export function NexusPulse() {
                         </div>
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '16px' }}>
-                        <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--accent-green)', background: 'rgba(0, 230, 118, 0.1)', padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(0, 230, 118, 0.15)', textTransform: 'uppercase' }}>
-                          Enabled
-                        </span>
-                        <button
-                          onClick={() => setIsSettingsOpen(true)}
-                          className="secondary-btn"
-                          style={{ padding: '6px 12px', fontSize: '10px' }}
-                        >
-                          ⚙️ Configure
-                        </button>
-                      </div>
+                      {(() => {
+                        const isBotActive = botStatus === 'ready' || botStatus === 'authenticated';
+                        return (
+                          <>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '16px' }}>
+                              <span style={{
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                color: isBotActive ? 'var(--accent-green)' : '#ff4444',
+                                background: isBotActive ? 'rgba(0, 230, 118, 0.1)' : 'rgba(255, 68, 68, 0.1)',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                border: isBotActive ? '1px solid rgba(0, 230, 118, 0.15)' : '1px solid rgba(255, 68, 68, 0.15)',
+                                textTransform: 'uppercase'
+                              }}>
+                                {isBotActive ? '🟢 Shield Active' : '🔴 Shield Offline'}
+                              </span>
+                              <button
+                                onClick={() => setIsSettingsOpen(true)}
+                                className="secondary-btn"
+                                style={{ padding: '6px 12px', fontSize: '10px' }}
+                              >
+                                ⚙️ Configure
+                              </button>
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
 
                     {/* Attendance Safety Net Card */}
@@ -874,12 +890,26 @@ export function NexusPulse() {
                         "Hello! Ward *[Student]* was marked *ABSENT* today at *[School]*."
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '16px' }}>
-                        <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--accent)' }}>Real-time Alerting</span>
-                        <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--accent-green)', background: 'rgba(0, 230, 118, 0.1)', padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(0, 230, 118, 0.15)', textTransform: 'uppercase' }}>
-                          Active
-                        </span>
-                      </div>
+                      {(() => {
+                        const isBotActive = botStatus === 'ready' || botStatus === 'authenticated';
+                        return (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '16px' }}>
+                            <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--accent)' }}>Real-time Alerting</span>
+                            <span style={{
+                              fontSize: '10px',
+                              fontWeight: 700,
+                              color: isBotActive ? 'var(--accent-green)' : '#ff4444',
+                              background: isBotActive ? 'rgba(0, 230, 118, 0.1)' : 'rgba(255, 68, 68, 0.1)',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              border: isBotActive ? '1px solid rgba(0, 230, 118, 0.15)' : '1px solid rgba(255, 68, 68, 0.15)',
+                              textTransform: 'uppercase'
+                            }}>
+                              {isBotActive ? 'Active' : 'Offline'}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </div>
 
                   </div>
