@@ -801,9 +801,8 @@ ipcMain.handle('auth:get-audit-logs', () => {
 // auth:unlock — fired by lock.html after PIN accepted. Loads the main app.
 ipcMain.on('auth:unlock', () => {
     if (!mainWindow) return;
-    const targetFile = process.env.USE_REACT_UI === 'true' ? 'dist/renderer.html' : 'index.html';
-    mainWindow.loadFile(targetFile);
-    console.log(`[Auth] Lock screen dismissed. Loading ${targetFile}.`);
+    mainWindow.loadFile('dist/renderer.html');
+    console.log(`[Auth] Lock screen dismissed. Loading dist/renderer.html.`);
 });
 
 ipcMain.on('auth:lock', () => {
@@ -4783,7 +4782,7 @@ function createWindow() {
       currentAdminSession = { id: 1, name: 'Developer', role: 'super_admin', loginAt: Date.now() };
     }
     console.log(`[Auth] DEV_AUTO_LOGIN active — skipping lock screen. Logged in as: ${currentAdminSession.username || 'Developer'} (ID: ${currentAdminSession.id})`);
-    bootFile = process.env.USE_REACT_UI === 'true' ? 'dist/renderer.html' : 'index.html';
+    bootFile = 'dist/renderer.html';
   } else {
     // ── First-run detection: valid license but no admins created yet ───────────────
     // Boot to the React AdminSetupScreen instead of the PIN login screen.
