@@ -12,19 +12,34 @@ export function About({ onTabChange }: AboutProps) {
 
   const currentTier = license?.tier || 'Silver';
   const studentCount = license?.student_count || 0;
-  const expiresAt = license?.expires_at || Date.now();
+  const expiresAt = license?.expires_at;
+  const hasExplicitExpiry = !!expiresAt;
+
+  const expiryDate = expiresAt ? new Date(expiresAt).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }) : '';
+  const isExpired = hasExplicitExpiry && Date.now() > expiresAt;
+
+  function deriveTermDisplay(terms?: string[]): string {
+    if (!terms || terms.length === 0) return 'Term-based license';
+    const last = terms[terms.length - 1]; // e.g. "2025/2026-T3"
+    const parts = last.split('-');
+    if (parts.length !== 2) return `Licensed through ${last}`;
+    const [session, term] = parts;
+    if (term === 'T3') {
+      const startYear = parseInt(session.split('/')[0], 10);
+      const nextSession = `${startYear + 1}/${startYear + 2}`;
+      return `Active through summer · Grace until ~Oct ${startYear + 1} (${nextSession} T1 + 30 days)`;
+    }
+    return `Valid through ${session} — ${term.replace('T', 'Term ')} (+ 30-day grace)`;
+  }
 
   let tierIcon = '🥈';
   if (currentTier === 'Standalone') tierIcon = '📦';
   if (currentTier === 'Gold') tierIcon = '🥇';
   if (currentTier === 'Diamond') tierIcon = '💎';
-
-  const expiryDate = new Date(expiresAt).toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
-  const isExpired = Date.now() > expiresAt;
 
   return (
     <div className="animate-in fade-in duration-300 h-full flex flex-col min-h-0">
@@ -214,11 +229,11 @@ export function About({ onTabChange }: AboutProps) {
                   <span>Valid Until</span>
                   <span
                     style={{
-                      color: isExpired ? '#ff4444' : '#00e5ff',
+                      color: hasExplicitExpiry ? (isExpired ? '#ff4444' : '#00e5ff') : '#94a3b8',
                       fontWeight: 'bold',
                     }}
                   >
-                    {expiryDate}
+                    {hasExplicitExpiry ? expiryDate : deriveTermDisplay(license?.licensed_terms)}
                   </span>
                 </div>
                 {isExpired && (

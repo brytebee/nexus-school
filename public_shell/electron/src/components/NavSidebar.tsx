@@ -21,6 +21,24 @@ export function NavSidebar({ activeTab, onTabChange, isCollapsed, onOpenHelp }: 
   const { license } = useLicense();
   const { identity } = useIdentity();
   const [stats, setStats] = useState({ teachers: 0, students: 0 });
+  const [roleLevel, setRoleLevel] = useState<number | null>(null);
+
+  // Load user role on mount
+  useEffect(() => {
+    const fetchSession = async () => {
+      try {
+        if (window.electronAPI?.invoke) {
+          const session = await (window as any).electronAPI.invoke('auth:get-session');
+          if (session) {
+            setRoleLevel(session.role_level);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load session for nav sidebar:', err);
+      }
+    };
+    fetchSession();
+  }, []);
 
   const currentTier = license?.tier || 'Silver';
   const tiers: Record<'Silver' | 'Gold' | 'Diamond', number> = {
@@ -299,13 +317,15 @@ export function NavSidebar({ activeTab, onTabChange, isCollapsed, onOpenHelp }: 
         </li>
 
         {/* Settings */}
-        <li
-          onClick={() => onTabChange('settings')}
-          className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`}
-        >
-          <span className="nav-icon">⚙️</span>
-          <span className="nav-label">Settings</span>
-        </li>
+        {roleLevel === 9 && (
+          <li
+            onClick={() => onTabChange('settings')}
+            className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`}
+          >
+            <span className="nav-icon">⚙️</span>
+            <span className="nav-label">Settings</span>
+          </li>
+        )}
 
         {/* About */}
         <li

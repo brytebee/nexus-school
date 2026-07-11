@@ -725,6 +725,24 @@ ipcMain.handle('auth:change-pin', (event, { adminId, newPin, authType }) => {
 ipcMain.handle('auth:create-admin', (event, { username, pin, authType, roleLevel, displayName, phone, question, answer }) => {
     try {
         const db = database.getDb();
+        
+        // Count existing admin users
+        const currentCount = db.prepare('SELECT COUNT(*) as c FROM admin_users').get().c;
+
+        // If there is already at least one admin, we require Superadmin credentials to create more.
+        if (currentCount > 0) {
+            if (!currentAdminSession || currentAdminSession.role_level < 9) {
+                return { ok: false, error: 'Superadmin access required.' };
+            }
+        }
+
+        // Limit enforcement based on license tier
+        const ADMIN_LIMITS = { Standalone: 2, Silver: 2, Gold: 5, Diamond: Infinity };
+        const tierLimit = ADMIN_LIMITS[licenseStatus?.tier] ?? 2;
+        if (currentCount >= tierLimit) {
+            return { ok: false, error: `Your ${licenseStatus?.tier || 'Silver'} plan supports up to ${tierLimit} admin accounts. Upgrade to add more.` };
+        }
+
         const type = authType === 'password' ? 'password' : 'pin';
         const secretName = type === 'password' ? 'password' : 'PIN';
 
@@ -766,6 +784,12 @@ ipcMain.handle('auth:create-admin', (event, { username, pin, authType, roleLevel
 ipcMain.handle('auth:delete-admin', (event, { adminId }) => {
     try {
         const db = database.getDb();
+
+        // RBAC Guard — require level 9 Superadmin
+        if (!currentAdminSession || currentAdminSession.role_level < 9) {
+            return { ok: false, error: 'Superadmin access required.' };
+        }
+
         const target = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(adminId);
         if (!target) return { ok: false, error: 'Admin not found.' };
         if (currentAdminSession?.id === adminId) return { ok: false, error: 'You cannot delete your own account.' };
@@ -4007,6 +4031,12 @@ ipcMain.handle('pulse-bridge-ready', () => {
 ipcMain.handle("reset-app-data", async () => {
   console.log("[Electron] Resetting app data...");
 
+  // RBAC Guard — require level 9 Superadmin
+  if (!currentAdminSession || currentAdminSession.role_level < 9) {
+    console.error("[Electron] RESET ABORTED — Insufficient permissions.");
+    return { ok: false, error: "Superadmin access required." };
+  }
+
   // 1. Clear the database FIRST — if this fails we must NOT relaunch
   // (clearData now throws on failure so the try-catch below catches it)
   try {
@@ -4064,10 +4094,16 @@ ipcMain.handle("reset-app-data", async () => {
     setSchoolConfig(qrPayload.config);
   }
 
-  // 7. Relaunch cleanly — only reached if clearData() succeeded
-  console.log("[Electron] App data reset complete. Relaunching application...");
+  // 7. Notify renderer so it can show a "Resetting..." screen, then relaunch.
+  // We push the event BEFORE exiting so the renderer gets a chance to render
+  // the spinner. app.exit() is deferred 400 ms — enough for one paint cycle.
+  // See: private_engine/docs/guides/23-database-backup-restore.md § 5.4 Gap 2
+  console.log("[Electron] App data reset complete. Signalling renderer then relaunching...");
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('app:factory-reset-complete');
+  }
   app.relaunch();
-  app.exit(0);
+  setTimeout(() => app.exit(0), 400);
 
   return { ok: true };
 });
@@ -5030,27 +5066,10 @@ function createWindow() {
           portalSessions.set(matchable, { pin: '0000', expiry: Date.now() + 60 * 60 * 1000, students: fallback });
           return res.json({ ok: true, message: '[DEV_MODE] Portal PIN is 0000 — WhatsApp bypassed' });
         } else {
-          const students = db.prepare("SELECT id, name, class_name FROM students WHERE parent_phone LIKE ?").all(`%${matchable}`);
-          if (!students.length) {
-            return res.json({
-              ok: false,
-              error: `No students found for this number. Ensure it matches the number registered at the school (last 10 digits used: ${matchable}).`
-            });
-          }
-
-          console.log(`[Sovereign Portal] Generated auth PIN: ${pin} for phone: ${phone} (matchable: ${matchable})`);
-          portalSessions.set(matchable, { pin, expiry, students });
-
-          try {
-            db.prepare(`
-              INSERT INTO pending_pulse_messages (phone, message, type)
-              VALUES (?, ?, 'otp')
-            `).run(phone, `Nexus Portal Login PIN: ${pin}`);
-            return res.json({ ok: true, message: 'WhatsApp delivery queued. Please ensure Nexus Pulse is online.' });
-          } catch (queueErr) {
-            console.error("[Portal] Failed to queue message:", queueErr);
-            return res.json({ ok: false, error: 'Failed to queue OTP message.' });
-          }
+          return res.json({
+            ok: false,
+            error: 'WhatsApp delivery is currently unavailable. Please contact the school reception.'
+          });
         }
       }
     } catch (err) {
