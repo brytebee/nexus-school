@@ -4773,7 +4773,7 @@ function createWindow() {
   // loads immediately — avoids the admin-login flash on first install.
   {
     const _earlyLicensePath = path.join(app.getPath('userData'), 'license.nexus');
-    if (!fs.existsSync(_earlyLicensePath)) {
+    if (!fs.existsSync(_earlyLicensePath) && process.env.DEV_MODE !== 'true') {
       licenseStatus = { locked: true, reason: 'no_license', message: 'NO_LICENSE' };
       console.log('[License] No license file found — booting to activation screen.');
     }
@@ -4812,10 +4812,10 @@ function createWindow() {
       if (firstSuper) {
         currentAdminSession = { id: firstSuper.id, username: firstSuper.username, role_level: firstSuper.role_level, loginAt: Date.now() };
       } else {
-        currentAdminSession = { id: 1, name: 'Developer', role: 'super_admin', loginAt: Date.now() };
+        currentAdminSession = { id: 1, username: 'developer', role_level: 9, loginAt: Date.now() };
       }
     } catch (_) {
-      currentAdminSession = { id: 1, name: 'Developer', role: 'super_admin', loginAt: Date.now() };
+      currentAdminSession = { id: 1, username: 'developer', role_level: 9, loginAt: Date.now() };
     }
     console.log(`[Auth] DEV_AUTO_LOGIN active — skipping lock screen. Logged in as: ${currentAdminSession.username || 'Developer'} (ID: ${currentAdminSession.id})`);
     bootFile = 'dist/renderer.html';
