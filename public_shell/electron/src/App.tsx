@@ -61,6 +61,18 @@ function App() {
     loadAds();
   }, []);
 
+  const [platform, setPlatform] = useState<string>('darwin');
+  const [showActivationBanner, setShowActivationBanner] = useState<boolean>(true);
+  const [showGraceBanner, setShowGraceBanner] = useState<boolean>(true);
+
+  React.useEffect(() => {
+    if (window.nexusAPI?.getPlatform) {
+      window.nexusAPI.getPlatform().then((p: string) => {
+        setPlatform(p);
+      });
+    }
+  }, []);
+
   // ── License enforcement ───────────────────────────────────────────────────
   const { license, loading: licenseLoading } = useLicense();
   const isLicenseLocked = license?.locked === true;
@@ -227,12 +239,97 @@ function App() {
     );
   }
 
+  const showBanner = (license?.needs_activation && showActivationBanner) ||
+                     (((license?.in_grace || license?.server_revoked) && !license?.needs_activation) && showGraceBanner);
+
   // 3. Valid license — full app
   return (
     <>
       <div className="background-glow"></div>
+
+      {/* ── Provisional Activation Banner ── */}
+      {license?.needs_activation && showActivationBanner && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9000,
+          background: 'linear-gradient(90deg, #1a3a5c, #0d2137)',
+          borderBottom: '1px solid rgba(0, 180, 216, 0.3)',
+          padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '12px',
+          height: '40px', boxSizing: 'border-box'
+        }}>
+          <span style={{ fontSize: '15px' }}>⚡</span>
+          <p style={{ color: '#ccd6f6', fontSize: '12px', margin: 0, flex: 1 }}>
+            <strong style={{ color: '#00b4d8' }}>Activate your license</strong> — bind it to this device to complete setup.
+          </p>
+          <button
+            onClick={async () => {
+              const res = await window.nexusAPI?.license?.activateOnline?.();
+              if (res && res.ok) {
+                window.location.reload();
+              }
+            }}
+            style={{
+              background: '#00b4d8', color: '#0a0e2e', border: 'none',
+              borderRadius: '6px', padding: '4px 12px', cursor: 'pointer',
+              fontSize: '11px', fontWeight: 700, whiteSpace: 'nowrap'
+            }}
+          >
+            Activate Now →
+          </button>
+          <button
+            onClick={() => setShowActivationBanner(false)}
+            style={{ background: 'transparent', border: 'none', color: 'rgba(255, 255, 255, 0.4)', cursor: 'pointer', fontSize: '18px', padding: '0 4px', lineHeight: 1 }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* ── Grace Period / Revocation Warning Banner ── */}
+      {!license?.needs_activation && (license?.in_grace || license?.server_revoked) && showGraceBanner && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9000,
+          background: 'linear-gradient(90deg, #3d2900, #1f1500)',
+          borderBottom: '1px solid rgba(255, 179, 0, 0.3)',
+          padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '12px',
+          height: '40px', boxSizing: 'border-box'
+        }}>
+          <span style={{ fontSize: '15px' }}>⚠️</span>
+          <p style={{ color: '#ffe0a0', fontSize: '12px', margin: 0, flex: 1 }}>
+            {license?.server_revoked ? (
+              <><strong>Server Warning</strong> — Your license has been flagged by the server. Please contact support.</>
+            ) : (
+              <><strong>Grace period active</strong> — Your current term has ended. Please renew before the grace window expires.</>
+            )}
+          </p>
+          {!license?.server_revoked && (
+            <button
+              onClick={async () => {
+                const res = await window.nexusAPI?.license?.activateOnline?.();
+                if (res && res.ok) {
+                  window.location.reload();
+                }
+              }}
+              style={{
+                background: '#FFB300', color: '#1a0e00', border: 'none',
+                borderRadius: '6px', padding: '4px 12px', cursor: 'pointer',
+                fontSize: '11px', fontWeight: 700, whiteSpace: 'nowrap'
+              }}
+            >
+              Renew Now →
+            </button>
+          )}
+          <button
+            onClick={() => setShowGraceBanner(false)}
+            style={{ background: 'transparent', border: 'none', color: 'rgba(255, 255, 255, 0.4)', cursor: 'pointer', fontSize: '18px', padding: '0 4px', lineHeight: 1 }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       <div
         className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""} flex h-screen w-screen overflow-hidden text-nexus-text font-inter select-none`}
+        style={{ paddingTop: showBanner ? '40px' : '0px' }}
       >
         {/* Sidebar Layout */}
         <NavSidebar
@@ -282,6 +379,36 @@ function App() {
               <button className="titlebar-nav-btn" id="btn-forward" title="Go Forward"
                 disabled={historyIndex >= tabHistory.length - 1} onClick={navigateForward}>→</button>
             </div>
+
+            {/* Win/Linux custom window controls */}
+            {platform !== 'darwin' && (
+              <div className="win-controls" id="win-controls">
+                <button
+                  type="button"
+                  className="win-btn win-minimize"
+                  onClick={() => window.nexusAPI?.winMinimize?.()}
+                  title="Minimize"
+                >
+                  &#8722;
+                </button>
+                <button
+                  type="button"
+                  className="win-btn win-maximize"
+                  onClick={() => window.nexusAPI?.winMaximize?.()}
+                  title="Maximize"
+                >
+                  &#9633;
+                </button>
+                <button
+                  type="button"
+                  className="win-btn win-close"
+                  onClick={() => window.nexusAPI?.winClose?.()}
+                  title="Close"
+                >
+                  &#10005;
+                </button>
+              </div>
+            )}
           </div>
 
           {/* View container */}
