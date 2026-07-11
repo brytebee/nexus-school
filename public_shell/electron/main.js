@@ -335,7 +335,7 @@ let currentAdminSession = null;
 ipcMain.handle('auth:get-admins', () => {
     const db = database.getDb();
     // Use role_level instead of role string, username instead of name.
-    return db.prepare('SELECT id, username, role_level, avatar FROM admin_users ORDER BY role_level DESC, username ASC').all();
+    return db.prepare('SELECT id, username, role_level, auth_type, avatar FROM admin_users ORDER BY role_level DESC, username ASC').all();
 });
 
 ipcMain.handle('auth:verify-pin', (event, { adminId, pin }) => {
