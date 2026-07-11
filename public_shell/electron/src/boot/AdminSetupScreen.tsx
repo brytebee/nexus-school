@@ -294,8 +294,8 @@ export function AdminSetupScreen() {
           {step === 'recovery' && (
             <form onSubmit={handleSubmit} noValidate>
               <Field label="Security Question" error={errors.question}>
-                <select value={form.question} onChange={set('question')} style={inputStyle(false)}>
-                  {SECURITY_QUESTIONS.map(q => <option key={q} value={q}>{q}</option>)}
+                <select value={form.question} onChange={set('question')} style={{ ...inputStyle(false), background: '#12131a' }}>
+                  {SECURITY_QUESTIONS.map(q => <option key={q} value={q} style={{ background: '#12131a', color: '#fff' }}>{q}</option>)}
                 </select>
               </Field>
 
