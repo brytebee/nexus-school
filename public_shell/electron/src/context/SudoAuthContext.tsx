@@ -3,6 +3,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 interface Admin {
   id: string;
   username: string;
+  auth_type?: string;
 }
 
 interface SudoAuthContextType {
@@ -46,6 +47,9 @@ export function SudoAuthProvider({ children }: { children: React.ReactNode }) {
 
   // ── Confirm modal state (session still valid, just needs a safety click) ────
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+
+  const currentAdmin = admins.find(a => String(a.id) === String(selectedAdmin));
+  const isPassword = currentAdmin?.auth_type === 'password';
 
   useEffect(() => {
     const fetchAdmins = async () => {
@@ -108,7 +112,7 @@ export function SudoAuthProvider({ children }: { children: React.ReactNode }) {
   const handlePinConfirm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedAdmin || !pin.trim()) {
-      setPinError('Please enter your PIN.');
+      setPinError(isPassword ? 'Please enter your password.' : 'Please enter your PIN.');
       return;
     }
     setPinLoading(true);
@@ -123,7 +127,7 @@ export function SudoAuthProvider({ children }: { children: React.ReactNode }) {
         }
         setPendingAction(null);
       } else {
-        setPinError(res?.error || 'Incorrect PIN.');
+        setPinError(res?.error || (isPassword ? 'Incorrect password.' : 'Incorrect PIN.'));
       }
     } catch (err: any) {
       setPinError(err.message || 'Verification failed.');
@@ -231,7 +235,11 @@ export function SudoAuthProvider({ children }: { children: React.ReactNode }) {
                 <select
                   className="modern-input"
                   value={selectedAdmin}
-                  onChange={e => setSelectedAdmin(e.target.value)}
+                  onChange={e => {
+                    setSelectedAdmin(e.target.value);
+                    setPin('');
+                    setPinError('');
+                  }}
                   style={{ fontSize: '12px', width: '100%', background: '#0d1235', color: '#fff' }}
                 >
                   {admins.map(a => <option key={a.id} value={a.id}>{a.username}</option>)}
@@ -239,17 +247,20 @@ export function SudoAuthProvider({ children }: { children: React.ReactNode }) {
               </div>
             )}
 
-            {/* PIN input */}
+            {/* PIN/Password input */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <label style={{ fontSize: '11px', color: 'var(--text-dim)', fontWeight: 500 }}>Admin PIN</label>
+              <label style={{ fontSize: '11px', color: 'var(--text-dim)', fontWeight: 500 }}>
+                {isPassword ? 'Admin Password' : 'Admin PIN'}
+              </label>
               <input
                 type="password"
                 className="modern-input"
                 value={pin}
                 onChange={e => setPin(e.target.value)}
-                placeholder="Enter PIN to authorize"
+                placeholder={isPassword ? 'Enter password to authorize' : 'Enter PIN to authorize'}
                 autoFocus
-                style={{ fontSize: '13px', letterSpacing: '0.2em', width: '100%', boxSizing: 'border-box' }}
+                inputMode={isPassword ? 'text' : 'numeric'}
+                style={{ fontSize: '13px', letterSpacing: isPassword ? 'normal' : '0.2em', width: '100%', boxSizing: 'border-box' }}
               />
             </div>
 
