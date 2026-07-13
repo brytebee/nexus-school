@@ -25,7 +25,7 @@
     "prepublish:win": "npm run build && npm run test",
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
-    "dist:linux": "electron-builder --linux",
+    "dist:linux": "mkdir -p .build-snapshot && cp node_modules/better-sqlite3/build/Release/better_sqlite3.node .build-snapshot/better_sqlite3.node && (electron-builder --linux; status=$?; cp .build-snapshot/better_sqlite3.node node_modules/better-sqlite3/build/Release/better_sqlite3.node; rm -rf .build-snapshot; exit $status)",
     "dist:all": "electron-builder --mac --win --linux",
     "publish:mac": "electron-builder --mac --publish always",
     "publish:win": "electron-builder --win --publish always",
