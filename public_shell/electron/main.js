@@ -2488,9 +2488,98 @@ ipcMain.handle("update-teacher-full", (event, { id, name, phone, email, signatur
 });
 
 // ── Form-based Student Entry (mobile adds/edits; this is a DB stub) ───────────
+// ── Seat Cap: validate a student CSV before any write ────────────────────────
+// Returns: { ok, total, newStudents, existingStudents, cap, available, willExceed, skippedCount }
+ipcMain.handle('students:validate-csv', async (_, { filePath }) => {
+  return new Promise((resolve) => {
+    try {
+      const db = database.getDb();
+      const fs = require('fs');
+      const csv = require('csv-parser');
+
+      const rows = [];
+      const stream = fs.createReadStream(filePath)
+        .pipe(csv())
+        .on('data', (row) => rows.push(row))
+        .on('error', (err) => resolve({ ok: false, error: err.message }))
+        .on('end', () => {
+          try {
+            // Count new vs existing students in the CSV
+            let newStudents = 0;
+            let existingStudents = 0;
+
+            for (const row of rows) {
+              const studentId = (row['Student_ID'] || row['ID'] || '').trim();
+              const firstName = (row['First_Name'] || '').trim();
+              const lastName  = (row['Last_Name']  || '').trim();
+              const className = (row['Class']       || '').trim();
+              if (!studentId || (!firstName && !lastName) || !className) continue;
+
+              const exists = db.prepare('SELECT 1 FROM students WHERE id = ? LIMIT 1').get(studentId);
+              if (exists) existingStudents++;
+              else newStudents++;
+            }
+
+            const totalEnrolled = db.prepare('SELECT COUNT(id) AS c FROM students').get().c;
+            const cap = licenseStatus?.student_count;
+            const hasCap = typeof cap === 'number' && isFinite(cap) && cap < 999999;
+            const available = hasCap ? Math.max(0, cap - totalEnrolled) : Infinity;
+            const willExceed = hasCap && newStudents > available;
+            const skippedCount = hasCap ? Math.max(0, newStudents - available) : 0;
+
+            resolve({
+              ok: true,
+              total: rows.length,
+              newStudents,
+              existingStudents,
+              totalEnrolled,
+              cap: hasCap ? cap : null,
+              available: hasCap ? available : null,
+              willExceed,
+              skippedCount,
+            });
+          } catch (innerErr) {
+            resolve({ ok: false, error: innerErr.message });
+          }
+        });
+    } catch (err) {
+      resolve({ ok: false, error: err.message });
+    }
+  });
+});
+
+// ── Seat Cap: get current enrolled student count ──────────────────────────────
+ipcMain.handle('students:get-count', () => {
+  try {
+    const db = database.getDb();
+    const row = db.prepare('SELECT COUNT(id) AS c FROM students').get();
+    const cap = licenseStatus?.student_count;
+    const hasCap = typeof cap === 'number' && isFinite(cap) && cap < 999999;
+    return { ok: true, count: row.c, cap: hasCap ? cap : null };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, subjects, reg_no, admission_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status }) => {
   try {
     const db = database.getDb();
+
+    // ── Seat Cap Check ───────────────────────────────────────────
+    const cap = licenseStatus?.student_count;
+    const hasCap = typeof cap === 'number' && isFinite(cap) && cap < 999999;
+    if (hasCap) {
+      // Only enforce the cap if this is a NEW student (not an update/edit)
+      const isExisting = db.prepare('SELECT 1 FROM students WHERE id = ? LIMIT 1').get(id);
+      if (!isExisting) {
+        const currentCount = db.prepare('SELECT COUNT(id) AS c FROM students').get().c;
+        if (currentCount >= cap) {
+          return { ok: false, error: 'STUDENT_CAP_REACHED', cap, currentCount };
+        }
+      }
+    }
+    // ───────────────────────────────────────────────────────
+
     db.transaction(() => {
       db.prepare(`
         INSERT INTO students (id, name, class_name, class_arm, reg_no, admission_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status)
@@ -6226,10 +6315,13 @@ function createWindow() {
   // ui-ready handler is registered at module scope (line ~158) so it is
   // in place before mainWindow.loadFile() — no duplicate registration here.
 
-  ipcMain.on("process-csv", (event, filePath) => {
+  ipcMain.on("process-csv", (event, payload) => {
+    // payload is either a plain filePath string (legacy) or { filePath, limit }
+    const filePath = typeof payload === 'string' ? payload : payload?.filePath;
+    const newStudentLimit = typeof payload === 'string' ? undefined : payload?.limit;
     handleCSVUpload(filePath, (count, err, result) => {
-      event.reply("csv-loaded", { count, warnings: result?.warnings || [] });
-    });
+      event.reply("csv-loaded", { count, warnings: result?.warnings || [], newStudentsInserted: result?.newStudentsInserted });
+    }, newStudentLimit);
   });
 
   ipcMain.on("process-grades-csv", (event, filePath) => {
