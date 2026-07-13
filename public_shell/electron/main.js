@@ -222,14 +222,21 @@ ipcMain.once("ui-ready", () => {
   ipcMain.handle("database:backup", async () => {
     try {
       const db = database.getDb();
-      const fs = require('fs');
-      const path = require('path');
-      const backupDir = path.join(path.dirname(db.name), 'backups');
-      if (!fs.existsSync(backupDir)) {
-        fs.mkdirSync(backupDir, { recursive: true });
-      }
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const backupPath = path.join(backupDir, `nexus_backup_${timestamp}.sqlite`);
+      const defaultFilename = `nexus_backup_${timestamp}.sqlite`;
+
+      const result = await dialog.showSaveDialog(mainWindow, {
+        title: 'Save Database Backup',
+        defaultPath: defaultFilename,
+        buttonLabel: 'Save Backup',
+        filters: [{ name: 'SQLite Database', extensions: ['sqlite', 'db'] }]
+      });
+
+      if (result.canceled || !result.filePath) {
+        return { ok: false, reason: 'cancelled' };
+      }
+
+      const backupPath = result.filePath;
       await db.backup(backupPath);
       console.log(`[Backup] Safe database backup created at: ${backupPath}`);
       logActivity({ event_type: 'BACKUP_CREATED', payload: { path: backupPath } });
