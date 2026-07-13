@@ -23,6 +23,7 @@ interface QrPayload {
 interface Admin {
   id: string;
   username: string;
+  role_level: number;
 }
 
 // ── PIN Confirmation Modal ────────────────────────────────────────────────────
@@ -166,6 +167,7 @@ export function SyncHub() {
 
   // ── QR / Pairing state ────────────────────────────────────────────────────
   const [teachers,          setTeachers]          = useState<Teacher[]>([]);
+  const [adminUsers,        setAdminUsers]         = useState<Admin[]>([]);
   const [selectedTeacherId, setSelectedTeacherId] = useState('');
   const [qrPayload,         setQrPayload]         = useState<QrPayload | null>(null);
   const [copyText,          setCopyText]          = useState('Copy Manual Sync Code');
@@ -278,6 +280,11 @@ export function SyncHub() {
           await loadAccessList();
           return;
         }
+        // Load admin accounts for the companion Admin optgroup
+        const adminsRes = await window.electronAPI?.auth?.getAdmins?.();
+        if (Array.isArray(adminsRes)) {
+          setAdminUsers(adminsRes);
+        }
         // Prefer the scalable paginated handler (minimal=true skips N+1 allocations)
         if (window.electronAPI.getAllTeachers) {
           const res = await window.electronAPI.getAllTeachers({ minimal: true, limit: 500, offset: 0 });
@@ -355,17 +362,35 @@ export function SyncHub() {
 
   // ── Handlers: QR ─────────────────────────────────────────────────────────
   const handleTeacherChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const teacherId = e.target.value;
-    setSelectedTeacherId(teacherId);
-    const teacher = teachers.find(t => t.id === teacherId);
-    if (teacher && window.electronAPI?.setTeacher) {
-      setGenerating(true);
-      setQrPayload(null);
-      try {
-        await window.electronAPI.setTeacher({ id: teacher.id, name: teacher.name });
-      } catch (err) {
-        console.error('[SyncHub] setTeacher error:', err);
-        setGenerating(false);
+    const value = e.target.value; // either teacher id or 'admin_<id>'
+    setSelectedTeacherId(value);
+
+    if (value.startsWith('admin_')) {
+      // Admin companion pairing — resolve the admin account and stamp 'admin_<id>'
+      const rawId = value.replace(/^admin_/, '');
+      const admin = adminUsers.find(a => String(a.id) === rawId);
+      if (admin && window.electronAPI?.setTeacher) {
+        setGenerating(true);
+        setQrPayload(null);
+        try {
+          // Encode teacher_id as 'admin_<id>' so the server maps to the correct role
+          await window.electronAPI.setTeacher({ id: `admin_${admin.id}`, name: admin.username });
+        } catch (err) {
+          console.error('[SyncHub] setTeacher (admin) error:', err);
+          setGenerating(false);
+        }
+      }
+    } else {
+      const teacher = teachers.find(t => t.id === value);
+      if (teacher && window.electronAPI?.setTeacher) {
+        setGenerating(true);
+        setQrPayload(null);
+        try {
+          await window.electronAPI.setTeacher({ id: teacher.id, name: teacher.name });
+        } catch (err) {
+          console.error('[SyncHub] setTeacher error:', err);
+          setGenerating(false);
+        }
       }
     }
   };
@@ -519,7 +544,7 @@ export function SyncHub() {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <label style={{ fontSize: '11px', color: 'var(--text-dim)', fontWeight: 500 }}>
-                  Choose a teacher to generate their custom pairing credentials:
+                  Choose a staff member to generate their custom pairing credentials:
                 </label>
                 <select
                   value={selectedTeacherId}
@@ -527,12 +552,37 @@ export function SyncHub() {
                   className="modern-input"
                   style={{ width: '100%' }}
                 >
-                  <option value="" disabled>Select teacher to generate QR…</option>
-                  {teachers.map(t => (
-                    <option key={t.id} value={t.id} style={{ background: 'var(--bg-dark)', color: 'var(--text-main)' }}>
-                      {t.name}
-                    </option>
-                  ))}
+                  <option value="" disabled>Select staff to generate QR…</option>
+                  {/* ── Admin Accounts ── */}
+                  {adminUsers.length > 0 && (
+                    <optgroup label="── Administrators ──">
+                      {adminUsers.map(a => {
+                        const roleLabel =
+                          a.role_level >= 9 ? 'IT / Superadmin' :
+                          a.role_level >= 7 ? 'Principal' :
+                          a.role_level >= 5 ? 'Bursar' : 'Staff Clerk';
+                        return (
+                          <option
+                            key={`admin_${a.id}`}
+                            value={`admin_${a.id}`}
+                            style={{ background: 'var(--bg-dark)', color: 'var(--text-main)' }}
+                          >
+                            {a.username} — {roleLabel}
+                          </option>
+                        );
+                      })}
+                    </optgroup>
+                  )}
+                  {/* ── Teachers ── */}
+                  {teachers.length > 0 && (
+                    <optgroup label="── Teachers ──">
+                      {teachers.map(t => (
+                        <option key={t.id} value={t.id} style={{ background: 'var(--bg-dark)', color: 'var(--text-main)' }}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               </div>
             )}

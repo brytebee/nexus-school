@@ -5,7 +5,7 @@ const nexusAPI = {
     onQrPayload: (callback) => ipcRenderer.on('qr-payload', (_event, value) => callback(value)),
     onHandshakeComplete: (callback) => ipcRenderer.on('handshake-complete', (_event, value) => callback(value)),
     onSyncUpdate: (callback) => ipcRenderer.on('sync-update', (_event, value) => callback(value)),
-    processCSV: (filePath) => ipcRenderer.send('process-csv', filePath),
+    processCSV: (filePathOrPayload) => ipcRenderer.send('process-csv', filePathOrPayload),
     onCSVLoaded: (callback) => ipcRenderer.on('csv-loaded', (_event, value) => callback(value)),
     processGradesCSV: (filePath) => ipcRenderer.send('process-grades-csv', filePath),
     onGradesCSVLoaded: (callback) => ipcRenderer.on('grades-csv-loaded', (_event, value) => callback(value)),
@@ -245,6 +245,8 @@ const nexusAPI = {
         saveSettings:   (data) => ipcRenderer.invoke('students:save-settings', data),
         getGrades:      (data) => ipcRenderer.invoke('get-student-grades',     data),
         saveGrades:     (data) => ipcRenderer.invoke('save-student-grades',    data),
+        validateCSV:    (data) => ipcRenderer.invoke('students:validate-csv',  data),
+        getCount:       ()     => ipcRenderer.invoke('students:get-count'),
     },
     // ── Generic bridge (Guardian Shield, etc.) ───────────────────────
     invoke: (channel, data)  => ipcRenderer.invoke(channel, data),

@@ -307,12 +307,76 @@ export function Students() {
     }
   }, []);
 
-  const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCSVUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Reset input so the same file can be re-selected if needed
+    e.target.value = '';
     if (!file) return;
-    setCsvStatus('⏳ Ingesting and verifying student CSV data...');
-    if (window.electronAPI?.processCSV) {
-      window.electronAPI.processCSV(file.path);
+
+    const Swal = (window as any).Swal;
+
+    // ── Step 1: Pre-validate before any write ─────────────────────────────
+    const validation = await (window.electronAPI as any)?.students?.validateCSV?.({ filePath: file.path });
+
+    if (validation?.ok && validation.willExceed) {
+      // Cap will be exceeded — show the pre-import modal
+      if (!Swal) {
+        // Fallback if Swal not loaded: proceed without cap
+        setCsvStatus('⏳ Ingesting and verifying student CSV data...');
+        window.electronAPI?.processCSV?.(file.path);
+        return;
+      }
+
+      const result = await Swal.fire({
+        title: '⚠️ Seat Quota Exceeded',
+        html: `
+          <div style="text-align:left; font-family:'Inter',sans-serif; padding: 4px 0;">
+            <p style="color:#fff; font-size:14px; margin-bottom:14px; line-height:1.6;">
+              Your CSV contains <strong style="color:#ffaa00">${validation.newStudents} new student${validation.newStudents !== 1 ? 's' : ''}</strong>, 
+              but only <strong style="color:#00e676">${validation.available} seat${validation.available !== 1 ? 's' : ''}</strong> remain on your 
+              <strong>${validation.cap}-seat</strong> plan.
+            </p>
+            <div style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:12px 16px; margin-bottom:14px;">
+              <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:12px; color:#aaa;"><span>Already enrolled</span><span style="color:#fff;font-weight:700">${validation.totalEnrolled}</span></div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:12px; color:#aaa;"><span>New in CSV</span><span style="color:#ffaa00;font-weight:700">${validation.newStudents}</span></div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:12px; color:#aaa;"><span>Will be skipped</span><span style="color:#ff5252;font-weight:700">${validation.skippedCount}</span></div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:12px; color:#aaa;"><span>Updates (existing)</span><span style="color:#00e676;font-weight:700">${validation.existingStudents}</span></div>
+              <div style="display:flex; justify-content:space-between; font-size:12px; color:#aaa;"><span>Licensed cap</span><span style="color:#00e5ff;font-weight:700">${validation.cap}</span></div>
+            </div>
+            <p style="color:#aaa; font-size:11px; line-height:1.5;">Choose how to proceed:</p>
+          </div>
+        `,
+        icon: 'warning',
+        background: '#0b0f19',
+        color: '#fff',
+        showDenyButton: true,
+        showCancelButton: true,
+        confirmButtonColor: '#0288d1',
+        denyButtonColor: '#2e7d32',
+        cancelButtonColor: '#444',
+        confirmButtonText: '💳 Buy More Seats',
+        denyButtonText: `✂️ Import ${validation.available} (Capped)`,
+        cancelButtonText: '✖ Cancel Import',
+        reverseButtons: true,
+      });
+
+      if (result.isConfirmed) {
+        // Redirect to billing portal
+        (window.electronAPI as any)?.license?.activateOnline?.();
+        return;
+      } else if (result.isDenied) {
+        // Import with cap — only admit up to available slots
+        setCsvStatus(`⏳ Importing ${validation.available} of ${validation.newStudents} new students (capped)...`);
+        window.electronAPI?.processCSV?.({ filePath: file.path, limit: (validation.totalEnrolled ?? 0) + (validation.available ?? 0) } as any);
+      } else {
+        // Cancelled
+        setCsvStatus(null);
+        return;
+      }
+    } else {
+      // No cap issue — proceed normally
+      setCsvStatus('⏳ Ingesting and verifying student CSV data...');
+      window.electronAPI?.processCSV?.(file.path);
     }
   };
 
@@ -703,6 +767,33 @@ export function Students() {
             setIsDrawerOpen(false);
             fetchStudents();
           }, 1000);
+        } else if (res.error === 'STUDENT_CAP_REACHED') {
+          // Seat cap hit — show Buy Seats prompt
+          const Swal = (window as any).Swal;
+          if (Swal) {
+            const result = await Swal.fire({
+              title: '🚫 Seat Quota Full',
+              html: `
+                <p style="color:#fff; font-size:14px; line-height:1.6; margin-bottom:10px;">
+                  You have reached the maximum of <strong style="color:#ffaa00">${res.cap}</strong> enrolled students allowed on your current plan.
+                </p>
+                <p style="color:#aaa; font-size:12px;">Purchase additional seats to continue registering new students.</p>
+              `,
+              icon: 'error',
+              background: '#0b0f19',
+              color: '#fff',
+              showCancelButton: true,
+              confirmButtonColor: '#0288d1',
+              cancelButtonColor: '#444',
+              confirmButtonText: '💳 Buy More Seats',
+              cancelButtonText: 'Later',
+            });
+            if (result.isConfirmed) {
+              (window.electronAPI as any)?.license?.activateOnline?.();
+            }
+          } else {
+            setFormLog({ text: `❌ Seat quota full (${res.cap} students max). Buy more seats to continue.`, isError: true });
+          }
         } else {
           setFormLog({ text: `❌ ${res.error}`, isError: true });
         }
