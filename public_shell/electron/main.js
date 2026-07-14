@@ -5,6 +5,11 @@ console.log("*******************************************\n");
 const { app, BrowserWindow, ipcMain, shell, Menu, dialog, nativeImage, clipboard, globalShortcut, powerSaveBlocker } = require("electron");
 
 const path = require("path");
+// Guard: reset CWD to home dir before dotenv runs.
+// dotenv v17 calls process.cwd() internally even when a path: option is supplied.
+// If the app is launched from a USB drive or a deleted/unmounted directory,
+// uv_cwd() throws EIO: i/o error and crashes the main process before the window opens.
+try { process.chdir(require("os").homedir()); } catch (_) {}
 require("dotenv").config({ path: path.join(__dirname, ".env") });
 const fs = require("fs");
 const crypto = require("crypto");
