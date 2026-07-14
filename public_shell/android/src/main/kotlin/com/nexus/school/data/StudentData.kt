@@ -67,7 +67,13 @@ interface StudentDao {
     @Query("SELECT * FROM students ORDER BY class_name ASC, subject ASC, name ASC")
     suspend fun getAllStudents(): List<Student>
 
-    @Query("SELECT * FROM students WHERE class_name = :className ORDER BY subject ASC, name ASC")
+    @Query("""
+        SELECT * FROM students 
+        WHERE class_name = :className 
+           OR class_name || ' ' || COALESCE(class_arm, '') = :className 
+           OR class_name || COALESCE(class_arm, '') = :className
+        ORDER BY subject ASC, name ASC
+    """)
     suspend fun getStudentsByClass(className: String): List<Student>
 
     @Query("SELECT COUNT(*) FROM students")

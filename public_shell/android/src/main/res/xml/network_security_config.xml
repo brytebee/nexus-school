@@ -1,14 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Allow cleartext HTTP traffic to local subnets for the local school server -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">localhost</domain>
-        <domain includeSubdomains="true">127.0.0.1</domain>
-        <domain includeSubdomains="true">10.0.2.2</domain> <!-- Android Emulator Loopback -->
-        <domain includeSubdomains="true">nexus.local</domain>
-        <domain includeSubdomains="true">192.168.0.0/16</domain>
-        <domain includeSubdomains="true">10.0.0.0/8</domain>
-        <domain includeSubdomains="true">172.16.0.0/12</domain>
-    </domain-config>
-    <base-config cleartextTrafficPermitted="false" />
+    <!-- Allow cleartext HTTP traffic to local network school servers (IP addresses) -->
+    <base-config cleartextTrafficPermitted="true" />
 </network-security-config>
