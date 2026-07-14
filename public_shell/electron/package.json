@@ -1,7 +1,7 @@
 {
   "name": "nexusschoolos",
   "productName": "Nexus School OS",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "High-End School Management System — Desktop Shell",
   "author": "Nexus Infrastructure",
   "repository": {
@@ -26,6 +26,7 @@
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
     "dist:linux": "mkdir -p .build-snapshot && cp node_modules/better-sqlite3/build/Release/better_sqlite3.node .build-snapshot/better_sqlite3.node && (docker run --rm -v \"${PWD}\":/project -v \"${HOME}/.cache/electron\":/root/.cache/electron -v \"${HOME}/.cache/electron-builder\":/root/.cache/electron-builder -w /project electronuserland/builder:20 /bin/bash -c 'npm ci --prefer-offline 2>/dev/null || npm ci; npx electron-builder --linux --publish never'; status=$?; cp .build-snapshot/better_sqlite3.node node_modules/better-sqlite3/build/Release/better_sqlite3.node; rm -rf .build-snapshot; exit $status)",
+    "predist:linux:native": "npm run build",
     "dist:linux:native": "electron-builder --linux",
     "dist:all": "electron-builder --mac --win --linux",
     "publish:mac": "electron-builder --mac --publish always",
