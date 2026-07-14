@@ -30,7 +30,8 @@ jobs:
           sudo apt-get install -y \
             libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev \
             libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxcomposite1 \
-            libxdamage1 libxrandr2 libgbm1 libasound2
+            libxdamage1 libxrandr2 libgbm1
+          sudo apt-get install -y libasound2 || sudo apt-get install -y libasound2t64
 
       - name: Install npm dependencies
         run: npm ci
