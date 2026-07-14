@@ -4924,7 +4924,7 @@ function createWindow() {
       const adminCount = db.prepare('SELECT COUNT(*) as c FROM admin_users').get().c;
       if (adminCount === 0) {
         bootFile = 'dist/renderer.html';
-        loadOptions = { query: { firstRun: '1' } };
+        loadOptions = { hash: 'firstRun' };
         console.log('[Boot] First-run detected — no admins exist. Loading admin setup screen.');
       }
       // else: bootFile stays 'lock.html' — normal PIN login
@@ -4933,21 +4933,11 @@ function createWindow() {
       // Showing the PIN lock screen here would be a dead end with no admin to log in with.
       console.warn('[Boot] Admin count check failed (treating as first-run):', e.message);
       bootFile = 'dist/renderer.html';
-      loadOptions = { query: { firstRun: '1' } };
+      loadOptions = { hash: 'firstRun' };
       console.log('[Boot] Defaulting to admin setup screen.');
     }
   }
-  if (loadOptions && loadOptions.query) {
-    const url = require('url');
-    const fileUrl = url.pathToFileURL(path.join(__dirname, bootFile));
-    for (const [key, val] of Object.entries(loadOptions.query)) {
-      fileUrl.searchParams.append(key, String(val));
-    }
-    mainWindow.loadURL(fileUrl.href);
-    console.log(`[Boot] Loaded query-based URL: ${fileUrl.href}`);
-  } else {
-    mainWindow.loadFile(bootFile, loadOptions);
-  }
+  mainWindow.loadFile(bootFile, loadOptions);
 
 
   // ── Bot window reference — set unconditionally so sendStatus() always has a
