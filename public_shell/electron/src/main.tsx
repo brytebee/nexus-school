@@ -7,7 +7,7 @@ import './index.css';
 import { SudoAuthProvider } from './context/SudoAuthContext';
 
 const params = new URLSearchParams(window.location.search);
-const isFirstRun = params.get('firstRun') === '1';
+const isFirstRun = params.get('firstRun') === '1' || window.location.hash === '#firstRun';
 
 function Root() {
   // During firstRun the user first picks Start Fresh or Restore Backup.
