@@ -18,7 +18,7 @@ function Root() {
     if (!setupStarted) {
       return <StartupChoiceScreen onStartFresh={() => setSetupStarted(true)} />;
     }
-    return <AdminSetupScreen />;
+    return <AdminSetupScreen onBack={() => setSetupStarted(false)} />;
   }
 
   return (

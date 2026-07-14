@@ -21,7 +21,11 @@ const SECURITY_QUESTIONS = [
   'What was the name of your primary school?',
 ];
 
-export function AdminSetupScreen() {
+interface AdminSetupScreenProps {
+  onBack?: () => void;
+}
+
+export function AdminSetupScreen({ onBack }: AdminSetupScreenProps) {
   const [step, setStep] = useState<Step>('credentials');
   const [authType, setAuthType] = useState<'pin' | 'password'>('pin');
   const [form, setForm] = useState<FormState>({
@@ -115,6 +119,44 @@ export function AdminSetupScreen() {
       fontFamily: '"Inter", system-ui, sans-serif',
       position: 'relative', overflow: 'hidden',
     }}>
+      {onBack && step === 'credentials' && (
+        <button
+          onClick={onBack}
+          style={{
+            position: 'absolute',
+            top: 24,
+            left: 24,
+            background: 'rgba(255,255,255,0.03)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: '12px',
+            color: 'rgba(255,255,255,0.7)',
+            padding: '10px 16px',
+            fontSize: '13px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            transition: 'all 0.2s ease',
+            backdropFilter: 'blur(10px)',
+            zIndex: 10,
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.08)';
+            (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(0,229,255,0.4)';
+            (e.currentTarget as HTMLButtonElement).style.color = '#fff';
+            (e.currentTarget as HTMLButtonElement).style.transform = 'translateX(-2px)';
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.03)';
+            (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.08)';
+            (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.7)';
+            (e.currentTarget as HTMLButtonElement).style.transform = 'translateX(0)';
+          }}
+        >
+          ← Back
+        </button>
+      )}
       {/* Background glow orbs */}
       <div style={{
         position: 'absolute', width: 500, height: 500, borderRadius: '50%',
