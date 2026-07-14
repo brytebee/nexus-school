@@ -4937,7 +4937,17 @@ function createWindow() {
       console.log('[Boot] Defaulting to admin setup screen.');
     }
   }
-  mainWindow.loadFile(bootFile, loadOptions);
+  if (loadOptions && loadOptions.query) {
+    const url = require('url');
+    const fileUrl = url.pathToFileURL(path.join(__dirname, bootFile));
+    for (const [key, val] of Object.entries(loadOptions.query)) {
+      fileUrl.searchParams.append(key, String(val));
+    }
+    mainWindow.loadURL(fileUrl.href);
+    console.log(`[Boot] Loaded query-based URL: ${fileUrl.href}`);
+  } else {
+    mainWindow.loadFile(bootFile, loadOptions);
+  }
 
 
   // ── Bot window reference — set unconditionally so sendStatus() always has a
