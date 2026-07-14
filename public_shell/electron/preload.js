@@ -34,6 +34,8 @@ const nexusAPI = {
     // can render a "Resetting..." screen for the 400 ms before the process dies.
     onFactoryReset:   (cb) => ipcRenderer.on('app:factory-reset-complete', (_e) => cb()),
     wasRestored:      () => ipcRenderer.invoke('app:was-restored'),
+    getQuotaStatus:   () => ipcRenderer.invoke('app:quota-status'),
+    getVersion:       () => ipcRenderer.invoke('app:get-version'),
 
     getTeachers: () => ipcRenderer.invoke('get-teachers'),
     setTeacher: (data) => ipcRenderer.invoke('set-teacher', data),

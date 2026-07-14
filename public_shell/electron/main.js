@@ -79,19 +79,97 @@ let qrPayload = null;
 let licenseStatus = { locked: false, message: "" };
 pulseExporter.getLicenseTier = () => licenseStatus?.tier || "Silver";
 
-// Synchronous getter — renderer calls this at boot to pre-populate tier
-// before the reactive `license-status` push event arrives.
-ipcMain.handle('license:get-status', () => licenseStatus);
+// ── Quota Gating (Two-Phase Seat Cap Enforcement) ──────────────────────────
+const GATED_FEATURES = [
+  'generate-reports',
+  'results:dispatch',
+  'results:publish',
+  'fees:record-payment',
+  'fees:upsert',
+  'cbt:deploy-exam',
+  'cbt:create-batch',
+  'cbt:dispatch-pulse-notifications'
+];
+
+function recheckQuota() {
+  try {
+    if (!licenseStatus || licenseStatus.locked) return;
+    const db = database.getDb();
+    if (!db) return; // DB not initialized yet
+    
+    // Check if students table exists to prevent crash on fresh DB
+    const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='students'").get();
+    if (!tableExists) return;
+
+    const totalEnrolled = db.prepare('SELECT COUNT(id) AS c FROM students').get().c;
+    const cap = licenseStatus.student_count;
+    const hasCap = typeof cap === 'number' && isFinite(cap) && cap < 999999;
+    
+    if (hasCap && totalEnrolled > cap) {
+      let graceStartStr = null;
+      try {
+        db.prepare("CREATE TABLE IF NOT EXISTS system_settings (key TEXT PRIMARY KEY, value TEXT)").run();
+        const row = db.prepare("SELECT value FROM system_settings WHERE key = '_sys_quota_grace_start'").get();
+        if (row && row.value) graceStartStr = row.value;
+      } catch (e) {}
+      
+      if (!graceStartStr) {
+        graceStartStr = new Date().toISOString();
+        try {
+          db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_quota_grace_start', ?)").run(graceStartStr);
+          const adminId = typeof currentAdminSession !== 'undefined' && currentAdminSession ? currentAdminSession.id : null;
+          db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'QUOTA_MISMATCH_DETECTED', 'license', ?)").run(
+            adminId,
+            `Enrolled: ${totalEnrolled}, Cap: ${cap}. Grace period started.`
+          );
+        } catch (e) {}
+      }
+      
+      const graceStart = new Date(graceStartStr).getTime();
+      const daysSinceGrace = Math.floor((Date.now() - graceStart) / (24 * 60 * 60 * 1000));
+      
+      licenseStatus.overQuota = true;
+      licenseStatus.enrolledCount = totalEnrolled;
+      licenseStatus.daysSinceGrace = daysSinceGrace;
+      licenseStatus.quotaEnforced = daysSinceGrace > 7;
+    } else {
+      // Quota is compliant
+      try {
+        const row = db.prepare("SELECT value FROM system_settings WHERE key = '_sys_quota_grace_start'").get();
+        if (row) {
+          db.prepare("DELETE FROM system_settings WHERE key = '_sys_quota_grace_start'").run();
+          const adminId = typeof currentAdminSession !== 'undefined' && currentAdminSession ? currentAdminSession.id : null;
+          db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'QUOTA_RESOLVED', 'license', ?)").run(
+            adminId,
+            `Enrolled: ${totalEnrolled}, Cap: ${cap || 'N/A'}. Quota is now compliant.`
+          );
+        }
+      } catch (e) {}
+      licenseStatus.overQuota = false;
+      licenseStatus.quotaEnforced = false;
+    }
+  } catch (e) {
+    console.error('[Quota] recheckQuota failed:', e.message);
+  }
+}
+
+function assertQuotaCompliant(channel) {
+  if (GATED_FEATURES.includes(channel)) {
+    recheckQuota();
+    if (licenseStatus?.quotaEnforced) {
+      return {
+        ok: false,
+        error: 'QUOTA_ENFORCEMENT_ACTIVE',
+        enrolled: licenseStatus.enrolledCount || 0,
+        cap: licenseStatus.student_count || 0,
+        daysSinceGrace: licenseStatus.daysSinceGrace || 0
+      };
+    }
+  }
+  return null;
+}
 
 const originalHandle = ipcMain.handle;
-function guardStandalone(handler) {
-    return (event, ...args) => {
-        if (licenseStatus?.tier === 'Standalone') {
-            return { ok: false, error: 'Feature locked. Migrate to a payment plan to enjoy the full features of Nexus School OS.' };
-        }
-        return handler(event, ...args);
-    };
-}
 ipcMain.handle = function(channel, listener) {
     const gatedChannels = [
         'pulse:', 'scholar:', 'cbt:', 'portal:', 'portal-content:', 'fee-structure:', 'attendance:', 'queue:', 'pulse-inbox:',
@@ -100,11 +178,29 @@ ipcMain.handle = function(channel, listener) {
     const shouldGate = gatedChannels.some(prefix => channel.startsWith(prefix)) &&
                        channel !== 'cbt:get-system-settings' &&
                        channel !== 'cbt:save-system-setting';
-    if (shouldGate) {
-        return originalHandle.call(ipcMain, channel, guardStandalone(listener));
+
+    const wrapper = async (event, ...args) => {
+        const quotaError = assertQuotaCompliant(channel);
+        if (quotaError) return quotaError;
+
+        if (shouldGate && licenseStatus?.tier === 'Standalone') {
+            return { ok: false, error: 'Feature locked. Migrate to a payment plan to enjoy the full features of Nexus School OS.' };
+        }
+        return listener(event, ...args);
+    };
+
+    if (shouldGate || GATED_FEATURES.includes(channel)) {
+        return originalHandle.call(ipcMain, channel, wrapper);
     }
     return originalHandle.call(ipcMain, channel, listener);
 };
+
+// Synchronous getter — renderer calls this at boot to pre-populate tier
+// before the reactive `license-status` push event arrives.
+ipcMain.handle('license:get-status', () => {
+    recheckQuota();
+    return licenseStatus;
+});
 
 ipcMain.handle('read-guide-file', async (event, filename) => {
     try {
@@ -6075,6 +6171,8 @@ function createWindow() {
     licenseStatus = { locked: true, message: 'License vault corrupted. Re-install required.', reason: 'internal_error' };
   }
 
+  recheckQuota();
+
   // ── Heartbeat helper (Gold/Diamond — sends weekly ping to nexus-api) ─────────
   function _scheduleHeartbeat(token, hwId, schoolId, sysConfPath) {
     const API_BASE = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
@@ -6569,6 +6667,21 @@ if (app) {
 
     // Expose flag to renderer so it can show a "Restored from backup" notice
     ipcMain.handle('app:was-restored', () => wasRestoredFromBackup);
+
+    ipcMain.handle('app:quota-status', () => {
+      recheckQuota();
+      return {
+        overQuota: licenseStatus.overQuota || false,
+        quotaEnforced: licenseStatus.quotaEnforced || false,
+        enrolled: licenseStatus.enrolledCount || 0,
+        cap: licenseStatus.student_count || 0,
+        daysSinceGrace: licenseStatus.daysSinceGrace || 0,
+        graceDays: 7,
+        wasRestored: wasRestoredFromBackup
+      };
+    });
+
+    ipcMain.handle('app:get-version', () => app.getVersion());
 
     createWindow();
 

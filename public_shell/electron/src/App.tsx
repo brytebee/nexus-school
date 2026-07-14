@@ -73,8 +73,32 @@ function App() {
     }
   }, []);
 
+  const [quotaStatus, setQuotaStatus] = useState<any>(null);
+  const [enforcementModalData, setEnforcementModalData] = useState<any>(null);
+
+  const fetchQuota = async () => {
+    try {
+      if ((window as any).nexusAPI?.getQuotaStatus) {
+        const res = await (window as any).nexusAPI.getQuotaStatus();
+        setQuotaStatus(res);
+      }
+    } catch (_) {}
+  };
+
+  React.useEffect(() => {
+    fetchQuota();
+  }, []);
+
+  React.useEffect(() => {
+    if (window.nexusAPI?.onShowUpgradeModal) {
+      window.nexusAPI.onShowUpgradeModal((data: any) => {
+        setEnforcementModalData(data);
+      });
+    }
+  }, []);
+
   // ── License enforcement ───────────────────────────────────────────────────
-  const { license, loading: licenseLoading } = useLicense();
+  const { license, loading: licenseLoading, refreshLicense } = useLicense();
   const isLicenseLocked = license?.locked === true;
   const lockReason: LockReason =
     (license?.server_revoked ? 'server_revoked' : license?.reason) as LockReason
@@ -107,6 +131,7 @@ function App() {
   const navigateTo = (tab: string, pushToHistory = true) => {
     setActiveTab(tab);
     localStorage.setItem("nexus_nav_activeTab", tab);
+    fetchQuota();
 
     // Click counter logic for Standalone / Silver ad displays
     setNavClickCount((prevCount) => {
@@ -327,9 +352,51 @@ function App() {
         </div>
       )}
 
+      {/* ── Quota Warning Banner ── */}
+      {quotaStatus && quotaStatus.overQuota && (
+        <div style={{
+          position: 'fixed',
+          top: showBanner ? '40px' : '0px',
+          left: 0, right: 0, zIndex: 9000,
+          background: quotaStatus.quotaEnforced
+            ? 'linear-gradient(90deg, #8b0000, #4a0000)'
+            : 'linear-gradient(90deg, #b8860b, #996515)',
+          borderBottom: quotaStatus.quotaEnforced
+            ? '1px solid rgba(255, 68, 68, 0.4)'
+            : '1px solid rgba(255, 170, 0, 0.4)',
+          padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '12px',
+          height: '40px', boxSizing: 'border-box'
+        }}>
+          <span style={{ fontSize: '15px' }}>{quotaStatus.quotaEnforced ? '🚫' : '⚠️'}</span>
+          <p style={{ color: '#fff', fontSize: '12px', margin: 0, flex: 1 }}>
+            {quotaStatus.quotaEnforced ? (
+              <><strong>Quota Exceeded</strong> — Your license covers {quotaStatus.cap} students but {quotaStatus.enrolled} are enrolled. Gated features are paused.</>
+            ) : (
+              <><strong>License Quota Warning</strong> — {quotaStatus.enrolled} students enrolled vs {quotaStatus.cap} licensed. New student registration is paused. Grace period ends in {quotaStatus.graceDays - quotaStatus.daysSinceGrace} days.</>
+            )}
+          </p>
+          <button
+            onClick={() => {
+              if (window.nexusAPI?.openExternal) {
+                window.nexusAPI.openExternal('https://nexusos.com.ng/portal');
+              } else {
+                window.open('https://nexusos.com.ng/portal', '_blank');
+              }
+            }}
+            style={{
+              background: '#fff', color: quotaStatus.quotaEnforced ? '#8b0000' : '#8b5e3c', border: 'none',
+              borderRadius: '6px', padding: '4px 12px', cursor: 'pointer',
+              fontSize: '11px', fontWeight: 700, whiteSpace: 'nowrap'
+            }}
+          >
+            Upgrade Quota →
+          </button>
+        </div>
+      )}
+
       <div
         className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""} flex h-screen w-screen overflow-hidden text-nexus-text font-inter select-none`}
-        style={{ paddingTop: showBanner ? '40px' : '0px' }}
+        style={{ paddingTop: `${((showBanner ? 1 : 0) + (quotaStatus && quotaStatus.overQuota ? 1 : 0)) * 40}px` }}
       >
         {/* Sidebar Layout */}
         <NavSidebar
@@ -429,7 +496,138 @@ function App() {
       {currentAd && (
         <AdModal ad={currentAd} onClose={() => setCurrentAd(null)} />
       )}
+
+      {/* Quota Enforcement Modal Overlay */}
+      {enforcementModalData && (
+        <QuotaEnforcementModal
+          data={enforcementModalData}
+          onClose={() => setEnforcementModalData(null)}
+          onImportSuccess={async () => {
+            await refreshLicense();
+            await fetchQuota();
+            setEnforcementModalData(null);
+          }}
+        />
+      )}
     </>
+  );
+}
+
+interface QuotaEnforcementModalProps {
+  data: {
+    enrolled: number;
+    cap: number;
+    daysSinceGrace: number;
+  };
+  onClose: () => void;
+  onImportSuccess: () => void;
+}
+
+export function QuotaEnforcementModal({ data, onClose, onImportSuccess }: QuotaEnforcementModalProps) {
+  const [importing, setImporting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  const handleImport = async () => {
+    setImporting(true);
+    setErrorMsg('');
+    try {
+      const res = await (window.nexusAPI as any)?.license?.importFile?.();
+      if (res?.ok) {
+        onImportSuccess();
+      } else if (res?.reason !== 'cancelled') {
+        setErrorMsg(res?.reason || 'Import failed.');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Unexpected error.');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0,
+      background: 'rgba(5, 7, 18, 0.95)',
+      backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 10000, padding: '24px',
+      fontFamily: "'Inter', sans-serif"
+    }}>
+      <div style={{
+        width: '100%', maxWidth: '520px',
+        background: 'rgba(15, 23, 42, 0.65)',
+        border: '1px solid rgba(239, 68, 68, 0.3)',
+        borderRadius: '24px', padding: '36px',
+        boxShadow: '0 24px 64px rgba(0,0,0,0.8), 0 0 40px rgba(239, 68, 68, 0.08)',
+        color: '#fff', textAlign: 'center',
+        margin: 'auto'
+      }}>
+        <div style={{ fontSize: '56px', marginBottom: '20px' }}>🔒</div>
+        <h3 style={{ fontSize: '22px', fontWeight: 800, margin: '0 0 12px', color: '#ff6b6b' }}>
+          Feature Paused — Quota Exceeded
+        </h3>
+        <p style={{ fontSize: '13.5px', color: '#94a3b8', lineHeight: '1.65', margin: '0 0 24px' }}>
+          This feature is currently locked because your database contains <strong>{data.enrolled}</strong> enrolled students, but your active license quota is limited to <strong>{data.cap}</strong>. 
+          <br /><br />
+          Quota has been exceeded for <strong>{data.daysSinceGrace} days</strong>. All existing school records remain completely safe and viewable, but transactional actions are paused.
+        </p>
+
+        {errorMsg && (
+          <div style={{
+            background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#f87171',
+            marginBottom: '16px'
+          }}>
+            ⚠️ {errorMsg}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <button
+            onClick={() => {
+              if (window.nexusAPI?.openExternal) {
+                window.nexusAPI.openExternal('https://nexusos.com.ng/portal');
+              } else {
+                window.open('https://nexusos.com.ng/portal', '_blank');
+              }
+            }}
+            style={{
+              background: 'linear-gradient(135deg, #ff6b6b 0%, #ee5253 100%)',
+              color: '#fff', border: 'none', borderRadius: '12px',
+              padding: '12px 24px', fontSize: '13px', fontWeight: 700,
+              cursor: 'pointer', boxShadow: '0 4px 12px rgba(239, 107, 107, 0.25)'
+            }}
+          >
+            🚀 Request Quota Upgrade →
+          </button>
+          
+          <button
+            onClick={handleImport}
+            disabled={importing}
+            style={{
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              color: '#c8d0e0', borderRadius: '12px',
+              padding: '12px 24px', fontSize: '13px', fontWeight: 600,
+              cursor: 'pointer'
+            }}
+          >
+            {importing ? '⏳ Importing...' : '📁 Import New License File'}
+          </button>
+
+          <button
+            onClick={onClose}
+            style={{
+              background: 'transparent', border: 'none', color: '#64748b',
+              fontSize: '12px', cursor: 'pointer', marginTop: '8px',
+              textDecoration: 'underline'
+            }}
+          >
+            Close Dialog
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
