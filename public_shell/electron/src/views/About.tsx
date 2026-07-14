@@ -10,6 +10,7 @@ export function About({ onTabChange }: AboutProps) {
   const [licenseActionStatus, setLicenseActionStatus] = useState<'idle' | 'importing' | 'activating' | 'success' | 'error'>('idle');
   const [licenseActionMsg, setLicenseActionMsg] = useState('');
   const [enrolledCount, setEnrolledCount] = useState<number | null>(null);
+  const [appVersion, setAppVersion] = useState('1.0.0');
 
   useEffect(() => {
     // Fetch live enrolled student count on mount
@@ -19,7 +20,18 @@ export function About({ onTabChange }: AboutProps) {
         if (res?.ok) setEnrolledCount(res.count);
       } catch (_) {}
     };
+
+    const fetchVersion = async () => {
+      try {
+        if ((window.electronAPI as any)?.getVersion) {
+          const v = await (window.electronAPI as any).getVersion();
+          if (v) setAppVersion(v);
+        }
+      } catch (_) {}
+    };
+
     fetchCount();
+    fetchVersion();
   }, []);
 
   const currentTier = license?.tier || 'Silver';
@@ -110,7 +122,7 @@ export function About({ onTabChange }: AboutProps) {
             }}
           >
             <div>
-              Version: <span style={{ color: 'var(--accent)' }}>1.0.0</span>
+              Version: <span style={{ color: 'var(--accent)' }}>{appVersion}</span>
             </div>
             <div>
               Engine:{' '}
