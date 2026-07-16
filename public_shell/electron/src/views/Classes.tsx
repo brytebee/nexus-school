@@ -36,6 +36,18 @@ export default function Classes() {
               confirmButtonColor: '#ef4444'
             });
           }
+        } else if (res.count === 0) {
+          setCsvStatus('⚠️ No class records imported. Check that you selected the correct CSV template.');
+          if (Swal) {
+            Swal.fire({
+              title: 'No Records Imported',
+              text: 'Zero rows were processed. Ensure you are using the Nexus Classes CSV template with a Class_Name column.',
+              icon: 'warning',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#f59e0b'
+            });
+          }
         } else {
           setCsvStatus(`✅ Classes CSV Processed: ${res.count} records loaded`);
           refresh();

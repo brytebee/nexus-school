@@ -264,7 +264,46 @@ export function Students() {
     if (window.electronAPI?.onCSVLoaded) {
       window.electronAPI.onCSVLoaded((payload: any) => {
         const count = typeof payload === 'object' ? payload.count : payload;
+        const error: string | null = typeof payload === 'object' ? (payload.error || null) : null;
         const warnings: string[] = typeof payload === 'object' ? (payload.warnings || []) : [];
+
+        const Swal = (window as any).Swal;
+
+        // ── Layer 5: distinguish error / wrong-template / success ─────────
+        if (error) {
+          setCsvStatus(`❌ Import Failed: ${error}`);
+          if (Swal) {
+            Swal.fire({
+              title: 'Import Failed',
+              text: error.startsWith('WRONG_TEMPLATE:')
+                ? 'Wrong file selected. Please use the official Nexus Students or Teachers CSV template.'
+                : error,
+              icon: 'error',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#ef4444'
+            });
+          }
+          setTimeout(() => setCsvStatus(null), 6000);
+          return;
+        }
+
+        if (count === 0) {
+          setCsvStatus('⚠️ No records imported. Check that you selected the correct CSV template.');
+          if (Swal) {
+            Swal.fire({
+              title: 'No Records Imported',
+              text: 'Zero rows were processed. Ensure you are using the official Nexus Students or Teachers CSV template with the correct column headers.',
+              icon: 'warning',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#f59e0b'
+            });
+          }
+          setTimeout(() => setCsvStatus(null), 6000);
+          return;
+        }
+
         const baseMsg = `✅ CSV Processed: ${count} Students Loaded`;
         const fullMsg = warnings.length > 0
           ? `${baseMsg} — ⚠️ ${warnings.length} warning(s): ${warnings.join(' | ')}`
@@ -273,7 +312,6 @@ export function Students() {
         fetchStudents();
         setTimeout(() => setCsvStatus(null), warnings.length > 0 ? 8000 : 4000);
 
-        const Swal = (window as any).Swal;
         if (Swal) {
           if (warnings.length > 0) {
             Swal.fire({
@@ -523,11 +561,25 @@ export function Students() {
           if (Swal) {
             Swal.fire({
               title: 'Grades Import Failed',
-              text: res.error,
+              text: res.error.startsWith('WRONG_TEMPLATE:')
+                ? 'Wrong file selected. Please use the official Nexus Grades CSV template.'
+                : res.error,
               icon: 'error',
               background: '#0b0f19',
               color: '#fff',
               confirmButtonColor: '#ef4444'
+            });
+          }
+        } else if (res.count === 0) {
+          setCsvStatus('⚠️ No grade records imported. Check that you selected the correct CSV template.');
+          if (Swal) {
+            Swal.fire({
+              title: 'No Records Imported',
+              text: 'Zero rows were processed. Ensure you are using the Nexus Grades CSV template with Student_ID and Subject columns.',
+              icon: 'warning',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#f59e0b'
             });
           }
         } else {
@@ -558,11 +610,25 @@ export function Students() {
           if (Swal) {
             Swal.fire({
               title: 'Attendance Import Failed',
-              text: res.error,
+              text: res.error.startsWith('WRONG_TEMPLATE:')
+                ? 'Wrong file selected. Please use the official Nexus Attendance CSV template.'
+                : res.error,
               icon: 'error',
               background: '#0b0f19',
               color: '#fff',
               confirmButtonColor: '#ef4444'
+            });
+          }
+        } else if (res.count === 0) {
+          setCsvStatus('⚠️ No attendance records imported. Check that you selected the correct CSV template.');
+          if (Swal) {
+            Swal.fire({
+              title: 'No Records Imported',
+              text: 'Zero rows were processed. Ensure you are using the Nexus Attendance CSV template with Student_ID, Total_Days, and Days_Attended columns.',
+              icon: 'warning',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#f59e0b'
             });
           }
         } else {

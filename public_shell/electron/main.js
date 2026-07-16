@@ -4291,16 +4291,19 @@ ipcMain.handle("reset-app-data", async () => {
     setSchoolConfig(qrPayload.config);
   }
 
-  // 7. Notify renderer so it can show a "Resetting..." screen, then relaunch.
-  // We push the event BEFORE exiting so the renderer gets a chance to render
-  // the spinner. app.exit() is deferred 400 ms — enough for one paint cycle.
-  // See: private_engine/docs/guides/23-database-backup-restore.md § 5.4 Gap 2
-  console.log("[Electron] App data reset complete. Signalling renderer then relaunching...");
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('app:factory-reset-complete');
-  }
-  app.relaunch();
-  setTimeout(() => app.exit(0), 400);
+  // 7. Return { ok: true } to the renderer FIRST so the await resolves,
+  // then push the factory-reset-complete event and schedule the exit.
+  // Previously app.relaunch()+exit fired synchronously before the IPC
+  // reply was flushed, so the renderer's await never settled and
+  // triggerResetComplete() was never called.
+  console.log('[Electron] App data reset complete. Returning to renderer then relaunching...');
+  setImmediate(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('app:factory-reset-complete');
+    }
+    app.relaunch();
+    setTimeout(() => app.exit(0), 400);
+  });
 
   return { ok: true };
 });

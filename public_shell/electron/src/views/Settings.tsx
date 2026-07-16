@@ -81,7 +81,7 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
   const [stampPreviews, setStampPreviews] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [identityUploadStatus, setIdentityUploadStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [identityUploadStatus, setIdentityUploadStatus] = useState<'idle' | 'success' | 'error' | 'wrong_template'>('idle');
   const [isTemplateDrawerOpen, setIsTemplateDrawerOpen] = useState(false);
 
   // Load identity values when they arrive
@@ -881,12 +881,28 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // ── Schema fingerprint: these are the ONLY keys this template recognises ──
+    const IDENTITY_KEYS = [
+      'name', 'address', 'motto', 'signature',
+      'principalPhone', 'portalSlug', 'themePrimary', 'themeSecondary',
+    ];
+
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
         const text = event.target?.result as string;
         const data = JSON.parse(text);
-        
+
+        // Reject any JSON object that contains zero recognised identity fields
+        const matched = IDENTITY_KEYS.filter(k => k in data);
+        if (matched.length === 0) {
+          console.warn('[Identity] Wrong template — no recognised keys found in uploaded JSON.');
+          setIdentityUploadStatus('wrong_template');
+          setTimeout(() => setIdentityUploadStatus('idle'), 5000);
+          e.target.value = '';
+          return;
+        }
+
         if (data.name !== undefined) setName(String(data.name));
         if (data.address !== undefined) setAddress(String(data.address));
         if (data.motto !== undefined) setMotto(String(data.motto));
@@ -895,7 +911,7 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
         if (data.portalSlug !== undefined) setPortalSlug(String(data.portalSlug));
         if (data.themePrimary !== undefined) setThemePrimary(String(data.themePrimary));
         if (data.themeSecondary !== undefined) setThemeSecondary(String(data.themeSecondary));
-        
+
         setIdentityUploadStatus('success');
         setTimeout(() => setIdentityUploadStatus('idle'), 4000);
       } catch (err) {
@@ -1646,9 +1662,14 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
               ✅ Identity config loaded! Save to persist.
             </p>
           )}
+          {identityUploadStatus === 'wrong_template' && (
+            <p style={{ color: '#f59e0b', fontSize: '11px', marginTop: '6px', textAlign: 'center' }}>
+              ⚠️ Wrong file — no identity fields found. Download the template and fill it in.
+            </p>
+          )}
           {identityUploadStatus === 'error' && (
             <p style={{ color: '#ff4444', fontSize: '11px', marginTop: '6px', textAlign: 'center' }}>
-              ❌ Error parsing JSON file.
+              ❌ Invalid JSON — file could not be parsed.
             </p>
           )}
         </div>
