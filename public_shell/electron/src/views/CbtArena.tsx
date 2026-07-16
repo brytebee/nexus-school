@@ -747,6 +747,47 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
     
     const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/['"_-]/g, ''));
     const candidates: any[] = [];
+
+    const parseDateString = (dateStr: string) => {
+      if (!dateStr) return null;
+      const clean = dateStr.replace(/[\/\.\s]/g, '-');
+      const parts = clean.split('-').map(p => parseInt(p, 10));
+      if (parts.length < 3 || parts.some(isNaN)) return null;
+
+      let year = 2010, month = 1, day = 1;
+
+      if (parts[0] > 1000) {
+        // YYYY-MM-DD
+        year = parts[0];
+        month = parts[1];
+        day = parts[2];
+      } else if (parts[2] > 1000) {
+        // DD-MM-YYYY
+        day = parts[0];
+        month = parts[1];
+        year = parts[2];
+      } else {
+        return null;
+      }
+
+      if (month < 1 || month > 12) return null;
+      if (day < 1 || day > 31) return null;
+      if (year < 1900 || year > new Date().getFullYear()) return null;
+
+      return { year, month, day };
+    };
+
+    const dobIdx = headers.indexOf('dob') !== -1 
+      ? headers.indexOf('dob') 
+      : (headers.indexOf('dateofbirth') !== -1 
+        ? headers.indexOf('dateofbirth') 
+        : headers.indexOf('birthdate'));
+
+    const dobYearIdx = headers.indexOf('dobyear') !== -1 ? headers.indexOf('dobyear') : headers.indexOf('birthyear');
+    const dobMonthIdx = headers.indexOf('dobmonth') !== -1 ? headers.indexOf('dobmonth') : headers.indexOf('birthmonth');
+    const dobDayIdx = headers.indexOf('dobday') !== -1 
+      ? headers.indexOf('dobday') 
+      : (headers.indexOf('birthday') !== -1 ? headers.indexOf('birthday') : headers.indexOf('dobday')); // fallback
     
     for (let i = 1; i < lines.length; i++) {
       const cols = lines[i].split(',').map(c => c.trim().replace(/^["']|["']$/g, ''));
@@ -777,13 +818,43 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
       if (classIdx !== -1 && cols[classIdx]) {
         targetClass = cols[classIdx];
       }
+
+      let dYear = 2010;
+      let dMonth = 1;
+      let dDay = 1;
+      let isFallback = true;
+
+      // 1. Try split columns first
+      if (dobYearIdx !== -1 && dobMonthIdx !== -1 && dobDayIdx !== -1) {
+        const yVal = parseInt(cols[dobYearIdx], 10);
+        const mVal = parseInt(cols[dobMonthIdx], 10);
+        const dVal = parseInt(cols[dobDayIdx], 10);
+        if (!isNaN(yVal) && !isNaN(mVal) && !isNaN(dVal) && yVal >= 1900 && yVal <= new Date().getFullYear() && mVal >= 1 && mVal <= 12 && dVal >= 1 && dVal <= 31) {
+          dYear = yVal;
+          dMonth = mVal;
+          dDay = dVal;
+          isFallback = false;
+        }
+      }
+
+      // 2. Try single column DOB
+      if (isFallback && dobIdx !== -1 && cols[dobIdx]) {
+        const parsed = parseDateString(cols[dobIdx]);
+        if (parsed) {
+          dYear = parsed.year;
+          dMonth = parsed.month;
+          dDay = parsed.day;
+          isFallback = false;
+        }
+      }
       
       candidates.push({
         name,
         guardian_phone: phone || '',
-        dob_year: 2010,
-        dob_month: 1,
-        dob_day: 1,
+        dob_year: dYear,
+        dob_month: dMonth,
+        dob_day: dDay,
+        dob_fallback: isFallback,
         exam_year: new Date().getFullYear(),
         exam_month: new Date().getMonth() + 1,
         exam_day: new Date().getDate(),
@@ -848,6 +919,31 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
             alert("No valid candidates found in the CSV file.");
           }
           return;
+        }
+
+        const fallbackCount = candidates.filter(c => c.dob_fallback).length;
+        if (fallbackCount > 0) {
+          let proceed = false;
+          if (Swal) {
+            const swalRes = await Swal.fire({
+              title: 'Security Warning: Missing DOBs',
+              text: `${fallbackCount} out of ${candidates.length} candidates are missing a valid Date of Birth. They will be assigned a default fallback of 2010-01-01. This allows potential unauthorized access to their exam tokens. Do you want to proceed anyway?`,
+              icon: 'warning',
+              showCancelButton: true,
+              confirmButtonText: 'Yes, Proceed',
+              cancelButtonText: 'No, Cancel',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#f59e0b',
+              cancelButtonColor: '#ef4444'
+            });
+            proceed = swalRes.isConfirmed;
+          } else {
+            proceed = window.confirm(
+              `WARNING: ${fallbackCount} out of ${candidates.length} candidates are missing a valid Date of Birth. They will receive the fallback (2010-01-01), creating a security risk. Proceed anyway?`
+            );
+          }
+          if (!proceed) return;
         }
       } catch (err: any) {
         if (Swal) {
