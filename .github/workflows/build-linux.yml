@@ -41,6 +41,13 @@ jobs:
         run: npm test
         working-directory: public_shell/electron
 
+      - name: Inject Production environment keys and enable .env packaging
+        run: |
+          echo "PAYSTACK_SECRET_KEY=${{ secrets.PAYSTACK_SECRET_KEY }}" >> .env
+          echo "PAYSTACK_PUBLIC_KEY=${{ secrets.PAYSTACK_PUBLIC_KEY }}" >> .env
+          node -e "const fs = require('fs'); const pkg = JSON.parse(fs.readFileSync('package.json')); pkg.build.files = pkg.build.files.filter(f => f !== '!.env'); fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));"
+        working-directory: public_shell/electron
+
       - name: Build Linux packages (.deb + AppImage)
         run: npm run dist:linux:native -- --publish never
         working-directory: public_shell/electron
