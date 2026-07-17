@@ -377,7 +377,7 @@ ipcMain.once("ui-ready", () => {
       logActivity({ event_type: 'BACKUP_RESTORED', payload: { source: src } });
 
       // Relaunch to load the restored database state
-      app.relaunch();
+      relaunchApp();
       app.exit(0);
       return { ok: true };
     } catch (e) {
@@ -999,12 +999,15 @@ ipcMain.handle('fee-structure:delete-item', (event, id) => {
 ipcMain.handle('fee-structure:apply-to-class', (event, { className, academicSession, term }) => {
     const db = database.getDb();
     const termConfig = db.prepare('SELECT * FROM school_term_config WHERE id = 1').get();
+    if (!termConfig || !termConfig.academic_session || !termConfig.term) {
+        return { ok: false, error: 'TERM_CONFIG_MISSING', count: 0 };
+    }
     const session = academicSession || termConfig.academic_session;
     const activeTerm = term || termConfig.term;
 
     const { total } = db.prepare(`
         SELECT COALESCE(SUM(amount), 0) as total FROM fee_structures
-        WHERE class_name = ? AND (term = 'All Terms' OR term = ?)
+        WHERE class_name = ? AND (LOWER(TRIM(term)) IN ('all terms', 'all term') OR term = ?)
     `).get(className, activeTerm);
 
     const students = db.prepare("SELECT id FROM students WHERE UPPER(replace(class_name || COALESCE(' ' || NULLIF(class_arm, ''), ''), ' ', '')) = ?").all(className.replace(/\s+/g, '').toUpperCase());
@@ -1976,8 +1979,11 @@ ipcMain.handle("classes:getAll", () => {
       configsMap[c.hierarchy_class] = c;
     });
 
-    return hierarchy.map(cls => {
-      const c = configsMap[cls] || { max_subjects: 0, pass_mark_override: null };
+    // Only return classes that are actually configured in class_configs.
+    // class_hierarchy is re-inserted on every boot (INSERT OR IGNORE), so
+    // filtering by configsMap is the only reliable way to respect a "Clear Data".
+    return hierarchy.filter(cls => configsMap[cls]).map(cls => {
+      const c = configsMap[cls];
       return {
         hierarchy_class: cls,
         max_subjects: c.max_subjects || 0,
@@ -2020,6 +2026,11 @@ ipcMain.handle("classes:getFullList", () => {
     const setting = db.prepare("SELECT value FROM system_settings WHERE key = 'class_hierarchy'").get();
     const hierarchy = setting ? JSON.parse(setting.value) : [];
 
+    // Only include classes that exist in class_configs — same guard as classes:getAll.
+    const configuredSet = new Set(
+      db.prepare("SELECT hierarchy_class FROM class_configs").all().map(r => r.hierarchy_class)
+    );
+
     const arms = db.prepare("SELECT hierarchy_class, arm FROM class_arms ORDER BY arm ASC").all();
     const armsMap = {};
     arms.forEach(r => {
@@ -2029,6 +2040,7 @@ ipcMain.handle("classes:getFullList", () => {
 
     const flatList = [];
     hierarchy.forEach(cls => {
+      if (!configuredSet.has(cls)) return; // skip classes not in class_configs
       const clsArms = armsMap[cls] || [];
       if (clsArms.length > 0) {
         clsArms.forEach(arm => {
@@ -2445,9 +2457,21 @@ ipcMain.handle("get-db-stats", () => {
     try {
       grade_events = db.prepare("SELECT COUNT(*) as c FROM sync_logs").get().c;
     } catch (_) {}
-    return { teachers, students, classes, devices, grade_events };
+    let grades = 0;
+    try {
+      grades = db.prepare("SELECT COUNT(*) as c FROM student_records").get().c;
+    } catch (_) {}
+    let attendance = 0;
+    try {
+      attendance = db.prepare("SELECT COUNT(*) as c FROM student_attendance").get().c;
+    } catch (_) {}
+    let fees = 0;
+    try {
+      fees = db.prepare("SELECT COUNT(*) as c FROM student_fees").get().c;
+    } catch (_) {}
+    return { teachers, students, classes, devices, grade_events, grades, attendance, fees };
   } catch (err) {
-    return { teachers: 0, students: 0, classes: 0, devices: 0, grade_events: 0 };
+    return { teachers: 0, students: 0, classes: 0, devices: 0, grade_events: 0, grades: 0, attendance: 0, fees: 0 };
   }
 });
 
@@ -3043,6 +3067,15 @@ ipcMain.handle("save-term-config", (event, config) => {
       include_attendance_in_grades: config.include_attendance_in_grades !== false && config.include_attendance_in_grades !== 0 ? 1 : 0,
       exclude_unregistered_from_totals: config.exclude_unregistered_from_totals ? 1 : 0,
     });
+
+    // Unify session/term settings: also update system_settings keys to prevent divergence
+    const sessionVal = config.academic_session || "2024/2025";
+    const termVal = config.term || "First Term";
+    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('current_academic_session', ?)")
+      .run(sessionVal);
+    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('current_term', ?)")
+      .run(termVal);
+
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -3201,6 +3234,68 @@ ipcMain.handle("fees:clear-data", (event, { scope, academic_session, term }) => 
     return { ok: true, counts };
   } catch (err) {
     console.error("[Fees] clear-data error:", err);
+    return { ok: false, error: err.message };
+  }
+});
+
+// Admin-authenticated clearing of specific database assets
+ipcMain.handle("assets:clear", (event, { asset }) => {
+  if (!currentAdminSession) return { ok: false, error: "Unauthorized. No active admin session." };
+  const db = database.getDb();
+  
+  const clearActions = {
+    classes: () => {
+      db.prepare("DELETE FROM class_arms").run();
+      db.prepare("DELETE FROM class_configs").run();
+      db.prepare("DELETE FROM system_settings WHERE key = 'class_hierarchy'").run();
+      db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('classes_initialized', 'true')").run();
+    },
+    teachers: () => {
+      db.prepare("DELETE FROM teacher_allocations").run();
+      db.prepare("DELETE FROM form_teachers").run();
+      db.prepare("DELETE FROM teachers").run();
+    },
+    students: () => {
+      db.prepare("DELETE FROM student_subjects").run();
+      db.prepare("DELETE FROM form_teachers").run();
+      db.prepare("DELETE FROM students").run();
+    },
+    grades: () => {
+      db.prepare("DELETE FROM student_records").run();
+    },
+    attendance: () => {
+      db.prepare("DELETE FROM student_attendance").run();
+      db.prepare("DELETE FROM daily_attendance").run();
+      db.prepare("DELETE FROM subject_attendance").run();
+      db.prepare("DELETE FROM subject_attendance_agg").run();
+    },
+    fees: () => {
+      db.prepare("DELETE FROM student_fees").run();
+      db.prepare("DELETE FROM fee_structures").run();
+      db.prepare("DELETE FROM fee_transactions").run();
+      db.prepare("DELETE FROM fee_adjustments").run();
+    }
+  };
+
+  if (!clearActions[asset]) {
+    return { ok: false, error: "Unknown asset type." };
+  }
+
+  try {
+    db.transaction(clearActions[asset])();
+    
+    // Log the audit event
+    const adminId = currentAdminSession ? currentAdminSession.id : null;
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'CLEAR_ASSETS', ?, ?)").run(
+      adminId,
+      asset,
+      `Wiped all database records for asset: ${asset}`
+    );
+    
+    console.log(`[Assets] Wiped all database records for ${asset}`);
+    return { ok: true };
+  } catch (err) {
+    console.error(`[Assets] Clear error for ${asset}:`, err.message);
     return { ok: false, error: err.message };
   }
 });
@@ -4301,7 +4396,7 @@ ipcMain.handle("reset-app-data", async () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('app:factory-reset-complete');
     }
-    app.relaunch();
+    relaunchApp();
     setTimeout(() => app.exit(0), 400);
   });
 
@@ -4717,6 +4812,22 @@ ipcMain.handle("settings:smtp:test", async (event, params) => {
     return { ok: false, error: err.message };
   }
 });
+
+function relaunchApp() {
+  if (process.defaultApp) {
+    const args = process.argv.slice(1);
+    const appPath = app.getAppPath();
+    if (!args.includes(appPath) && !args.includes('.')) {
+      args.unshift(appPath);
+    }
+    app.relaunch({
+      execPath: process.execPath,
+      args: args
+    });
+  } else {
+    app.relaunch();
+  }
+}
 
 function createWindow() {
   // ── Initialize Persistence First ──────────────────────────────────────────
@@ -6365,7 +6476,7 @@ function createWindow() {
 
   // ── Relaunch — clean restart after license import so Phase 4 re-runs ─────────
   ipcMain.handle('app:relaunch', () => {
-    app.relaunch();
+    relaunchApp();
     app.exit(0);
   });
 
@@ -6426,7 +6537,7 @@ function createWindow() {
     const filePath = typeof payload === 'string' ? payload : payload?.filePath;
     const newStudentLimit = typeof payload === 'string' ? undefined : payload?.limit;
     handleCSVUpload(filePath, (count, err, result) => {
-      event.reply("csv-loaded", { count, warnings: result?.warnings || [], newStudentsInserted: result?.newStudentsInserted });
+      event.reply("csv-loaded", { count, error: err || null, warnings: result?.warnings || [], newStudentsInserted: result?.newStudentsInserted });
     }, newStudentLimit);
   });
 

@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useClassArms, ClassConfig } from '../hooks/useClassArms';
 import { generateSessionsList } from '../lib/sessions';
+import { useSudoAuth } from '../context/SudoAuthContext';
 
 export default function Classes() {
   const { configs, refresh } = useClassArms();
+  const { requireSudo } = useSudoAuth();
   
   // Slide-in drawer state
   const [selectedClass, setSelectedClass] = useState<ClassConfig | null>(null);
@@ -67,12 +69,112 @@ export default function Classes() {
     }
   }, [refresh]);
 
-  const handleClassesCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleClassesCSVUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    const Swal = (window as any).Swal;
+    const api = (window as any).electronAPI;
+
+    if (api?.getDbStats) {
+      try {
+        const stats = await api.getDbStats();
+        if (stats && stats.classes > 0) {
+          if (Swal) {
+            const result = await Swal.fire({
+              title: 'Replace Existing Classes?',
+              text: `Warning: You currently have ${stats.classes} classes/arms configured. Uploading this template will completely delete and replace them. Continue?`,
+              icon: 'warning',
+              showCancelButton: true,
+              confirmButtonText: 'Yes, Overwrite',
+              cancelButtonText: 'Cancel',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#f59e0b',
+              cancelButtonColor: '#ef4444'
+            });
+            if (!result.isConfirmed) {
+              e.target.value = '';
+              return;
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to run preflight check:', err);
+      }
+    }
+
     setCsvStatus('⏳ Ingesting and verifying Classes CSV data...');
-    if ((window as any).electronAPI?.processClassesCSV) {
-      (window as any).electronAPI.processClassesCSV(file.path);
+    if (api?.processClassesCSV) {
+      api.processClassesCSV(file.path);
+    }
+    e.target.value = '';
+  };
+
+  const handleClearClasses = async () => {
+    const Swal = (window as any).Swal;
+    const api = (window as any).electronAPI;
+    if (!api?.assets?.clear) return;
+
+    try {
+      if (api.getDbStats) {
+        const stats = await api.getDbStats();
+        if (stats && (stats.teachers > 0 || stats.students > 0)) {
+          if (Swal) {
+            Swal.fire({
+              title: 'Cannot Clear Classes',
+              text: `There are currently ${stats.teachers} teachers and ${stats.students} students registered in the system that depend on these classes. Please clear them first.`,
+              icon: 'error',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#ef4444'
+            });
+          } else {
+            alert('Cannot clear classes: teachers or students exist.');
+          }
+          return;
+        }
+      }
+
+      requireSudo(
+        async () => {
+          setCsvStatus('⏳ Clearing classes from database...');
+          const res = await api.assets.clear({ asset: 'classes' });
+          if (res?.ok) {
+            setCsvStatus('✅ All class configurations cleared');
+            refresh();
+            fetchGlobalSettings();
+            if (Swal) {
+              Swal.fire({
+                title: 'Cleared!',
+                text: 'All classes and arms have been successfully deleted.',
+                icon: 'success',
+                background: '#0b0f19',
+                color: '#fff',
+                confirmButtonColor: '#00E5FF'
+              });
+            }
+          } else {
+            setCsvStatus(`❌ Clear Failed: ${res?.error}`);
+            if (Swal) {
+              Swal.fire({
+                title: 'Clear Failed',
+                text: res?.error || 'Unknown error occurred.',
+                icon: 'error',
+                background: '#0b0f19',
+                color: '#fff',
+                confirmButtonColor: '#ef4444'
+              });
+            }
+          }
+        },
+        'Clear All Classes & Arms?',
+        'This will completely delete all configured classes and arms from the database. This action is permanent and cannot be undone.',
+        true
+      );
+    } catch (err: any) {
+      console.error(err);
+      if (Swal) Swal.fire({ title: 'Error', text: err.message, icon: 'error', background: '#0b0f19', color: '#fff' });
     }
   };
 
@@ -454,6 +556,34 @@ export default function Classes() {
             onChange={handleClassesCSVUpload}
             style={{ display: 'none' }}
           />
+          {configs.length > 0 && (
+            <button
+              onClick={handleClearClasses}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: '6px',
+                color: '#fca5a5',
+                fontSize: '12px',
+                fontWeight: 600,
+                padding: '6px 14px',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)';
+                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+              }}
+            >
+              🗑️ Clear Data
+            </button>
+          )}
         </div>
       </div>
 
