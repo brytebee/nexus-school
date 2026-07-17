@@ -2,7 +2,7 @@
  * Dynamically generates progressively incremental academic sessions list (e.g., YYYY/YYYY)
  * starting from a baseline year up to the upcoming years.
  */
-export function generateSessionsList(baseYear = 2023): string[] {
+export function generateSessionsList(baseYear = 2025): string[] {
   const currentYear = new Date().getFullYear();
   // Dynamically grow the sessions dropdown to include future years (currentYear + 2)
   const maxYear = currentYear + 2;

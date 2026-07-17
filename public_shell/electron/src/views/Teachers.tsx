@@ -180,11 +180,96 @@ export function Teachers() {
     }
   }, []);
 
-  const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCSVUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    const Swal = (window as any).Swal;
+    const api = (window as any).electronAPI;
+
+    if (api?.getDbStats) {
+      try {
+        const stats = await api.getDbStats();
+        if (stats && stats.classes === 0) {
+          if (Swal) {
+            Swal.fire({
+              title: 'Setup Step Required',
+              text: 'No classes have been set up yet. Import your Classes CSV first, then return here to import teachers.',
+              icon: 'info',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#f59e0b',
+              confirmButtonText: 'Go to Classes'
+            });
+          } else {
+            alert('No classes found. Import Classes first.');
+          }
+          e.target.value = '';
+          return;
+        }
+      } catch (err) {
+        console.error('Failed to run preflight check:', err);
+      }
+    }
+
     setCsvStatus('⏳ Uploading and processing CSV...');
-    if (window.electronAPI?.processCSV) window.electronAPI.processCSV(file.path);
+    if (api?.processCSV) api.processCSV(file.path);
+    e.target.value = '';
+  };
+
+  const handleClearTeachers = async () => {
+    const Swal = (window as any).Swal;
+    const api = (window as any).electronAPI;
+    if (!api?.assets?.clear) return;
+
+    try {
+      if (api.getDbStats) {
+        const stats = await api.getDbStats();
+        if (!stats || stats.teachers === 0) {
+          if (Swal) Swal.fire({ title: 'No Teachers Found', text: 'There are no teacher records to clear.', icon: 'info', background: '#0b0f19', color: '#fff', confirmButtonColor: '#00E5FF' });
+          return;
+        }
+      }
+
+      requireSudo(
+        async () => {
+          setCsvStatus('⏳ Clearing teachers from database...');
+          const res = await api.assets.clear({ asset: 'teachers' });
+          if (res?.ok) {
+            setCsvStatus('✅ All teacher configurations cleared');
+            fetchTeachers();
+            if (Swal) {
+              Swal.fire({
+                title: 'Cleared!',
+                text: 'All teachers and their allocations have been successfully deleted.',
+                icon: 'success',
+                background: '#0b0f19',
+                color: '#fff',
+                confirmButtonColor: '#00E5FF'
+              });
+            }
+          } else {
+            setCsvStatus(`❌ Clear Failed: ${res?.error}`);
+            if (Swal) {
+              Swal.fire({
+                title: 'Clear Failed',
+                text: res?.error || 'Unknown error occurred.',
+                icon: 'error',
+                background: '#0b0f19',
+                color: '#fff',
+                confirmButtonColor: '#ef4444'
+              });
+            }
+          }
+        },
+        'Clear All Teachers?',
+        'This will completely delete all teachers and their subject/class allocations from the database. This action is permanent and cannot be undone.',
+        true
+      );
+    } catch (err: any) {
+      console.error(err);
+      if (Swal) Swal.fire({ title: 'Error', text: err.message, icon: 'error', background: '#0b0f19', color: '#fff' });
+    }
   };
 
   // ── Drawer helpers ─────────────────────────────────────────────────────────
@@ -486,6 +571,20 @@ export function Teachers() {
             ⚡ Import CSV
           </label>
           <input type="file" id="teacher-csv-upload-input" accept=".csv" onChange={handleCSVUpload} style={{ display: 'none' }} />
+
+          {teachers.length > 0 && (
+            <button
+              onClick={handleClearTeachers}
+              className="secondary-btn"
+              style={{
+                borderColor: 'rgba(239, 68, 68, 0.35)',
+                color: '#fca5a5',
+                background: 'rgba(239, 68, 68, 0.05)',
+              }}
+            >
+              🗑️ Clear Data
+            </button>
+          )}
 
           <button className="secondary-btn" onClick={openSubjectAuditModal} style={{ borderColor: 'rgba(245,158,11,0.35)', color: 'var(--warning)' }}>
             ⚠️ Subject Audit

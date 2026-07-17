@@ -911,10 +911,6 @@ async function handleMessage(msg) {
       .all(`%${matchable}`);
 
     if (!students?.length) {
-      await msg.reply(
-        "⚠️ No students are linked to this phone number.\n" +
-        "Please contact the school administrator to update your records."
-      );
       return;
     }
 

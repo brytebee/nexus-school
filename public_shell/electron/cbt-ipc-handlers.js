@@ -301,6 +301,21 @@ module.exports = function registerCBTHandlers(database) {
         const db = database.getDb();
         const valStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
         db.prepare("INSERT INTO system_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key, valStr);
+        
+        // Also keep school_term_config in sync to prevent divergence in Pulse Bot/billing
+        if (key === 'current_academic_session' || key === 'current_term') {
+            try {
+                const col = key === 'current_academic_session' ? 'academic_session' : 'term';
+                const exists = db.prepare("SELECT COUNT(*) as c FROM school_term_config WHERE id = 1").get()?.c || 0;
+                if (exists === 0) {
+                    db.prepare("INSERT OR IGNORE INTO school_term_config (id, academic_session, term) VALUES (1, '2025/2026', 'First Term')").run();
+                }
+                db.prepare(`UPDATE school_term_config SET ${col} = ? WHERE id = 1`).run(String(value));
+            } catch (err) {
+                console.error("[CBT settings sync] Failed to sync with school_term_config:", err.message);
+            }
+        }
+        
         return { success: true };
     });
 

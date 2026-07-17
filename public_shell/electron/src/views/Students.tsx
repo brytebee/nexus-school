@@ -352,6 +352,31 @@ export function Students() {
     if (!file) return;
 
     const Swal = (window as any).Swal;
+    const api = (window as any).electronAPI;
+
+    if (api?.getDbStats) {
+      try {
+        const stats = await api.getDbStats();
+        if (stats && stats.classes === 0) {
+          if (Swal) {
+            Swal.fire({
+              title: 'Setup Step Required',
+              text: 'No classes have been set up yet. Import your Classes CSV before importing students.',
+              icon: 'info',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#f59e0b',
+              confirmButtonText: 'Go to Classes'
+            });
+          } else {
+            alert('No classes found. Import Classes first.');
+          }
+          return;
+        }
+      } catch (err) {
+        console.error('Failed to run preflight check:', err);
+      }
+    }
 
     // ── Step 1: Pre-validate before any write ─────────────────────────────
     const validation = await (window.electronAPI as any)?.students?.validateCSV?.({ filePath: file.path });
@@ -418,21 +443,166 @@ export function Students() {
     }
   };
 
-  const handleGradesCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleGradesCSVUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
+
+    const Swal = (window as any).Swal;
+    const api = (window as any).electronAPI;
+
+    if (api?.getDbStats) {
+      try {
+        const stats = await api.getDbStats();
+        if (stats && stats.students === 0) {
+          if (Swal) {
+            Swal.fire({
+              title: 'No Students Found',
+              text: 'No student records exist yet. Import your Roster CSV first, then return to import grades.',
+              icon: 'info',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#f59e0b',
+              confirmButtonText: 'Go to Students'
+            });
+          } else {
+            alert('No students found. Import Students first.');
+          }
+          return;
+        }
+      } catch (err) {
+        console.error('Failed to run preflight check:', err);
+      }
+    }
+
     setCsvStatus('⏳ Ingesting and verifying Grades CSV data...');
-    if ((window.electronAPI as any)?.processGradesCSV) {
-      (window.electronAPI as any).processGradesCSV(file.path);
+    if (api?.processGradesCSV) {
+      api.processGradesCSV(file.path);
     }
   };
 
-  const handleAttendanceCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAttendanceCSVUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
+
+    const Swal = (window as any).Swal;
+    const api = (window as any).electronAPI;
+
+    if (api?.getDbStats) {
+      try {
+        const stats = await api.getDbStats();
+        if (stats && stats.students === 0) {
+          if (Swal) {
+            Swal.fire({
+              title: 'No Students Found',
+              text: 'No student records exist yet. Import your Roster CSV first, then return to import attendance.',
+              icon: 'info',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#f59e0b',
+              confirmButtonText: 'Go to Students'
+            });
+          } else {
+            alert('No students found. Import Students first.');
+          }
+          return;
+        }
+      } catch (err) {
+        console.error('Failed to run preflight check:', err);
+      }
+    }
+
     setCsvStatus('⏳ Ingesting and verifying Attendance CSV data...');
-    if ((window.electronAPI as any)?.processAttendanceCSV) {
-      (window.electronAPI as any).processAttendanceCSV(file.path);
+    if (api?.processAttendanceCSV) {
+      api.processAttendanceCSV(file.path);
+    }
+  };
+
+  const handleClearStudents = async () => {
+    const Swal = (window as any).Swal;
+    const api = (window as any).electronAPI;
+    if (!api?.assets?.clear) return;
+
+    try {
+      if (api.getDbStats) {
+        const stats = await api.getDbStats();
+        if (!stats || stats.students === 0) {
+          if (Swal) Swal.fire({ title: 'No Students Found', text: 'There are no student records to clear.', icon: 'info', background: '#0b0f19', color: '#fff', confirmButtonColor: '#00E5FF' });
+          return;
+        }
+        if (stats.grades > 0 || stats.attendance > 0 || stats.fees > 0) {
+          let depList = [];
+          if (stats.grades > 0) depList.push(`${stats.grades} grade records`);
+          if (stats.attendance > 0) depList.push(`${stats.attendance} attendance records`);
+          if (stats.fees > 0) depList.push(`${stats.fees} fee configurations/records`);
+          
+          if (Swal) {
+            Swal.fire({
+              title: 'Cannot Clear Students',
+              html: `
+                <div style="text-align: left; padding: 10px 5px; font-family: 'Inter', sans-serif;">
+                  <p style="color:#fff; font-size:14px; margin-bottom:14px; line-height:1.6;">
+                    The student directory cannot be cleared because there are active dependent records in the database:
+                  </p>
+                  <ul style="color:#aaa; font-size:12px; line-height:1.8; padding-left:20px; margin-bottom:14px;">
+                    ${depList.map(dep => `<li><strong>${dep}</strong></li>`).join('')}
+                  </ul>
+                  <p style="color:#f59e0b; font-size:12px; font-weight:600;">
+                    Please clear these dependent records first from their respective screens before clearing the students directory.
+                  </p>
+                </div>
+              `,
+              icon: 'error',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#ef4444'
+            });
+          } else {
+            alert('Cannot clear students: dependent records exist.');
+          }
+          return;
+        }
+      }
+
+      requireSudo(
+        async () => {
+          setCsvStatus('⏳ Clearing student directory...');
+          const res = await api.assets.clear({ asset: 'students' });
+          if (res?.ok) {
+            setCsvStatus('✅ Student directory cleared');
+            fetchStudents();
+            if (Swal) {
+              Swal.fire({
+                title: 'Cleared!',
+                text: 'All student records have been successfully deleted.',
+                icon: 'success',
+                background: '#0b0f19',
+                color: '#fff',
+                confirmButtonColor: '#00E5FF'
+              });
+            }
+          } else {
+            setCsvStatus(`❌ Clear Failed: ${res?.error}`);
+            if (Swal) {
+              Swal.fire({
+                title: 'Clear Failed',
+                text: res?.error || 'Unknown error occurred.',
+                icon: 'error',
+                background: '#0b0f19',
+                color: '#fff',
+                confirmButtonColor: '#ef4444'
+              });
+            }
+          }
+        },
+        'Clear Student Directory?',
+        'This will completely delete all student records and profiles from the database. This action is permanent and cannot be undone.',
+        true
+      );
+    } catch (err: any) {
+      console.error(err);
+      if (Swal) Swal.fire({ title: 'Error', text: err.message, icon: 'error', background: '#0b0f19', color: '#fff' });
     }
   };
 
@@ -515,6 +685,7 @@ export function Students() {
 
           const clearRes = await (window.electronAPI as any)?.db?.clearData({ type });
           if (clearRes?.ok) {
+            fetchStudents(); // Refresh UI to avoid stale records
             Swal.fire({
               title: 'Success!',
               text: `All ${type} and cascading records have been deleted successfully.`,
@@ -1063,6 +1234,19 @@ export function Students() {
             onChange={handleCSVUpload}
             style={{ display: 'none' }}
           />
+          {students.length > 0 && (
+            <button
+              onClick={handleClearStudents}
+              className="secondary-btn"
+              style={{
+                borderColor: 'rgba(239, 68, 68, 0.35)',
+                color: '#fca5a5',
+                background: 'rgba(239, 68, 68, 0.05)',
+              }}
+            >
+              🗑️ Clear Data
+            </button>
+          )}
 
           <button
             onClick={openAddDrawer}

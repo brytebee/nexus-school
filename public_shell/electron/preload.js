@@ -241,6 +241,10 @@ const nexusAPI = {
         getSyncWarnings:       ()     => ipcRenderer.invoke('subjects:get-sync-warnings'),
         clearSyncWarnings:     ()     => ipcRenderer.invoke('subjects:clear-sync-warnings'),
     },
+    // ── Asset Clearing ────────────────────────────────────────────────────
+    assets: {
+        clear: (params) => ipcRenderer.invoke('assets:clear', params),
+    },
     // ── Student Directory Settings ────────────────────────────────────────
     students: {
         getSettings:    ()     => ipcRenderer.invoke('students:get-settings'),

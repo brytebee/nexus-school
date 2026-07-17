@@ -676,6 +676,14 @@ export function FinancialHub() {
       const res = await api.fees.clearData({ scope: clearScope, academic_session: selectedSession, term: selectedTerm });
       if (res?.ok) {
         const c = res.counts || {};
+        
+        // Clear all local states to avoid stale rendering in different tabs
+        setRoster([]);
+        setStructItems([]);
+        setAdjustments([]);
+        setReceipts([]);
+        setDbSummary(null);
+
         Swal.fire({
           title: 'Data Cleared',
           html: `<p style="font-size:13px;color:#94a3b8">Deleted: ${c.fees ?? 0} fee records, ${c.transactions ?? 0} transactions, ${c.adjustments ?? 0} adjustments${c.structures != null ? `, ${c.structures} fee structure items` : ''}.</p>`,
@@ -685,7 +693,12 @@ export function FinancialHub() {
           confirmButtonColor: '#00E5FF'
         });
         setSettingsOpen(false);
+        
+        // Reload all data streams from the DB
         doLoadRoster(sessionRef.current, termRef.current, 0, searchQuery, statusFilter);
+        loadStructure();
+        loadAdjustments();
+        loadReceipts();
       } else {
         Swal.fire({ title: 'Clear Failed', text: res?.error || 'Unknown error.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
       }
@@ -873,14 +886,25 @@ export function FinancialHub() {
       } else {
         showIndicator('❌ Billing failed');
         if (Swal) {
-          Swal.fire({
-            title: 'Billing Failed',
-            text: res?.error || 'Failed to apply fee structure.',
-            icon: 'error',
-            background: '#0b0f19',
-            color: '#fff',
-            confirmButtonColor: '#ef4444'
-          });
+          if (res?.error === 'TERM_CONFIG_MISSING') {
+            Swal.fire({
+              title: 'Academic Session & Term Not Configured',
+              text: 'Academic Session & Term are not configured in the database. Please go to Print Hub -> Report Settings -> Term Configuration to set them before billing.',
+              icon: 'error',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#f59e0b'
+            });
+          } else {
+            Swal.fire({
+              title: 'Billing Failed',
+              text: res?.error || 'Failed to apply fee structure.',
+              icon: 'error',
+              background: '#0b0f19',
+              color: '#fff',
+              confirmButtonColor: '#ef4444'
+            });
+          }
         }
       }
     } catch (err) {
