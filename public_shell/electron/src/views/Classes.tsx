@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useClassArms, ClassConfig } from '../hooks/useClassArms';
 import { generateSessionsList } from '../lib/sessions';
 import { useSudoAuth } from '../context/SudoAuthContext';
+import { SetupGuardModal } from '../components/SetupGuardModal';
+import { CSVReviewModal } from '../components/CSVReviewModal';
 
 export default function Classes() {
   const { configs, refresh } = useClassArms();
@@ -21,11 +23,26 @@ export default function Classes() {
   // CSV Import state
   const [csvStatus, setCsvStatus] = useState<string | null>(null);
 
+  // Setup Guard & CSV Review Modal States
+  const [setupGuardOpen, setSetupGuardOpen] = useState(false);
+  const [setupGuardStep, setSetupGuardStep] = useState('');
+  const [setupGuardMessage, setSetupGuardMessage] = useState('');
+  const [csvReviewOpen, setCsvReviewOpen] = useState(false);
+  const [csvReviewResult, setCsvReviewResult] = useState<any>(null);
+  const [pendingCsvFile, setPendingCsvFile] = useState<any>(null);
+
   // Handle Classes CSV Loaded notification
   useEffect(() => {
     if ((window as any).electronAPI?.onClassesCSVLoaded) {
       (window as any).electronAPI.onClassesCSVLoaded((res: { count: number, error: string | null }) => {
         const Swal = (window as any).Swal;
+        if (res.error === 'SETUP_INCOMPLETE' && (res as any).setupCheck) {
+          setSetupGuardStep((res as any).setupCheck.step || 'identity');
+          setSetupGuardMessage((res as any).setupCheck.message || '');
+          setSetupGuardOpen(true);
+          setCsvStatus(null);
+          return;
+        }
         if (res.error) {
           setCsvStatus(`❌ Classes Import Failed: ${res.error}`);
           if (Swal) {
@@ -104,11 +121,35 @@ export default function Classes() {
       }
     }
 
+    // Dry-run validation before sending
+    try {
+      const dryRun = await (window as any).nexusAPI?.validateCSVDryRun?.({ filePath: file.path, type: 'classes' });
+      if (dryRun && (dryRun.blocking?.length > 0 || dryRun.normalizable?.length > 0)) {
+        setPendingCsvFile(file);
+        setCsvReviewResult(dryRun);
+        setCsvReviewOpen(true);
+        e.target.value = '';
+        return;
+      }
+    } catch (err) {
+      console.warn('Dry-run validation skipped:', err);
+    }
+
     setCsvStatus('⏳ Ingesting and verifying Classes CSV data...');
     if (api?.processClassesCSV) {
       api.processClassesCSV(file.path);
     }
     e.target.value = '';
+  };
+
+  const handleCSVReviewAccept = () => {
+    setCsvReviewOpen(false);
+    if (!pendingCsvFile) return;
+    const file = pendingCsvFile;
+    setPendingCsvFile(null);
+    const api = (window as any).electronAPI;
+    setCsvStatus('⏳ Ingesting and verifying Classes CSV data...');
+    if (api?.processClassesCSV) api.processClassesCSV(file.path);
   };
 
   const handleClearClasses = async () => {
@@ -206,6 +247,13 @@ export default function Classes() {
         passMarkOverride: parsedPass,
         arms: parsedArms
       });
+
+      if (res?.error === 'SETUP_INCOMPLETE' || res?.step) {
+        setSetupGuardStep(res.step || 'identity');
+        setSetupGuardMessage(res.message || 'Setup step required before creating classes.');
+        setSetupGuardOpen(true);
+        return;
+      }
 
       if (res && res.success) {
         if (Swal) {
@@ -308,7 +356,13 @@ export default function Classes() {
     const api = (window as any).electronAPI;
     const Swal = (window as any).Swal;
     try {
-      await api.classes.saveConfig({ hierarchyClass, maxSubjects, passMarkOverride });
+      const res = await api.classes.saveConfig({ hierarchyClass, maxSubjects, passMarkOverride });
+      if (res?.error === 'SETUP_INCOMPLETE') {
+        setSetupGuardStep(res.step || 'identity');
+        setSetupGuardMessage(res.message || '');
+        setSetupGuardOpen(true);
+        return;
+      }
       refresh();
     } catch (err: any) {
       if (Swal) Swal.fire({ toast: true, position: 'top-end', icon: 'error', title: 'Failed saving config', showConfirmButton: false, timer: 3000, background: '#0d1235', color: '#fff' });
@@ -321,6 +375,12 @@ export default function Classes() {
     const Swal = (window as any).Swal;
     try {
       const res = await api.classes.addArm({ hierarchyClass, arm: arm.trim() });
+      if (res?.error === 'SETUP_INCOMPLETE') {
+        setSetupGuardStep(res.step || 'identity');
+        setSetupGuardMessage(res.message || '');
+        setSetupGuardOpen(true);
+        return;
+      }
       if (res && res.success) {
         refresh();
       } else if (Swal) {
@@ -1209,6 +1269,19 @@ export default function Classes() {
         </div>
 
       </div>
+
+      <SetupGuardModal
+        isOpen={setupGuardOpen}
+        onClose={() => setSetupGuardOpen(false)}
+        step={setupGuardStep}
+        message={setupGuardMessage}
+      />
+      <CSVReviewModal
+        isOpen={csvReviewOpen}
+        onClose={() => { setCsvReviewOpen(false); setPendingCsvFile(null); }}
+        result={csvReviewResult}
+        onAccept={handleCSVReviewAccept}
+      />
 
     </div>
   );

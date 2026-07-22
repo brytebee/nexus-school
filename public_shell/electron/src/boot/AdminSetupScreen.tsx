@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { validateUsername, validatePin, validatePhone, validateSecurityAnswer } from '../lib/validators';
 
 const api = (window as any).nexusAPI;
 
@@ -55,20 +56,29 @@ export function AdminSetupScreen({ onBack }: AdminSetupScreenProps) {
     setGlobalError('');
   };
 
+  // PIN-specific handler: strips non-digits and caps at exactly 4 characters
+  const setPinField = (field: 'pin' | 'confirmPin') => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const digits = e.target.value.replace(/\D/g, '').slice(0, 4);
+    setForm(f => ({ ...f, [field]: digits }));
+    setErrors(err => ({ ...err, [field]: '' }));
+    setGlobalError('');
+  };
+
   function validateCredentials(): boolean {
     const e: Partial<FormState> = {};
-    if (!form.username.trim()) e.username = 'Name is required.';
-    else if (form.username.trim().length < 2) e.username = 'Name must be at least 2 characters.';
+    const uRes = validateUsername(form.username);
+    if (!uRes.ok && uRes.error) e.username = uRes.error;
 
-    if (authType === 'pin') {
-      if (!form.pin.trim()) e.pin = 'PIN is required.';
-      else if (form.pin.trim().length < 4) e.pin = 'PIN must be at least 4 digits.';
-      else if (!/^\d+$/.test(form.pin.trim())) e.pin = 'PIN must be digits only.';
-      if (form.pin !== form.confirmPin) e.confirmPin = 'PINs do not match.';
-    } else {
-      if (!form.pin.trim()) e.pin = 'Password is required.';
-      else if (form.pin.trim().length < 6) e.pin = 'Password must be at least 6 characters.';
-      if (form.pin !== form.confirmPin) e.confirmPin = 'Passwords do not match.';
+    const pRes = validatePin(form.pin, authType);
+    if (!pRes.ok && pRes.error) e.pin = pRes.error;
+
+    if (form.pin !== form.confirmPin) {
+      e.confirmPin = authType === 'pin' ? 'PINs do not match.' : 'Passwords do not match.';
+    }
+
+    if (form.phone.trim()) {
+      const phRes = validatePhone(form.phone);
+      if (!phRes.ok && phRes.error) e.phone = phRes.error;
     }
     
     setErrors(e);
@@ -82,10 +92,21 @@ export function AdminSetupScreen({ onBack }: AdminSetupScreenProps) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.answer.trim()) {
-      setErrors(err => ({ ...err, answer: 'Please provide a recovery answer.' }));
+    const eMap: Partial<FormState> = {};
+
+    const aRes = validateSecurityAnswer(form.answer);
+    if (!aRes.ok && aRes.error) eMap.answer = aRes.error;
+
+    if (form.phone.trim()) {
+      const phRes = validatePhone(form.phone);
+      if (!phRes.ok && phRes.error) eMap.phone = phRes.error;
+    }
+
+    if (Object.keys(eMap).length > 0) {
+      setErrors(err => ({ ...err, ...eMap }));
       return;
     }
+
     setSubmitting(true);
     setGlobalError('');
     try {
@@ -117,7 +138,7 @@ export function AdminSetupScreen({ onBack }: AdminSetupScreenProps) {
       minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: 'linear-gradient(135deg, #0a0a0f 0%, #0d1117 50%, #0a0a0f 100%)',
       fontFamily: '"Inter", system-ui, sans-serif',
-      position: 'relative', overflow: 'hidden',
+      position: 'relative', overflowY: 'auto', overflowX: 'hidden', padding: '40px 0', boxSizing: 'border-box',
     }}>
       {onBack && step === 'credentials' && (
         <button
@@ -228,7 +249,7 @@ export function AdminSetupScreen({ onBack }: AdminSetupScreenProps) {
           {/* ── Step 1: Credentials ── */}
           {step === 'credentials' && (
             <form onSubmit={handleNextStep} noValidate>
-              <Field label="Admin Name" error={errors.username}>
+              <Field label="Username (admin)" error={errors.username}>
                 <input
                   ref={usernameRef}
                   type="text"
@@ -275,7 +296,7 @@ export function AdminSetupScreen({ onBack }: AdminSetupScreenProps) {
 
               <Field
                 label={authType === 'pin' ? 'PIN' : 'Password'}
-                hint={authType === 'pin' ? 'Numbers only, minimum 4 digits' : 'Alphanumeric, minimum 6 characters'}
+                hint={authType === 'pin' ? 'Numbers only, exactly 4 digits' : 'Alphanumeric, minimum 6 characters'}
                 error={errors.pin}
                 style={{ marginTop: 20 }}
               >
@@ -285,8 +306,8 @@ export function AdminSetupScreen({ onBack }: AdminSetupScreenProps) {
                     inputMode={authType === 'pin' ? 'numeric' : 'text'}
                     placeholder={authType === 'pin' ? '••••' : 'Enter security password'}
                     value={form.pin}
-                    onChange={set('pin')}
-                    maxLength={authType === 'pin' ? 8 : 32}
+                    onChange={authType === 'pin' ? setPinField('pin') : set('pin')}
+                    maxLength={authType === 'pin' ? 4 : 32}
                     style={{
                       ...inputStyle(!!errors.pin),
                       paddingRight: 44,
@@ -307,8 +328,8 @@ export function AdminSetupScreen({ onBack }: AdminSetupScreenProps) {
                   inputMode={authType === 'pin' ? 'numeric' : 'text'}
                   placeholder={authType === 'pin' ? '••••' : 'Confirm security password'}
                   value={form.confirmPin}
-                  onChange={set('confirmPin')}
-                  maxLength={authType === 'pin' ? 8 : 32}
+                  onChange={authType === 'pin' ? setPinField('confirmPin') : set('confirmPin')}
+                  maxLength={authType === 'pin' ? 4 : 32}
                   style={{
                     ...inputStyle(!!errors.confirmPin),
                     letterSpacing: (authType === 'pin' && form.confirmPin && !pinVisible) ? '0.3em' : 'normal'
@@ -316,13 +337,13 @@ export function AdminSetupScreen({ onBack }: AdminSetupScreenProps) {
                 />
               </Field>
 
-              <Field label="Phone (optional)" hint="For account recovery" style={{ marginTop: 20 }}>
+              <Field label="Phone (optional)" hint="For account recovery" error={errors.phone} style={{ marginTop: 20 }}>
                 <input
                   type="tel"
                   placeholder="+234 800 000 0000"
                   value={form.phone}
                   onChange={set('phone')}
-                  style={inputStyle(false)}
+                  style={inputStyle(!!errors.phone)}
                 />
               </Field>
 

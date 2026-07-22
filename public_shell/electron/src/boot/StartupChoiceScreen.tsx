@@ -45,7 +45,9 @@ export function StartupChoiceScreen({ onStartFresh }: StartupChoiceScreenProps) 
       padding: '40px 24px',
       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
       position: 'relative',
-      overflow: 'hidden',
+      overflowY: 'auto',
+      overflowX: 'hidden',
+      boxSizing: 'border-box',
     }}>
       {/* Ambient glow blobs */}
       <div style={{

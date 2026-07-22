@@ -4,6 +4,8 @@ import { useClassArms } from '../hooks/useClassArms';
 import { Combobox } from '../components/Combobox';
 import { generateSessionsList } from '../lib/sessions';
 import { applyInlineEdit, validatePaymentInput, validateRefundInput, validateBankAccounts } from '../lib/financialUtils';
+import { SetupGuardModal } from '../components/SetupGuardModal';
+import { CSVReviewModal } from '../components/CSVReviewModal';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 interface RosterRow {
@@ -274,12 +276,20 @@ export function FinancialHub() {
     adjustment: { loading: false, result: null },
   });
 
+  // ── Setup Guard & CSV Review states ───────────────────────────────────────
+  const [setupGuardOpen, setSetupGuardOpen] = useState(false);
+  const [setupGuardStep, setSetupGuardStep] = useState('');
+  const [setupGuardMessage, setSetupGuardMessage] = useState('');
+  const [csvReviewOpen, setCsvReviewOpen] = useState(false);
+  const [csvReviewResult, setCsvReviewResult] = useState<any>(null);
+  const [pendingFeeCSV, setPendingFeeCSV] = useState<{ file: any; type: 'structure'|'payment'|'adjustment' } | null>(null);
+
   const handleFeeCSV = (type: 'structure' | 'payment' | 'adjustment') => {
     const api = (window as any).electronAPI;
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.csv';
-    input.onchange = (e: any) => {
+    input.onchange = async (e: any) => {
       const file = e.target?.files?.[0];
       if (!file) return;
       setCsvImportStatus(prev => ({ ...prev, [type]: { loading: true, result: null } }));
@@ -300,6 +310,16 @@ export function FinancialHub() {
           ? `❌ Error: ${res.error}`
           : `✅ ${res.count} row${res.count === 1 ? '' : 's'} imported successfully.`;
         setCsvImportStatus(prev => ({ ...prev, [type]: { loading: false, result: msg } }));
+
+        // ── Setup guard intercept ──
+        if (res.error === 'SETUP_INCOMPLETE' && (res as any).setupCheck) {
+          const sc = (res as any).setupCheck;
+          setSetupGuardStep(sc.step || 'term');
+          setSetupGuardMessage(sc.message || '');
+          setSetupGuardOpen(true);
+          setCsvImportStatus(prev => ({ ...prev, [type]: { loading: false, result: null } }));
+          return;
+        }
 
         const Swal = (window as any).Swal;
         if (Swal) {
@@ -337,9 +357,42 @@ export function FinancialHub() {
           doLoadRoster(sessionRef.current, termRef.current, 0, searchQuery, statusFilter);
         }
       });
+      // ── Dry-run validation before sending ────────────────────────────────
+      try {
+        const csvTypeMap: Record<string, string> = {
+          structure: 'fee-structure',
+          payment: 'fee-payment',
+          adjustment: 'fee-adjustment',
+        };
+        const dryRun = await (window as any).nexusAPI?.validateCSVDryRun?.({ filePath: file.path, type: csvTypeMap[type] });
+        if (dryRun && (dryRun.blocking?.length > 0 || dryRun.normalizable?.length > 0)) {
+          setPendingFeeCSV({ file, type });
+          setCsvReviewResult(dryRun);
+          setCsvReviewOpen(true);
+          setCsvImportStatus(prev => ({ ...prev, [type]: { loading: false, result: null } }));
+          return;
+        }
+      } catch (err) {
+        console.warn('Dry-run validation skipped:', err);
+      }
+
       api?.[senders[type]]?.(file.path);
     };
     input.click();
+  };
+  const handleFeeCSVReviewAccept = () => {
+    setCsvReviewOpen(false);
+    if (!pendingFeeCSV) return;
+    const { file, type } = pendingFeeCSV;
+    setPendingFeeCSV(null);
+    const api = (window as any).electronAPI;
+    const senders: Record<string, string> = {
+      structure: 'processFeeStructureCSV',
+      payment: 'processFeePaymentCSV',
+      adjustment: 'processFeeAdjustmentCSV',
+    };
+    setCsvImportStatus(prev => ({ ...prev, [type]: { loading: true, result: null } }));
+    api?.[senders[type]]?.(file.path);
   };
 
   const showIndicator = useCallback((text: string, color = '#4CAF50') => {
@@ -812,9 +865,31 @@ export function FinancialHub() {
     if (!structClass || !newName.trim() || !newAmount) return;
     setAddingItem(true);
     try {
-      await window.electronAPI.feeStructure.upsertItem({ className:structClass, itemName:newName.trim(), term:newTerm, amount:Number(newAmount)||0 });
+      const res = await window.electronAPI.feeStructure.upsertItem({ className:structClass, itemName:newName.trim(), term:newTerm, amount:Number(newAmount)||0 });
+      if (res?.error === 'SETUP_INCOMPLETE' || res?.step) {
+        setSetupGuardStep(res.step || 'term');
+        setSetupGuardMessage(res.message || 'Complete setup before adding fee structure items.');
+        setSetupGuardOpen(true);
+        return;
+      }
+      if (res?.ok === false || res?.error) {
+        const errMsg = res.message || res.error || 'Failed to add fee item.';
+        if (Swal) {
+          Swal.fire({ title: 'Cannot Add Fee Item', text: errMsg, icon: 'error', background: '#0b0f19', color: '#fff' });
+        } else {
+          alert(`Error: ${errMsg}`);
+        }
+        return;
+      }
       setNewName(''); setNewAmount('');
       loadStructure();
+    } catch (err: any) {
+      const errMsg = err?.message || 'Failed to add fee item.';
+      if (Swal) {
+        Swal.fire({ title: 'Error', text: errMsg, icon: 'error', background: '#0b0f19', color: '#fff' });
+      } else {
+        alert(`Error: ${errMsg}`);
+      }
     } finally { setAddingItem(false); }
   };
 
@@ -885,7 +960,11 @@ export function FinancialHub() {
         }
       } else {
         showIndicator('❌ Billing failed');
-        if (Swal) {
+        if (res?.error === 'SETUP_INCOMPLETE' || res?.step) {
+          setSetupGuardStep(res.step || 'term');
+          setSetupGuardMessage(res.message || 'Setup step required before applying fee billing.');
+          setSetupGuardOpen(true);
+        } else if (Swal) {
           if (res?.error === 'TERM_CONFIG_MISSING') {
             Swal.fire({
               title: 'Academic Session & Term Not Configured',
@@ -2867,6 +2946,18 @@ export function FinancialHub() {
           </div>
         </div>
       )}
+      <SetupGuardModal
+        isOpen={setupGuardOpen}
+        onClose={() => setSetupGuardOpen(false)}
+        step={setupGuardStep}
+        message={setupGuardMessage}
+      />
+      <CSVReviewModal
+        isOpen={csvReviewOpen}
+        onClose={() => { setCsvReviewOpen(false); setPendingFeeCSV(null); }}
+        result={csvReviewResult}
+        onAccept={handleFeeCSVReviewAccept}
+      />
 
     </div>
   );

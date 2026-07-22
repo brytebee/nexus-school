@@ -5,6 +5,9 @@ import { useSudoAuth } from '../context/SudoAuthContext';
 import { Combobox } from '../components/Combobox';
 import { MultiSelectCombobox } from '../components/MultiSelectCombobox';
 import { useClassArms } from '../hooks/useClassArms';
+import { SetupGuardModal } from '../components/SetupGuardModal';
+import { CSVReviewModal } from '../components/CSVReviewModal';
+import { validateName, validatePhone, validateEmail } from '../lib/validators';
 
 interface TeacherAllocation {
   class_name: string;
@@ -67,6 +70,14 @@ export function Teachers() {
   // CSV
   const [csvStatus, setCsvStatus] = useState<string | null>(null);
 
+  // Setup Guard & CSV Review Modal States
+  const [setupGuardOpen, setSetupGuardOpen] = useState(false);
+  const [setupGuardStep, setSetupGuardStep] = useState('');
+  const [setupGuardMessage, setSetupGuardMessage] = useState('');
+  const [csvReviewOpen, setCsvReviewOpen] = useState(false);
+  const [csvReviewResult, setCsvReviewResult] = useState<any>(null);
+  const [pendingCsvFile, setPendingCsvFile] = useState<any>(null);
+
   // ── Data Fetching ──────────────────────────────────────────────────────────
   const fetchTeachers = async () => {
     if (!window.electronAPI?.getAllTeachers) return;
@@ -106,6 +117,13 @@ export function Teachers() {
 
         // ── Layer 5: error → wrong-template → success ─────────────────
         if (error) {
+          if (error === 'SETUP_INCOMPLETE' && payload.setupCheck) {
+            setSetupGuardStep(payload.setupCheck.step || 'classes');
+            setSetupGuardMessage(payload.setupCheck.message || '');
+            setSetupGuardOpen(true);
+            setCsvStatus(null);
+            return;
+          }
           setCsvStatus(`❌ Import Failed: ${error}`);
           if (Swal) {
             Swal.fire({
@@ -200,6 +218,10 @@ export function Teachers() {
               color: '#fff',
               confirmButtonColor: '#f59e0b',
               confirmButtonText: 'Go to Classes'
+            }).then((res: any) => {
+              if (res.isConfirmed) {
+                window.dispatchEvent(new CustomEvent('nexus-nav', { detail: 'classes' }));
+              }
             });
           } else {
             alert('No classes found. Import Classes first.');
@@ -212,9 +234,33 @@ export function Teachers() {
       }
     }
 
+    // Dry-run validation before writing
+    try {
+      const dryRun = await (window as any).nexusAPI?.validateCSVDryRun?.({ filePath: file.path, type: 'teachers' });
+      if (dryRun && (dryRun.blocking?.length > 0 || dryRun.normalizable?.length > 0)) {
+        setPendingCsvFile(file);
+        setCsvReviewResult(dryRun);
+        setCsvReviewOpen(true);
+        e.target.value = '';
+        return;
+      }
+    } catch (err) {
+      console.warn('Dry-run validation skipped:', err);
+    }
+
     setCsvStatus('⏳ Uploading and processing CSV...');
     if (api?.processCSV) api.processCSV(file.path);
     e.target.value = '';
+  };
+
+  const handleCSVReviewAccept = () => {
+    setCsvReviewOpen(false);
+    if (!pendingCsvFile) return;
+    const file = pendingCsvFile;
+    setPendingCsvFile(null);
+    const api = (window as any).electronAPI;
+    setCsvStatus('⏳ Uploading and processing CSV...');
+    if (api?.processCSV) api.processCSV(file.path);
   };
 
   const handleClearTeachers = async () => {
@@ -280,7 +326,21 @@ export function Teachers() {
     setCustomSubjectInput(''); setClassAllocationInput([]); setFormLog(null);
   };
 
-  const openAddDrawer = () => { setEditTeacherId(null); resetForm(); setIsDrawerOpen(true); };
+  const openAddDrawer = async () => {
+    const api = (window as any).electronAPI;
+    if (api?.getDbStats) {
+      try {
+        const stats = await api.getDbStats();
+        if (stats && stats.classes === 0) {
+          setSetupGuardStep('classes');
+          setSetupGuardMessage('No classes have been configured yet. Set up classes before adding teachers.');
+          setSetupGuardOpen(true);
+          return;
+        }
+      } catch (_) {}
+    }
+    setEditTeacherId(null); resetForm(); setIsDrawerOpen(true);
+  };
 
   // Open View Detail Modal
   const openDetailModal = (teacher: Teacher) => {
@@ -350,7 +410,19 @@ export function Teachers() {
 
   // ── Save / Delete ──────────────────────────────────────────────────────────
   const handleSaveTeacher = async () => {
-    if (!name.trim()) { setFormLog({ text: '⚠ Full Name is required.', isError: true }); return; }
+    const nRes = validateName(name, 'Full Name');
+    if (!nRes.ok && nRes.error) { setFormLog({ text: `⚠ ${nRes.error}`, isError: true }); return; }
+
+    if (phone.trim()) {
+      const phRes = validatePhone(phone);
+      if (!phRes.ok && phRes.error) { setFormLog({ text: `⚠ ${phRes.error}`, isError: true }); return; }
+    }
+
+    if (email.trim()) {
+      const emRes = validateEmail(email);
+      if (!emRes.ok && emRes.error) { setFormLog({ text: `⚠ ${emRes.error}`, isError: true }); return; }
+    }
+
     if (!stagedAllocations.length) { setFormLog({ text: '⚠ Add at least one class allocation.', isError: true }); return; }
     setFormLog({ text: 'Saving shard...', isError: false });
     try {
@@ -359,20 +431,30 @@ export function Teachers() {
           id: editTeacherId, name, phone, email,
           allocations: stagedAllocations, signature: signatureBase64, host_class: hostClass,
         });
-        if (res.ok) {
+        if (res?.ok) {
           setFormLog({ text: '✅ Teacher profile saved!', isError: false });
           setTimeout(() => { setIsDrawerOpen(false); fetchTeachers(); }, 1000);
-        } else setFormLog({ text: `❌ ${res.error}`, isError: true });
+        } else if (res?.error === 'SETUP_INCOMPLETE' || res?.step) {
+          setSetupGuardStep(res.step || 'classes');
+          setSetupGuardMessage(res.message || 'Setup step required before saving teacher.');
+          setSetupGuardOpen(true);
+          setIsDrawerOpen(false);
+        } else setFormLog({ text: `❌ ${res?.error || 'Failed to update teacher'}`, isError: true });
       } else {
         const id = 'TCH-' + crypto.randomUUID().split('-')[0].toUpperCase();
         const res = await window.electronAPI.addTeacherForm({
           id, name, phone, email,
           allocations: stagedAllocations, signature: signatureBase64 || undefined,
         });
-        if (res.ok) {
+        if (res?.ok) {
           setFormLog({ text: `✅ Teacher saved! (${id})`, isError: false });
           setTimeout(() => { setIsDrawerOpen(false); fetchTeachers(); }, 1000);
-        } else setFormLog({ text: `❌ ${res.error}`, isError: true });
+        } else if (res?.error === 'SETUP_INCOMPLETE' || res?.step) {
+          setSetupGuardStep(res.step || 'classes');
+          setSetupGuardMessage(res.message || 'Setup step required before adding teacher.');
+          setSetupGuardOpen(true);
+          setIsDrawerOpen(false);
+        } else setFormLog({ text: `❌ ${res?.error || 'Failed to add teacher'}`, isError: true });
       }
     } catch (err: any) {
       setFormLog({ text: `❌ Save failed: ${err.message}`, isError: true });
@@ -1361,6 +1443,18 @@ export function Teachers() {
           </div>
         </div>
       )}
+      <SetupGuardModal
+        isOpen={setupGuardOpen}
+        onClose={() => setSetupGuardOpen(false)}
+        step={setupGuardStep}
+        message={setupGuardMessage}
+      />
+      <CSVReviewModal
+        isOpen={csvReviewOpen}
+        onClose={() => { setCsvReviewOpen(false); setPendingCsvFile(null); }}
+        result={csvReviewResult}
+        onAccept={handleCSVReviewAccept}
+      />
     </>
   );
 }

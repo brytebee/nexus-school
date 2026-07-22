@@ -22,6 +22,7 @@ const nexusAPI = {
     onFeeAdjustmentCSVLoaded: (callback) => ipcRenderer.on('fee-adjustment-csv-loaded', (_event, v) => callback(v)),
     // Activity Log
     getActivityLog: (opts) => ipcRenderer.invoke('activity-log:get', opts),
+    validateCSVDryRun: (data) => ipcRenderer.invoke('validate-csv-dry-run', data),
 
     backupDatabase: () => ipcRenderer.invoke('database:backup'),
     restoreDatabase: () => ipcRenderer.invoke('database:restore'),
@@ -64,6 +65,7 @@ const nexusAPI = {
     saveTeacherRemark:  (data)   => ipcRenderer.invoke('save-teacher-remark', data),
     // V2.1: Edit existing resources
     updateStudent:      (data)   => ipcRenderer.invoke('update-student', data),
+    promoteStudentOverflow: (data) => ipcRenderer.invoke('promote-student-overflow', data),
     updateTeacherFull:  (data)   => ipcRenderer.invoke('update-teacher-full', data),
     // V3: Result Studio
     copyResultImage:    (data)   => ipcRenderer.invoke('copy-result-image', data),

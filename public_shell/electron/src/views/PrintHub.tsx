@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useLicense } from "../hooks/useLicense";
 import { generateSessionsList } from "../lib/sessions";
+import { SetupGuardModal } from "../components/SetupGuardModal";
 
 interface GradingComponent {
   key: string;
@@ -72,6 +73,9 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
   const [termStartDate, setTermStartDate] = useState("");
   const [termEndDate, setTermEndDate] = useState("");
   const [showPosition, setShowPosition] = useState(true);
+  const [setupGuardOpen, setSetupGuardOpen] = useState(false);
+  const [setupGuardStep, setSetupGuardStep] = useState("");
+  const [setupGuardMessage, setSetupGuardMessage] = useState("");
   const [showDomains, setShowDomains] = useState(true);
   const [showAttendance, setShowAttendance] = useState(true);
   const [includeAttendance, setIncludeAttendance] = useState(true);
@@ -359,9 +363,14 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
       };
 
       const res = await window.electronAPI.saveTermConfig(config);
-      if (res.ok) {
+      if (res?.ok) {
         setSaveStatus("✅ Saved successfully.");
         setTimeout(() => setSaveStatus(""), 2500);
+      } else if (res?.error === 'SETUP_INCOMPLETE' || res?.step) {
+        setSaveStatus("❌ Save failed: Setup incomplete.");
+        setSetupGuardStep(res.step || 'students');
+        setSetupGuardMessage(res.message || 'Setup step required before saving term configuration.');
+        setSetupGuardOpen(true);
       } else {
         setSaveStatus("❌ Save failed: " + res.error);
       }
@@ -1426,6 +1435,12 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
           </div>
         )}
       </div>
+      <SetupGuardModal
+        isOpen={setupGuardOpen}
+        onClose={() => setSetupGuardOpen(false)}
+        step={setupGuardStep}
+        message={setupGuardMessage}
+      />
     </div>
   );
 }

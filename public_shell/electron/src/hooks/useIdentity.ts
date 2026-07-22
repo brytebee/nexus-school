@@ -4,6 +4,8 @@ export interface SchoolIdentity {
   name?: string;
   address?: string;
   motto?: string;
+  phone?: string;
+  email?: string;
   signature?: string;
   principalPhone?: string;
   portalSlug?: string;
