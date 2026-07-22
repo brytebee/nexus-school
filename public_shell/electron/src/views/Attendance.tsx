@@ -79,12 +79,25 @@ export function Attendance() {
     const initData = async () => {
       if (!window.electronAPI) return;
       try {
-        // Get term config for queries
-        const termCfg = await window.electronAPI.getTermConfig();
-        if (termCfg) {
-          setReportSession(termCfg.academic_session || '2025/2026');
-          setReportTerm(termCfg.term || 'First Term');
+        // Get term config for queries (tries school_term_config first, then system_settings)
+        let session = '';
+        let term = '';
+        try {
+          const termCfg = await window.electronAPI.getTermConfig?.();
+          session = termCfg?.academic_session || '';
+          term = termCfg?.term || '';
+        } catch (_) {}
+
+        if ((!session || !term) && (window as any).electronAPI?.cbt?.getSystemSettings) {
+          try {
+            const sys = await (window as any).electronAPI.cbt.getSystemSettings();
+            if (!session) session = sys?.current_academic_session || '';
+            if (!term) term = sys?.current_term || '';
+          } catch (_) {}
         }
+
+        setReportSession(session || '2025/2026');
+        setReportTerm(term || 'First Term');
 
         // Get attendance settings
         const settingsRes = await window.electronAPI.attendance.getSettings();
