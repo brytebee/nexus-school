@@ -365,7 +365,7 @@ export default function Classes() {
 
   // Load rollover session preview
   const fetchRolloverPreview = async () => {
-    const api = (window as any).electronAPI?.rollover;
+    const api = (window as any).electronAPI?.rollover || (window as any).nexusAPI?.rollover;
     if (!api?.sessionPreview) return;
     try {
       const res = await api.sessionPreview();
@@ -375,6 +375,7 @@ export default function Classes() {
 
   useEffect(() => {
     fetchGlobalSettings();
+    fetchRolloverPreview();
   }, []);
 
   // Fetch batch students when batchFilterClass changes
