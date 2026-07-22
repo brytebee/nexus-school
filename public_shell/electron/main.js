@@ -7091,6 +7091,7 @@ if (app) {
     // ── Handler 1: Read-only preview (no writes) ──────────────────────────────
     ipcMain.handle('app:rollover-session-preview', () => {
       try {
+        const db = database.getDb();
         const { termStructure, hierarchy } = getRolloverConfig(db);
         const termRow = db.prepare("SELECT term, academic_session FROM school_term_config WHERE id=1").get();
         const currentTerm = termRow?.term || termStructure.terms[0];
@@ -7126,6 +7127,7 @@ if (app) {
     ipcMain.handle('app:rollover-session', async (_event, payload) => {
       const { newSession } = payload || {};
       try {
+        const db = database.getDb();
         const { termStructure, hierarchy } = getRolloverConfig(db);
         const termRow = db.prepare("SELECT term, academic_session FROM school_term_config WHERE id=1").get();
         const currentTerm = termRow?.term || termStructure.terms[0];
@@ -7184,6 +7186,7 @@ if (app) {
       const { hierarchyClass, arm } = payload || {};
       if (!hierarchyClass) return { ok: false, error: 'hierarchyClass is required' };
       try {
+        const db = database.getDb();
         const { hierarchy } = getRolloverConfig(db);
         const termRow = db.prepare("SELECT academic_session FROM school_term_config WHERE id=1").get();
         const currentSession = termRow?.academic_session || '2025/2026';
@@ -7218,6 +7221,7 @@ if (app) {
       if (!action) return { ok: false, error: 'action is required' };
 
       try {
+        const db = database.getDb();
         const { hierarchy } = getRolloverConfig(db);
         const termRow = db.prepare("SELECT academic_session FROM school_term_config WHERE id=1").get();
         const currentSession = termRow?.academic_session || '2025/2026';
@@ -7263,6 +7267,7 @@ if (app) {
       if (!action)    return { ok: false, error: 'action is required' };
 
       try {
+        const db = database.getDb();
         const { hierarchy } = getRolloverConfig(db);
         const termRow = db.prepare("SELECT academic_session FROM school_term_config WHERE id=1").get();
         const currentSession = termRow?.academic_session || '2025/2026';
