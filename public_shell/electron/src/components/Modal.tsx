@@ -4,12 +4,13 @@ interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
+  subtitle?: string;
   children: ReactNode;
   footer?: ReactNode;
   maxWidth?: string;
 }
 
-export function Modal({ isOpen, onClose, title, children, footer, maxWidth = 'max-w-md' }: ModalProps) {
+export function Modal({ isOpen, onClose, title, subtitle, children, footer, maxWidth = '500px' }: ModalProps) {
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -21,35 +22,101 @@ export function Modal({ isOpen, onClose, title, children, footer, maxWidth = 'ma
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-      {/* Backdrop */}
-      <div 
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity"
-        onClick={onClose}
-      />
-      
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(0, 0, 0, 0.75)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        padding: '16px',
+        userSelect: 'none',
+      }}
+      onClick={onClose}
+    >
       {/* Dialog */}
-      <div 
-        className={`relative w-full ${maxWidth} bg-nexus-panel border border-nexus-border rounded-2xl shadow-2xl flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200`}
+      <div
+        style={{
+          width: maxWidth,
+          maxWidth: '90vw',
+          maxHeight: '85vh',
+          background: 'var(--bg-dark, #0d1235)',
+          border: '1px solid var(--glass-border, rgba(255, 255, 255, 0.12))',
+          borderRadius: '16px',
+          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(0, 229, 255, 0.05)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          position: 'relative',
+        }}
+        onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
-        <div className="flex items-center justify-between px-6 py-5 border-b border-nexus-border">
-          <h2 className="text-xl font-semibold tracking-tight text-white">{title}</h2>
-          <button 
+        {/* Header */}
+        <div
+          style={{
+            padding: '18px 24px',
+            borderBottom: '1px solid var(--glass-border, rgba(255, 255, 255, 0.1))',
+            display: 'flex',
+            justify: 'space-between',
+            alignItems: 'center',
+            background: 'rgba(0, 0, 0, 0.15)',
+            flexShrink: 0,
+          }}
+        >
+          <div>
+            <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--text-main, #ffffff)', letterSpacing: '-0.01em' }}>
+              {title}
+            </h3>
+            {subtitle && (
+              <p style={{ margin: '4px 0 0', fontSize: '11px', color: 'var(--text-dim, #94a3b8)' }}>
+                {subtitle}
+              </p>
+            )}
+          </div>
+          <button
             onClick={onClose}
-            className="text-nexus-text-dim hover:text-white transition-colors p-1 rounded-md hover:bg-white/10"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-dim, #94a3b8)',
+              cursor: 'pointer',
+              fontSize: '18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '4px 8px',
+              borderRadius: '6px',
+            }}
           >
             ✕
           </button>
         </div>
-        
-        <div className="p-6 overflow-y-auto">
+
+        {/* Content */}
+        <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1 }}>
           {children}
         </div>
 
+        {/* Footer */}
         {footer && (
-          <div className="px-6 py-4 border-t border-nexus-border bg-black/10 flex justify-end gap-3 rounded-b-2xl">
+          <div
+            style={{
+              padding: '16px 24px',
+              borderTop: '1px solid var(--glass-border, rgba(255, 255, 255, 0.1))',
+              background: 'rgba(0, 0, 0, 0.15)',
+              display: 'flex',
+              justify: 'flex-end',
+              gap: '12px',
+              alignItems: 'center',
+              flexShrink: 0,
+            }}
+          >
             {footer}
           </div>
         )}

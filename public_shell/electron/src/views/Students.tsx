@@ -4,6 +4,9 @@ import { CurriculumPresets } from '../lib/curriculum';
 import { useSudoAuth } from '../context/SudoAuthContext';
 import { Combobox } from '../components/Combobox';
 import { useClassArms } from '../hooks/useClassArms';
+import { SetupGuardModal } from '../components/SetupGuardModal';
+import { CSVReviewModal } from '../components/CSVReviewModal';
+import { validateName, validatePhone, validateEmail, validateDOB, validateNonEmpty } from '../lib/validators';
 
 interface Student {
   id: string;
@@ -19,6 +22,7 @@ interface Student {
   fee_status?: string;
   subjects?: string[];
   photo?: string;
+  enrollment_status?: string;
 }
 
 const splitClass = (selected: string, configs: { hierarchy_class: string }[]) => {
@@ -53,6 +57,16 @@ export function Students() {
   const [searchVal, setSearchVal] = useState('');
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(10);
+
+  // Setup Guard & CSV Review Modal States
+  const [setupGuardOpen, setSetupGuardOpen] = useState(false);
+  const [setupGuardStep, setSetupGuardStep] = useState('');
+  const [setupGuardMessage, setSetupGuardMessage] = useState('');
+
+  const [csvReviewOpen, setCsvReviewOpen] = useState(false);
+  const [csvReviewResult, setCsvReviewResult] = useState<any>(null);
+  const [pendingCsvFile, setPendingCsvFile] = useState<any>(null);
+  const [pendingCsvType, setPendingCsvType] = useState<string>('roster');
 
   // Add/Edit Drawer State
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -196,6 +210,7 @@ export function Students() {
         subject: filterSubject,
         teacher_id: filterTeacherId,
         no_arm: filterNoArm,
+        include_overflow: true,
       });
       if (res && res.ok) {
         setStudents(res.data || []);
@@ -271,6 +286,13 @@ export function Students() {
 
         // ── Layer 5: distinguish error / wrong-template / success ─────────
         if (error) {
+          if (error === 'SETUP_INCOMPLETE' && payload.setupCheck) {
+            setSetupGuardStep(payload.setupCheck.step || 'teachers');
+            setSetupGuardMessage(payload.setupCheck.message || '');
+            setSetupGuardOpen(true);
+            setCsvStatus(null);
+            return;
+          }
           setCsvStatus(`❌ Import Failed: ${error}`);
           if (Swal) {
             Swal.fire({
@@ -367,6 +389,10 @@ export function Students() {
               color: '#fff',
               confirmButtonColor: '#f59e0b',
               confirmButtonText: 'Go to Classes'
+            }).then((res: any) => {
+              if (res.isConfirmed) {
+                window.dispatchEvent(new CustomEvent('nexus-nav', { detail: 'classes' }));
+              }
             });
           } else {
             alert('No classes found. Import Classes first.');
@@ -378,7 +404,21 @@ export function Students() {
       }
     }
 
-    // ── Step 1: Pre-validate before any write ─────────────────────────────
+    // ── Step 1: Dry-run validation — check for blocking/normalizable rows ──
+    try {
+      const dryRun = await (window as any).nexusAPI?.validateCSVDryRun?.({ filePath: file.path, type: 'students' });
+      if (dryRun && (dryRun.blocking?.length > 0 || dryRun.normalizable?.length > 0)) {
+        setPendingCsvFile(file);
+        setPendingCsvType('roster');
+        setCsvReviewResult(dryRun);
+        setCsvReviewOpen(true);
+        return; // pause — user must Accept from modal
+      }
+    } catch (err) {
+      console.warn('Dry-run validation skipped:', err);
+    }
+
+    // ── Step 2: Pre-validate seat cap before any write ─────────────────────
     const validation = await (window.electronAPI as any)?.students?.validateCSV?.({ filePath: file.path });
 
     if (validation?.ok && validation.willExceed) {
@@ -402,7 +442,7 @@ export function Students() {
             <div style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:12px 16px; margin-bottom:14px;">
               <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:12px; color:#aaa;"><span>Already enrolled</span><span style="color:#fff;font-weight:700">${validation.totalEnrolled}</span></div>
               <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:12px; color:#aaa;"><span>New in CSV</span><span style="color:#ffaa00;font-weight:700">${validation.newStudents}</span></div>
-              <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:12px; color:#aaa;"><span>Will be skipped</span><span style="color:#ff5252;font-weight:700">${validation.skippedCount}</span></div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:12px; color:#aaa;"><span>Tagged as Overflow</span><span style="color:#ffaa00;font-weight:700">${validation.skippedCount}</span></div>
               <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:12px; color:#aaa;"><span>Updates (existing)</span><span style="color:#00e676;font-weight:700">${validation.existingStudents}</span></div>
               <div style="display:flex; justify-content:space-between; font-size:12px; color:#aaa;"><span>Licensed cap</span><span style="color:#00e5ff;font-weight:700">${validation.cap}</span></div>
             </div>
@@ -418,7 +458,7 @@ export function Students() {
         denyButtonColor: '#2e7d32',
         cancelButtonColor: '#444',
         confirmButtonText: '💳 Buy More Seats',
-        denyButtonText: `✂️ Import ${validation.available} (Capped)`,
+        denyButtonText: `📥 Import All (tag overflow)`,
         cancelButtonText: '✖ Cancel Import',
         reverseButtons: true,
       });
@@ -438,6 +478,62 @@ export function Students() {
       }
     } else {
       // No cap issue — proceed normally
+      setCsvStatus('⏳ Ingesting and verifying student CSV data...');
+      window.electronAPI?.processCSV?.(file.path);
+    }
+  };
+
+  // Called when admin clicks "Accept & Import" in the CSVReviewModal
+  const handleCSVReviewAccept = async () => {
+    setCsvReviewOpen(false);
+    if (!pendingCsvFile) return;
+    const file = pendingCsvFile;
+    setPendingCsvFile(null);
+
+    const api = (window as any).electronAPI;
+    if (pendingCsvType === 'grades') {
+      setCsvStatus('⏳ Ingesting and verifying Grades CSV data...');
+      if (api?.processGradesCSV) api.processGradesCSV(file.path);
+      return;
+    }
+    if (pendingCsvType === 'attendance') {
+      setCsvStatus('⏳ Ingesting and verifying Attendance CSV data...');
+      if (api?.processAttendanceCSV) api.processAttendanceCSV(file.path);
+      return;
+    }
+
+    // Continue from Step 2 — cap check → processCSV
+    const Swal = (window as any).Swal;
+    const validation = await (window.electronAPI as any)?.students?.validateCSV?.({ filePath: file.path });
+
+    if (validation?.ok && validation.willExceed && Swal) {
+      const result = await Swal.fire({
+        title: '⚠️ Seat Quota Exceeded',
+        html: `<p style="color:#fff;font-size:14px;">Your plan allows <strong style="color:#ffaa00">${validation.cap}</strong> seats. Only <strong style="color:#00e676">${validation.available}</strong> remain.</p>`,
+        icon: 'warning',
+        background: '#0b0f19',
+        color: '#fff',
+        showDenyButton: true,
+        showCancelButton: true,
+        confirmButtonColor: '#0288d1',
+        denyButtonColor: '#2e7d32',
+        cancelButtonColor: '#444',
+        confirmButtonText: '💳 Buy More Seats',
+        denyButtonText: `📥 Import All (tag overflow)`,
+        cancelButtonText: '✖ Cancel',
+        reverseButtons: true,
+      });
+
+      if (result.isConfirmed) {
+        (window.electronAPI as any)?.license?.activateOnline?.();
+        return;
+      } else if (result.isDenied) {
+        setCsvStatus(`⏳ Importing students with overflow tagging...`);
+        window.electronAPI?.processCSV?.({ filePath: file.path, limit: (validation.totalEnrolled ?? 0) + (validation.available ?? 0) } as any);
+      } else {
+        setCsvStatus(null);
+      }
+    } else {
       setCsvStatus('⏳ Ingesting and verifying student CSV data...');
       window.electronAPI?.processCSV?.(file.path);
     }
@@ -473,6 +569,20 @@ export function Students() {
       } catch (err) {
         console.error('Failed to run preflight check:', err);
       }
+    }
+
+    // Dry-run validation before writing
+    try {
+      const dryRun = await (window as any).nexusAPI?.validateCSVDryRun?.({ filePath: file.path, type: 'grades' });
+      if (dryRun && (dryRun.blocking?.length > 0 || dryRun.normalizable?.length > 0)) {
+        setPendingCsvFile(file);
+        setPendingCsvType('grades');
+        setCsvReviewResult(dryRun);
+        setCsvReviewOpen(true);
+        return;
+      }
+    } catch (err) {
+      console.warn('Dry-run validation skipped:', err);
     }
 
     setCsvStatus('⏳ Ingesting and verifying Grades CSV data...');
@@ -511,6 +621,20 @@ export function Students() {
       } catch (err) {
         console.error('Failed to run preflight check:', err);
       }
+    }
+
+    // Dry-run validation before writing
+    try {
+      const dryRun = await (window as any).nexusAPI?.validateCSVDryRun?.({ filePath: file.path, type: 'attendance' });
+      if (dryRun && (dryRun.blocking?.length > 0 || dryRun.normalizable?.length > 0)) {
+        setPendingCsvFile(file);
+        setPendingCsvType('attendance');
+        setCsvReviewResult(dryRun);
+        setCsvReviewOpen(true);
+        return;
+      }
+    } catch (err) {
+      console.warn('Dry-run validation skipped:', err);
     }
 
     setCsvStatus('⏳ Ingesting and verifying Attendance CSV data...');
@@ -949,10 +1073,25 @@ export function Students() {
 
   // Save student data
   const handleSaveStudent = async () => {
-    if (!name.trim() || !className.trim()) {
-      setFormLog({ text: '⚠ Name and Class are required.', isError: true });
-      return;
+    const nRes = validateName(name, 'Student Name');
+    if (!nRes.ok && nRes.error) { setFormLog({ text: `⚠ ${nRes.error}`, isError: true }); return; }
+
+    const cRes = validateNonEmpty(className, 'Class Designation');
+    if (!cRes.ok && cRes.error) { setFormLog({ text: `⚠ ${cRes.error}`, isError: true }); return; }
+
+    const phRes = validatePhone(parentPhone, true);
+    if (!phRes.ok && phRes.error) { setFormLog({ text: `⚠ WhatsApp Phone: ${phRes.error}`, isError: true }); return; }
+
+    if (parentEmail.trim()) {
+      const emRes = validateEmail(parentEmail);
+      if (!emRes.ok && emRes.error) { setFormLog({ text: `⚠ Parent Email: ${emRes.error}`, isError: true }); return; }
     }
+
+    if (dob.trim()) {
+      const dobRes = validateDOB(dob);
+      if (!dobRes.ok && dobRes.error) { setFormLog({ text: `⚠ Date of Birth: ${dobRes.error}`, isError: true }); return; }
+    }
+
     if (!stagedSubjects.length) {
       setFormLog({ text: '⚠ Please select at least one enrolled subject.', isError: true });
       return;
@@ -1108,6 +1247,21 @@ export function Students() {
             </div>
           )}
           <span style={{ fontWeight: 'bold', color: 'var(--text-main)', fontSize: '13px' }}>{s.name}</span>
+          {s.enrollment_status === 'overflow' && (
+            <span style={{
+              background: 'rgba(239, 68, 68, 0.1)',
+              color: '#ef4444',
+              border: '1px solid rgba(239, 68, 68, 0.2)',
+              fontSize: '10px',
+              borderRadius: '4px',
+              padding: '1px 5px',
+              fontWeight: 700,
+              marginLeft: '6px',
+              flexShrink: 0
+            }}>
+              OVERFLOW
+            </span>
+          )}
         </div>
       ),
     },
@@ -2403,6 +2557,66 @@ export function Students() {
                 /* ────── Details View ────── */
                 <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
+                  {detailStudent.enrollment_status === 'overflow' && (
+                    <div style={{
+                      background: 'rgba(239, 68, 68, 0.1)',
+                      border: '1px solid rgba(239, 68, 68, 0.2)',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '12px 16px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '16px' }}>⚠️</span>
+                        <strong style={{ color: '#ef4444', fontSize: '13px' }}>Seat Quota Overflow</strong>
+                      </div>
+                      <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-dim)', lineHeight: '1.4' }}>
+                        This student was imported after your active seat limit was reached. Most features are locked for this student.
+                      </p>
+                      <button
+                        onClick={async () => {
+                          const Swal = (window as any).Swal;
+                          try {
+                            const res = await (window as any).nexusAPI.promoteStudentOverflow({ id: detailStudent.id });
+                            if (res?.ok) {
+                              if (Swal) {
+                                Swal.fire({
+                                  title: 'Promoted!',
+                                  text: `Successfully promoted ${detailStudent.name} to Active status.`,
+                                  icon: 'success',
+                                  background: '#0b0f19',
+                                  color: '#fff',
+                                  confirmButtonColor: '#00E5FF'
+                                });
+                              }
+                              const updatedStudent = { ...detailStudent, enrollment_status: 'active' };
+                              setDetailStudent(updatedStudent);
+                              fetchStudents();
+                            } else {
+                              if (Swal) {
+                                Swal.fire({
+                                  title: 'Promotion Failed',
+                                  text: res?.message || res?.error || 'Failed to promote student.',
+                                  icon: 'error',
+                                  background: '#0b0f19',
+                                  color: '#fff',
+                                  confirmButtonColor: '#ef4444'
+                                });
+                              }
+                            }
+                          } catch (err: any) {
+                            console.error(err);
+                          }
+                        }}
+                        className="primary-btn"
+                        style={{ alignSelf: 'flex-start', padding: '6px 12px', fontSize: '11px', height: 'auto', background: '#00E5FF', color: '#000' }}
+                      >
+                        Promote to Active
+                      </button>
+                    </div>
+                  )}
+
                   {/* Identity Row */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                     {([
@@ -2412,6 +2626,7 @@ export function Students() {
                       { label: 'Gender',       value: detailStudent.gender  || '—' },
                       { label: 'Date of Birth',value: detailStudent.dob     || '—' },
                       { label: 'Fee Status',   value: detailStudent.fee_status || '—' },
+                      { label: 'Status',       value: detailStudent.enrollment_status ? detailStudent.enrollment_status.toUpperCase() : 'ACTIVE' },
                     ] as { label: string; value: string }[]).map(({ label, value }) => (
                       <div key={label}>
                         <p style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>{label}</p>
@@ -2419,6 +2634,8 @@ export function Students() {
                           fontSize: '13px',
                           color: label === 'Fee Status'
                             ? (value === 'cleared' ? 'var(--success)' : value === 'partial' ? 'var(--warning)' : 'var(--danger)')
+                            : label === 'Status'
+                            ? (value === 'ACTIVE' ? 'var(--success)' : 'var(--danger)')
                             : 'var(--text-main)',
                           fontWeight: label === 'Full Name' ? 600 : 400,
                           margin: 0,
@@ -2957,6 +3174,20 @@ export function Students() {
           </div>
         </>
       )}
+      <>
+        <SetupGuardModal
+          isOpen={setupGuardOpen}
+          onClose={() => setSetupGuardOpen(false)}
+          step={setupGuardStep}
+          message={setupGuardMessage}
+        />
+        <CSVReviewModal
+          isOpen={csvReviewOpen}
+          onClose={() => { setCsvReviewOpen(false); setPendingCsvFile(null); }}
+          result={csvReviewResult}
+          onAccept={handleCSVReviewAccept}
+        />
+      </>
     </>
   );
 }

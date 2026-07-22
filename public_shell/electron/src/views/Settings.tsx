@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useIdentity, SchoolIdentity } from '../hooks/useIdentity';
 import { useLicense } from '../hooks/useLicense';
 import { useSudoAuth } from '../context/SudoAuthContext';
+import { validateUsername, validatePin, validatePhone, validateEmail, validateNonEmpty, validateSecurityAnswer } from '../lib/validators';
 
 interface SettingsProps {
   onResetSuccess?: () => void;
@@ -35,6 +36,8 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
   const [motto, setMotto] = useState('');
   const [signature, setSignature] = useState('');
   const [principalPhone, setPrincipalPhone] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [portalSlug, setPortalSlug] = useState('');
   const [themePrimary, setThemePrimary] = useState('#1A237E');
   const [themeSecondary, setThemeSecondary] = useState('#00E5FF');
@@ -92,6 +95,8 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
       setMotto(identity.motto || '');
       setSignature(identity.signature || '');
       setPrincipalPhone(identity.principalPhone || '');
+      setPhone((identity as any).phone || '');
+      setEmail((identity as any).email || '');
       setPortalSlug(identity.portalSlug || '');
       ThemeColorLoad(identity.themePrimary, identity.themeSecondary);
       setStampStyle(identity.stampStyle || 'none');
@@ -300,25 +305,30 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
 
   const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newStaffUsername.trim() || !newStaffPin.trim()) {
-      const Swal = (window as any).Swal;
-      const msg = 'Username and PIN are required.';
+    const Swal = (window as any).Swal;
+    const showErr = (msg: string) => {
       if (Swal) {
-        Swal.fire({ title: 'Error', text: msg, icon: 'error', background: '#0d1235', color: '#fff' });
+        Swal.fire({ title: 'Validation Error', text: msg, icon: 'error', background: '#0d1235', color: '#fff' });
       } else {
         alert(msg);
       }
-      return;
+    };
+
+    const uRes = validateUsername(newStaffUsername);
+    if (!uRes.ok && uRes.error) return showErr(uRes.error);
+
+    const pRes = validatePin(newStaffPin, 'pin');
+    if (!pRes.ok && pRes.error) return showErr(pRes.error);
+
+    if (newStaffPhone.trim()) {
+      const phRes = validatePhone(newStaffPhone);
+      if (!phRes.ok && phRes.error) return showErr(phRes.error);
     }
-    if (newStaffPin.trim().length < 4) {
-      const Swal = (window as any).Swal;
-      const msg = 'PIN must be at least 4 characters.';
-      if (Swal) {
-        Swal.fire({ title: 'Error', text: msg, icon: 'error', background: '#0d1235', color: '#fff' });
-      } else {
-        alert(msg);
-      }
-      return;
+
+    if (newStaffQuestion.trim() || newStaffAnswer.trim()) {
+      if (!newStaffQuestion.trim()) return showErr('Please select a recovery question.');
+      const aRes = validateSecurityAnswer(newStaffAnswer);
+      if (!aRes.ok && aRes.error) return showErr(aRes.error);
     }
 
     try {
@@ -439,6 +449,34 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
         alert('Please enter your verification code.');
       }
       return;
+    }
+
+    const uRes = validateUsername(profileUsername);
+    if (!uRes.ok && uRes.error) {
+      const Swal = (window as any).Swal;
+      if (Swal) Swal.fire({ title: 'Validation Error', text: uRes.error, icon: 'error', background: '#0d1235', color: '#fff' });
+      else alert(uRes.error);
+      return;
+    }
+
+    if (profilePhone.trim()) {
+      const phRes = validatePhone(profilePhone);
+      if (!phRes.ok && phRes.error) {
+        const Swal = (window as any).Swal;
+        if (Swal) Swal.fire({ title: 'Validation Error', text: phRes.error, icon: 'error', background: '#0d1235', color: '#fff' });
+        else alert(phRes.error);
+        return;
+      }
+    }
+
+    if (profileRecoveryEmail.trim()) {
+      const emRes = validateEmail(profileRecoveryEmail);
+      if (!emRes.ok && emRes.error) {
+        const Swal = (window as any).Swal;
+        if (Swal) Swal.fire({ title: 'Validation Error', text: emRes.error, icon: 'error', background: '#0d1235', color: '#fff' });
+        else alert(emRes.error);
+        return;
+      }
     }
 
     try {
@@ -661,6 +699,30 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
 
   // Submit form
   const handleSave = async () => {
+    const Swal = (window as any).Swal;
+    const showErr = (msg: string) => {
+      if (Swal) Swal.fire({ title: 'Validation Error', text: msg, icon: 'error', background: '#0d1235', color: '#fff' });
+      else alert(msg);
+    };
+
+    const nRes = validateNonEmpty(name, 'School Name');
+    if (!nRes.ok && nRes.error) return showErr(nRes.error);
+
+    if (phone.trim()) {
+      const phRes = validatePhone(phone);
+      if (!phRes.ok && phRes.error) return showErr(`School Phone: ${phRes.error}`);
+    }
+
+    if (email.trim()) {
+      const emRes = validateEmail(email);
+      if (!emRes.ok && emRes.error) return showErr(`School Email: ${emRes.error}`);
+    }
+
+    if (principalPhone.trim()) {
+      const pPhRes = validatePhone(principalPhone);
+      if (!pPhRes.ok && pPhRes.error) return showErr(`Principal Phone: ${pPhRes.error}`);
+    }
+
     setSaving(true);
     setSaveStatus('idle');
     try {
@@ -670,6 +732,8 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
         motto,
         signature,
         principalPhone,
+        phone,
+        email,
         portalSlug: portalSlug.toLowerCase().replace(/[^a-z0-9]/g, '') || undefined,
         themePrimary,
         themeSecondary,
@@ -884,7 +948,7 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
     // ── Schema fingerprint: these are the ONLY keys this template recognises ──
     const IDENTITY_KEYS = [
       'name', 'address', 'motto', 'signature',
-      'principalPhone', 'portalSlug', 'themePrimary', 'themeSecondary',
+      'principalPhone', 'phone', 'email', 'portalSlug', 'themePrimary', 'themeSecondary',
     ];
 
     const reader = new FileReader();
@@ -908,6 +972,8 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
         if (data.motto !== undefined) setMotto(String(data.motto));
         if (data.signature !== undefined) setSignature(String(data.signature));
         if (data.principalPhone !== undefined) setPrincipalPhone(String(data.principalPhone));
+        if (data.phone !== undefined) setPhone(String(data.phone));
+        if (data.email !== undefined) setEmail(String(data.email));
         if (data.portalSlug !== undefined) setPortalSlug(String(data.portalSlug));
         if (data.themePrimary !== undefined) setThemePrimary(String(data.themePrimary));
         if (data.themeSecondary !== undefined) setThemeSecondary(String(data.themeSecondary));
@@ -1370,6 +1436,30 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
               placeholder="e.g. Excellence in all things"
               value={motto}
               onChange={(e) => setMotto(e.target.value)}
+            />
+          </div>
+
+          <div className="form-group">
+            <label>School Phone</label>
+            <input
+              type="text"
+              id="school-phone-input"
+              className="modern-input"
+              placeholder="e.g. +234..."
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+            />
+          </div>
+
+          <div className="form-group">
+            <label>School Email</label>
+            <input
+              type="email"
+              id="school-email-input"
+              className="modern-input"
+              placeholder="e.g. info@school.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
             />
           </div>
 

@@ -1,3 +1,10 @@
+// Suppress EPIPE errors on stdout/stderr — occurs when Electron's pipe to the
+// launching terminal is closed (e.g. background launch, CI, or pipe consumers
+// that exit before the process finishes writing). Without this, a console.log
+// inside an async callback can crash the entire main process.
+if (process.stdout) process.stdout.on('error', (err) => { if (err.code !== 'EPIPE') throw err; });
+if (process.stderr) process.stderr.on('error', (err) => { if (err.code !== 'EPIPE') throw err; });
+
 console.log("\n\n*******************************************");
 console.log("*       NEXUS DEMO HUB - VERSION 2.3      *");
 console.log("*******************************************\n");
@@ -11,6 +18,7 @@ const path = require("path");
 // uv_cwd() throws EIO: i/o error and crashes the main process before the window opens.
 try { process.chdir(require("os").homedir()); } catch (_) {}
 require("dotenv").config({ path: path.join(__dirname, ".env") });
+try { process.chdir(__dirname); } catch (_) {}
 const fs = require("fs");
 const crypto = require("crypto");
 const os = require("os");
@@ -21,7 +29,7 @@ const scholar = require("@nexus/engine/src/scholar");
 const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, logActivity,
         handleCSVUpload, handleGradesCSVUpload, handleAttendanceCSVUpload, handleClassesCSVUpload,
         handleFeeStructureCSVUpload, handleFeePaymentCSVUpload, handleFeeAdjustmentCSVUpload,
-        clearData } = server;
+        validateCSVDryRun, clearData } = server;
 const address = require("address");
 const pulseBot     = require('./pulse-bot.js');
 const pulseExporter = require('./pulse-exporter.js');
@@ -73,6 +81,8 @@ let identityPacket = {
   logoBase64: null,
   address: "",
   motto: "",
+  phone: "",
+  email: "",
   signature: "",           // Principal's name (text — used by calligraphy-style templates)
   principalSignBase64: null, // Principal's image signature (uploaded via Settings)
   stamp: "",
@@ -174,6 +184,38 @@ function assertQuotaCompliant(channel) {
   return null;
 }
 
+const { assertSetupChain: libAssertSetupChain } = require("./lib/setupChain.js");
+function assertSetupChain(db, requiredUpTo) {
+  return libAssertSetupChain(db, requiredUpTo, identityPacket);
+}
+
+// ── Shared IPC Validation Helpers ──────────────────────────────────────────────
+function isValidPhone(v) {
+  if (!v || !v.trim()) return true;
+  const clean = v.trim().replace(/[\s\-()]/g, '');
+  return /^(\+?234|0)[789][01]\d{8}$/.test(clean) || /^\+?[1-9]\d{6,14}$/.test(clean);
+}
+
+function isValidEmail(v) {
+  if (!v || !v.trim()) return true;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+}
+
+function isValidUsername(v) {
+  if (!v || !v.trim()) return false;
+  const trimmed = v.trim();
+  if (trimmed.length < 3 || trimmed.length > 40) return false;
+  if (!/^[a-zA-Z0-9._-]+$/.test(trimmed)) return false;
+  if (/^[._-]/.test(trimmed) || /[._-]$/.test(trimmed)) return false;
+  return true;
+}
+
+function isValidName(v) {
+  if (!v || !v.trim()) return false;
+  const trimmed = v.trim();
+  return trimmed.length >= 2 && trimmed.length <= 80 && /[a-zA-Z]/.test(trimmed);
+}
+
 const originalHandle = ipcMain.handle;
 ipcMain.handle = function(channel, listener) {
     const gatedChannels = [
@@ -191,13 +233,47 @@ ipcMain.handle = function(channel, listener) {
         if (shouldGate && licenseStatus?.tier === 'Standalone') {
             return { ok: false, error: 'Feature locked. Migrate to a payment plan to enjoy the full features of Nexus School OS.' };
         }
+
+        // Setup chain guard check — only runs once DB is initialized
+        if (database.isInitialized()) {
+            try {
+                const db = database.getDb();
+                let requiredUpTo = null;
+                if (
+                    ['classes:saveConfig', 'classes:addArm', 'classes:saveArms', 'classes:removeArm', 'classes:create', 'create-class'].includes(channel) ||
+                    (channel.includes('saveSystemSetting') && args[0]?.key === 'class_hierarchy')
+                ) {
+                    requiredUpTo = 'identity';
+                } else if (['add-teacher', 'add-teacher-form', 'update-teacher-full'].includes(channel)) {
+                    requiredUpTo = 'classes';
+                } else if (['save-term-config'].includes(channel)) {
+                    requiredUpTo = 'students';
+                } else if (['add-student', 'add-student-form'].includes(channel)) {
+                    requiredUpTo = 'teachers';
+                } else if ([
+                    'save-daily-attendance', 'save-attendance', 'save-student-grades',
+                    'fee-structure:upsert-item', 'fee-structure:apply-to-class', 'fees:record-payment',
+                    'fees:upsert', 'fee-structure:add-adjustment', 'results:dispatch', 'results:publish'
+                ].some(c => channel === c || channel.startsWith(c))) {
+                    requiredUpTo = 'term';
+                }
+
+                if (requiredUpTo) {
+                    const setupCheck = assertSetupChain(db, requiredUpTo);
+                    if (!setupCheck.ok) {
+                        return setupCheck;
+                    }
+                }
+            } catch (dbErr) {
+                console.error('[Setup Guard] DB check failed:', dbErr.message);
+            }
+        }
+
+
         return listener(event, ...args);
     };
 
-    if (shouldGate || GATED_FEATURES.includes(channel)) {
-        return originalHandle.call(ipcMain, channel, wrapper);
-    }
-    return originalHandle.call(ipcMain, channel, listener);
+    return originalHandle.call(ipcMain, channel, wrapper);
 };
 
 // Synchronous getter — renderer calls this at boot to pre-populate tier
@@ -857,6 +933,12 @@ ipcMain.handle('auth:create-admin', (event, { username, pin, authType, roleLevel
         if (!username?.trim() || !pin?.trim()) {
             return { ok: false, error: `Username and ${secretName} are required.` };
         }
+        if (!isValidUsername(username)) {
+            return { ok: false, error: 'Username must be 3–40 characters and contain only letters, numbers, underscores, hyphens, and dots.' };
+        }
+        if (phone && !isValidPhone(phone)) {
+            return { ok: false, error: 'Invalid phone number format.' };
+        }
         const exists = db.prepare('SELECT id FROM admin_users WHERE username = ?').get(username.trim());
         if (exists) return { ok: false, error: `Username "${username.trim()}" is already taken.` };
 
@@ -1218,7 +1300,7 @@ ipcMain.handle('fees:print-receipt', async (event, { txRef, studentId, format })
 
     let schoolName = identityPacket?.name || "The School";
     let schoolAddress = identityPacket?.address || "";
-    let schoolPhone = identityPacket?.principalPhone || "";
+    let schoolPhone = identityPacket?.phone || "";
     let schoolLogoB64 = identityPacket?.logoBase64 || "";
 
     try {
@@ -1556,7 +1638,7 @@ async function sendBrandedReceiptHelper(db, ref, session) {
 
   let schoolName = identityPacket?.name || "the school";
   let schoolAddress = identityPacket?.address || "";
-  let schoolPhone = identityPacket?.principalPhone || "";
+  let schoolPhone = identityPacket?.phone || "";
   let schoolLogoB64 = identityPacket?.logoBase64 || "";
 
   try {
@@ -2523,6 +2605,15 @@ ipcMain.handle(
   "add-teacher-form",
   (event, { id, name, phone, email, signature, allocations }) => {
     try {
+      if (!isValidName(name)) {
+        return { ok: false, error: "Full Name must be 2–80 characters and contain letters." };
+      }
+      if (phone && !isValidPhone(phone)) {
+        return { ok: false, error: "Invalid phone number format." };
+      }
+      if (email && !isValidEmail(email)) {
+        return { ok: false, error: "Invalid email address format." };
+      }
       const db = database.getDb();
       db.prepare(
         `INSERT INTO teachers (id, name, phone, email, signature)
@@ -2576,6 +2667,15 @@ ipcMain.handle("update-teacher", (event, { id, name, phone, email }) => {
 // ── Full Teacher Update — profile + replace all allocations ────────────────────────────
 ipcMain.handle("update-teacher-full", (event, { id, name, phone, email, signature, allocations, host_class }) => {
   try {
+    if (!isValidName(name)) {
+      return { ok: false, error: "Full Name must be 2–80 characters and contain letters." };
+    }
+    if (phone && !isValidPhone(phone)) {
+      return { ok: false, error: "Invalid phone number format." };
+    }
+    if (email && !isValidEmail(email)) {
+      return { ok: false, error: "Invalid email address format." };
+    }
     const db = database.getDb();
     db.transaction(() => {
       db.prepare(
@@ -2688,18 +2788,28 @@ ipcMain.handle('students:get-count', () => {
 
 ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, subjects, reg_no, admission_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status }) => {
   try {
+    if (!isValidName(name)) {
+      return { ok: false, error: "Student Name must be 2–80 characters and contain letters." };
+    }
+    if (!parent_phone || !isValidPhone(parent_phone)) {
+      return { ok: false, error: "Parent WhatsApp Phone number is required and must be valid." };
+    }
+    if (parent_email && !isValidEmail(parent_email)) {
+      return { ok: false, error: "Invalid parent email address format." };
+    }
     const db = database.getDb();
 
     // ── Seat Cap Check ───────────────────────────────────────────
     const cap = licenseStatus?.student_count;
     const hasCap = typeof cap === 'number' && isFinite(cap) && cap < 999999;
+    let status = 'active';
     if (hasCap) {
       // Only enforce the cap if this is a NEW student (not an update/edit)
       const isExisting = db.prepare('SELECT 1 FROM students WHERE id = ? LIMIT 1').get(id);
       if (!isExisting) {
-        const currentCount = db.prepare('SELECT COUNT(id) AS c FROM students').get().c;
+        const currentCount = db.prepare("SELECT COUNT(id) AS c FROM students WHERE enrollment_status = 'active'").get().c;
         if (currentCount >= cap) {
-          return { ok: false, error: 'STUDENT_CAP_REACHED', cap, currentCount };
+          status = 'overflow';
         }
       }
     }
@@ -2707,20 +2817,21 @@ ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, su
 
     db.transaction(() => {
       db.prepare(`
-        INSERT INTO students (id, name, class_name, class_arm, reg_no, admission_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status)
-        VALUES (@id, @name, @class_name, @class_arm, @reg_no, @admission_no, @gender, @dob, @photo, @parent_email, @parent_phone, @parent_name, @fee_status)
+        INSERT INTO students (id, name, class_name, class_arm, reg_no, admission_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status, enrollment_status)
+        VALUES (@id, @name, @class_name, @class_arm, @reg_no, @admission_no, @gender, @dob, @photo, @parent_email, @parent_phone, @parent_name, @fee_status, @enrollment_status)
         ON CONFLICT(id) DO UPDATE SET
           name=excluded.name, class_name=excluded.class_name, class_arm=excluded.class_arm,
           reg_no=excluded.reg_no, admission_no=excluded.admission_no, gender=excluded.gender, dob=excluded.dob,
           photo=COALESCE(excluded.photo, photo),
           parent_email=excluded.parent_email, parent_phone=excluded.parent_phone,
           parent_name=excluded.parent_name,
-          fee_status=excluded.fee_status
+          fee_status=excluded.fee_status,
+          enrollment_status=COALESCE(students.enrollment_status, excluded.enrollment_status)
       `).run({ id, name, class_name, class_arm: class_arm || '',
         reg_no: reg_no || '', admission_no: admission_no || '', gender: gender || '', dob: dob || '',
         photo: photo || null, parent_email: parent_email || '',
         parent_phone: parent_phone || '', parent_name: parent_name || null,
-        fee_status: fee_status || 'cleared'
+        fee_status: fee_status || 'cleared', enrollment_status: status
       });
       db.prepare("DELETE FROM student_subjects WHERE student_id = ?").run(id);
       if (subjects && subjects.length > 0) {
@@ -2728,8 +2839,8 @@ ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, su
         for (const subj of subjects) stmt.run(id, normalizeSubjectName(subj, class_name));
       }
     })();
-    console.log(`[Form] Student added: ${name} with ${subjects?.length || 0} subjects`);
-    return { ok: true };
+    console.log(`[Form] Student added: ${name} with ${subjects?.length || 0} subjects. Status: ${status}`);
+    return { ok: true, overflow: status === 'overflow' };
   } catch (err) {
     return { ok: false, error: err.message };
   }
@@ -2738,6 +2849,15 @@ ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, su
 // ── Form-based Student Update (“Edit” path) ──────────────────────────────────────
 ipcMain.handle("update-student", (event, { id, name, class_name, class_arm, subjects, reg_no, admission_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status }) => {
   try {
+    if (!isValidName(name)) {
+      return { ok: false, error: "Student Name must be 2–80 characters and contain letters." };
+    }
+    if (!parent_phone || !isValidPhone(parent_phone)) {
+      return { ok: false, error: "Parent WhatsApp Phone number is required and must be valid." };
+    }
+    if (parent_email && !isValidEmail(parent_email)) {
+      return { ok: false, error: "Invalid parent email address format." };
+    }
     const db = database.getDb();
     db.transaction(() => {
       if (photo !== undefined) {
@@ -2772,6 +2892,24 @@ ipcMain.handle("update-student", (event, { id, name, class_name, class_arm, subj
     return { ok: true };
   } catch (err) {
     console.error('[Form] update-student failed:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("promote-student-overflow", (event, { id }) => {
+  try {
+    const db = database.getDb();
+    const cap = licenseStatus?.student_count;
+    const hasCap = typeof cap === 'number' && isFinite(cap) && cap < 999999;
+    if (hasCap) {
+      const currentCount = db.prepare("SELECT COUNT(id) AS c FROM students WHERE enrollment_status = 'active'").get().c;
+      if (currentCount >= cap) {
+        return { ok: false, error: 'LIMIT_REACHED', message: `Cannot promote student. You have reached your quota limit of ${cap} active students.` };
+      }
+    }
+    db.prepare("UPDATE students SET enrollment_status = 'active' WHERE id = ?").run(id);
+    return { ok: true };
+  } catch (err) {
     return { ok: false, error: err.message };
   }
 });
@@ -2870,13 +3008,16 @@ ipcMain.handle("get-all-teachers", (event, { limit = 15, offset = 0, search = ""
 });
 
 // ── Directory: Get All Students ─────────────────────────────────────────
-ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = "", class_name = "", subject = "", teacher_id = "", no_arm = false, minimal = false } = {}) => {
+ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = "", class_name = "", subject = "", teacher_id = "", no_arm = false, minimal = false, include_overflow = false } = {}) => {
   try {
     const db = database.getDb();
     const query = search ? `%${search}%` : "%";
 
     // Base WHERE clause (always present)
     let conditions = "(s.name LIKE ? OR s.id LIKE ? OR s.reg_no LIKE ?)";
+    if (!include_overflow) {
+      conditions += " AND (s.enrollment_status = 'active' OR s.enrollment_status IS NULL OR s.enrollment_status = '')";
+    }
     const params = [query, query, query];
 
     // Optional class/arm filter (normalised, handles "JSS 1 Gold" or "JSS 1")
@@ -2905,7 +3046,7 @@ ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = ""
     }
 
     const totalSql   = `SELECT COUNT(*) as total FROM students s WHERE ${conditions}`;
-    const selectSql  = `SELECT s.id, s.name, s.class_name, COALESCE(s.class_arm, '') as class_arm, s.reg_no, s.gender, s.dob, s.photo, s.parent_email, s.parent_phone, s.parent_name, s.fee_status FROM students s WHERE ${conditions} ORDER BY s.class_name ASC, s.name ASC LIMIT ? OFFSET ?`;
+    const selectSql  = `SELECT s.id, s.name, s.class_name, COALESCE(s.class_arm, '') as class_arm, s.reg_no, s.gender, s.dob, s.photo, s.parent_email, s.parent_phone, s.parent_name, s.fee_status, s.enrollment_status FROM students s WHERE ${conditions} ORDER BY s.class_name ASC, s.name ASC LIMIT ? OFFSET ?`;
 
     const total    = db.prepare(totalSql).get(...params).total;
     const students = db.prepare(selectSql).all(...params, limit, offset);
@@ -4201,6 +4342,16 @@ ipcMain.handle("set-form-teacher", (event, { class_name, teacher_id }) => {
 
 ipcMain.handle("save-identity", (event, newIdentity) => {
   try {
+    if (newIdentity?.phone && !isValidPhone(newIdentity.phone)) {
+      return { ok: false, error: "Invalid school phone number format." };
+    }
+    if (newIdentity?.email && !isValidEmail(newIdentity.email)) {
+      return { ok: false, error: "Invalid school email address format." };
+    }
+    if (newIdentity?.principalPhone && !isValidPhone(newIdentity.principalPhone)) {
+      return { ok: false, error: "Invalid principal phone number format." };
+    }
+
     // Ensure identityFilePath is set
     if (!identityFilePath) {
       const userDataPath = require('electron').app.getPath("userData");
@@ -4218,6 +4369,10 @@ ipcMain.handle("save-identity", (event, newIdentity) => {
       if (identityPacket.name) {
         db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_name', ?)").run(identityPacket.name);
       }
+      db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_address', ?)").run(identityPacket.address || '');
+      db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_phone', ?)").run(identityPacket.phone || '');
+      db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_email', ?)").run(identityPacket.email || '');
+      db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_motto', ?)").run(identityPacket.motto || '');
     } catch (dbErr) {
       console.warn("[Identity] Could not sync school_identity/school_name to DB:", dbErr.message);
     }
@@ -4814,15 +4969,11 @@ ipcMain.handle("settings:smtp:test", async (event, params) => {
 });
 
 function relaunchApp() {
+  const appPath = app.getAppPath();
   if (process.defaultApp) {
-    const args = process.argv.slice(1);
-    const appPath = app.getAppPath();
-    if (!args.includes(appPath) && !args.includes('.')) {
-      args.unshift(appPath);
-    }
     app.relaunch({
       execPath: process.execPath,
-      args: args
+      args: [appPath]
     });
   } else {
     app.relaunch();
@@ -5053,6 +5204,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     icon: appIcon,
+    show: false, // Prevents flash — window surfaces only after first paint (see ready-to-show below)
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       nodeIntegration: false,
@@ -5065,6 +5217,10 @@ function createWindow() {
     frame: process.platform !== "darwin", // frameless on Windows/Linux
     backgroundColor: "#0A0E2E",
   });
+
+  // Show the window only after the renderer has completed its first paint.
+  // This eliminates the lock-screen flash (PIN→Password) and post-unlock jump.
+  mainWindow.once("ready-to-show", () => mainWindow.show());
 
   // Fix YouTube Error 153 in Electron's file:// protocol context by spoofing referrer/origin headers
   mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
@@ -6532,49 +6688,174 @@ function createWindow() {
   // ui-ready handler is registered at module scope (line ~158) so it is
   // in place before mainWindow.loadFile() — no duplicate registration here.
 
+  function detectCSVType(filePath) {
+    try {
+      const fs = require('fs');
+      const content = fs.readFileSync(filePath, 'utf8');
+      const firstLine = content.split('\n')[0] || '';
+      const headers = firstLine.split(',').map(h => h.trim().toLowerCase());
+      const hasTeacherCols = headers.includes('teacher_id') || headers.includes('teacher_name') || headers.includes('teacher_phone');
+      if (hasTeacherCols) return 'teachers';
+      return 'students';
+    } catch (e) {
+      return 'students';
+    }
+  }
+
   ipcMain.on("process-csv", (event, payload) => {
-    // payload is either a plain filePath string (legacy) or { filePath, limit }
     const filePath = typeof payload === 'string' ? payload : payload?.filePath;
     const newStudentLimit = typeof payload === 'string' ? undefined : payload?.limit;
+    const dryRun = typeof payload === 'object' && payload !== null ? !!payload.dry_run : false;
+    
+    const db = database.getDb();
+    const csvType = detectCSVType(filePath);
+    const guardLevel = csvType === 'teachers' ? 'classes' : 'teachers';
+    const guardCheck = assertSetupChain(db, guardLevel);
+    if (!guardCheck.ok) {
+      event.reply("csv-loaded", { count: 0, error: guardCheck.error, setupCheck: guardCheck });
+      return;
+    }
+
     handleCSVUpload(filePath, (count, err, result) => {
-      event.reply("csv-loaded", { count, error: err || null, warnings: result?.warnings || [], newStudentsInserted: result?.newStudentsInserted });
-    }, newStudentLimit);
+      event.reply("csv-loaded", {
+        count,
+        error: err || null,
+        warnings: result?.warnings || [],
+        blocking: result?.blocking || [],
+        normalizable: result?.normalizable || [],
+        cleanCount: result?.cleanCount || count,
+        dry_run: result?.dry_run || false,
+        newStudentsInserted: result?.newStudentsInserted
+      });
+    }, newStudentLimit, dryRun);
   });
 
-  ipcMain.on("process-grades-csv", (event, filePath) => {
-    handleGradesCSVUpload(filePath, (count, err) => {
-      event.reply("grades-csv-loaded", { count, error: err });
-    });
+  ipcMain.on("process-grades-csv", (event, payload) => {
+    const filePath = typeof payload === 'string' ? payload : payload?.filePath;
+    const dryRun = typeof payload === 'object' && payload !== null ? !!payload.dry_run : false;
+
+    const db = database.getDb();
+    const guardCheck = assertSetupChain(db, 'term');
+    if (!guardCheck.ok) {
+      event.reply("grades-csv-loaded", { count: 0, error: guardCheck.error, setupCheck: guardCheck });
+      return;
+    }
+    handleGradesCSVUpload(filePath, (count, err, result) => {
+      event.reply("grades-csv-loaded", {
+        count,
+        error: err || null,
+        blocking: result?.blocking || [],
+        normalizable: result?.normalizable || [],
+        cleanCount: result?.cleanCount || count,
+        dry_run: result?.dry_run || false,
+        activeSession: result?.activeSession,
+        activeTerm: result?.activeTerm
+      });
+    }, dryRun);
   });
 
-  ipcMain.on("process-attendance-csv", (event, filePath) => {
-    handleAttendanceCSVUpload(filePath, (count, err) => {
-      event.reply("attendance-csv-loaded", { count, error: err });
-    });
+  ipcMain.on("process-attendance-csv", (event, payload) => {
+    const filePath = typeof payload === 'string' ? payload : payload?.filePath;
+    const dryRun = typeof payload === 'object' && payload !== null ? !!payload.dry_run : false;
+
+    const db = database.getDb();
+    const guardCheck = assertSetupChain(db, 'term');
+    if (!guardCheck.ok) {
+      event.reply("attendance-csv-loaded", { count: 0, error: guardCheck.error, setupCheck: guardCheck });
+      return;
+    }
+    handleAttendanceCSVUpload(filePath, (count, err, result) => {
+      event.reply("attendance-csv-loaded", {
+        count,
+        error: err || null,
+        blocking: result?.blocking || [],
+        normalizable: result?.normalizable || [],
+        cleanCount: result?.cleanCount || count,
+        dry_run: result?.dry_run || false,
+        activeSession: result?.activeSession,
+        activeTerm: result?.activeTerm
+      });
+    }, dryRun);
   });
 
   ipcMain.on("process-classes-csv", (event, filePath) => {
+    const db = database.getDb();
+    const guardCheck = assertSetupChain(db, 'identity');
+    if (!guardCheck.ok) {
+      event.reply("classes-csv-loaded", { count: 0, error: guardCheck.error, setupCheck: guardCheck });
+      return;
+    }
     handleClassesCSVUpload(filePath, (count, err) => {
       event.reply("classes-csv-loaded", { count, error: err });
     });
   });
 
   // ── Fee CSV imports ────────────────────────────────────────────────────
-  ipcMain.on("process-fee-structure-csv", (event, filePath) => {
-    handleFeeStructureCSVUpload(filePath, (count, err) => {
-      event.reply("fee-structure-csv-loaded", { count, error: err });
-    });
+  ipcMain.on("process-fee-structure-csv", (event, payload) => {
+    const filePath = typeof payload === 'string' ? payload : payload?.filePath;
+    const dryRun = typeof payload === 'object' && payload !== null ? !!payload.dry_run : false;
+
+    const db = database.getDb();
+    const guardCheck = assertSetupChain(db, 'term');
+    if (!guardCheck.ok) {
+      event.reply("fee-structure-csv-loaded", { count: 0, error: guardCheck.error, setupCheck: guardCheck });
+      return;
+    }
+    handleFeeStructureCSVUpload(filePath, (count, err, result) => {
+      event.reply("fee-structure-csv-loaded", {
+        count,
+        error: err || null,
+        blocking: result?.blocking || [],
+        normalizable: result?.normalizable || [],
+        cleanCount: result?.cleanCount || count,
+        dry_run: result?.dry_run || false
+      });
+    }, dryRun);
   });
 
-  ipcMain.on("process-fee-payment-csv", (event, filePath) => {
-    handleFeePaymentCSVUpload(filePath, (count, err) => {
-      event.reply("fee-payment-csv-loaded", { count, error: err });
-    });
+  ipcMain.on("process-fee-payment-csv", (event, payload) => {
+    const filePath = typeof payload === 'string' ? payload : payload?.filePath;
+    const dryRun = typeof payload === 'object' && payload !== null ? !!payload.dry_run : false;
+
+    const db = database.getDb();
+    const guardCheck = assertSetupChain(db, 'term');
+    if (!guardCheck.ok) {
+      event.reply("fee-payment-csv-loaded", { count: 0, error: guardCheck.error, setupCheck: guardCheck });
+      return;
+    }
+    handleFeePaymentCSVUpload(filePath, (count, err, result) => {
+      event.reply("fee-payment-csv-loaded", {
+        count,
+        error: err || null,
+        blocking: result?.blocking || [],
+        normalizable: result?.normalizable || [],
+        cleanCount: result?.cleanCount || count,
+        dry_run: result?.dry_run || false
+      });
+    }, dryRun);
   });
 
   ipcMain.on("process-fee-adjustment-csv", (event, filePath) => {
+    const db = database.getDb();
+    const guardCheck = assertSetupChain(db, 'term');
+    if (!guardCheck.ok) {
+      event.reply("fee-adjustment-csv-loaded", { count: 0, error: guardCheck.error, setupCheck: guardCheck });
+      return;
+    }
     handleFeeAdjustmentCSVUpload(filePath, (count, err) => {
       event.reply("fee-adjustment-csv-loaded", { count, error: err });
+    });
+  });
+
+  ipcMain.handle('validate-csv-dry-run', async (event, { filePath, type }) => {
+    return new Promise((resolve) => {
+      validateCSVDryRun(filePath, type, (result, err) => {
+        if (err) {
+          resolve({ ok: false, error: err });
+        } else {
+          resolve({ ok: true, result });
+        }
+      });
     });
   });
 

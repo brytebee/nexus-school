@@ -47,7 +47,7 @@ export default defineConfig({
   },
   // Vitest: only pick up unit test files; never touch Playwright E2E specs
   test: {
-    include: ['tests/*.test.js'],
+    include: ['tests/*.test.{js,ts}'],
     exclude: ['tests/e2e/**', 'node_modules/**'],
     environment: 'node',
   },

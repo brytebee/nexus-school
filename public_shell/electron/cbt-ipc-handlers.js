@@ -386,9 +386,9 @@ module.exports = function registerCBTHandlers(database) {
         const db = database.getDb();
         const normClassName = (class_name || '').replace(/\s+/g, '');
         if (class_arm && class_arm !== 'all') {
-            return db.prepare("SELECT id, name, class_name, class_arm FROM students WHERE replace(class_name, ' ', '') = ? AND class_arm = ?").all(normClassName, class_arm);
+            return db.prepare("SELECT id, name, class_name, class_arm FROM students WHERE replace(class_name, ' ', '') = ? AND class_arm = ? AND (enrollment_status = 'active' OR enrollment_status IS NULL OR enrollment_status = '')").all(normClassName, class_arm);
         } else {
-            return db.prepare("SELECT id, name, class_name, class_arm FROM students WHERE replace(class_name, ' ', '') = ?").all(normClassName);
+            return db.prepare("SELECT id, name, class_name, class_arm FROM students WHERE replace(class_name, ' ', '') = ? AND (enrollment_status = 'active' OR enrollment_status IS NULL OR enrollment_status = '')").all(normClassName);
         }
     });
 

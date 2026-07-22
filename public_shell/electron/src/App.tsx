@@ -161,7 +161,16 @@ function App() {
       setHistoryIndex(newHistory.length - 1);
     }
   };
-
+  React.useEffect(() => {
+    const handleNav = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail) {
+        navigateTo(customEvent.detail, true);
+      }
+    };
+    window.addEventListener('nexus-nav', handleNav);
+    return () => window.removeEventListener('nexus-nav', handleNav);
+  }, [tabHistory, historyIndex]);
   const navigateBack = () => {
     if (historyIndex > 0) {
       const idx = historyIndex - 1;
