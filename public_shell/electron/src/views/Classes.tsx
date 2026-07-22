@@ -344,6 +344,10 @@ export default function Classes() {
   const [singleTargetClass, setSingleTargetClass] = useState('');
   const [singleTargetArm, setSingleTargetArm] = useState('');
   const [singleNote, setSingleNote] = useState('');
+  // Preview error state
+  const [rolloverPreviewError, setRolloverPreviewError] = useState<string|null>(null);
+  // Active term (from school_term_config — same source as PrintHub)
+  const [activeTerm, setActiveTerm] = useState('');
 
   // Load global system settings
   const fetchGlobalSettings = async () => {
@@ -361,16 +365,30 @@ export default function Classes() {
     } catch (err) {
       console.error('Error fetching global settings:', err);
     }
+    // Also load the active term from school_term_config (same source as PrintHub)
+    try {
+      const termCfg = await (window as any).electronAPI?.getTermConfig?.();
+      if (termCfg?.term) setActiveTerm(termCfg.term);
+    } catch (_) {}
   };
 
   // Load rollover session preview
   const fetchRolloverPreview = async () => {
     const api = (window as any).electronAPI?.rollover || (window as any).nexusAPI?.rollover;
-    if (!api?.sessionPreview) return;
+    if (!api?.sessionPreview) { setRolloverPreviewError('Rollover API not available.'); return; }
+    setRolloverPreviewError(null);
     try {
       const res = await api.sessionPreview();
-      if (res?.ok) setRolloverPreview(res);
-    } catch (_) {}
+      if (res?.ok) {
+        setRolloverPreview(res);
+        // Sync activeTerm from the live preview (most up-to-date source)
+        if (res.currentTerm) setActiveTerm(res.currentTerm);
+      } else {
+        setRolloverPreviewError(res?.error || 'Preview failed');
+      }
+    } catch (e: any) {
+      setRolloverPreviewError(e?.message || 'Preview error');
+    }
   };
 
   useEffect(() => {
@@ -378,27 +396,27 @@ export default function Classes() {
     fetchRolloverPreview();
   }, []);
 
-  // Fetch batch students when batchFilterClass changes
+  // ── Issue 3A fix: Fetch batch students using the real getAllStudents API ──
   useEffect(() => {
     if (!batchFilterClass) { setBatchStudents([]); setBatchSelected(new Set()); return; }
-    const api = (window as any).electronAPI?.cbt;
-    if (!api?.getStudents) return;
-    api.getStudents({ class: batchFilterClass }).then((res: any) => {
-      const list = Array.isArray(res?.students) ? res.students : (Array.isArray(res) ? res : []);
+    const api = (window as any).electronAPI;
+    if (!api?.getAllStudents) return;
+    api.getAllStudents({ class_name: batchFilterClass, limit: 500, minimal: true }).then((res: any) => {
+      const list = Array.isArray(res?.data) ? res.data : [];
       setBatchStudents(list);
       setBatchSelected(new Set());
     }).catch(() => {});
   }, [batchFilterClass]);
 
-  // Debounce single student search
+  // ── Issue 3B fix: Debounce single student search via getAllStudents ──
   useEffect(() => {
     if (!singleSearch.trim()) { setSingleResults([]); return; }
-    const api = (window as any).electronAPI?.cbt;
-    if (!api?.getStudents) return;
+    const api = (window as any).electronAPI;
+    if (!api?.getAllStudents) return;
     const t = setTimeout(() => {
-      api.getStudents({ search: singleSearch }).then((res: any) => {
-        const list = Array.isArray(res?.students) ? res.students : (Array.isArray(res) ? res : []);
-        setSingleResults(list.slice(0, 8));
+      api.getAllStudents({ search: singleSearch, limit: 8, minimal: true }).then((res: any) => {
+        const list = Array.isArray(res?.data) ? res.data : [];
+        setSingleResults(list);
       }).catch(() => {});
     }, 300);
     return () => clearTimeout(t);
@@ -1346,6 +1364,31 @@ export default function Classes() {
                     <p style={{ margin: 0, fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>
                       Define how many periods your school runs per academic year. Default is 3 terms (Nigerian standard). Change this for semester, quarterly, or custom structures.
                     </p>
+                    {/* Issue 4 fix: Current active term selector — same data source as PrintHub */}
+                    <div style={{ background: 'rgba(0,229,255,0.04)', border: '1px solid rgba(0,229,255,0.12)', borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 600, color: '#00E5FF' }}>📌 Active Term (school-wide)</span>
+                      <p style={{ margin: 0, fontSize: '11px', color: 'rgba(255,255,255,0.45)', lineHeight: 1.5 }}>This is the term currently active across the app — PrintHub, Reports, Attendance, Fees. Changing it here updates the global term immediately.</p>
+                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <select
+                          value={activeTerm}
+                          onChange={e => setActiveTerm(e.target.value)}
+                          style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,229,255,0.2)', color: '#fff', borderRadius: '6px', padding: '7px 12px', fontSize: '12px' }}
+                        >
+                          <option value=''>— Select Term —</option>
+                          {termStructure.terms.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                        <button
+                          disabled={!activeTerm}
+                          onClick={async () => {
+                            if (!activeTerm) return;
+                            await (window as any).electronAPI?.cbt?.saveSystemSetting({ key: 'current_term', value: activeTerm });
+                            fetchRolloverPreview();
+                            (window as any).Swal?.fire({ toast: true, position: 'top-end', icon: 'success', title: `Active term set to ${activeTerm}`, showConfirmButton: false, timer: 2000, background: '#0d1235', color: '#fff' });
+                          }}
+                          style={{ background: activeTerm ? 'rgba(0,229,255,0.12)' : 'rgba(255,255,255,0.04)', border: `1px solid ${activeTerm ? 'rgba(0,229,255,0.25)' : 'rgba(255,255,255,0.08)'}`, color: activeTerm ? '#00E5FF' : 'rgba(255,255,255,0.3)', borderRadius: '6px', padding: '7px 14px', fontSize: '12px', fontWeight: 600, cursor: activeTerm ? 'pointer' : 'default' }}
+                        >Set Active Term</button>
+                      </div>
+                    </div>
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                       <label style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>Period label:</label>
                       <select
@@ -1403,8 +1446,16 @@ export default function Classes() {
                   const capLabel = periodLabel.charAt(0).toUpperCase() + periodLabel.slice(1);
                   return (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                      {!p ? (
-                        <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', margin: 0 }}>Loading preview…</p>
+                      {!p && !rolloverPreviewError ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', margin: 0 }}>Loading preview…</p>
+                          <button onClick={fetchRolloverPreview} style={{ fontSize: '11px', background: 'none', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.4)', borderRadius: '4px', padding: '3px 8px', cursor: 'pointer' }}>Retry</button>
+                        </div>
+                      ) : rolloverPreviewError ? (
+                        <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '6px', padding: '10px 14px', display: 'flex', gap: '10px', alignItems: 'center' }}>
+                          <span style={{ fontSize: '12px', color: '#f87171' }}>⚠ {rolloverPreviewError}</span>
+                          <button onClick={fetchRolloverPreview} style={{ fontSize: '11px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', borderRadius: '4px', padding: '3px 8px', cursor: 'pointer' }}>Retry</button>
+                        </div>
                       ) : p.isLastTerm ? (
                         // MODE B — Session End
                         <div style={{ border: '1px solid rgba(239,68,68,0.25)', background: 'rgba(239,68,68,0.05)', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
