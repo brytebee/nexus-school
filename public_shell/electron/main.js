@@ -251,9 +251,11 @@ ipcMain.handle = function(channel, listener) {
                 } else if (['add-student', 'add-student-form'].includes(channel)) {
                     requiredUpTo = 'teachers';
                 } else if ([
-                    'save-daily-attendance', 'save-attendance', 'save-student-grades',
-                    'fee-structure:upsert-item', 'fee-structure:apply-to-class', 'fees:record-payment',
-                    'fees:upsert', 'fee-structure:add-adjustment', 'results:dispatch', 'results:publish'
+                    'save-daily-attendance', 'save-attendance', 'attendance', 'save-student-grades', 'insert-score',
+                    'fee-structure:upsert-item', 'fee-structure:apply-to-class', 'fee-structure:delete',
+                    'fees:record-payment', 'fees:upsert', 'fees:delete', 'fee-structure:add-adjustment',
+                    'results:dispatch', 'results:publish',
+                    'cbt:bulk-import', 'cbt:create-bank', 'cbt:add-question', 'cbt:save-exam'
                 ].some(c => channel === c || channel.startsWith(c))) {
                     requiredUpTo = 'term';
                 }

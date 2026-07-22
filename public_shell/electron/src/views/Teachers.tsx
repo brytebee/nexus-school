@@ -167,14 +167,17 @@ export function Teachers() {
 
         if (Swal) {
           if (warnings.length > 0) {
+            const displayWarnings = warnings.length > 2
+              ? [...warnings.slice(0, 2), `... and ${warnings.length - 2} other(s) affected.`]
+              : warnings;
             Swal.fire({
               title: 'Import Processed with Warnings',
               html: `
                 <p style="color: #fff; margin-bottom: 10px;">Successfully loaded <strong>${count}</strong> teachers.</p>
                 <div style="text-align: left; background: rgba(239, 68, 68, 0.1); border-left: 4px solid #ef4444; padding: 10px; margin-top: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto;">
-                  <strong style="color: #ef4444; font-size: 13px;">Warnings:</strong>
+                  <strong style="color: #ef4444; font-size: 13px;">Warnings (${warnings.length}):</strong>
                   <ul style="margin: 5px 0 0 0; padding-left: 15px; color: #fca5a5; font-size: 11px; line-height: 1.6;">
-                    ${warnings.map(w => `<li>${w}</li>`).join('')}
+                    ${displayWarnings.map(w => `<li>${w}</li>`).join('')}
                   </ul>
                 </div>
               `,

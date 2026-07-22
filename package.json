@@ -1,0 +1,11 @@
+{
+  "name": "nexus-school-root",
+  "version": "1.0.2",
+  "private": true,
+  "description": "Nexus School OS - Root Workspace Launcher",
+  "scripts": {
+    "start": "npm start --prefix public_shell/electron",
+    "build": "npm run build --prefix public_shell/electron",
+    "dev": "npm start --prefix public_shell/electron"
+  }
+}
