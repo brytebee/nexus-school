@@ -89,42 +89,44 @@ function getRolloverConfig(db) {
  * @returns {{ newClass: string, newArm: string, newStatus: string }}
  */
 function resolveStudentAction(student, action, hierarchy, targetClass, targetArm) {
-  const idx = hierarchy.indexOf(student.class);
+  const currentClass = student.class_name || student.class || '';
+  const currentArm = student.class_arm || '';
+  const idx = hierarchy.indexOf(currentClass);
 
   switch (action) {
     case 'promote': {
       // Unknown class OR already at top → graduate
       if (idx < 0 || idx >= hierarchy.length - 1) {
-        return { newClass: student.class, newArm: student.class_arm, newStatus: 'graduated' };
+        return { newClass: currentClass, newArm: currentArm, newStatus: 'graduated' };
       }
       // Arm is preserved (carry-forward policy)
-      return { newClass: hierarchy[idx + 1], newArm: student.class_arm, newStatus: 'active' };
+      return { newClass: hierarchy[idx + 1], newArm: currentArm, newStatus: 'active' };
     }
     case 'graduate':
-      return { newClass: student.class, newArm: student.class_arm, newStatus: 'graduated' };
+      return { newClass: currentClass, newArm: currentArm, newStatus: 'graduated' };
 
     case 'repeat':
-      return { newClass: student.class, newArm: student.class_arm, newStatus: 'active' };
+      return { newClass: currentClass, newArm: currentArm, newStatus: 'active' };
 
     case 'demote': {
       // Already at bottom → stay, no change
-      if (idx <= 0) return { newClass: student.class, newArm: student.class_arm, newStatus: 'active' };
+      if (idx <= 0) return { newClass: currentClass, newArm: currentArm, newStatus: 'active' };
       // Arm preserved on demotion
-      return { newClass: hierarchy[idx - 1], newArm: student.class_arm, newStatus: 'active' };
+      return { newClass: hierarchy[idx - 1], newArm: currentArm, newStatus: 'active' };
     }
     case 'move':
       return {
-        newClass:  targetClass || student.class,
-        newArm:    targetArm   || student.class_arm,
+        newClass:  targetClass || currentClass,
+        newArm:    targetArm   || currentArm,
         newStatus: 'active',
       };
     case 'switch_arm':
       // Class unchanged; only arm updated
-      return { newClass: student.class, newArm: targetArm || student.class_arm, newStatus: 'active' };
+      return { newClass: currentClass, newArm: targetArm || currentArm, newStatus: 'active' };
 
     default:
       // No-op: return current state unchanged
-      return { newClass: student.class, newArm: student.class_arm, newStatus: student.enrollment_status };
+      return { newClass: currentClass, newArm: currentArm, newStatus: student.enrollment_status || 'active' };
   }
 }
 
@@ -136,7 +138,7 @@ function resolveStudentAction(student, action, hierarchy, targetClass, targetArm
  * MUST be called inside a db.transaction() for atomicity guarantees.
  *
  * @param {import('better-sqlite3').Database} db
- * @param {{ id: number, class: string, class_arm: string, session_history: string }} student
+ * @param {{ id: number|string, class_name?: string, class?: string, class_arm?: string, session_history?: string }} student
  * @param {{ newClass: string, newArm: string, newStatus: string }} resolved
  * @param {string} action  Original action label
  * @param {string} currentSession  e.g. '2024/2025'
@@ -147,17 +149,20 @@ function applyStudentRollover(db, student, resolved, action, currentSession, not
   let history = [];
   try { history = JSON.parse(student.session_history || '[]'); } catch (_) {}
 
+  const currentClass = student.class_name || student.class || '';
+  const currentArm = student.class_arm || '';
+
   history.push({
     session: currentSession,
-    class:   student.class,
-    arm:     student.class_arm,
+    class:   currentClass,
+    arm:     currentArm,
     // If the outcome is graduation, always label the action 'graduated'
     action:  resolved.newStatus === 'graduated' ? 'graduated' : action,
     ...(note ? { note } : {}),
   });
 
   db.prepare(
-    'UPDATE students SET class = ?, class_arm = ?, enrollment_status = ?, session_history = ? WHERE id = ?'
+    'UPDATE students SET class_name = ?, class_arm = ?, enrollment_status = ?, session_history = ? WHERE id = ?'
   ).run(resolved.newClass, resolved.newArm, resolved.newStatus, JSON.stringify(history), student.id);
 }
 

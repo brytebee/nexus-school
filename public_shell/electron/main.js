@@ -7100,7 +7100,7 @@ if (app) {
         const nextTerm = (!isLastTerm && termIdx >= 0) ? termStructure.terms[termIdx + 1] : null;
 
         const lastClass = hierarchy[hierarchy.length - 1];
-        const activeStudents = db.prepare("SELECT class FROM students WHERE enrollment_status='active'").all();
+        const activeStudents = db.prepare("SELECT class_name AS class FROM students WHERE (enrollment_status = 'active' OR enrollment_status IS NULL OR enrollment_status = '')").all();
         const toGraduate = activeStudents.filter(s => s.class === lastClass).length;
         const toPromote = activeStudents.length - toGraduate;
 
@@ -7117,6 +7117,7 @@ if (app) {
           terms: termStructure.terms
         };
       } catch (err) {
+        console.error('[Rollover Preview Error]:', err);
         return { ok: false, error: err.message };
       }
     });
@@ -7150,7 +7151,7 @@ if (app) {
         }
 
         const rolloverTx = db.transaction(() => {
-          const students = db.prepare("SELECT id, name, class, class_arm, enrollment_status, session_history FROM students WHERE enrollment_status='active'").all();
+          const students = db.prepare("SELECT id, name, class_name AS class, COALESCE(class_arm, '') AS class_arm, COALESCE(enrollment_status, 'active') AS enrollment_status, session_history FROM students WHERE (enrollment_status = 'active' OR enrollment_status IS NULL OR enrollment_status = '')").all();
           let promoted = 0, graduated = 0;
 
           for (const student of students) {
