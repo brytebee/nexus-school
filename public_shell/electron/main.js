@@ -7083,7 +7083,271 @@ if (app) {
       };
     });
 
+    // ── Phase 3B: Dynamic Term-Aware Rollover Engine ─────────────────────────────
+
+    /**
+     * Shared helper: reads term_structure + class_hierarchy from system_settings.
+     * Falls back to 3-term Nigerian default if not configured.
+     */
+    function getRolloverConfig(db) {
+      const tsRow = db.prepare("SELECT value FROM system_settings WHERE key='term_structure'").get();
+      let termStructure = { terms: ['First Term', 'Second Term', 'Third Term'], period_label: 'term' };
+      try { if (tsRow) termStructure = JSON.parse(tsRow.value); } catch (_) {}
+
+      const hierRow = db.prepare("SELECT value FROM system_settings WHERE key='class_hierarchy'").get();
+      let hierarchy = ['JSS 1', 'JSS 2', 'JSS 3', 'SS 1', 'SS 2', 'SS 3'];
+      try { if (hierRow) hierarchy = JSON.parse(hierRow.value); } catch (_) {}
+
+      return { termStructure, hierarchy };
+    }
+
+    /**
+     * Shared helper: computes what happens to a single student given an action.
+     * Returns { newClass, newArm, newStatus } without writing to DB.
+     */
+    function resolveStudentAction(student, action, hierarchy, targetClass, targetArm) {
+      const idx = hierarchy.indexOf(student.class);
+      switch (action) {
+        case 'promote': {
+          if (idx < 0 || idx >= hierarchy.length - 1) {
+            return { newClass: student.class, newArm: student.class_arm, newStatus: 'graduated' };
+          }
+          return { newClass: hierarchy[idx + 1], newArm: student.class_arm, newStatus: 'active' };
+        }
+        case 'graduate':
+          return { newClass: student.class, newArm: student.class_arm, newStatus: 'graduated' };
+        case 'repeat':
+          return { newClass: student.class, newArm: student.class_arm, newStatus: 'active' };
+        case 'demote': {
+          if (idx <= 0) return { newClass: student.class, newArm: student.class_arm, newStatus: 'active' };
+          return { newClass: hierarchy[idx - 1], newArm: student.class_arm, newStatus: 'active' };
+        }
+        case 'move':
+          return { newClass: targetClass || student.class, newArm: targetArm || student.class_arm, newStatus: 'active' };
+        case 'switch_arm':
+          return { newClass: student.class, newArm: targetArm || student.class_arm, newStatus: 'active' };
+        default:
+          return { newClass: student.class, newArm: student.class_arm, newStatus: student.enrollment_status };
+      }
+    }
+
+    /**
+     * Shared helper: writes a resolved student action to the DB.
+     * Appends a session_history entry and updates class/arm/enrollment_status.
+     */
+    function applyStudentRollover(db, student, resolved, action, currentSession, note) {
+      // Read and update session_history (append-only)
+      let history = [];
+      try { history = JSON.parse(student.session_history || '[]'); } catch (_) {}
+      history.push({
+        session: currentSession,
+        class: student.class,
+        arm: student.class_arm,
+        action: resolved.newStatus === 'graduated' ? 'graduated' : action,
+        ...(note ? { note } : {})
+      });
+
+      db.prepare(`
+        UPDATE students
+        SET class = ?, class_arm = ?, enrollment_status = ?, session_history = ?
+        WHERE id = ?
+      `).run(resolved.newClass, resolved.newArm, resolved.newStatus, JSON.stringify(history), student.id);
+    }
+
+    // ── Handler 1: Read-only preview (no writes) ──────────────────────────────
+    ipcMain.handle('app:rollover-session-preview', () => {
+      try {
+        const { termStructure, hierarchy } = getRolloverConfig(db);
+        const termRow = db.prepare("SELECT term, academic_session FROM school_term_config WHERE id=1").get();
+        const currentTerm = termRow?.term || termStructure.terms[0];
+        const currentSession = termRow?.academic_session || '2025/2026';
+        const termIdx = termStructure.terms.indexOf(currentTerm);
+        const isLastTerm = termIdx >= 0 && termIdx === termStructure.terms.length - 1;
+        const nextTerm = (!isLastTerm && termIdx >= 0) ? termStructure.terms[termIdx + 1] : null;
+
+        const lastClass = hierarchy[hierarchy.length - 1];
+        const activeStudents = db.prepare("SELECT class FROM students WHERE enrollment_status='active'").all();
+        const toGraduate = activeStudents.filter(s => s.class === lastClass).length;
+        const toPromote = activeStudents.length - toGraduate;
+
+        return {
+          ok: true,
+          active: activeStudents.length,
+          toPromote,
+          toGraduate,
+          currentTerm,
+          currentSession,
+          nextTerm,
+          isLastTerm,
+          periodLabel: termStructure.period_label,
+          terms: termStructure.terms
+        };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+
+    // ── Handler 2: Full session / term-advance rollover ───────────────────────
+    ipcMain.handle('app:rollover-session', async (_event, payload) => {
+      const { newSession } = payload || {};
+      try {
+        const { termStructure, hierarchy } = getRolloverConfig(db);
+        const termRow = db.prepare("SELECT term, academic_session FROM school_term_config WHERE id=1").get();
+        const currentTerm = termRow?.term || termStructure.terms[0];
+        const currentSession = termRow?.academic_session || '2025/2026';
+        const termIdx = termStructure.terms.indexOf(currentTerm);
+        const isLastTerm = termIdx >= 0 && termIdx === termStructure.terms.length - 1;
+
+        if (!isLastTerm) {
+          // ── MODE A: Advance to next term within same session ─────────────────
+          const nextTerm = termStructure.terms[termIdx + 1];
+          db.prepare(`
+            UPDATE school_term_config
+            SET term=?, term_start_date=NULL, term_end_date=NULL, resumption_date=NULL
+            WHERE id=1
+          `).run(nextTerm);
+          db.prepare("INSERT OR REPLACE INTO system_settings (key,value) VALUES ('current_term',?)").run(nextTerm);
+          return { ok: true, mode: 'term_advance', newTerm: nextTerm, periodLabel: termStructure.period_label };
+        }
+
+        // ── MODE B: End of session — promote students, advance year ──────────
+        if (!newSession || !newSession.trim()) {
+          return { ok: false, error: 'NEW_SESSION_REQUIRED', message: 'A new academic session must be selected to complete session rollover.' };
+        }
+
+        const rolloverTx = db.transaction(() => {
+          const students = db.prepare("SELECT id, name, class, class_arm, enrollment_status, session_history FROM students WHERE enrollment_status='active'").all();
+          let promoted = 0, graduated = 0;
+
+          for (const student of students) {
+            const resolved = resolveStudentAction(student, 'promote', hierarchy);
+            if (resolved.newStatus === 'graduated') graduated++; else promoted++;
+            applyStudentRollover(db, student, resolved, 'promote', currentSession, null);
+          }
+
+          const firstTerm = termStructure.terms[0];
+          db.prepare(`
+            UPDATE school_term_config
+            SET academic_session=?, term=?, term_start_date=NULL, term_end_date=NULL, resumption_date=NULL
+            WHERE id=1
+          `).run(newSession.trim(), firstTerm);
+          db.prepare("INSERT OR REPLACE INTO system_settings (key,value) VALUES ('current_academic_session',?)").run(newSession.trim());
+          db.prepare("INSERT OR REPLACE INTO system_settings (key,value) VALUES ('current_term',?)").run(firstTerm);
+
+          return { promoted, graduated };
+        });
+
+        const { promoted, graduated } = rolloverTx();
+        return { ok: true, mode: 'session_rollover', newSession: newSession.trim(), promoted, graduated };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+
+    // ── Handler 3: Single class rollover ──────────────────────────────────────
+    ipcMain.handle('app:rollover-class', async (_event, payload) => {
+      const { hierarchyClass, arm } = payload || {};
+      if (!hierarchyClass) return { ok: false, error: 'hierarchyClass is required' };
+      try {
+        const { hierarchy } = getRolloverConfig(db);
+        const termRow = db.prepare("SELECT academic_session FROM school_term_config WHERE id=1").get();
+        const currentSession = termRow?.academic_session || '2025/2026';
+
+        const rolloverTx = db.transaction(() => {
+          let query = "SELECT id, name, class, class_arm, enrollment_status, session_history FROM students WHERE enrollment_status='active' AND class=?";
+          const params = [hierarchyClass];
+          if (arm) { query += " AND class_arm=?"; params.push(arm); }
+
+          const students = db.prepare(query).all(...params);
+          let promoted = 0, graduated = 0;
+
+          for (const student of students) {
+            const resolved = resolveStudentAction(student, 'promote', hierarchy);
+            if (resolved.newStatus === 'graduated') graduated++; else promoted++;
+            applyStudentRollover(db, student, resolved, 'promote', currentSession, null);
+          }
+          return { promoted, graduated };
+        });
+
+        const { promoted, graduated } = rolloverTx();
+        return { ok: true, class: hierarchyClass, arm: arm || 'all', promoted, graduated };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+
+    // ── Handler 4: Filtered / batch student rollover ──────────────────────────
+    ipcMain.handle('app:rollover-students', async (_event, payload) => {
+      const { studentIds, action, targetClass, targetArm } = payload || {};
+      if (!Array.isArray(studentIds) || studentIds.length === 0) return { ok: false, error: 'studentIds array is required' };
+      if (!action) return { ok: false, error: 'action is required' };
+
+      try {
+        const { hierarchy } = getRolloverConfig(db);
+        const termRow = db.prepare("SELECT academic_session FROM school_term_config WHERE id=1").get();
+        const currentSession = termRow?.academic_session || '2025/2026';
+        const errors = [];
+
+        const rolloverTx = db.transaction(() => {
+          let processed = 0;
+          for (const sid of studentIds) {
+            const student = db.prepare("SELECT id, name, class, class_arm, enrollment_status, session_history FROM students WHERE id=?").get(sid);
+            if (!student) { errors.push({ id: sid, error: 'not found' }); continue; }
+            const resolved = resolveStudentAction(student, action, hierarchy, targetClass, targetArm);
+            applyStudentRollover(db, student, resolved, action, currentSession, null);
+            processed++;
+          }
+          return processed;
+        });
+
+        const processed = rolloverTx();
+        return { ok: true, action, processed, errors };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+
+    // ── Handler 5: Single student rollover (most granular) ────────────────────
+    ipcMain.handle('app:rollover-student', async (_event, payload) => {
+      const { studentId, action, targetClass, targetArm, note } = payload || {};
+      if (!studentId) return { ok: false, error: 'studentId is required' };
+      if (!action)    return { ok: false, error: 'action is required' };
+
+      try {
+        const { hierarchy } = getRolloverConfig(db);
+        const termRow = db.prepare("SELECT academic_session FROM school_term_config WHERE id=1").get();
+        const currentSession = termRow?.academic_session || '2025/2026';
+
+        const student = db.prepare("SELECT id, name, class, class_arm, enrollment_status, session_history FROM students WHERE id=?").get(studentId);
+        if (!student) return { ok: false, error: 'Student not found' };
+
+        const resolved = resolveStudentAction(student, action, hierarchy, targetClass, targetArm);
+
+        const rolloverTx = db.transaction(() => {
+          applyStudentRollover(db, student, resolved, action, currentSession, note || null);
+        });
+        rolloverTx();
+
+        return {
+          ok: true,
+          student: {
+            id: student.id,
+            name: student.name,
+            prevClass: student.class,
+            prevArm: student.class_arm,
+            newClass: resolved.newClass,
+            newArm: resolved.newArm,
+            newStatus: resolved.newStatus,
+            action
+          }
+        };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+
     ipcMain.handle('app:get-version', () => app.getVersion());
+
 
     createWindow();
 

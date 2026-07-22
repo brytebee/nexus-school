@@ -84,6 +84,7 @@
       "icon": "assets/icon.ico"
     },
     "linux": {
+      "executableName": "nexus-school-os",
       "target": [
         {
           "target": "AppImage",

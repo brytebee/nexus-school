@@ -311,6 +311,40 @@ export default function Classes() {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
+  // ── Phase 3B Rollover state ───────────────────────────────────────────────
+  const [rolloverTab, setRolloverTab] = useState<'structure'|'session'|'class'|'student'>('session');
+
+  // Tab 1 – Term Structure
+  const [termStructure, setTermStructure] = useState<{ terms: string[]; period_label: string }>({ terms: ['First Term','Second Term','Third Term'], period_label: 'term' });
+  const [newTermInput, setNewTermInput] = useState('');
+  const [termStructureSaving, setTermStructureSaving] = useState(false);
+
+  // Tab 2 – Full Session / Term Advance preview
+  const [rolloverPreview, setRolloverPreview] = useState<any>(null);
+  const [rolloverNewSession, setRolloverNewSession] = useState('');
+
+  // Tab 3 – Single Class
+  const [classRolloverClass, setClassRolloverClass] = useState('');
+  const [classRolloverArm, setClassRolloverArm] = useState('');
+
+  // Tab 4 – Student Level
+  const [studentRolloverMode, setStudentRolloverMode] = useState<'batch'|'single'>('batch');
+  // Batch
+  const [batchFilterClass, setBatchFilterClass] = useState('');
+  const [batchStudents, setBatchStudents] = useState<any[]>([]);
+  const [batchSelected, setBatchSelected] = useState<Set<number>>(new Set());
+  const [batchAction, setBatchAction] = useState('promote');
+  const [batchTargetClass, setBatchTargetClass] = useState('');
+  const [batchTargetArm, setBatchTargetArm] = useState('');
+  // Single
+  const [singleSearch, setSingleSearch] = useState('');
+  const [singleResults, setSingleResults] = useState<any[]>([]);
+  const [singleStudent, setSingleStudent] = useState<any>(null);
+  const [singleAction, setSingleAction] = useState('promote');
+  const [singleTargetClass, setSingleTargetClass] = useState('');
+  const [singleTargetArm, setSingleTargetArm] = useState('');
+  const [singleNote, setSingleNote] = useState('');
+
   // Load global system settings
   const fetchGlobalSettings = async () => {
     if (!(window as any).electronAPI?.cbt?.getSystemSettings) return;
@@ -320,15 +354,54 @@ export default function Classes() {
         setClassHierarchy(Array.isArray(res.class_hierarchy) ? res.class_hierarchy : []);
         setGlobalPassMark(parseInt(res.pass_mark_threshold) || 50);
         setActiveSession(res.current_academic_session || '2025/2026');
+        if (res.term_structure) {
+          try { setTermStructure(JSON.parse(res.term_structure)); } catch (_) {}
+        }
       }
     } catch (err) {
       console.error('Error fetching global settings:', err);
     }
   };
 
+  // Load rollover session preview
+  const fetchRolloverPreview = async () => {
+    const api = (window as any).electronAPI?.rollover;
+    if (!api?.sessionPreview) return;
+    try {
+      const res = await api.sessionPreview();
+      if (res?.ok) setRolloverPreview(res);
+    } catch (_) {}
+  };
+
   useEffect(() => {
     fetchGlobalSettings();
   }, []);
+
+  // Fetch batch students when batchFilterClass changes
+  useEffect(() => {
+    if (!batchFilterClass) { setBatchStudents([]); setBatchSelected(new Set()); return; }
+    const api = (window as any).electronAPI?.cbt;
+    if (!api?.getStudents) return;
+    api.getStudents({ class: batchFilterClass }).then((res: any) => {
+      const list = Array.isArray(res?.students) ? res.students : (Array.isArray(res) ? res : []);
+      setBatchStudents(list);
+      setBatchSelected(new Set());
+    }).catch(() => {});
+  }, [batchFilterClass]);
+
+  // Debounce single student search
+  useEffect(() => {
+    if (!singleSearch.trim()) { setSingleResults([]); return; }
+    const api = (window as any).electronAPI?.cbt;
+    if (!api?.getStudents) return;
+    const t = setTimeout(() => {
+      api.getStudents({ search: singleSearch }).then((res: any) => {
+        const list = Array.isArray(res?.students) ? res.students : (Array.isArray(res) ? res : []);
+        setSingleResults(list.slice(0, 8));
+      }).catch(() => {});
+    }, 300);
+    return () => clearTimeout(t);
+  }, [singleSearch]);
 
   // Update local input values when configs list refreshes
   useEffect(() => {
@@ -1239,33 +1312,374 @@ export default function Classes() {
 
         {/* Accordion 3: Academic Rollover */}
         <div style={{ border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', background: 'rgba(30, 41, 59, 0.2)', overflow: 'hidden' }}>
-          <div 
-            onClick={() => setIsRolloverOpen(!isRolloverOpen)}
+          <div
+            onClick={() => { setIsRolloverOpen(!isRolloverOpen); if (!isRolloverOpen) fetchRolloverPreview(); }}
             style={{ padding: '16px 20px', background: 'rgba(255,255,255,0.02)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
           >
-            <span style={{ fontWeight: 700, fontSize: '14px' }}>🔄 Academic Session Rollover</span>
+            <span style={{ fontWeight: 700, fontSize: '14px' }}>🔄 Academic Rollover & Progression</span>
             <span>{isRolloverOpen ? '▲' : '▼'}</span>
           </div>
-          {isRolloverOpen && (
-            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-              <div style={{ border: '1px solid rgba(239, 68, 68, 0.2)', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <span style={{ fontSize: '14px', fontWeight: 700, color: '#EF4444' }}>Danger Zone: Academic Rollover</span>
-                <p style={{ fontSize: '12px', color: '#fca5a5', margin: 0, lineHeight: 1.6 }}>
-                  Active Academic Session: <strong style={{ color: '#fff', fontSize: '13px' }}>{activeSession}</strong>.
-                  <br />
-                  Ending a session will rollover student grades, apply auto-promotions based on class hierarchy rules, archive the current session, and setup a fresh ledger.
-                </p>
-                
-                <button 
-                  onClick={handleRollover} 
-                  className="primary-btn"
-                  style={{ alignSelf: 'flex-start', background: '#EF4444', color: '#fff', fontWeight: 700, border: 'none', marginTop: '10px' }}
-                >
-                  End Session & Rollover →
-                </button>
+          {isRolloverOpen && (() => {
+            const rolloverAPI = (window as any).electronAPI?.rollover;
+            const Swal = (window as any).Swal;
+            const tabStyle = (t: string) => ({
+              padding: '8px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', border: 'none',
+              background: rolloverTab === t ? 'rgba(0,229,255,0.15)' : 'rgba(255,255,255,0.04)',
+              color: rolloverTab === t ? '#00E5FF' : 'rgba(255,255,255,0.5)',
+              transition: 'all 0.15s'
+            });
+            return (
+              <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
+                {/* Tab strip */}
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button style={tabStyle('session')}  onClick={() => setRolloverTab('session')}>📅 Session / Term</button>
+                  <button style={tabStyle('class')}   onClick={() => setRolloverTab('class')}>🏫 Single Class</button>
+                  <button style={tabStyle('student')} onClick={() => setRolloverTab('student')}>👤 Students</button>
+                  <button style={tabStyle('structure')} onClick={() => setRolloverTab('structure')}>⚙️ Term Structure</button>
+                </div>
+
+                {/* ── Tab: Term Structure ── */}
+                {rolloverTab === 'structure' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <p style={{ margin: 0, fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>
+                      Define how many periods your school runs per academic year. Default is 3 terms (Nigerian standard). Change this for semester, quarterly, or custom structures.
+                    </p>
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <label style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>Period label:</label>
+                      <select
+                        value={termStructure.period_label}
+                        onChange={e => setTermStructure(prev => ({ ...prev, period_label: e.target.value }))}
+                        style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }}
+                      >
+                        {['term','semester','quarter','period','block'].map(l => <option key={l} value={l}>{l.charAt(0).toUpperCase()+l.slice(1)}</option>)}
+                      </select>
+                      <span style={{ fontSize: '12px', color: '#00E5FF', fontWeight: 600 }}>
+                        School runs <strong>{termStructure.terms.length}</strong> {termStructure.period_label}{termStructure.terms.length !== 1 ? 's' : ''} per academic session
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {termStructure.terms.map((t, i) => (
+                        <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', width: '20px' }}>{i + 1}.</span>
+                          <input
+                            value={t}
+                            onChange={e => setTermStructure(prev => { const ts = [...prev.terms]; ts[i] = e.target.value; return { ...prev, terms: ts }; })}
+                            style={{ flex: 1, background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }}
+                          />
+                          <button onClick={() => setTermStructure(prev => ({ ...prev, terms: prev.terms.filter((_, j) => j !== i) }))}
+                            style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#EF4444', borderRadius: '4px', padding: '4px 8px', fontSize: '11px', cursor: 'pointer' }}>✕</button>
+                        </div>
+                      ))}
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                        <input value={newTermInput} onChange={e => setNewTermInput(e.target.value)} placeholder={`Add ${termStructure.period_label} name…`}
+                          style={{ flex: 1, background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }} />
+                        <button onClick={() => { if (newTermInput.trim()) { setTermStructure(prev => ({ ...prev, terms: [...prev.terms, newTermInput.trim()] })); setNewTermInput(''); } }}
+                          style={{ background: 'rgba(0,229,255,0.1)', border: '1px solid rgba(0,229,255,0.2)', color: '#00E5FF', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>+ Add</button>
+                      </div>
+                    </div>
+                    <button
+                      disabled={termStructureSaving || termStructure.terms.length === 0}
+                      onClick={async () => {
+                        setTermStructureSaving(true);
+                        try {
+                          await (window as any).electronAPI.cbt.saveSystemSetting({ key: 'term_structure', value: JSON.stringify(termStructure) });
+                          fetchRolloverPreview();
+                          Swal?.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Term structure saved', showConfirmButton: false, timer: 2500, background: '#0d1235', color: '#fff' });
+                        } catch (_) {
+                          Swal?.fire({ toast: true, position: 'top-end', icon: 'error', title: 'Failed to save', showConfirmButton: false, timer: 2500, background: '#0d1235', color: '#fff' });
+                        } finally { setTermStructureSaving(false); }
+                      }}
+                      style={{ alignSelf: 'flex-start', background: termStructureSaving ? 'rgba(255,255,255,0.05)' : 'rgba(0,229,255,0.1)', border: '1px solid rgba(0,229,255,0.2)', color: '#00E5FF', borderRadius: '6px', padding: '8px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                    >{termStructureSaving ? 'Saving…' : 'Save Term Structure'}</button>
+                  </div>
+                )}
+
+                {/* ── Tab: Full Session / Term Advance ── */}
+                {rolloverTab === 'session' && (() => {
+                  const p = rolloverPreview;
+                  const periodLabel = p?.periodLabel || termStructure.period_label;
+                  const capLabel = periodLabel.charAt(0).toUpperCase() + periodLabel.slice(1);
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {!p ? (
+                        <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', margin: 0 }}>Loading preview…</p>
+                      ) : p.isLastTerm ? (
+                        // MODE B — Session End
+                        <div style={{ border: '1px solid rgba(239,68,68,0.25)', background: 'rgba(239,68,68,0.05)', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          <span style={{ fontSize: '14px', fontWeight: 700, color: '#EF4444' }}>⚠️ Danger Zone — End of Academic Year</span>
+                          <p style={{ fontSize: '12px', color: '#fca5a5', margin: 0, lineHeight: 1.7 }}>
+                            Active: <strong style={{ color: '#fff' }}>{p.currentSession} · {p.currentTerm}</strong> (Final {capLabel})<br />
+                            <strong style={{ color: '#fff' }}>{p.toPromote}</strong> students will be promoted · <strong style={{ color: '#f87171' }}>{p.toGraduate}</strong> will graduate<br />
+                            All student academic slates reset for the new session. Prior records are preserved.
+                          </p>
+                          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <label style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>New Session:</label>
+                            <select value={rolloverNewSession} onChange={e => setRolloverNewSession(e.target.value)}
+                              style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '6px', padding: '7px 12px', fontSize: '12px' }}>
+                              <option value=''>— Select —</option>
+                              {generateSessionsList().map((s: string) => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                          </div>
+                          <button
+                            disabled={!rolloverNewSession}
+                            onClick={async () => {
+                              const c = await Swal?.fire({ title: '<span style="color:#EF4444;font-size:17px;font-weight:700;">⚠️ End Academic Year?</span>', html: `<p style="color:rgba(255,255,255,0.65);font-size:13px;line-height:1.6;">This will promote <strong>${p.toPromote}</strong> students and graduate <strong>${p.toGraduate}</strong>. New session: <strong>${rolloverNewSession}</strong>.<br/>This cannot be undone.</p>`, showCancelButton: true, confirmButtonText: 'Yes, End Session & Rollover', confirmButtonColor: '#EF4444', cancelButtonColor: '#1a1a2e', background: '#0d1235', color: '#fff' });
+                              if (!c?.isConfirmed) return;
+                              const res = await rolloverAPI?.session({ newSession: rolloverNewSession });
+                              if (res?.ok) {
+                                setActiveSession(rolloverNewSession);
+                                setRolloverNewSession('');
+                                fetchRolloverPreview();
+                                Swal?.fire({ toast: true, position: 'top-end', icon: 'success', title: `Session rolled over → ${rolloverNewSession}`, showConfirmButton: false, timer: 3500, background: '#0d1235', color: '#fff' });
+                              } else {
+                                Swal?.fire({ toast: true, position: 'top-end', icon: 'error', title: res?.message || res?.error || 'Rollover failed', showConfirmButton: false, timer: 3500, background: '#0d1235', color: '#fff' });
+                              }
+                            }}
+                            style={{ alignSelf: 'flex-start', background: rolloverNewSession ? '#EF4444' : 'rgba(239,68,68,0.2)', color: '#fff', borderRadius: '6px', padding: '9px 18px', fontSize: '13px', fontWeight: 700, border: 'none', cursor: rolloverNewSession ? 'pointer' : 'default', opacity: rolloverNewSession ? 1 : 0.5 }}
+                          >End Session & Rollover →</button>
+                        </div>
+                      ) : (
+                        // MODE A — Term Advance
+                        <div style={{ border: '1px solid rgba(0,229,255,0.15)', background: 'rgba(0,229,255,0.04)', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)', margin: 0, lineHeight: 1.7 }}>
+                            Active: <strong style={{ color: '#fff' }}>{p.currentSession} · {p.currentTerm}</strong><br />
+                            Next: <strong style={{ color: '#00E5FF' }}>{p.nextTerm}</strong><br />
+                            No student promotion — only term dates reset. Students keep their classes.
+                          </p>
+                          <button
+                            onClick={async () => {
+                              const c = await Swal?.fire({ title: `<span style="color:#00E5FF;font-size:17px;font-weight:700;">Advance to ${p.nextTerm}?</span>`, html: `<p style="color:rgba(255,255,255,0.65);font-size:13px;">Term dates will be cleared. Students stay in their current classes.</p>`, showCancelButton: true, confirmButtonText: `Advance to ${p.nextTerm}`, confirmButtonColor: '#00E5FF', cancelButtonColor: '#1a1a2e', background: '#0d1235', color: '#fff' });
+                              if (!c?.isConfirmed) return;
+                              const res = await rolloverAPI?.session({});
+                              if (res?.ok) {
+                                fetchRolloverPreview();
+                                fetchGlobalSettings();
+                                Swal?.fire({ toast: true, position: 'top-end', icon: 'success', title: `Advanced to ${res.newTerm}`, showConfirmButton: false, timer: 2500, background: '#0d1235', color: '#fff' });
+                              } else {
+                                Swal?.fire({ toast: true, position: 'top-end', icon: 'error', title: res?.error || 'Failed', showConfirmButton: false, timer: 2500, background: '#0d1235', color: '#fff' });
+                              }
+                            }}
+                            style={{ alignSelf: 'flex-start', background: 'rgba(0,229,255,0.12)', border: '1px solid rgba(0,229,255,0.25)', color: '#00E5FF', borderRadius: '6px', padding: '9px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}
+                          >Advance to {p.nextTerm} →</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* ── Tab: Single Class ── */}
+                {rolloverTab === 'class' && (() => {
+                  const uniqueArms = configs.find(c => c.hierarchy_class === classRolloverClass)?.arms || [];
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                      <p style={{ margin: 0, fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>Promote or graduate all active students in a specific class (and optionally a specific arm) without rolling the entire session.</p>
+                      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <select value={classRolloverClass} onChange={e => { setClassRolloverClass(e.target.value); setClassRolloverArm(''); }}
+                          style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '6px', padding: '7px 12px', fontSize: '12px' }}>
+                          <option value=''>— Select Class —</option>
+                          {classHierarchy.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                        {classRolloverClass && (
+                          <select value={classRolloverArm} onChange={e => setClassRolloverArm(e.target.value)}
+                            style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '6px', padding: '7px 12px', fontSize: '12px' }}>
+                            <option value=''>All Arms</option>
+                            {uniqueArms.map((a: string) => <option key={a} value={a}>{a}</option>)}
+                          </select>
+                        )}
+                      </div>
+                      {classRolloverClass && (
+                        <p style={{ margin: 0, fontSize: '12px', color: 'rgba(255,255,255,0.5)', lineHeight: 1.6 }}>
+                          {classRolloverClass} is {classHierarchy.indexOf(classRolloverClass) >= classHierarchy.length - 1 ? <><strong style={{ color: '#f87171' }}>the final class</strong> — students will be <strong style={{ color: '#f87171' }}>graduated</strong></> : <>followed by <strong style={{ color: '#00E5FF' }}>{classHierarchy[classHierarchy.indexOf(classRolloverClass) + 1]}</strong> in the hierarchy — students will be <strong style={{ color: '#00E5FF' }}>promoted</strong></>}.
+                        </p>
+                      )}
+                      <button
+                        disabled={!classRolloverClass}
+                        onClick={async () => {
+                          const targetLabel = classRolloverArm ? `${classRolloverClass} ${classRolloverArm}` : `all arms of ${classRolloverClass}`;
+                          const c = await Swal?.fire({ title: '<span style="color:#fff;font-size:16px;font-weight:700;">Rollover Class?</span>', html: `<p style="color:rgba(255,255,255,0.65);font-size:13px;">All active students in <strong>${targetLabel}</strong> will be promoted or graduated.</p>`, showCancelButton: true, confirmButtonText: 'Rollover Class', confirmButtonColor: '#00E5FF', cancelButtonColor: '#1a1a2e', background: '#0d1235', color: '#fff' });
+                          if (!c?.isConfirmed) return;
+                          const res = await rolloverAPI?.byClass({ hierarchyClass: classRolloverClass, arm: classRolloverArm || undefined });
+                          if (res?.ok) {
+                            Swal?.fire({ toast: true, position: 'top-end', icon: 'success', title: `${res.promoted} promoted · ${res.graduated} graduated`, showConfirmButton: false, timer: 3000, background: '#0d1235', color: '#fff' });
+                          } else {
+                            Swal?.fire({ toast: true, position: 'top-end', icon: 'error', title: res?.error || 'Failed', showConfirmButton: false, timer: 3000, background: '#0d1235', color: '#fff' });
+                          }
+                        }}
+                        style={{ alignSelf: 'flex-start', background: classRolloverClass ? 'rgba(0,229,255,0.12)' : 'rgba(255,255,255,0.04)', border: `1px solid ${classRolloverClass ? 'rgba(0,229,255,0.25)' : 'rgba(255,255,255,0.08)'}`, color: classRolloverClass ? '#00E5FF' : 'rgba(255,255,255,0.3)', borderRadius: '6px', padding: '8px 16px', fontSize: '12px', fontWeight: 600, cursor: classRolloverClass ? 'pointer' : 'default' }}
+                      >Rollover {classRolloverClass || 'Class'} →</button>
+                    </div>
+                  );
+                })()}
+
+                {/* ── Tab: Student-Level ── */}
+                {rolloverTab === 'student' && (() => {
+                  const actionOpts = [
+                    { val: 'promote', label: 'Promote' }, { val: 'graduate', label: 'Graduate' },
+                    { val: 'repeat', label: 'Repeat (Stay)' }, { val: 'demote', label: 'Demote' },
+                    { val: 'move', label: 'Move to…' }, { val: 'switch_arm', label: 'Switch Arm' },
+                  ];
+                  const needsTarget = ['move','switch_arm'].includes(studentRolloverMode === 'batch' ? batchAction : singleAction);
+                  const isMove = (studentRolloverMode === 'batch' ? batchAction : singleAction) === 'move';
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {/* Mode toggle */}
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        {(['batch','single'] as const).map(m => (
+                          <button key={m} onClick={() => setStudentRolloverMode(m)}
+                            style={{ padding: '6px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', border: 'none', background: studentRolloverMode === m ? 'rgba(0,229,255,0.15)' : 'rgba(255,255,255,0.04)', color: studentRolloverMode === m ? '#00E5FF' : 'rgba(255,255,255,0.4)' }}>
+                            {m === 'batch' ? '☑ Filtered Batch' : '👤 Single Student'}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Batch sub-mode */}
+                      {studentRolloverMode === 'batch' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                            <label style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>Filter by class:</label>
+                            <select value={batchFilterClass} onChange={e => setBatchFilterClass(e.target.value)}
+                              style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }}>
+                              <option value=''>— Select Class —</option>
+                              {classHierarchy.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                          </div>
+                          {batchStudents.length > 0 && (
+                            <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '6px' }}>
+                              <div style={{ padding: '6px 10px', background: 'rgba(255,255,255,0.03)', display: 'flex', gap: '8px', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                                <input type='checkbox' checked={batchSelected.size === batchStudents.length && batchStudents.length > 0}
+                                  onChange={e => setBatchSelected(e.target.checked ? new Set(batchStudents.map((s: any) => s.id)) : new Set())}
+                                  style={{ cursor: 'pointer' }} />
+                                <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)' }}>Select all ({batchStudents.length})</span>
+                              </div>
+                              {batchStudents.map((s: any) => (
+                                <div key={s.id} style={{ padding: '8px 10px', display: 'flex', gap: '10px', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.04)', background: batchSelected.has(s.id) ? 'rgba(0,229,255,0.04)' : 'transparent' }}>
+                                  <input type='checkbox' checked={batchSelected.has(s.id)}
+                                    onChange={e => setBatchSelected(prev => { const n = new Set(prev); e.target.checked ? n.add(s.id) : n.delete(s.id); return n; })}
+                                    style={{ cursor: 'pointer' }} />
+                                  <span style={{ fontSize: '12px', color: '#e2e8f0', flex: 1 }}>{s.name || s.student_name}</span>
+                                  <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.35)' }}>{s.class_arm || ''}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {batchStudents.length === 0 && batchFilterClass && (
+                            <p style={{ margin: 0, fontSize: '12px', color: 'rgba(255,255,255,0.3)' }}>No active students found in {batchFilterClass}.</p>
+                          )}
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            {actionOpts.map(opt => (
+                              <button key={opt.val} onClick={() => setBatchAction(opt.val)}
+                                style={{ padding: '5px 10px', borderRadius: '5px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', border: 'none', background: batchAction === opt.val ? 'rgba(0,229,255,0.15)' : 'rgba(255,255,255,0.05)', color: batchAction === opt.val ? '#00E5FF' : 'rgba(255,255,255,0.5)' }}>
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                          {needsTarget && (
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                              {isMove && <select value={batchTargetClass} onChange={e => setBatchTargetClass(e.target.value)}
+                                style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }}>
+                                <option value=''>— Target Class —</option>
+                                {classHierarchy.map(c => <option key={c} value={c}>{c}</option>)}
+                              </select>}
+                              <select value={batchTargetArm} onChange={e => setBatchTargetArm(e.target.value)}
+                                style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }}>
+                                <option value=''>— Target Arm —</option>
+                                {(configs.find(c => c.hierarchy_class === (isMove ? batchTargetClass : batchFilterClass))?.arms || []).map((a: string) => <option key={a} value={a}>{a}</option>)}
+                              </select>
+                            </div>
+                          )}
+                          <button
+                            disabled={batchSelected.size === 0}
+                            onClick={async () => {
+                              const c = await Swal?.fire({ title: '<span style="color:#fff;font-size:16px;font-weight:700;">Apply Rollover Action?</span>', html: `<p style="color:rgba(255,255,255,0.65);font-size:13px;">Action: <strong>${batchAction}</strong> on <strong>${batchSelected.size}</strong> students. This cannot be undone.</p>`, showCancelButton: true, confirmButtonText: 'Apply', confirmButtonColor: '#00E5FF', cancelButtonColor: '#1a1a2e', background: '#0d1235', color: '#fff' });
+                              if (!c?.isConfirmed) return;
+                              const res = await rolloverAPI?.students({ studentIds: [...batchSelected], action: batchAction, targetClass: batchTargetClass || undefined, targetArm: batchTargetArm || undefined });
+                              if (res?.ok) {
+                                setBatchSelected(new Set()); setBatchFilterClass('');
+                                Swal?.fire({ toast: true, position: 'top-end', icon: 'success', title: `${res.processed} students updated`, showConfirmButton: false, timer: 2500, background: '#0d1235', color: '#fff' });
+                              } else {
+                                Swal?.fire({ toast: true, position: 'top-end', icon: 'error', title: res?.error || 'Failed', showConfirmButton: false, timer: 2500, background: '#0d1235', color: '#fff' });
+                              }
+                            }}
+                            style={{ alignSelf: 'flex-start', background: batchSelected.size > 0 ? 'rgba(0,229,255,0.12)' : 'rgba(255,255,255,0.04)', border: `1px solid ${batchSelected.size > 0 ? 'rgba(0,229,255,0.25)' : 'rgba(255,255,255,0.06)'}`, color: batchSelected.size > 0 ? '#00E5FF' : 'rgba(255,255,255,0.3)', borderRadius: '6px', padding: '8px 16px', fontSize: '12px', fontWeight: 600, cursor: batchSelected.size > 0 ? 'pointer' : 'default' }}
+                          >Apply to {batchSelected.size} Selected →</button>
+                        </div>
+                      )}
+
+                      {/* Single student sub-mode */}
+                      {studentRolloverMode === 'single' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          <div style={{ position: 'relative' }}>
+                            <input value={singleSearch} onChange={e => { setSingleSearch(e.target.value); setSingleStudent(null); }} placeholder='Search student by name…'
+                              style={{ width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '6px', padding: '8px 12px', fontSize: '12px', boxSizing: 'border-box' }} />
+                            {singleResults.length > 0 && !singleStudent && (
+                              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#0d1235', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', zIndex: 50, maxHeight: '200px', overflowY: 'auto' }}>
+                                {singleResults.map((s: any) => (
+                                  <div key={s.id} onClick={() => { setSingleStudent(s); setSingleSearch(s.name || s.student_name); setSingleResults([]); }}
+                                    style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '12px', color: '#e2e8f0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+                                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,229,255,0.08)')}
+                                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                                  >
+                                    <strong>{s.name || s.student_name}</strong> · {s.class} {s.class_arm} · <span style={{ color: s.enrollment_status === 'active' ? '#4ade80' : '#f87171' }}>{s.enrollment_status}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          {singleStudent && (
+                            <>
+                              <div style={{ background: 'rgba(0,229,255,0.05)', border: '1px solid rgba(0,229,255,0.12)', borderRadius: '6px', padding: '10px 14px', fontSize: '12px', color: '#94a3b8' }}>
+                                <strong style={{ color: '#fff' }}>{singleStudent.name || singleStudent.student_name}</strong> · {singleStudent.class} {singleStudent.class_arm} · <span style={{ color: '#4ade80' }}>{singleStudent.enrollment_status}</span>
+                              </div>
+                              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                {actionOpts.map(opt => (
+                                  <button key={opt.val} onClick={() => setSingleAction(opt.val)}
+                                    style={{ padding: '5px 10px', borderRadius: '5px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', border: 'none', background: singleAction === opt.val ? 'rgba(0,229,255,0.15)' : 'rgba(255,255,255,0.05)', color: singleAction === opt.val ? '#00E5FF' : 'rgba(255,255,255,0.5)' }}>
+                                    {opt.label}
+                                  </button>
+                                ))}
+                              </div>
+                              {(['move','switch_arm'].includes(singleAction)) && (
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                  {singleAction === 'move' && <select value={singleTargetClass} onChange={e => setSingleTargetClass(e.target.value)}
+                                    style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }}>
+                                    <option value=''>— Target Class —</option>
+                                    {classHierarchy.map(c => <option key={c} value={c}>{c}</option>)}
+                                  </select>}
+                                  <select value={singleTargetArm} onChange={e => setSingleTargetArm(e.target.value)}
+                                    style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }}>
+                                    <option value=''>— Target Arm —</option>
+                                    {(configs.find(c => c.hierarchy_class === (singleAction === 'move' ? singleTargetClass : singleStudent.class))?.arms || []).map((a: string) => <option key={a} value={a}>{a}</option>)}
+                                  </select>
+                                </div>
+                              )}
+                              <input value={singleNote} onChange={e => setSingleNote(e.target.value)} placeholder='Admin note (optional)…'
+                                style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', borderRadius: '6px', padding: '7px 12px', fontSize: '12px' }} />
+                              <button
+                                onClick={async () => {
+                                  const c = await Swal?.fire({ title: `<span style="color:#fff;font-size:16px;font-weight:700;">Apply: ${singleAction}?</span>`, html: `<p style="color:rgba(255,255,255,0.65);font-size:13px;">Student: <strong>${singleStudent.name || singleStudent.student_name}</strong><br/>Action: <strong>${singleAction}</strong>${singleNote ? `<br/>Note: ${singleNote}` : ''}</p>`, showCancelButton: true, confirmButtonText: 'Apply', confirmButtonColor: '#00E5FF', cancelButtonColor: '#1a1a2e', background: '#0d1235', color: '#fff' });
+                                  if (!c?.isConfirmed) return;
+                                  const res = await rolloverAPI?.student({ studentId: singleStudent.id, action: singleAction, targetClass: singleTargetClass || undefined, targetArm: singleTargetArm || undefined, note: singleNote || undefined });
+                                  if (res?.ok) {
+                                    setSingleStudent(null); setSingleSearch(''); setSingleNote(''); setSingleAction('promote');
+                                    Swal?.fire({ toast: true, position: 'top-end', icon: 'success', title: `${res.student?.name} → ${res.student?.newClass} ${res.student?.newArm}`, showConfirmButton: false, timer: 3000, background: '#0d1235', color: '#fff' });
+                                  } else {
+                                    Swal?.fire({ toast: true, position: 'top-end', icon: 'error', title: res?.error || 'Failed', showConfirmButton: false, timer: 2500, background: '#0d1235', color: '#fff' });
+                                  }
+                                }}
+                                style={{ alignSelf: 'flex-start', background: 'rgba(0,229,255,0.12)', border: '1px solid rgba(0,229,255,0.25)', color: '#00E5FF', borderRadius: '6px', padding: '8px 16px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                              >Apply Action →</button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
               </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
 
       </div>
