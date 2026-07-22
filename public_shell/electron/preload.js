@@ -292,6 +292,15 @@ const nexusAPI = {
         getDevices: () => ipcRenderer.invoke('standalone:get-devices'),
         revokeDevice: (data) => ipcRenderer.invoke('standalone:revoke-device', data),
     },
+
+    // ── Phase 3B: Rollover Engine ─────────────────────────────────────
+    rollover: {
+        sessionPreview: ()        => ipcRenderer.invoke('app:rollover-session-preview'),
+        session:        (payload) => ipcRenderer.invoke('app:rollover-session', payload),
+        byClass:        (payload) => ipcRenderer.invoke('app:rollover-class', payload),
+        students:       (payload) => ipcRenderer.invoke('app:rollover-students', payload),
+        student:        (payload) => ipcRenderer.invoke('app:rollover-student', payload),
+    },
 };
 
 
