@@ -305,21 +305,21 @@ export function FinancialHub() {
         adjustment: 'processFeeAdjustmentCSV',
       };
 
-      api?.[listeners[type]]?.((res: { count: number; error: string | null }) => {
-        const msg = res.error
-          ? `❌ Error: ${res.error}`
-          : `✅ ${res.count} row${res.count === 1 ? '' : 's'} imported successfully.`;
-        setCsvImportStatus(prev => ({ ...prev, [type]: { loading: false, result: msg } }));
-
+      api?.[listeners[type]]?.((res: { count: number; error: string | null; setupCheck?: any }) => {
         // ── Setup guard intercept ──
-        if (res.error === 'SETUP_INCOMPLETE' && (res as any).setupCheck) {
-          const sc = (res as any).setupCheck;
+        if (res.error === 'SETUP_INCOMPLETE' || res.setupCheck) {
+          const sc = res.setupCheck || {};
           setSetupGuardStep(sc.step || 'term');
-          setSetupGuardMessage(sc.message || '');
+          setSetupGuardMessage(sc.message || 'Complete setup before importing fee records.');
           setSetupGuardOpen(true);
           setCsvImportStatus(prev => ({ ...prev, [type]: { loading: false, result: null } }));
           return;
         }
+
+        const msg = res.error
+          ? `❌ Error: ${res.error}`
+          : `✅ ${res.count} row${res.count === 1 ? '' : 's'} imported successfully.`;
+        setCsvImportStatus(prev => ({ ...prev, [type]: { loading: false, result: msg } }));
 
         const Swal = (window as any).Swal;
         if (Swal) {

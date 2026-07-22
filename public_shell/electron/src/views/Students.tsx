@@ -336,14 +336,17 @@ export function Students() {
 
         if (Swal) {
           if (warnings.length > 0) {
+            const displayWarnings = warnings.length > 2
+              ? [...warnings.slice(0, 2), `... and ${warnings.length - 2} other(s) affected.`]
+              : warnings;
             Swal.fire({
               title: 'Import Processed with Warnings',
               html: `
                 <p style="color: #fff; margin-bottom: 10px;">Successfully loaded <strong>${count}</strong> students.</p>
                 <div style="text-align: left; background: rgba(239, 68, 68, 0.1); border-left: 4px solid #ef4444; padding: 10px; margin-top: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto;">
-                  <strong style="color: #ef4444; font-size: 13px;">Warnings:</strong>
+                  <strong style="color: #ef4444; font-size: 13px;">Warnings (${warnings.length}):</strong>
                   <ul style="margin: 5px 0 0 0; padding-left: 15px; color: #fca5a5; font-size: 11px; line-height: 1.6;">
-                    ${warnings.map(w => `<li>${w}</li>`).join('')}
+                    ${displayWarnings.map(w => `<li>${w}</li>`).join('')}
                   </ul>
                 </div>
               `,
@@ -849,8 +852,16 @@ export function Students() {
   // Handle Grades CSV Loaded notification
   useEffect(() => {
     if ((window.electronAPI as any)?.onGradesCSVLoaded) {
-      (window.electronAPI as any).onGradesCSVLoaded((res: { count: number, error: string | null }) => {
+      (window.electronAPI as any).onGradesCSVLoaded((res: { count: number, error: string | null, setupCheck?: any }) => {
         const Swal = (window as any).Swal;
+        if (res.error === 'SETUP_INCOMPLETE' || res.setupCheck) {
+          const sc = res.setupCheck || {};
+          setSetupGuardStep(sc.step || 'term');
+          setSetupGuardMessage(sc.message || 'Complete setup before importing grades.');
+          setSetupGuardOpen(true);
+          setCsvStatus(null);
+          return;
+        }
         if (res.error) {
           setCsvStatus(`❌ Grades Import Failed: ${res.error}`);
           if (Swal) {
@@ -898,8 +909,16 @@ export function Students() {
   // Handle Attendance CSV Loaded notification
   useEffect(() => {
     if ((window.electronAPI as any)?.onAttendanceCSVLoaded) {
-      (window.electronAPI as any).onAttendanceCSVLoaded((res: { count: number, error: string | null }) => {
+      (window.electronAPI as any).onAttendanceCSVLoaded((res: { count: number, error: string | null, setupCheck?: any }) => {
         const Swal = (window as any).Swal;
+        if (res.error === 'SETUP_INCOMPLETE' || res.setupCheck) {
+          const sc = res.setupCheck || {};
+          setSetupGuardStep(sc.step || 'term');
+          setSetupGuardMessage(sc.message || 'Complete setup before importing attendance.');
+          setSetupGuardOpen(true);
+          setCsvStatus(null);
+          return;
+        }
         if (res.error) {
           setCsvStatus(`❌ Attendance Import Failed: ${res.error}`);
           if (Swal) {
@@ -2397,6 +2416,12 @@ export function Students() {
                           componentKey: addScoreCompKey,
                           score: val
                         });
+                        if (res?.error === 'SETUP_INCOMPLETE' || res?.step) {
+                          setSetupGuardStep(res.step || 'term');
+                          setSetupGuardMessage(res.message || 'Complete setup before entering grades.');
+                          setSetupGuardOpen(true);
+                          return;
+                        }
                         if (res?.success) {
                           setAddScoreValue('');
                           setAddScoreSubject('');
