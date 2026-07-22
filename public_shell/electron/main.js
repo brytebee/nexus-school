@@ -7084,75 +7084,9 @@ if (app) {
     });
 
     // ── Phase 3B: Dynamic Term-Aware Rollover Engine ─────────────────────────────
-
-    /**
-     * Shared helper: reads term_structure + class_hierarchy from system_settings.
-     * Falls back to 3-term Nigerian default if not configured.
-     */
-    function getRolloverConfig(db) {
-      const tsRow = db.prepare("SELECT value FROM system_settings WHERE key='term_structure'").get();
-      let termStructure = { terms: ['First Term', 'Second Term', 'Third Term'], period_label: 'term' };
-      try { if (tsRow) termStructure = JSON.parse(tsRow.value); } catch (_) {}
-
-      const hierRow = db.prepare("SELECT value FROM system_settings WHERE key='class_hierarchy'").get();
-      let hierarchy = ['JSS 1', 'JSS 2', 'JSS 3', 'SS 1', 'SS 2', 'SS 3'];
-      try { if (hierRow) hierarchy = JSON.parse(hierRow.value); } catch (_) {}
-
-      return { termStructure, hierarchy };
-    }
-
-    /**
-     * Shared helper: computes what happens to a single student given an action.
-     * Returns { newClass, newArm, newStatus } without writing to DB.
-     */
-    function resolveStudentAction(student, action, hierarchy, targetClass, targetArm) {
-      const idx = hierarchy.indexOf(student.class);
-      switch (action) {
-        case 'promote': {
-          if (idx < 0 || idx >= hierarchy.length - 1) {
-            return { newClass: student.class, newArm: student.class_arm, newStatus: 'graduated' };
-          }
-          return { newClass: hierarchy[idx + 1], newArm: student.class_arm, newStatus: 'active' };
-        }
-        case 'graduate':
-          return { newClass: student.class, newArm: student.class_arm, newStatus: 'graduated' };
-        case 'repeat':
-          return { newClass: student.class, newArm: student.class_arm, newStatus: 'active' };
-        case 'demote': {
-          if (idx <= 0) return { newClass: student.class, newArm: student.class_arm, newStatus: 'active' };
-          return { newClass: hierarchy[idx - 1], newArm: student.class_arm, newStatus: 'active' };
-        }
-        case 'move':
-          return { newClass: targetClass || student.class, newArm: targetArm || student.class_arm, newStatus: 'active' };
-        case 'switch_arm':
-          return { newClass: student.class, newArm: targetArm || student.class_arm, newStatus: 'active' };
-        default:
-          return { newClass: student.class, newArm: student.class_arm, newStatus: student.enrollment_status };
-      }
-    }
-
-    /**
-     * Shared helper: writes a resolved student action to the DB.
-     * Appends a session_history entry and updates class/arm/enrollment_status.
-     */
-    function applyStudentRollover(db, student, resolved, action, currentSession, note) {
-      // Read and update session_history (append-only)
-      let history = [];
-      try { history = JSON.parse(student.session_history || '[]'); } catch (_) {}
-      history.push({
-        session: currentSession,
-        class: student.class,
-        arm: student.class_arm,
-        action: resolved.newStatus === 'graduated' ? 'graduated' : action,
-        ...(note ? { note } : {})
-      });
-
-      db.prepare(`
-        UPDATE students
-        SET class = ?, class_arm = ?, enrollment_status = ?, session_history = ?
-        WHERE id = ?
-      `).run(resolved.newClass, resolved.newArm, resolved.newStatus, JSON.stringify(history), student.id);
-    }
+    // Helpers live in lib/rolloverEngine.js so they can be unit-tested without
+    // the Electron process. We import them here for use in all 5 IPC handlers.
+    const { getRolloverConfig, resolveStudentAction, applyStudentRollover } = require('./lib/rolloverEngine');
 
     // ── Handler 1: Read-only preview (no writes) ──────────────────────────────
     ipcMain.handle('app:rollover-session-preview', () => {
@@ -7286,13 +7220,27 @@ if (app) {
         const { hierarchy } = getRolloverConfig(db);
         const termRow = db.prepare("SELECT academic_session FROM school_term_config WHERE id=1").get();
         const currentSession = termRow?.academic_session || '2025/2026';
-        const errors = [];
+
+        // ── Gap 3 fix: pre-flight validation — verify all IDs exist BEFORE opening
+        // the transaction so the admin sees a clear error instead of a silent skip.
+        const missing = [];
+        for (const sid of studentIds) {
+          const exists = db.prepare("SELECT id FROM students WHERE id=?").get(sid);
+          if (!exists) missing.push(sid);
+        }
+        if (missing.length > 0) {
+          return {
+            ok: false,
+            error: 'STUDENTS_NOT_FOUND',
+            message: `${missing.length} student ID(s) not found: ${missing.join(', ')}. No changes were made.`,
+            missingIds: missing,
+          };
+        }
 
         const rolloverTx = db.transaction(() => {
           let processed = 0;
           for (const sid of studentIds) {
             const student = db.prepare("SELECT id, name, class, class_arm, enrollment_status, session_history FROM students WHERE id=?").get(sid);
-            if (!student) { errors.push({ id: sid, error: 'not found' }); continue; }
             const resolved = resolveStudentAction(student, action, hierarchy, targetClass, targetArm);
             applyStudentRollover(db, student, resolved, action, currentSession, null);
             processed++;
@@ -7301,7 +7249,7 @@ if (app) {
         });
 
         const processed = rolloverTx();
-        return { ok: true, action, processed, errors };
+        return { ok: true, action, processed };
       } catch (err) {
         return { ok: false, error: err.message };
       }

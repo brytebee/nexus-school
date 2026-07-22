@@ -298,6 +298,23 @@ module.exports = function registerCBTHandlers(database) {
     });
 
     ipcMain.handle("cbt:save-system-setting", (event, { key, value }) => {
+        // ── Gap 2 fix: validate term_structure before saving ────────────────────
+        // An empty or malformed term_structure would silently break Mode A/B
+        // detection in the rollover engine. Reject it at the API boundary.
+        if (key === 'term_structure') {
+            const { validateTermStructure } = require('./lib/rolloverEngine');
+            let parsed;
+            try {
+                parsed = typeof value === 'string' ? JSON.parse(value) : value;
+            } catch (_) {
+                return { success: false, error: 'term_structure is not valid JSON.' };
+            }
+            const check = validateTermStructure(parsed);
+            if (!check.valid) {
+                return { success: false, error: check.reason };
+            }
+        }
+
         const db = database.getDb();
         const valStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
         db.prepare("INSERT INTO system_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key, valStr);
@@ -318,6 +335,7 @@ module.exports = function registerCBTHandlers(database) {
         
         return { success: true };
     });
+
 
     ipcMain.handle("cbt:finalize-promotional-exam", (event, { exam_id, overrides }) => {
         const db = database.getDb();
