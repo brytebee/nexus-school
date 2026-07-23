@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useLicense } from "../hooks/useLicense";
 import { generateSessionsList } from "../lib/sessions";
+import { useTermConfig } from "../hooks/useTermConfig";
 import { SetupGuardModal } from "../components/SetupGuardModal";
 
 interface GradingComponent {
@@ -56,6 +57,7 @@ interface PrintHubProps {
 
 export function PrintHub({ onTabChange }: PrintHubProps) {
   const { license } = useLicense();
+  const { termsList } = useTermConfig();
   const currentTier = license?.tier || "Silver";
 
   const isTemplateLocked = (tpl: string) => {
@@ -594,9 +596,9 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
                   className="modern-input"
                   style={{ width: "100%" }}
                 >
-                  <option value="First Term">First Term</option>
-                  <option value="Second Term">Second Term</option>
-                  <option value="Third Term">Third Term</option>
+                  {termsList.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
                 </select>
               </div>
             </div>

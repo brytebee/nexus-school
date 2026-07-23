@@ -237,7 +237,7 @@ export function ResultStudio() {
     try {
       const cfg = await window.electronAPI.getTermConfig();
       const term = cfg?.term || "First Term";
-      const session = cfg?.academic_session || "2024/2025";
+      const session = cfg?.academic_session || "2025/2026";
       const channels = [];
       if (sendWA) channels.push("whatsapp");
       if (sendEmail) channels.push("email");
@@ -276,7 +276,7 @@ export function ResultStudio() {
     try {
       const cfg = await window.electronAPI.getTermConfig();
       const term = cfg?.term || "First Term";
-      const session = cfg?.academic_session || "2024/2025";
+      const session = cfg?.academic_session || "2025/2026";
 
       const res = await (window as any).electronAPI.results.publish({
         term,

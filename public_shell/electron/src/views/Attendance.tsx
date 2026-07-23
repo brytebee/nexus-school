@@ -3,6 +3,7 @@ import { useLicense } from '../hooks/useLicense';
 import { DataTable, Column } from '../components/DataTable';
 import { Combobox } from '../components/Combobox';
 import { useClassArms } from '../hooks/useClassArms';
+import { useTermConfig } from '../hooks/useTermConfig';
 
 interface AttendanceRecord {
   student: {
@@ -31,6 +32,7 @@ interface EscalationStep {
 export function Attendance() {
   const { license } = useLicense();
   const { fullList } = useClassArms();
+  const termConfig = useTermConfig();
   const currentTier = license?.tier || 'Silver';
   const isDiamond = currentTier === 'Diamond';
 
@@ -47,14 +49,12 @@ export function Attendance() {
   const limit = 15;
 
   // Truancy Radar State
-  const [truancyRows, setTruancyRows] = useState<TruancyRow[]>([]);
-  const [loadingRadar, setLoadingRadar] = useState(false);
-
-  // Settings State
+  const [truancyList, setTruancyList] = useState<TruancyRow[]>([]);
+  const [radarLoading, setRadarLoading] = useState(false);
   const [enableDaily, setEnableDaily] = useState(true);
   const [enableSubject, setEnableSubject] = useState(false);
   const [escalationFlow, setEscalationFlow] = useState<EscalationStep[]>([]);
-  const [savingSettings, setSavingSettings] = useState(false);
+  const [selectedStudentForModal, setSelectedStudentForModal] = useState<TruancyRow | null>(null);
 
   // Edit Escalation State
   const [isEscalationModalOpen, setIsEscalationModalOpen] = useState(false);
@@ -74,31 +74,17 @@ export function Attendance() {
   const [reportStats, setReportStats] = useState<{ present: number; absent: number; late: number; percentage: number } | null>(null);
   const [reportHistory, setReportHistory] = useState<{ date: string; status: string }[]>([]);
 
+  // Sync default session and term from termConfig hook when loaded
+  useEffect(() => {
+    if (termConfig.session && !reportSession) setReportSession(termConfig.session);
+    if (termConfig.term && !reportTerm) setReportTerm(termConfig.term);
+  }, [termConfig.session, termConfig.term]);
+
   // Load term details and classes
   useEffect(() => {
     const initData = async () => {
       if (!window.electronAPI) return;
       try {
-        // Get term config for queries (tries school_term_config first, then system_settings)
-        let session = '';
-        let term = '';
-        try {
-          const termCfg = await window.electronAPI.getTermConfig?.();
-          session = termCfg?.academic_session || '';
-          term = termCfg?.term || '';
-        } catch (_) {}
-
-        if ((!session || !term) && (window as any).electronAPI?.cbt?.getSystemSettings) {
-          try {
-            const sys = await (window as any).electronAPI.cbt.getSystemSettings();
-            if (!session) session = sys?.current_academic_session || '';
-            if (!term) term = sys?.current_term || '';
-          } catch (_) {}
-        }
-
-        setReportSession(session || '2025/2026');
-        setReportTerm(term || 'First Term');
-
         // Get attendance settings
         const settingsRes = await window.electronAPI.attendance.getSettings();
         if (settingsRes?.ok && settingsRes.settings) {
@@ -951,11 +937,21 @@ export function Attendance() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>Session</span>
-                      <input type="text" value={reportSession} onChange={(e) => setReportSession(e.target.value)} placeholder="2025/2026" className="modern-input" />
+                      <select value={reportSession} onChange={(e) => setReportSession(e.target.value)} className="modern-input">
+                        <option value="">All Sessions</option>
+                        {termConfig.sessionsList.map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>Term</span>
-                      <input type="text" value={reportTerm} onChange={(e) => setReportTerm(e.target.value)} placeholder="First Term" className="modern-input" />
+                      <select value={reportTerm} onChange={(e) => setReportTerm(e.target.value)} className="modern-input">
+                        <option value="">All Terms</option>
+                        {termConfig.termsList.map((t) => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                 </div>
