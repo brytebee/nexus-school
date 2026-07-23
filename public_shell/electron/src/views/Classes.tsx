@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useClassArms, ClassConfig } from '../hooks/useClassArms';
 import { generateSessionsList } from '../lib/sessions';
+import { useTermConfig } from '../hooks/useTermConfig';
 import { useSudoAuth } from '../context/SudoAuthContext';
 import { SetupGuardModal } from '../components/SetupGuardModal';
 import { CSVReviewModal } from '../components/CSVReviewModal';
