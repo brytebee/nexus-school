@@ -4833,7 +4833,9 @@ ipcMain.handle("generate-reports", async (event, payload) => {
         const classNames = Object.keys(classGroups).sort();
 
         for (const cn of classNames) {
-            const groupStudents = classGroups[cn];
+            const groupStudents = classGroups[cn] || [];
+            if (groupStudents.length === 0) continue;
+
             mainWindow?.webContents.send("report-generation:status", { text: `⏳ Rendering reports for ${cn} (${groupStudents.length} students)...` });
 
             const groupPayload = {
