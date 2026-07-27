@@ -97,16 +97,21 @@ export function ResultStudio() {
   const [remarksData, setRemarksData] = useState<StudentResult[]>([]);
   const [remarksSaveStatus, setRemarksSaveStatus] = useState("");
   const [currentTerm, setCurrentTerm] = useState("First Term");
-  const [skipZeroGrades, setSkipZeroGrades] = useState(true);
+  const [skipZeroGradesState, setSkipZeroGradesState] = useState(true);
+  const [skipUngradedState, setSkipUngradedState] = useState(true);
 
-  // Sync global session/term when loaded
-  useEffect(() => {
-    if (globalSession && !selectedSession) setSelectedSession(globalSession);
-    if (globalTerm && !selectedTerm) setSelectedTerm(globalTerm);
-  }, [globalSession, globalTerm]);
+  const skipZeroGrades = skipZeroGradesState;
+  const skipUngraded = skipUngradedState;
 
-  // Report filter options
-  const [skipUngraded, setSkipUngraded] = useState(false);
+  const setSkipZeroGrades = (val: boolean) => {
+    setSkipZeroGradesState(val);
+    setSkipUngradedState(val);
+  };
+
+  const setSkipUngraded = (val: boolean) => {
+    setSkipZeroGradesState(val);
+    setSkipUngradedState(val);
+  };
 
   // Computed brand colors from theme
   const [brandPrimary, setBrandPrimary] = useState("#1A237E");
@@ -241,10 +246,19 @@ export function ResultStudio() {
 
   // S8-4: Dispatch Results via WhatsApp/Email (Gold/Diamond)
   const handleDispatch = async () => {
-    console.log("[ResultStudio] handleDispatch triggered — queryResults:", queryResults.length, "API:", !!(window as any).electronAPI?.results?.dispatch);
     if (!queryResults.length || !(window as any).electronAPI?.results?.dispatch) return;
+    const activeSkip = skipZeroGrades || skipUngraded;
+    const targetStudents = activeSkip
+      ? queryResults.filter((s: any) => (s.average ?? 0) > 0)
+      : queryResults;
+
+    if (!targetStudents.length) {
+      setDispatchStatus("⚠️ No students to dispatch — all have zero grades and filter is enabled.");
+      return;
+    }
+
     setDispatching(true);
-    setDispatchStatus("⏳ Dispatching to " + queryResults.length + " student(s)…");
+    setDispatchStatus("⏳ Dispatching to " + targetStudents.length + " student(s)…");
     try {
       const term = selectedTerm || globalTerm || "First Term";
       const session = selectedSession || globalSession || "2025/2026";
@@ -252,10 +266,9 @@ export function ResultStudio() {
       if (sendWA) channels.push("whatsapp");
       if (sendEmail) channels.push("email");
 
-      console.log("[ResultStudio] Calling results.dispatch with payload:", { scope, channels, studentCount: queryResults.length, template });
       const res = await (window as any).electronAPI.results.dispatch({
         scope,
-        studentIds: queryResults.map((s: any) => s.id),
+        studentIds: targetStudents.map((s: any) => s.id),
         studentId: scope === "student" ? selectedStudentId : null,
         className: scope === "class" ? selectedClass : null,
         term,
@@ -293,6 +306,16 @@ export function ResultStudio() {
   // S8-5: Publish Results to parent portal
   const handlePublishToPortal = async () => {
     if (!queryResults.length || !(window as any).electronAPI?.results?.publish) return;
+    const activeSkip = skipZeroGrades || skipUngraded;
+    const targetStudents = activeSkip
+      ? queryResults.filter((s: any) => (s.average ?? 0) > 0)
+      : queryResults;
+
+    if (!targetStudents.length) {
+      setPublishStatus("⚠️ No students to publish — all have zero grades and filter is enabled.");
+      return;
+    }
+
     setPublishingPortal(true);
     setPublishProgress("Generating PDFs…");
     setPublishStatus("");
@@ -302,7 +325,8 @@ export function ResultStudio() {
 
       const res = await (window as any).electronAPI.results.publish({
         term,
-        academicSession: session
+        academicSession: session,
+        studentIds: targetStudents.map((s: any) => s.id)
       });
 
       if (res?.ok) {
@@ -321,6 +345,18 @@ export function ResultStudio() {
   // Generate Reports
   const handleGenerate = async () => {
     if (!queryResults.length || !window.electronAPI?.generateReports) return;
+    const activeSkip = skipZeroGrades || skipUngraded;
+    const studentsToGenerate = activeSkip
+      ? queryResults.filter((s) => (s.average ?? 0) > 0)
+      : queryResults;
+
+    if (!studentsToGenerate.length) {
+      setGenStatus(
+        "⚠️ No students to generate — all are ungraded and skip-ungraded is enabled.",
+      );
+      return;
+    }
+
     setGenerating(true);
     setGenStatus("⏳ Generating reports...");
     setGeneratedPath("");
@@ -337,19 +373,6 @@ export function ResultStudio() {
         academic_session: session,
         term: term,
       };
-
-      // Apply the admin-controlled skip-ungraded filter before generating
-      const studentsToGenerate = skipUngraded
-        ? queryResults.filter((s) => (s.average ?? 0) > 0)
-        : queryResults;
-
-      if (!studentsToGenerate.length) {
-        setGenStatus(
-          "⚠️ No students to generate — all are ungraded and skip-ungraded is enabled.",
-        );
-        setGenerating(false);
-        return;
-      }
 
       const res = await window.electronAPI.generateReports({
         identity,

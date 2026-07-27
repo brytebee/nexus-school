@@ -506,3 +506,64 @@ describe('S10-10: Dispatch counter logic', () => {
     expect(r.dispatched).toBe(0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 11. Zero-Grade Filter Contract & Empty Sheet Prevention
+// ─────────────────────────────────────────────────────────────────────────────
+describe('S10-11: Zero-grade filtering & empty sheet prevention contract', () => {
+  function applyZeroGradeFilter(students, skipFilterEnabled) {
+    if (!skipFilterEnabled) return students;
+    return students.filter(s => (s.average ?? 0) > 0);
+  }
+
+  function groupStudentsByClass(students) {
+    const groups = {};
+    for (const s of students) {
+      const cn = (s.class_name || 'Unassigned').trim();
+      if (!groups[cn]) groups[cn] = [];
+      groups[cn].push(s);
+    }
+    return groups;
+  }
+
+  it('filters out students with 0 or null average when skipFilter is active', () => {
+    const queryResults = [
+      { id: 'STU-1', name: 'Alice', average: 75.5 },
+      { id: 'STU-2', name: 'Bob', average: 0 },
+      { id: 'STU-3', name: 'Charlie', average: null },
+      { id: 'STU-4', name: 'David', average: 88.0 }
+    ];
+
+    const filtered = applyZeroGradeFilter(queryResults, true);
+    expect(filtered.length).toBe(2);
+    expect(filtered.map(s => s.id)).toEqual(['STU-1', 'STU-4']);
+  });
+
+  it('returns all students when skipFilter is disabled', () => {
+    const queryResults = [
+      { id: 'STU-1', name: 'Alice', average: 75.5 },
+      { id: 'STU-2', name: 'Bob', average: 0 }
+    ];
+
+    const filtered = applyZeroGradeFilter(queryResults, false);
+    expect(filtered.length).toBe(2);
+  });
+
+  it('skips empty class groups after zero-grade filtering to prevent empty sheets', () => {
+    const queryResults = [
+      { id: 'STU-1', name: 'Alice', class_name: 'JSS 1', average: 75.5 },
+      { id: 'STU-2', name: 'Bob', class_name: 'JSS 2', average: 0 } // JSS 2 student has 0 average
+    ];
+
+    const filtered = applyZeroGradeFilter(queryResults, true);
+    const groups = groupStudentsByClass(filtered);
+
+    // JSS 1 has 1 student, JSS 2 has 0 students in filtered list
+    expect(groups['JSS 1']?.length).toBe(1);
+    expect(groups['JSS 2']).toBeUndefined();
+
+    // Verify empty group skipping logic
+    const renderedClasses = Object.keys(groups).filter(cn => (groups[cn] || []).length > 0);
+    expect(renderedClasses).toEqual(['JSS 1']);
+  });
+});
