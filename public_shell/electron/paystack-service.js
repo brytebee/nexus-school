@@ -68,6 +68,9 @@ async function initializeTransaction(params) {
   if (params.subaccountCode) {
     body.subaccount = params.subaccountCode;
     body.bearer = params.bearer || 'subaccount';
+    if (params.transactionCharge != null && !isNaN(Number(params.transactionCharge))) {
+      body.transaction_charge = Number(params.transactionCharge);
+    }
   }
 
   return paystackFetch('/transaction/initialize', {

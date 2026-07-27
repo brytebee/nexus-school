@@ -1511,26 +1511,28 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
   try {
     await msg.reply("⏳ _Generating your secure checkout link..._");
 
-    // Calculate gross amount so the school receives exactly `amount` after
-    // Paystack deducts its processing fee — the fee is passed on to the parent.
-    const { gross, charge } = calculatePaystackCharge(amount);
+    // Calculate 0.99% platform fee split
+    const baseKobo = Math.round(amount * 100);
+    const platformFeeKobo = Math.round(baseKobo * 0.0099); // 0.99% enabling fee
+    const grossKobo = baseKobo + platformFeeKobo;
+    const grossNaira = grossKobo / 100;
+    const platformFeeNaira = platformFeeKobo / 100;
 
     const tx = await paystackService.initializeTransaction({
       email: parentEmail,
-      amount: Math.round(amount * 100), // pass the base amount in kobo; Paystack adds charges automatically at checkout
+      amount: grossKobo,
+      transactionCharge: platformFeeKobo,
       reference: reference,
       subaccountCode: subaccountCode,
       callbackUrl: "https://nexusos.com.ng/payment-complete",
       metadata: {
-        // School ledger records only `amount` (base); these fields give full
-        // transparency in the Paystack dashboard and receipt emails.
-        base_amount:      amount,
-        paystack_charge:  charge,
-        gross_amount:     gross,
+        base_amount:           amount,
+        platform_enabling_fee: platformFeeNaira,
+        gross_amount:          grossNaira,
         custom_fields: [
-          { display_name: 'School Fee',      variable_name: 'base_amount', value: formatNaira(amount) },
-          { display_name: 'Processing Fee',  variable_name: 'charge',      value: formatNaira(charge) },
-          { display_name: 'Total Charged',   variable_name: 'gross',       value: formatNaira(gross)  },
+          { display_name: 'School Fee',                 variable_name: 'base_amount',   value: formatNaira(amount) },
+          { display_name: 'Platform Enabling Fee (0.99%)', variable_name: 'platform_fee',  value: formatNaira(platformFeeNaira) },
+          { display_name: 'Total Charged',              variable_name: 'gross',         value: formatNaira(grossNaira) },
         ]
       }
     });
@@ -1547,10 +1549,10 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
       // Show itemised breakdown so the parent is never surprised
       let payLinkMsg = `🔗 *Secure Checkout Link*\n\n`;
       payLinkMsg += `Plan: *${paymentType}*\n`;
-      payLinkMsg += `School Fee:      *${formatNaira(amount)}*\n`;
-      payLinkMsg += `Processing Fee:  *${formatNaira(charge)}*\n`;
+      payLinkMsg += `School Fee:               *${formatNaira(amount)}*\n`;
+      payLinkMsg += `Platform Enabling Fee (0.99%): *${formatNaira(platformFeeNaira)}*\n`;
       payLinkMsg += `─────────────────────────\n`;
-      payLinkMsg += `Total to Pay:    *${formatNaira(gross)}*\n\n`;
+      payLinkMsg += `Total to Pay:             *${formatNaira(grossNaira)}*\n\n`;
       payLinkMsg += `Click the link below to complete your payment:\n`;
       payLinkMsg += `${tx.authorization_url}\n\n`;
       payLinkMsg += `_Once payment is successful, your school records will update automatically._`;
