@@ -315,10 +315,23 @@ export default function Classes() {
   // ── Phase 3B Rollover state ───────────────────────────────────────────────
   const [rolloverTab, setRolloverTab] = useState<'structure'|'session'|'class'|'student'>('session');
 
+  // Term Config Hook
+  const { termsList, periodLabel: configPeriodLabel } = useTermConfig();
+
   // Tab 1 – Term Structure
-  const [termStructure, setTermStructure] = useState<{ terms: string[]; period_label: string }>({ terms: ['First Term','Second Term','Third Term'], period_label: 'term' });
+  const [termStructure, setTermStructure] = useState<{ terms: string[]; period_label: string }>({ terms: ['First Term','Second Term','Third Term','Fourth Term'], period_label: 'term' });
   const [newTermInput, setNewTermInput] = useState('');
   const [termStructureSaving, setTermStructureSaving] = useState(false);
+
+  // Sync termsList into termStructure state when hook loads
+  useEffect(() => {
+    if (termsList && termsList.length > 0) {
+      setTermStructure(prev => ({
+        terms: termsList,
+        period_label: configPeriodLabel || prev.period_label || 'term'
+      }));
+    }
+  }, [termsList, configPeriodLabel]);
 
   // Tab 2 – Full Session / Term Advance preview
   const [rolloverPreview, setRolloverPreview] = useState<any>(null);
@@ -332,6 +345,7 @@ export default function Classes() {
   const [studentRolloverMode, setStudentRolloverMode] = useState<'batch'|'single'>('batch');
   // Batch
   const [batchFilterClass, setBatchFilterClass] = useState('');
+  const [batchFilterArm,   setBatchFilterArm]   = useState('');
   const [batchStudents, setBatchStudents] = useState<any[]>([]);
   const [batchSelected, setBatchSelected] = useState<Set<number>>(new Set());
   const [batchAction, setBatchAction] = useState('promote');
@@ -403,11 +417,16 @@ export default function Classes() {
     const api = (window as any).electronAPI;
     if (!api?.getAllStudents) return;
     api.getAllStudents({ class_name: batchFilterClass, limit: 500, minimal: true }).then((res: any) => {
-      const list = Array.isArray(res?.data) ? res.data : [];
+      let list = Array.isArray(res?.data) ? res.data : [];
+      if (batchFilterArm) {
+        list = list.filter((s: any) =>
+          (s.class_arm || '').trim().toUpperCase() === batchFilterArm.trim().toUpperCase()
+        );
+      }
       setBatchStudents(list);
       setBatchSelected(new Set());
     }).catch(() => {});
-  }, [batchFilterClass]);
+  }, [batchFilterClass, batchFilterArm]);
 
   // ── Issue 3B fix: Debounce single student search via getAllStudents ──
   useEffect(() => {
@@ -1589,13 +1608,26 @@ export default function Classes() {
                       {/* Batch sub-mode */}
                       {studentRolloverMode === 'batch' && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                            <label style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>Filter by class:</label>
-                            <select value={batchFilterClass} onChange={e => setBatchFilterClass(e.target.value)}
+                          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <label style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>Class:</label>
+                            <select value={batchFilterClass} onChange={e => { setBatchFilterClass(e.target.value); setBatchFilterArm(''); }}
                               style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }}>
                               <option value=''>— Select Class —</option>
                               {classHierarchy.map(c => <option key={c} value={c}>{c}</option>)}
                             </select>
+                            {batchFilterClass && (() => {
+                              const arms = configs.find(c => c.hierarchy_class === batchFilterClass)?.arms || [];
+                              return arms.length > 0 ? (
+                                <>
+                                  <label style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>Arm:</label>
+                                  <select value={batchFilterArm} onChange={e => setBatchFilterArm(e.target.value)}
+                                    style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }}>
+                                    <option value=''>All Arms</option>
+                                    {arms.map((a: string) => <option key={a} value={a}>{a}</option>)}
+                                  </select>
+                                </>
+                              ) : null;
+                            })()}
                           </div>
                           {batchStudents.length > 0 && (
                             <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '6px' }}>
@@ -1662,27 +1694,73 @@ export default function Classes() {
                       {/* Single student sub-mode */}
                       {studentRolloverMode === 'single' && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          {/* Search sits OUTSIDE the scroll container so the dropdown isn't clipped */}
                           <div style={{ position: 'relative' }}>
-                            <input value={singleSearch} onChange={e => { setSingleSearch(e.target.value); setSingleStudent(null); }} placeholder='Search student by name…'
-                              style={{ width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '6px', padding: '8px 12px', fontSize: '12px', boxSizing: 'border-box' }} />
+                            <input
+                              value={singleSearch}
+                              onChange={e => { setSingleSearch(e.target.value); setSingleStudent(null); }}
+                              placeholder='Search student by name…'
+                              style={{ width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '6px', padding: '8px 12px', fontSize: '12px', boxSizing: 'border-box' }}
+                            />
                             {singleResults.length > 0 && !singleStudent && (
-                              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#0d1235', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', zIndex: 50, maxHeight: '200px', overflowY: 'auto' }}>
+                              <div style={{ marginTop: '8px', background: 'rgba(13, 18, 53, 0.95)', border: '1px solid rgba(0,229,255,0.25)', borderRadius: '8px', padding: '10px', maxHeight: '280px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}>
+                                <div style={{ fontSize: '11px', color: '#00E5FF', fontWeight: 700, padding: '2px 6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                  Select Student ({singleResults.length} found):
+                                </div>
                                 {singleResults.map((s: any) => (
-                                  <div key={s.id} onClick={() => { setSingleStudent(s); setSingleSearch(s.name || s.student_name); setSingleResults([]); }}
-                                    style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '12px', color: '#e2e8f0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}
-                                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,229,255,0.08)')}
-                                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                                  <div
+                                    key={s.id}
+                                    onClick={() => { setSingleStudent(s); setSingleSearch(s.name || s.student_name); setSingleResults([]); }}
+                                    style={{
+                                      padding: '10px 14px',
+                                      cursor: 'pointer',
+                                      fontSize: '13px',
+                                      color: '#fff',
+                                      background: 'rgba(255,255,255,0.04)',
+                                      borderRadius: '6px',
+                                      border: '1px solid rgba(255,255,255,0.08)',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'space-between',
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                    onMouseEnter={e => {
+                                      e.currentTarget.style.background = 'rgba(0,229,255,0.12)';
+                                      e.currentTarget.style.borderColor = 'rgba(0,229,255,0.3)';
+                                    }}
+                                    onMouseLeave={e => {
+                                      e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                                      e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+                                    }}
                                   >
-                                    <strong>{s.name || s.student_name}</strong> · {s.class} {s.class_arm} · <span style={{ color: s.enrollment_status === 'active' ? '#4ade80' : '#f87171' }}>{s.enrollment_status}</span>
+                                    <div>
+                                      <strong style={{ fontSize: '13px', color: '#fff' }}>{s.name || s.student_name}</strong>
+                                      <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginTop: '2px' }}>
+                                        {s.class_name || s.class} {s.class_arm || ''}
+                                      </div>
+                                    </div>
+                                    <span style={{
+                                      fontSize: '11px',
+                                      padding: '3px 8px',
+                                      borderRadius: '4px',
+                                      fontWeight: 600,
+                                      background: s.enrollment_status === 'active' ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)',
+                                      color: s.enrollment_status === 'active' ? '#4ade80' : '#f87171',
+                                      border: `1px solid ${s.enrollment_status === 'active' ? 'rgba(74,222,128,0.3)' : 'rgba(248,113,113,0.3)'}`
+                                    }}>
+                                      {s.enrollment_status || 'active'}
+                                    </span>
                                   </div>
                                 ))}
                               </div>
                             )}
                           </div>
+
+                          {/* Scrollable action section below */}
                           {singleStudent && (
-                            <>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '340px', overflowY: 'auto', paddingRight: '4px' }}>
                               <div style={{ background: 'rgba(0,229,255,0.05)', border: '1px solid rgba(0,229,255,0.12)', borderRadius: '6px', padding: '10px 14px', fontSize: '12px', color: '#94a3b8' }}>
-                                <strong style={{ color: '#fff' }}>{singleStudent.name || singleStudent.student_name}</strong> · {singleStudent.class} {singleStudent.class_arm} · <span style={{ color: '#4ade80' }}>{singleStudent.enrollment_status}</span>
+                                <strong style={{ color: '#fff' }}>{singleStudent.name || singleStudent.student_name}</strong> · {singleStudent.class_name || singleStudent.class} {singleStudent.class_arm} · <span style={{ color: '#4ade80' }}>{singleStudent.enrollment_status}</span>
                               </div>
                               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                                 {actionOpts.map(opt => (
@@ -1694,15 +1772,17 @@ export default function Classes() {
                               </div>
                               {(['move','switch_arm'].includes(singleAction)) && (
                                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                                  {singleAction === 'move' && <select value={singleTargetClass} onChange={e => setSingleTargetClass(e.target.value)}
-                                    style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }}>
-                                    <option value=''>— Target Class —</option>
-                                    {classHierarchy.map(c => <option key={c} value={c}>{c}</option>)}
-                                  </select>}
+                                  {singleAction === 'move' && (
+                                    <select value={singleTargetClass} onChange={e => setSingleTargetClass(e.target.value)}
+                                      style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }}>
+                                      <option value=''>— Target Class —</option>
+                                      {classHierarchy.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                  )}
                                   <select value={singleTargetArm} onChange={e => setSingleTargetArm(e.target.value)}
                                     style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }}>
                                     <option value=''>— Target Arm —</option>
-                                    {(configs.find(c => c.hierarchy_class === (singleAction === 'move' ? singleTargetClass : singleStudent.class))?.arms || []).map((a: string) => <option key={a} value={a}>{a}</option>)}
+                                    {(configs.find(c => c.hierarchy_class === (singleAction === 'move' ? singleTargetClass : (singleStudent.class_name || singleStudent.class)))?.arms || []).map((a: string) => <option key={a} value={a}>{a}</option>)}
                                   </select>
                                 </div>
                               )}
@@ -1722,7 +1802,7 @@ export default function Classes() {
                                 }}
                                 style={{ alignSelf: 'flex-start', background: 'rgba(0,229,255,0.12)', border: '1px solid rgba(0,229,255,0.25)', color: '#00E5FF', borderRadius: '6px', padding: '8px 16px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
                               >Apply Action →</button>
-                            </>
+                            </div>
                           )}
                         </div>
                       )}

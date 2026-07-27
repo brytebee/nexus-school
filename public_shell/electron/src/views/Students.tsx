@@ -6,7 +6,7 @@ import { Combobox } from '../components/Combobox';
 import { useClassArms } from '../hooks/useClassArms';
 import { SetupGuardModal } from '../components/SetupGuardModal';
 import { CSVReviewModal } from '../components/CSVReviewModal';
-import { validateName, validatePhone, validateEmail, validateDOB, validateNonEmpty } from '../lib/validators';
+import { validateName, validatePhone, validateEmail, validateDOB, validateNonEmpty, validateScoreComponent } from '../lib/validators';
 
 interface Student {
   id: string;
@@ -138,6 +138,7 @@ export function Students() {
   const [filterSubject, setFilterSubject] = useState('');
   const [filterTeacherId, setFilterTeacherId] = useState('');
   const [filterNoArm, setFilterNoArm] = useState(false);
+  const [filterOverflow, setFilterOverflow] = useState(false);
 
   // Filter metadata — teachers list and all known subjects
   const [filterTeachers, setFilterTeachers] = useState<{ id: string; name: string; allocations?: { class_name: string; subject: string }[] }[]>([]);
@@ -172,11 +173,15 @@ export function Students() {
   const [gradesEditMode, setGradesEditMode] = useState(false);
   const [gradesUnlocked, setGradesUnlocked] = useState(false);
   const [gradesStatus, setGradesStatus] = useState<string | null>(null);
+  const [activeSession, setActiveSession] = useState<string>('');
+  const [activeTerm, setActiveTerm] = useState<string>('');
 
   // Manual Score Entry Form states
   const [addScoreSubject, setAddScoreSubject] = useState('');
   const [addScoreCompKey, setAddScoreCompKey] = useState('CA1');
   const [addScoreValue, setAddScoreValue] = useState('');
+  const [gradingComponents, setGradingComponents] = useState<{ key: string; label: string; max: number }[]>([]);
+  const [addScoreBreakdown, setAddScoreBreakdown] = useState<Record<string, number>>({});
 
   // Load filter metadata on mount (teachers + subjects from canonical allocation list)
   useEffect(() => {
@@ -195,6 +200,24 @@ export function Students() {
       }
     };
     loadFilterMeta();
+
+    const loadTerm = async () => {
+      try {
+        const termCfg = await (window.electronAPI as any)?.getTermConfig?.();
+        if (termCfg) {
+          if (termCfg.academic_session) setActiveSession(termCfg.academic_session);
+          if (termCfg.term) setActiveTerm(termCfg.term);
+        }
+      } catch (_) {}
+    };
+    loadTerm();
+
+    const handleTermUpdate = (e: any) => {
+      if (e.detail?.academic_session) setActiveSession(e.detail.academic_session);
+      if (e.detail?.term) setActiveTerm(e.detail.term);
+    };
+    window.addEventListener('term-config-updated', handleTermUpdate);
+    return () => window.removeEventListener('term-config-updated', handleTermUpdate);
   }, []);
 
   // Fetch student records
@@ -211,6 +234,7 @@ export function Students() {
         teacher_id: filterTeacherId,
         no_arm: filterNoArm,
         include_overflow: true,
+        enrollment_status_filter: filterOverflow ? 'overflow' : undefined,
       });
       if (res && res.ok) {
         setStudents(res.data || []);
@@ -234,7 +258,7 @@ export function Students() {
 
   useEffect(() => {
     fetchStudents();
-  }, [page, search, limit, filterClass, filterSubject, filterTeacherId, filterNoArm]);
+  }, [page, search, limit, filterClass, filterSubject, filterTeacherId, filterNoArm, filterOverflow]);
 
 
   // Load student directory settings on mount
@@ -275,98 +299,127 @@ export function Students() {
     loadStudentSettings();
   }, []);
 
+  // ── CSV Import Handler ───────────────────────────────────────────────────
+  const handleCSVLoadedPayload = (payload: any) => {
+    const count = typeof payload === 'object' ? payload.count : payload;
+    const error: string | null = typeof payload === 'object' ? (payload.error || null) : null;
+    const warnings: string[] = typeof payload === 'object' ? (payload.warnings || []) : [];
+    const blocking: any[] = typeof payload === 'object' ? (payload.blocking || []) : [];
+
+    const Swal = (window as any).Swal;
+
+    if (error) {
+      if (error === 'SETUP_INCOMPLETE' && payload.setupCheck) {
+        setSetupGuardStep(payload.setupCheck.step || 'teachers');
+        setSetupGuardMessage(payload.setupCheck.message || '');
+        setSetupGuardOpen(true);
+        setCsvStatus(null);
+        return;
+      }
+      setCsvStatus(`❌ Import Failed: ${error}`);
+      if (Swal) {
+        let htmlContent = '';
+        if (error.startsWith('WRONG_TEMPLATE:')) {
+          htmlContent = '<div style="font-size: 13px; color: #fca5a5;">Wrong file selected. Please use the official Nexus Students or Teachers CSV template.</div>';
+        } else if (blocking && blocking.length > 0) {
+          const issuesHtml = blocking.map((b: any) => `
+            <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); padding: 8px 12px; border-radius: 6px; font-size: 12px; text-align: left; margin-bottom: 6px;">
+              <strong style="color: #f87171;">Row ${b.rowIndex}${b.field ? ` (${b.field})` : ''}:</strong> <span style="color: #fca5a5;">${b.reason}</span>
+            </div>
+          `).join('');
+
+          htmlContent = `
+            <div style="display: flex; flex-direction: column; gap: 8px; text-align: left;">
+              <p style="margin: 0 0 10px; font-size: 13px; color: #fca5a5; font-weight: 600;">
+                ${error}
+              </p>
+              <div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">
+                Conflicting / Unregistered Items (${blocking.length}):
+              </div>
+              <div style="max-height: 220px; overflow-y: auto; padding-right: 4px;">
+                ${issuesHtml}
+              </div>
+            </div>
+          `;
+        } else {
+          htmlContent = `<div style="font-size: 13px; color: #fca5a5; text-align: left;">${error}</div>`;
+        }
+
+        Swal.fire({
+          title: 'Import Failed',
+          html: htmlContent,
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444',
+          width: blocking && blocking.length > 0 ? '540px' : '420px',
+        });
+      }
+      setTimeout(() => setCsvStatus(null), 6000);
+      return;
+    }
+
+    if (count === 0) {
+      setCsvStatus('⚠️ No records imported. Check that you selected the correct CSV template.');
+      if (Swal) {
+        Swal.fire({
+          title: 'No Records Imported',
+          text: 'Zero rows were processed. Ensure you are using the official Nexus Students or Teachers CSV template with the correct column headers.',
+          icon: 'warning',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#f59e0b'
+        });
+      }
+      setTimeout(() => setCsvStatus(null), 6000);
+      return;
+    }
+
+    const baseMsg = `✅ CSV Processed: ${count} Students Loaded`;
+    const fullMsg = warnings.length > 0
+      ? `${baseMsg} — ⚠️ ${warnings.length} warning(s): ${warnings.join(' | ')}`
+      : baseMsg;
+    setCsvStatus(fullMsg);
+    fetchStudents();
+    setTimeout(() => setCsvStatus(null), warnings.length > 0 ? 8000 : 4000);
+
+    if (Swal) {
+      if (warnings.length > 0) {
+        const displayWarnings = warnings.length > 2
+          ? [...warnings.slice(0, 2), `... and ${warnings.length - 2} other(s) affected.`]
+          : warnings;
+        Swal.fire({
+          title: 'Import Processed with Warnings',
+          html: `
+            <p style="color: #fff; margin-bottom: 10px;">Successfully loaded <strong>${count}</strong> students.</p>
+            <div style="text-align: left; background: rgba(239, 68, 68, 0.1); border-left: 4px solid #ef4444; padding: 10px; margin-top: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto;">
+              <strong style="color: #ef4444; font-size: 13px;">Warnings (${warnings.length}):</strong>
+              <ul style="margin: 5px 0 0 0; padding-left: 15px; color: #fca5a5; font-size: 11px; line-height: 1.6;">
+                ${displayWarnings.map(w => `<li>${w}</li>`).join('')}
+              </ul>
+            </div>
+          `,
+          icon: 'warning',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#00E5FF'
+        });
+      } else {
+        Swal.fire({
+          title: 'Success!',
+          text: `Successfully loaded ${count} students.`,
+          icon: 'success',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#00E5FF'
+        });
+      }
+    }
+  };
+
   useEffect(() => {
     if (window.electronAPI?.onCSVLoaded) {
-      window.electronAPI.onCSVLoaded((payload: any) => {
-        const count = typeof payload === 'object' ? payload.count : payload;
-        const error: string | null = typeof payload === 'object' ? (payload.error || null) : null;
-        const warnings: string[] = typeof payload === 'object' ? (payload.warnings || []) : [];
-
-        const Swal = (window as any).Swal;
-
-        // ── Layer 5: distinguish error / wrong-template / success ─────────
-        if (error) {
-          if (error === 'SETUP_INCOMPLETE' && payload.setupCheck) {
-            setSetupGuardStep(payload.setupCheck.step || 'teachers');
-            setSetupGuardMessage(payload.setupCheck.message || '');
-            setSetupGuardOpen(true);
-            setCsvStatus(null);
-            return;
-          }
-          setCsvStatus(`❌ Import Failed: ${error}`);
-          if (Swal) {
-            Swal.fire({
-              title: 'Import Failed',
-              text: error.startsWith('WRONG_TEMPLATE:')
-                ? 'Wrong file selected. Please use the official Nexus Students or Teachers CSV template.'
-                : error,
-              icon: 'error',
-              background: '#0b0f19',
-              color: '#fff',
-              confirmButtonColor: '#ef4444'
-            });
-          }
-          setTimeout(() => setCsvStatus(null), 6000);
-          return;
-        }
-
-        if (count === 0) {
-          setCsvStatus('⚠️ No records imported. Check that you selected the correct CSV template.');
-          if (Swal) {
-            Swal.fire({
-              title: 'No Records Imported',
-              text: 'Zero rows were processed. Ensure you are using the official Nexus Students or Teachers CSV template with the correct column headers.',
-              icon: 'warning',
-              background: '#0b0f19',
-              color: '#fff',
-              confirmButtonColor: '#f59e0b'
-            });
-          }
-          setTimeout(() => setCsvStatus(null), 6000);
-          return;
-        }
-
-        const baseMsg = `✅ CSV Processed: ${count} Students Loaded`;
-        const fullMsg = warnings.length > 0
-          ? `${baseMsg} — ⚠️ ${warnings.length} warning(s): ${warnings.join(' | ')}`
-          : baseMsg;
-        setCsvStatus(fullMsg);
-        fetchStudents();
-        setTimeout(() => setCsvStatus(null), warnings.length > 0 ? 8000 : 4000);
-
-        if (Swal) {
-          if (warnings.length > 0) {
-            const displayWarnings = warnings.length > 2
-              ? [...warnings.slice(0, 2), `... and ${warnings.length - 2} other(s) affected.`]
-              : warnings;
-            Swal.fire({
-              title: 'Import Processed with Warnings',
-              html: `
-                <p style="color: #fff; margin-bottom: 10px;">Successfully loaded <strong>${count}</strong> students.</p>
-                <div style="text-align: left; background: rgba(239, 68, 68, 0.1); border-left: 4px solid #ef4444; padding: 10px; margin-top: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto;">
-                  <strong style="color: #ef4444; font-size: 13px;">Warnings (${warnings.length}):</strong>
-                  <ul style="margin: 5px 0 0 0; padding-left: 15px; color: #fca5a5; font-size: 11px; line-height: 1.6;">
-                    ${displayWarnings.map(w => `<li>${w}</li>`).join('')}
-                  </ul>
-                </div>
-              `,
-              icon: 'warning',
-              background: '#0b0f19',
-              color: '#fff',
-              confirmButtonColor: '#00E5FF'
-            });
-          } else {
-            Swal.fire({
-              title: 'Success!',
-              text: `Successfully loaded ${count} students.`,
-              icon: 'success',
-              background: '#0b0f19',
-              color: '#fff',
-              confirmButtonColor: '#00E5FF'
-            });
-          }
-        }
-      });
+      window.electronAPI.onCSVLoaded(handleCSVLoadedPayload);
     }
   }, []);
 
@@ -429,7 +482,8 @@ export function Students() {
       if (!Swal) {
         // Fallback if Swal not loaded: proceed without cap
         setCsvStatus('⏳ Ingesting and verifying student CSV data...');
-        window.electronAPI?.processCSV?.(file.path);
+        const res = await window.electronAPI?.processCSV?.(file.path);
+        if (res) handleCSVLoadedPayload(res);
         return;
       }
 
@@ -449,21 +503,23 @@ export function Students() {
               <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:12px; color:#aaa;"><span>Updates (existing)</span><span style="color:#00e676;font-weight:700">${validation.existingStudents}</span></div>
               <div style="display:flex; justify-content:space-between; font-size:12px; color:#aaa;"><span>Licensed cap</span><span style="color:#00e5ff;font-weight:700">${validation.cap}</span></div>
             </div>
-            <p style="color:#aaa; font-size:11px; line-height:1.5;">Choose how to proceed:</p>
+            <p style="color:#aaa; font-size:12px; margin:0; line-height:1.5;">
+              Select an option below to handle the extra students.
+            </p>
           </div>
         `,
         icon: 'warning',
         background: '#0b0f19',
         color: '#fff',
-        showDenyButton: true,
         showCancelButton: true,
-        confirmButtonColor: '#0288d1',
-        denyButtonColor: '#2e7d32',
-        cancelButtonColor: '#444',
-        confirmButtonText: '💳 Buy More Seats',
-        denyButtonText: `📥 Import All (tag overflow)`,
-        cancelButtonText: '✖ Cancel Import',
-        reverseButtons: true,
+        showDenyButton: true,
+        confirmButtonColor: '#00e5ff',
+        denyButtonColor: '#ffaa00',
+        cancelButtonColor: 'rgba(255,255,255,0.15)',
+        confirmButtonText: '🚀 Upgrade Seats Now',
+        denyButtonText: `Import ${validation.available} Seats Only`,
+        cancelButtonText: 'Cancel Import',
+        customClass: { popup: 'swal2-dark-custom' }
       });
 
       if (result.isConfirmed) {
@@ -473,7 +529,8 @@ export function Students() {
       } else if (result.isDenied) {
         // Import with cap — only admit up to available slots
         setCsvStatus(`⏳ Importing ${validation.available} of ${validation.newStudents} new students (capped)...`);
-        window.electronAPI?.processCSV?.({ filePath: file.path, limit: (validation.totalEnrolled ?? 0) + (validation.available ?? 0) } as any);
+        const res = await window.electronAPI?.processCSV?.({ filePath: file.path, limit: (validation.totalEnrolled ?? 0) + (validation.available ?? 0) } as any);
+        if (res) handleCSVLoadedPayload(res);
       } else {
         // Cancelled
         setCsvStatus(null);
@@ -482,7 +539,8 @@ export function Students() {
     } else {
       // No cap issue — proceed normally
       setCsvStatus('⏳ Ingesting and verifying student CSV data...');
-      window.electronAPI?.processCSV?.(file.path);
+      const res = await window.electronAPI?.processCSV?.(file.path);
+      if (res) handleCSVLoadedPayload(res);
     }
   };
 
@@ -493,6 +551,12 @@ export function Students() {
     const file = pendingCsvFile;
     setPendingCsvFile(null);
 
+    if (pendingCsvType === 'roster') {
+      setCsvStatus('⏳ Ingesting student CSV data...');
+      const res = await window.electronAPI?.processCSV?.(file.path);
+      if (res) handleCSVLoadedPayload(res);
+    }
+    
     const api = (window as any).electronAPI;
     if (pendingCsvType === 'grades') {
       setCsvStatus('⏳ Ingesting and verifying Grades CSV data...');
@@ -978,8 +1042,40 @@ export function Students() {
   const fetchGrades = async (studentId: string) => {
     setGradesLoading(true);
     try {
+      const termCfg = await (window.electronAPI as any)?.getTermConfig?.();
+      if (termCfg?.grading_scale) {
+        try {
+          const raw = typeof termCfg.grading_scale === 'string' ? JSON.parse(termCfg.grading_scale) : termCfg.grading_scale;
+          if (raw?.components && Array.isArray(raw.components) && raw.components.length > 0) {
+            setGradingComponents(raw.components);
+          } else {
+            setGradingComponents([
+              { key: "CA1", label: "C.A. 1", max: 10 },
+              { key: "CA2", label: "C.A. 2", max: 10 },
+              { key: "Exam", label: "Exam", max: 80 }
+            ]);
+          }
+        } catch (e) {
+          setGradingComponents([
+            { key: "CA1", label: "C.A. 1", max: 10 },
+            { key: "CA2", label: "C.A. 2", max: 10 },
+            { key: "Exam", label: "Exam", max: 80 }
+          ]);
+        }
+      } else {
+        setGradingComponents([
+          { key: "CA1", label: "C.A. 1", max: 10 },
+          { key: "CA2", label: "C.A. 2", max: 10 },
+          { key: "Exam", label: "Exam", max: 80 }
+        ]);
+      }
+
       const res = await (window.electronAPI as any)?.students?.getGrades({ student_id: studentId });
-      if (res?.ok) setGradesData(res.grades);
+      if (res?.ok) {
+        setGradesData(res.grades);
+        if (res.session) setActiveSession(res.session);
+        if (res.term) setActiveTerm(res.term);
+      }
     } finally {
       setGradesLoading(false);
     }
@@ -1391,14 +1487,72 @@ export function Students() {
             Enrol new students, configure parent contacts, and track subject enrollments.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          {/* CSV Import */}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {/* ➕ Add Student */}
+          <button
+            id="btn-add-student-icon"
+            onClick={openAddDrawer}
+            title="Add New Student"
+            style={{
+              background: 'linear-gradient(135deg, #00e5ff 0%, #00b0ff 100%)',
+              border: 'none',
+              borderRadius: '50%',
+              width: '34px',
+              height: '34px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              fontSize: '16px',
+              color: '#000',
+              fontWeight: 700,
+              boxShadow: '0 0 12px rgba(0,229,255,0.4)',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'scale(1.08)';
+              e.currentTarget.style.boxShadow = '0 0 16px rgba(0,229,255,0.6)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+              e.currentTarget.style.boxShadow = '0 0 12px rgba(0,229,255,0.4)';
+            }}
+          >
+            ➕
+          </button>
+
+          {/* ⚡ CSV Import */}
           <label
             htmlFor="student-csv-upload-input"
-            className="secondary-btn"
-            style={{ cursor: 'pointer' }}
+            title="Import Students from CSV"
+            style={{
+              background: 'rgba(0,229,255,0.05)',
+              border: '1px solid rgba(0,229,255,0.2)',
+              borderRadius: '50%',
+              width: '34px',
+              height: '34px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              boxShadow: '0 0 10px rgba(0,0,0,0.2)',
+              fontSize: '15px',
+              color: '#00e5ff',
+              margin: 0,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(0,229,255,0.6)';
+              e.currentTarget.style.boxShadow = '0 0 12px rgba(0,229,255,0.3)';
+              e.currentTarget.style.background = 'rgba(0,229,255,0.15)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(0,229,255,0.2)';
+              e.currentTarget.style.boxShadow = '0 0 10px rgba(0,0,0,0.2)';
+              e.currentTarget.style.background = 'rgba(0,229,255,0.05)';
+            }}
           >
-            ⚡ Import CSV
+            ⚡
           </label>
           <input
             type="file"
@@ -1407,47 +1561,108 @@ export function Students() {
             onChange={handleCSVUpload}
             style={{ display: 'none' }}
           />
+
+          {/* 🚫 Overflow Filter Shortcut */}
+          <button
+            id="btn-students-overflow-filter"
+            onClick={() => { setFilterOverflow(v => !v); setPage(0); }}
+            title={filterOverflow ? 'Overflow Filter Active (Click to show all students)' : 'Filter Overflow Students (Students beyond license cap)'}
+            style={{
+              background: filterOverflow ? 'rgba(239,68,68,0.25)' : 'rgba(239,68,68,0.06)',
+              border: `1px solid ${filterOverflow ? 'rgba(239,68,68,0.7)' : 'rgba(239,68,68,0.25)'}`,
+              borderRadius: '50%',
+              width: '34px',
+              height: '34px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              fontSize: '15px',
+              color: filterOverflow ? '#ef4444' : 'rgba(239,68,68,0.7)',
+              transition: 'all 0.2s',
+              boxShadow: filterOverflow ? '0 0 12px rgba(239,68,68,0.4)' : '0 0 10px rgba(0,0,0,0.2)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(239,68,68,0.8)';
+              e.currentTarget.style.background = 'rgba(239,68,68,0.3)';
+              e.currentTarget.style.boxShadow = '0 0 14px rgba(239,68,68,0.5)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = filterOverflow ? 'rgba(239,68,68,0.25)' : 'rgba(239,68,68,0.06)';
+              e.currentTarget.style.borderColor = filterOverflow ? 'rgba(239,68,68,0.7)' : 'rgba(239,68,68,0.25)';
+              e.currentTarget.style.boxShadow = filterOverflow ? '0 0 12px rgba(239,68,68,0.4)' : '0 0 10px rgba(0,0,0,0.2)';
+            }}
+          >
+            🚫
+          </button>
+
+          {/* 🗑️ Clear Data */}
           {students.length > 0 && (
             <button
               onClick={handleClearStudents}
-              className="secondary-btn"
+              title="Clear All Student Records"
               style={{
-                borderColor: 'rgba(239, 68, 68, 0.35)',
-                color: '#fca5a5',
-                background: 'rgba(239, 68, 68, 0.05)',
+                background: 'rgba(255,68,68,0.05)',
+                border: '1px solid rgba(255,68,68,0.2)',
+                borderRadius: '50%',
+                width: '34px',
+                height: '34px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                boxShadow: '0 0 10px rgba(0,0,0,0.2)',
+                fontSize: '15px',
+                color: '#ff4444'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(255,68,68,0.6)';
+                e.currentTarget.style.boxShadow = '0 0 12px rgba(255,68,68,0.3)';
+                e.currentTarget.style.background = 'rgba(255,68,68,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(255,68,68,0.2)';
+                e.currentTarget.style.boxShadow = '0 0 10px rgba(0,0,0,0.2)';
+                e.currentTarget.style.background = 'rgba(255,68,68,0.05)';
               }}
             >
-              🗑️ Clear Data
+              🗑️
             </button>
           )}
 
-          <button
-            onClick={openAddDrawer}
-            className="primary-btn"
-          >
-            + Add Student
-          </button>
-
-          {/* Settings Button */}
+          {/* ⚙️ Settings Toggle */}
           <button
             id="btn-students-settings-toggle"
             onClick={() => setIsSettingsPanelOpen(true)}
             title="Student Directory Settings"
             style={{
               background: 'rgba(255,255,255,0.05)',
-              border: '1px solid var(--glass-border)',
-              color: 'var(--text-dim)',
-              padding: '8px 10px',
-              borderRadius: 'var(--radius-sm)',
-              cursor: 'pointer',
-              fontSize: '16px',
-              lineHeight: 1,
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '50%',
+              width: '34px',
+              height: '34px',
               display: 'flex',
               alignItems: 'center',
-              transition: 'background 0.2s, color 0.2s',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              boxShadow: '0 0 10px rgba(0,0,0,0.2)',
+              fontSize: '15px',
+              color: 'var(--text-dim)'
             }}
-            onMouseOver={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#fff'; }}
-            onMouseOut={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = 'var(--text-dim)'; }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(0,229,255,0.4)';
+              e.currentTarget.style.boxShadow = '0 0 12px rgba(0,229,255,0.2)';
+              e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+              e.currentTarget.style.color = '#fff';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
+              e.currentTarget.style.boxShadow = '0 0 10px rgba(0,0,0,0.2)';
+              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+              e.currentTarget.style.color = 'var(--text-dim)';
+            }}
           >
             ⚙️
           </button>
@@ -1564,13 +1779,14 @@ export function Students() {
         const classOptions  = teacherClasses ? [...teacherClasses].sort() : [...fullList].sort();
         const subjectOptions = teacherSubjects || filterSubjects;
 
-        const hasAnyFilter = filterClass || filterSubject || filterTeacherId || filterNoArm;
+        const hasAnyFilter = filterClass || filterSubject || filterTeacherId || filterNoArm || filterOverflow;
 
         const clearAll = () => {
           setFilterClass('');
           setFilterSubject('');
           setFilterTeacherId('');
           setFilterNoArm(false);
+          setFilterOverflow(false);
           setPage(0);
         };
 
@@ -1669,6 +1885,26 @@ export function Students() {
               >
                 ⚠️ No Arm
               </button>
+
+              {/* Overflow filter toggle */}
+              <button
+                onClick={() => { setFilterOverflow(v => !v); setPage(0); }}
+                title="Show only students beyond license capacity (overflow)"
+                style={{
+                  background: filterOverflow ? 'rgba(239,68,68,0.2)' : 'rgba(239,68,68,0.06)',
+                  border: `1px solid ${filterOverflow ? 'rgba(239,68,68,0.6)' : 'rgba(239,68,68,0.25)'}`,
+                  color: '#ef4444',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '7px 12px',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  fontWeight: filterOverflow ? 700 : 400,
+                  transition: 'all 0.2s',
+                }}
+              >
+                🚫 Overflow
+              </button>
             </div>
 
             {hasAnyFilter && (
@@ -1677,6 +1913,12 @@ export function Students() {
                   <span style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', color: '#f59e0b', borderRadius: '20px', padding: '2px 10px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     ⚠️ No arm assigned
                     <button onClick={() => { setFilterNoArm(false); setPage(0); }} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: '12px' }}>×</button>
+                  </span>
+                )}
+                {filterOverflow && (
+                  <span style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: '#ef4444', borderRadius: '20px', padding: '2px 10px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    🚫 Overflow only
+                    <button onClick={() => { setFilterOverflow(false); setPage(0); }} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: '12px' }}>×</button>
                   </span>
                 )}
                 {filterTeacherId && (
@@ -2367,9 +2609,24 @@ export function Students() {
                     >
                       ← Back
                     </button>
-                    <p style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 auto' }}>
-                      📊 Term Grades
-                    </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '0 auto' }}>
+                      <p style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>
+                        📊 Term Grades
+                      </p>
+                      {activeSession && activeTerm && (
+                        <span style={{
+                          fontSize: '11px',
+                          color: '#00E5FF',
+                          background: 'rgba(0, 229, 255, 0.1)',
+                          border: '1px solid rgba(0, 229, 255, 0.3)',
+                          padding: '2px 8px',
+                          borderRadius: '12px',
+                          fontWeight: 600
+                        }}>
+                          📌 Saving to: {activeSession} · {activeTerm}
+                        </span>
+                      )}
+                    </div>
                     {!gradesEditMode ? (
                       <button onClick={() => setGradesEditMode(true)} className="secondary-btn" style={{ fontSize: '11px', padding: '4px 12px' }}>
                         ✏️ Edit
@@ -2407,98 +2664,161 @@ export function Students() {
                   <form
                     onSubmit={async (e) => {
                       e.preventDefault();
-                      if (!addScoreSubject) return;
-                      const val = parseFloat(addScoreValue) || 0;
-                      try {
-                        const res = await (window.electronAPI as any).insertScore({
-                          studentId: detailStudent.id,
-                          subject: addScoreSubject,
-                          componentKey: addScoreCompKey,
-                          score: val
-                        });
-                        if (res?.error === 'SETUP_INCOMPLETE' || res?.step) {
-                          setSetupGuardStep(res.step || 'term');
-                          setSetupGuardMessage(res.message || 'Complete setup before entering grades.');
-                          setSetupGuardOpen(true);
-                          return;
-                        }
-                        if (res?.success) {
-                          setAddScoreValue('');
-                          setAddScoreSubject('');
-                          await fetchGrades(detailStudent.id);
-                          setGradesStatus('✅ Score added successfully.');
+                      if (!addScoreSubject || !detailStudent) return;
+
+                      const compsToUse = gradingComponents.length > 0 ? gradingComponents : [
+                        { key: 'CA1', label: 'C.A. 1', max: 10 },
+                        { key: 'CA2', label: 'C.A. 2', max: 10 },
+                        { key: 'Exam', label: 'Exam', max: 80 }
+                      ];
+
+                      const finalBd: Record<string, number> = {};
+                      for (const c of compsToUse) {
+                        const val = addScoreBreakdown[c.key];
+                        if (val !== undefined && val !== null && !isNaN(val)) {
+                          const vRes = validateScoreComponent(val, c.max, c.label);
+                          if (!vRes.ok && vRes.error) {
+                            setGradesStatus(`❌ ${vRes.error}`);
+                            setTimeout(() => setGradesStatus(null), 4000);
+                            return;
+                          }
+                          finalBd[c.key] = val;
                         } else {
-                          setGradesStatus('❌ ' + (res?.error || 'Failed to add score'));
+                          finalBd[c.key] = 0;
+                        }
+                      }
+
+                      const sum = Object.values(finalBd).reduce((a, b) => a + b, 0);
+
+                      const updatedGrades = (() => {
+                        const existing = gradesData.find(g => g.subject === addScoreSubject);
+                        if (existing) {
+                          return gradesData.map(g => g.subject === addScoreSubject ? { ...g, breakdown: finalBd, score: sum } : g);
+                        }
+                        return [...gradesData, { subject: addScoreSubject, score: sum, breakdown: finalBd }];
+                      })();
+
+                      setGradesData(updatedGrades);
+                      const currentSubj = addScoreSubject;
+                      setAddScoreSubject('');
+                      setAddScoreBreakdown({});
+
+                      // Auto-persist immediately to SQLite DB
+                      try {
+                        const payload = {
+                          student_id: detailStudent.id,
+                          grades: updatedGrades.map(g => ({ subject: g.subject, breakdown: g.breakdown, score: g.score })),
+                        };
+                        const res = await (window.electronAPI as any)?.students?.saveGrades(payload);
+                        if (res?.ok) {
+                          setGradesStatus(`✅ Grade saved for ${currentSubj}`);
+                        } else {
+                          setGradesStatus('❌ ' + (res?.error || 'Save failed'));
                         }
                       } catch (err: any) {
                         setGradesStatus('❌ ' + err.message);
                       }
-                      setTimeout(() => setGradesStatus(null), 3500);
+                      setTimeout(() => setGradesStatus(null), 3000);
                     }}
                     style={{
-                      padding: '12px 24px',
+                      padding: '14px 24px',
                       background: 'rgba(255,255,255,0.02)',
                       borderBottom: '1px solid var(--glass-border)',
                       display: 'flex',
                       flexDirection: 'column',
-                      gap: '8px',
+                      gap: '10px',
                       flexShrink: 0
                     }}
                   >
-                    <p style={{ fontSize: '10px', color: '#00E5FF', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>
-                      ➕ Enter Score Manually
-                    </p>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <select
-                        required
-                        value={addScoreSubject}
-                        onChange={e => setAddScoreSubject(e.target.value)}
-                        className="modern-input"
-                        style={{ flex: 2, fontSize: '12px', padding: '6px 8px', background: 'rgba(0,0,0,0.3)', color: '#fff', border: '1px solid var(--glass-border)' }}
-                      >
-                        <option value="">Select Subject</option>
-                        {(() => {
-                          const recorded = (gradesData || []).map(g => g.subject);
-                          const all = detailStudent.subjects && detailStudent.subjects.length > 0
-                            ? detailStudent.subjects
-                            : filterSubjects;
-                          return all.filter(sub => !recorded.includes(sub));
-                        })().map(sub => (
-                          <option key={sub} value={sub}>{sub}</option>
-                        ))}
-                      </select>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <p style={{ fontSize: '10px', color: '#00E5FF', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>
+                        ➕ Enter Score Breakdown
+                      </p>
+                      {(() => {
+                        const compsToUse = gradingComponents.length > 0 ? gradingComponents : [
+                          { key: 'CA1', label: 'C.A. 1', max: 10 },
+                          { key: 'CA2', label: 'C.A. 2', max: 10 },
+                          { key: 'Exam', label: 'Exam', max: 80 }
+                        ];
+                        const totalMax = compsToUse.reduce((acc, c) => acc + (c.max || 0), 0);
+                        const currentSum = compsToUse.reduce((acc, c) => acc + (addScoreBreakdown[c.key] || 0), 0);
+                        return (
+                          <span style={{ fontSize: '11px', fontWeight: 700, color: currentSum > totalMax ? '#ef4444' : '#00e5ff', background: 'rgba(0,229,255,0.1)', border: '1px solid rgba(0,229,255,0.25)', padding: '2px 10px', borderRadius: '12px' }}>
+                            Total: {currentSum} / {totalMax}
+                          </span>
+                        );
+                      })()}
+                    </div>
 
-                      <select
-                        value={addScoreCompKey}
-                        onChange={e => setAddScoreCompKey(e.target.value)}
-                        className="modern-input"
-                        style={{ flex: 1, fontSize: '12px', padding: '6px 8px', background: 'rgba(0,0,0,0.3)', color: '#fff', border: '1px solid var(--glass-border)' }}
-                      >
-                        <option value="CA1">CA 1</option>
-                        <option value="CA2">CA 2</option>
-                        <option value="Assignment">Assignment</option>
-                        <option value="Exam">Exam</option>
-                      </select>
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                      {/* Subject Select */}
+                      <div style={{ flex: '2 1 180px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                        <label style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 600 }}>Subject</label>
+                        <select
+                          required
+                          value={addScoreSubject}
+                          onChange={e => setAddScoreSubject(e.target.value)}
+                          className="modern-input"
+                          style={{ fontSize: '12px', padding: '6px 8px', background: 'rgba(0,0,0,0.3)', color: '#fff', border: '1px solid var(--glass-border)' }}
+                        >
+                          <option value="">Select Subject</option>
+                          {(() => {
+                            const recorded = (gradesData || []).map(g => g.subject);
+                            const all = detailStudent.subjects && detailStudent.subjects.length > 0
+                              ? detailStudent.subjects
+                              : filterSubjects;
+                            return all.filter(sub => !recorded.includes(sub));
+                          })().map(sub => (
+                            <option key={sub} value={sub}>{sub}</option>
+                          ))}
+                        </select>
+                      </div>
 
-                      <input
-                        type="number"
-                        required
-                        step="any"
-                        min="0"
-                        max="100"
-                        value={addScoreValue}
-                        onChange={e => setAddScoreValue(e.target.value)}
-                        placeholder="Score"
-                        className="modern-input"
-                        style={{ flex: 1, fontSize: '12px', padding: '6px 8px', background: 'rgba(0,0,0,0.3)', color: '#fff', border: '1px solid var(--glass-border)', width: '60px', textAlign: 'center' }}
-                      />
+                      {/* Dynamic Component Inputs */}
+                      {(gradingComponents.length > 0 ? gradingComponents : [
+                        { key: 'CA1', label: 'C.A. 1', max: 10 },
+                        { key: 'CA2', label: 'C.A. 2', max: 10 },
+                        { key: 'Exam', label: 'Exam', max: 80 }
+                      ]).map(comp => (
+                        <div key={comp.key} style={{ flex: '1 1 70px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '65px' }}>
+                          <label style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={`${comp.label} (max ${comp.max})`}>
+                            {comp.label} <span style={{ color: '#00e5ff', fontSize: '9px' }}>({comp.max})</span>
+                          </label>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            max={comp.max}
+                            value={addScoreBreakdown[comp.key] ?? ''}
+                            onChange={e => {
+                              const raw = e.target.value;
+                              if (raw === '') {
+                                setAddScoreBreakdown(prev => {
+                                  const next = { ...prev };
+                                  delete next[comp.key];
+                                  return next;
+                                });
+                                return;
+                              }
+                              let val = parseFloat(raw);
+                              if (isNaN(val)) return;
+                              if (val < 0) val = 0;
+                              if (val > comp.max) val = comp.max;
+                              setAddScoreBreakdown(prev => ({ ...prev, [comp.key]: val }));
+                            }}
+                            placeholder={`0-${comp.max}`}
+                            className="modern-input"
+                            style={{ fontSize: '12px', padding: '6px 8px', background: 'rgba(0,0,0,0.3)', color: '#fff', border: '1px solid var(--glass-border)', textAlign: 'center' }}
+                          />
+                        </div>
+                      ))}
 
                       <button
                         type="submit"
                         className="primary-btn"
-                        style={{ fontSize: '11px', padding: '6px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        style={{ fontSize: '11px', padding: '6px 14px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                       >
-                        Add
+                        Add Score
                       </button>
                     </div>
                   </form>
@@ -2530,7 +2850,10 @@ export function Students() {
                                   value={g.score ?? 0}
                                   min={0}
                                   onChange={e => {
-                                    const newVal = parseFloat(e.target.value) || 0;
+                                    let newVal = parseFloat(e.target.value);
+                                    if (isNaN(newVal)) newVal = 0;
+                                    if (newVal < 0) newVal = 0;
+                                    if (newVal > 100) newVal = 100;
                                     setGradesData(prev => prev.map((gx, gxi) =>
                                       gxi !== gi ? gx : { ...gx, score: newVal }
                                     ));
@@ -2556,7 +2879,12 @@ export function Students() {
                                       value={val as number}
                                       min={0}
                                       onChange={e => {
-                                        const newVal = parseFloat(e.target.value) || 0;
+                                        let newVal = parseFloat(e.target.value);
+                                        if (isNaN(newVal)) newVal = 0;
+                                        if (newVal < 0) newVal = 0;
+                                        const compDef = gradingComponents.find(c => c.key === key || c.label === key);
+                                        const maxCap = compDef?.max ?? 100;
+                                        if (newVal > maxCap) newVal = maxCap;
                                         setGradesData(prev => prev.map((gx, gxi) => {
                                           if (gxi !== gi) return gx;
                                           const newBd = { ...gx.breakdown, [key]: newVal };

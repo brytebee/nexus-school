@@ -171,7 +171,7 @@ describe('CSV Relational Sanitization & Dry-Run Tests', () => {
     }, true);
   }));
 
-  it('dry-run: warns on session/term mismatch but does not block', () => new Promise((resolve) => {
+  it('dry-run: warns on session/term mismatch but does not block', () => new Promise((resolve, reject) => {
     const csvPath = path.join(tmpDir, 'grades_mismatch.csv');
     fs.writeFileSync(csvPath, [
       'Student_ID,Subject,Assessment,Score,Session,Term',
@@ -179,16 +179,20 @@ describe('CSV Relational Sanitization & Dry-Run Tests', () => {
     ].join('\n') + '\n');
 
     server.handleGradesCSVUpload(csvPath, (count, err, payload) => {
-      expect(payload.dry_run).toBe(true);
-      expect(payload.blocking.length).toBe(0);       // no errors — student is valid
-      expect(payload.normalizable.length).toBe(1);   // one session/term warning
-      expect(payload.activeSession).toBe('2025/2026');
-      expect(payload.activeTerm).toBe('First Term');
-      resolve(null);
+      try {
+        expect(payload.dry_run).toBe(true);
+        expect(payload.blocking.length).toBe(0);       // no errors — student is valid
+        expect(payload.normalizable.length).toBe(1);   // one session/term warning
+        expect(payload.activeSession).toBe('2025/2026');
+        expect(payload.activeTerm).toBe('First Term');
+        resolve(null);
+      } catch (e) {
+        reject(e);
+      }
     }, true);
   }));
 
-  it('confirmed import: stamps active session/term, ignores CSV values', () => new Promise((resolve) => {
+  it('confirmed import: stamps active session/term, ignores CSV values', () => new Promise((resolve, reject) => {
     const csvPath = path.join(tmpDir, 'grades_valid.csv');
     fs.writeFileSync(csvPath, [
       'Student_ID,Subject,Assessment,Score,Session,Term',
@@ -196,14 +200,18 @@ describe('CSV Relational Sanitization & Dry-Run Tests', () => {
     ].join('\n') + '\n');
 
     server.handleGradesCSVUpload(csvPath, (count, err) => {
-      expect(err).toBeNull();
-      expect(count).toBe(1);
-      const record = db.prepare("SELECT * FROM student_records WHERE student_id = 'STU-001'").get();
-      expect(record).toBeDefined();
-      expect(record.score).toBe(95);
-      expect(record.academic_session).toBe('2025/2026'); // active, not CSV value
-      expect(record.term).toBe('First Term');            // active, not CSV value
-      resolve(null);
+      try {
+        expect(err).toBeNull();
+        expect(count).toBe(1);
+        const record = db.prepare("SELECT * FROM student_records WHERE student_id = 'STU-001'").get();
+        expect(record).toBeDefined();
+        expect(record.score).toBe(95);
+        expect(record.academic_session).toBe('2025/2026'); // active, not CSV value
+        expect(record.term).toBe('First Term');            // active, not CSV value
+        resolve(null);
+      } catch (e) {
+        reject(e);
+      }
     }, false);
   }));
 

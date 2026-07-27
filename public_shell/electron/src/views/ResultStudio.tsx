@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useLicense } from "../hooks/useLicense";
 import { useClassArms } from "../hooks/useClassArms";
+import { useTermConfig } from "../hooks/useTermConfig";
 import { Combobox } from "../components/Combobox";
 
 interface StudentResult {
@@ -43,8 +44,8 @@ const PAID_TEMPLATES = [
 export function ResultStudio() {
   const { license } = useLicense();
   const { fullList } = useClassArms();
+  const { session: globalSession, term: globalTerm, termsList, sessionsList } = useTermConfig();
   const tier = license?.tier || "Silver";
-  const [loading, setLoading] = useState(false);
 
   const isTemplateLocked = (tpl: string) => {
     if (tpl === "clean_slate" || tpl === "class_photo") return false;
@@ -62,26 +63,28 @@ export function ResultStudio() {
     () => sessionStorage.getItem("rs_report_type") || "terminal",
   );
   const [scope, setScope] = useState("all");
-  const [format, setFormat] = useState("pdf");
-  const [template, setTemplate] = useState("clean_slate");
-  const [useBrandColors, setUseBrandColors] = useState(false);
-  const [imgError, setImgError] = useState(false);
-
-  // Pickers metadata lists
   const [selectedClass, setSelectedClass] = useState("");
-  const [teachers, setTeachers] = useState<{ id: string; name: string }[]>([]);
   const [selectedTeacherId, setSelectedTeacherId] = useState("");
-  const [subjects, setSubjects] = useState<string[]>([]);
   const [selectedSubject, setSelectedSubject] = useState("");
-  const [students, setStudents] = useState<
-    { id: string; name: string; class_name: string; class_arm?: string }[]
-  >([]);
   const [selectedStudentId, setSelectedStudentId] = useState("");
+  const [selectedSession, setSelectedSession] = useState("");
+  const [selectedTerm, setSelectedTerm] = useState("");
+  const [template, setTemplate] = useState("clean_slate");
+  const [format, setFormat] = useState<"pdf" | "html" | "image">("pdf");
+  const [useBrandColors, setUseBrandColors] = useState(true);
+
+  // Metadata dropdown options
+  const [subjects, setSubjects] = useState<string[]>([]);
+  const [teachers, setTeachers] = useState<any[]>([]);
+  const [students, setStudents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [imgError, setImgError] = useState(false);
 
   // Results Querying state
   const [queryResults, setQueryResults] = useState<StudentResult[]>([]);
   const [queryMessage, setQueryMessage] = useState("");
   const [previewActive, setPreviewActive] = useState(false);
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
 
   // Report Generation State
   const [generating, setGenerating] = useState(false);
@@ -94,6 +97,13 @@ export function ResultStudio() {
   const [remarksData, setRemarksData] = useState<StudentResult[]>([]);
   const [remarksSaveStatus, setRemarksSaveStatus] = useState("");
   const [currentTerm, setCurrentTerm] = useState("First Term");
+  const [skipZeroGrades, setSkipZeroGrades] = useState(true);
+
+  // Sync global session/term when loaded
+  useEffect(() => {
+    if (globalSession && !selectedSession) setSelectedSession(globalSession);
+    if (globalTerm && !selectedTerm) setSelectedTerm(globalTerm);
+  }, [globalSession, globalTerm]);
 
   // Report filter options
   const [skipUngraded, setSkipUngraded] = useState(false);
@@ -201,9 +211,8 @@ export function ResultStudio() {
     setPreviewActive(true);
 
     try {
-      const cfg = await window.electronAPI.getTermConfig();
-      const session = cfg?.academic_session || "2025/2026";
-      const term = cfg?.term || "First Term";
+      const session = selectedSession || globalSession || "2025/2026";
+      const term = selectedTerm || globalTerm || "First Term";
       setCurrentTerm(term);
 
       const resp = await window.electronAPI.queryResults({
@@ -221,6 +230,7 @@ export function ResultStudio() {
         setQueryMessage(
           `${resp.results?.length || 0} student(s) · ${session}, ${term}`,
         );
+        setIsPreviewModalOpen(true);
       } else {
         setQueryMessage("❌ Query failed: " + resp.error);
       }
@@ -231,34 +241,47 @@ export function ResultStudio() {
 
   // S8-4: Dispatch Results via WhatsApp/Email (Gold/Diamond)
   const handleDispatch = async () => {
+    console.log("[ResultStudio] handleDispatch triggered — queryResults:", queryResults.length, "API:", !!(window as any).electronAPI?.results?.dispatch);
     if (!queryResults.length || !(window as any).electronAPI?.results?.dispatch) return;
     setDispatching(true);
     setDispatchStatus("⏳ Dispatching to " + queryResults.length + " student(s)…");
     try {
-      const cfg = await window.electronAPI.getTermConfig();
-      const term = cfg?.term || "First Term";
-      const session = cfg?.academic_session || "2025/2026";
+      const term = selectedTerm || globalTerm || "First Term";
+      const session = selectedSession || globalSession || "2025/2026";
       const channels = [];
       if (sendWA) channels.push("whatsapp");
       if (sendEmail) channels.push("email");
 
+      console.log("[ResultStudio] Calling results.dispatch with payload:", { scope, channels, studentCount: queryResults.length, template });
       const res = await (window as any).electronAPI.results.dispatch({
         scope,
+        studentIds: queryResults.map((s: any) => s.id),
         studentId: scope === "student" ? selectedStudentId : null,
         className: scope === "class" ? selectedClass : null,
         term,
         academicSession: session,
+        templateId: template,
         channels
       });
 
       if (res?.ok) {
         const parts = [];
         if (res.dispatched) parts.push(res.dispatched + " sent");
-        if (res.queued)     parts.push(res.queued + " queued (email)");
+        if (res.queued)     parts.push(res.queued + " queued (email pending SMTP setup)");
         if (res.skipped)    parts.push(res.skipped + " skipped");
-        setDispatchStatus("✅ Done — " + parts.join(" · "));
+
+        let statusMsg = parts.length ? "✅ Done — " + parts.join(" · ") : "";
+
+        // Surface any per-channel availability warnings
+        if (res.warnings?.length) {
+          const warnStr = "⚠️ " + res.warnings.join(" · ");
+          statusMsg = statusMsg ? statusMsg + "\n" + warnStr : warnStr;
+        }
+
+        if (!statusMsg) statusMsg = "⚠️ 0 delivered — check that parent phone/email are set and Nexus Pulse is connected";
+        setDispatchStatus(statusMsg);
       } else {
-        setDispatchStatus("❌ Dispatch failed: " + (res?.error || "Unknown error"));
+        setDispatchStatus("❌ " + (res?.error || "Dispatch failed"));
       }
     } catch (err: any) {
       setDispatchStatus("❌ Error: " + err.message);
@@ -274,9 +297,8 @@ export function ResultStudio() {
     setPublishProgress("Generating PDFs…");
     setPublishStatus("");
     try {
-      const cfg = await window.electronAPI.getTermConfig();
-      const term = cfg?.term || "First Term";
-      const session = cfg?.academic_session || "2025/2026";
+      const term = selectedTerm || globalTerm || "First Term";
+      const session = selectedSession || globalSession || "2025/2026";
 
       const res = await (window as any).electronAPI.results.publish({
         term,
@@ -308,6 +330,13 @@ export function ResultStudio() {
     try {
       const identity = await window.electronAPI.getIdentity();
       const cfg = await window.electronAPI.getTermConfig();
+      const session = selectedSession || globalSession || "2025/2026";
+      const term = selectedTerm || globalTerm || "First Term";
+      const termConfig = {
+        ...cfg,
+        academic_session: session,
+        term: term,
+      };
 
       // Apply the admin-controlled skip-ungraded filter before generating
       const studentsToGenerate = skipUngraded
@@ -325,7 +354,7 @@ export function ResultStudio() {
       const res = await window.electronAPI.generateReports({
         identity,
         students: studentsToGenerate,
-        termConfig: cfg,
+        termConfig,
         reportType,
         templateId: template,
         format,
@@ -887,6 +916,34 @@ export function ResultStudio() {
                 </select>
               </div>
             )}
+
+            {/* Session & Term Selection */}
+            <div className="ph-config-group" style={{ marginTop: "8px" }}>
+              <label className="ph-label">Academic Session</label>
+              <select
+                className="modern-input"
+                style={{ width: "100%" }}
+                value={selectedSession}
+                onChange={(e) => setSelectedSession(e.target.value)}
+              >
+                {sessionsList.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+            <div className="ph-config-group">
+              <label className="ph-label">Academic Term</label>
+              <select
+                className="modern-input"
+                style={{ width: "100%" }}
+                value={selectedTerm}
+                onChange={(e) => setSelectedTerm(e.target.value)}
+              >
+                {termsList.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* ── Action Buttons (pinned to bottom of left panel) ── */}
@@ -1594,6 +1651,167 @@ export function ResultStudio() {
           </div>
         </div>
       )}
+
+      {/* ── Fullscreen Report Card Preview Modal ── */}
+      {isPreviewModalOpen && (() => {
+        const previewResults = skipZeroGrades
+          ? queryResults.filter((s) => (s.average ?? 0) > 0)
+          : queryResults;
+        return (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(0, 0, 0, 0.85)",
+            backdropFilter: "blur(10px)",
+            display: "flex",
+            flexDirection: "column",
+            padding: "24px",
+            boxSizing: "border-box",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "16px",
+              paddingBottom: "12px",
+              borderBottom: "1px solid rgba(255,255,255,0.1)",
+            }}
+          >
+            <div>
+              <h3 style={{ margin: 0, fontSize: "18px", color: "#fff", fontWeight: 700 }}>
+                🔍 Report Card Preview — {queryMessage}
+              </h3>
+              <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "var(--text-dim)" }}>
+                Template: <strong style={{ color: "#00E5FF" }}>{template}</strong> · Scope: <strong style={{ color: "#00E5FF" }}>{scope}</strong>
+                {' '}·{' '}
+                <span style={{ color: skipZeroGrades ? '#10b981' : 'var(--text-dim)' }}>
+                  {previewResults.length} of {queryResults.length} student(s)
+                </span>
+              </p>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <label
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '6px',
+                  fontSize: '12px', color: '#fff', cursor: 'pointer',
+                  background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+                  padding: '5px 10px', borderRadius: '6px', userSelect: 'none'
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={skipZeroGrades}
+                  onChange={(e) => setSkipZeroGrades(e.target.checked)}
+                  style={{ accentColor: '#00E5FF' }}
+                />
+                Skip students with zero grades
+              </label>
+              <button
+                onClick={() => setIsPreviewModalOpen(false)}
+                className="secondary-btn"
+                style={{ padding: "8px 16px", fontSize: "13px", cursor: "pointer" }}
+              >
+                ✕ Close Preview
+              </button>
+            </div>
+          </div>
+
+          <div
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              display: "grid",
+              gridTemplateColumns: "1fr 400px",
+              gap: "20px",
+              background: "rgba(13, 18, 53, 0.6)",
+              borderRadius: "12px",
+              padding: "20px",
+              border: "1px solid rgba(255,255,255,0.08)",
+            }}
+          >
+            {/* Template Card Visual Preview */}
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.3)", borderRadius: "8px", padding: "16px" }}>
+              <img
+                src={`libs/templates/previews/${TEMPLATE_IMG_MAP[template] || "classic"}.png`}
+                alt="Report Card Template Preview"
+                style={{ maxWidth: "100%", maxHeight: "550px", borderRadius: "8px", boxShadow: "0 10px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.1)" }}
+                onError={(e) => {
+                  (e.target as HTMLElement).style.display = "none";
+                }}
+              />
+            </div>
+
+            {/* Queried Student Roster & Scores */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px", overflowY: "auto" }}>
+              <h4 style={{ margin: 0, fontSize: "14px", color: "#fff" }}>
+                Queried Students ({previewResults.length}{skipZeroGrades && previewResults.length !== queryResults.length ? ` / ${queryResults.length} total` : ''})
+              </h4>
+              {skipZeroGrades && previewResults.length !== queryResults.length && (
+                <p style={{ margin: '0 0 4px', fontSize: '11px', color: '#f59e0b', fontStyle: 'italic' }}>
+                  ⚠️ {queryResults.length - previewResults.length} student(s) hidden — no grades recorded for this term.
+                </p>
+              )}
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {previewResults.slice(0, 50).map((s, idx) => (
+                  <div key={s.id || idx} style={{ background: "rgba(255,255,255,0.04)", borderRadius: "6px", padding: "10px 12px", fontSize: "12px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                    <div style={{ fontWeight: 600, color: "#fff" }}>{s.name}</div>
+                    <div style={{ color: "var(--text-dim)", fontSize: "11px", marginTop: "2px" }}>
+                      Class: {s.class_name} {s.class_arm || ""} · Score: {s.total_score ?? "—"} · Avg: {s.average ? `${s.average}%` : "—"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginTop: "16px", flexWrap: "wrap", background: "rgba(0,0,0,0.3)", padding: "12px 16px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.06)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#fff", cursor: "pointer" }}>
+                <input type="checkbox" checked={sendWA} onChange={(e) => setSendWA(e.target.checked)} />
+                💬 WhatsApp
+              </label>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#fff", cursor: "pointer" }}>
+                <input type="checkbox" checked={sendEmail} onChange={(e) => setSendEmail(e.target.checked)} />
+                📧 Email
+              </label>
+              <button
+                onClick={handleDispatch}
+                disabled={dispatching || (!sendWA && !sendEmail)}
+                className="secondary-btn"
+                style={{ padding: "6px 14px", fontSize: "12px", cursor: "pointer" }}
+              >
+                {dispatching ? "⚡ Sending…" : "⚡ Dispatch Results"}
+              </button>
+              <button
+                onClick={handlePublishToPortal}
+                disabled={publishingPortal}
+                className="secondary-btn"
+                style={{ padding: "6px 14px", fontSize: "12px", cursor: "pointer" }}
+              >
+                {publishingPortal ? "☁️ Publishing…" : "☁️ Publish to Portal"}
+              </button>
+              {(dispatchStatus || publishStatus || publishProgress) && (
+                <span style={{ fontSize: "11px", color: "#00E5FF" }}>
+                  {dispatchStatus || publishStatus || publishProgress}
+                </span>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button onClick={() => setIsPreviewModalOpen(false)} className="secondary-btn" style={{ padding: "8px 16px" }}>
+                Close
+              </button>
+              <button onClick={() => { setIsPreviewModalOpen(false); handleGenerate(); }} className="primary-btn" style={{ padding: "8px 20px" }}>
+                ⚡ Generate Reports PDF
+              </button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
     </div>
   );
 }

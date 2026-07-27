@@ -5,21 +5,42 @@ const nexusAPI = {
     onQrPayload: (callback) => ipcRenderer.on('qr-payload', (_event, value) => callback(value)),
     onHandshakeComplete: (callback) => ipcRenderer.on('handshake-complete', (_event, value) => callback(value)),
     onSyncUpdate: (callback) => ipcRenderer.on('sync-update', (_event, value) => callback(value)),
-    processCSV: (filePathOrPayload) => ipcRenderer.send('process-csv', filePathOrPayload),
-    onCSVLoaded: (callback) => ipcRenderer.on('csv-loaded', (_event, value) => callback(value)),
+    processCSV: (filePathOrPayload) => ipcRenderer.invoke('process-csv', filePathOrPayload),
+    onCSVLoaded: (callback) => {
+        ipcRenderer.removeAllListeners('csv-loaded');
+        ipcRenderer.on('csv-loaded', (_event, value) => callback(value));
+    },
     processGradesCSV: (filePath) => ipcRenderer.send('process-grades-csv', filePath),
-    onGradesCSVLoaded: (callback) => ipcRenderer.on('grades-csv-loaded', (_event, value) => callback(value)),
+    onGradesCSVLoaded: (callback) => {
+        ipcRenderer.removeAllListeners('grades-csv-loaded');
+        ipcRenderer.on('grades-csv-loaded', (_event, value) => callback(value));
+    },
     processAttendanceCSV: (filePath) => ipcRenderer.send('process-attendance-csv', filePath),
-    onAttendanceCSVLoaded: (callback) => ipcRenderer.on('attendance-csv-loaded', (_event, value) => callback(value)),
+    onAttendanceCSVLoaded: (callback) => {
+        ipcRenderer.removeAllListeners('attendance-csv-loaded');
+        ipcRenderer.on('attendance-csv-loaded', (_event, value) => callback(value));
+    },
     processClassesCSV: (filePath) => ipcRenderer.send('process-classes-csv', filePath),
-    onClassesCSVLoaded: (callback) => ipcRenderer.on('classes-csv-loaded', (_event, value) => callback(value)),
+    onClassesCSVLoaded: (callback) => {
+        ipcRenderer.removeAllListeners('classes-csv-loaded');
+        ipcRenderer.on('classes-csv-loaded', (_event, value) => callback(value));
+    },
     // Fee CSV imports
     processFeeStructureCSV:   (filePath) => ipcRenderer.send('process-fee-structure-csv', filePath),
-    onFeeStructureCSVLoaded:  (callback) => ipcRenderer.on('fee-structure-csv-loaded', (_event, v) => callback(v)),
+    onFeeStructureCSVLoaded:  (callback) => {
+        ipcRenderer.removeAllListeners('fee-structure-csv-loaded');
+        ipcRenderer.on('fee-structure-csv-loaded', (_event, v) => callback(v));
+    },
     processFeePaymentCSV:     (filePath) => ipcRenderer.send('process-fee-payment-csv', filePath),
-    onFeePaymentCSVLoaded:    (callback) => ipcRenderer.on('fee-payment-csv-loaded',    (_event, v) => callback(v)),
+    onFeePaymentCSVLoaded:    (callback) => {
+        ipcRenderer.removeAllListeners('fee-payment-csv-loaded');
+        ipcRenderer.on('fee-payment-csv-loaded', (_event, v) => callback(v));
+    },
     processFeeAdjustmentCSV:  (filePath) => ipcRenderer.send('process-fee-adjustment-csv', filePath),
-    onFeeAdjustmentCSVLoaded: (callback) => ipcRenderer.on('fee-adjustment-csv-loaded', (_event, v) => callback(v)),
+    onFeeAdjustmentCSVLoaded: (callback) => {
+        ipcRenderer.removeAllListeners('fee-adjustment-csv-loaded');
+        ipcRenderer.on('fee-adjustment-csv-loaded', (_event, v) => callback(v));
+    },
     // Activity Log
     getActivityLog: (opts) => ipcRenderer.invoke('activity-log:get', opts),
     validateCSVDryRun: (data) => ipcRenderer.invoke('validate-csv-dry-run', data),
@@ -60,6 +81,9 @@ const nexusAPI = {
     // V2: Term config & Print Hub
     getTermConfig:      ()       => ipcRenderer.invoke('get-term-config'),
     saveTermConfig:     (data)   => ipcRenderer.invoke('save-term-config', data),
+    listDepartmentManagers:   ()       => ipcRenderer.invoke('department-managers:list'),
+    saveDepartmentManager:   (data)   => ipcRenderer.invoke('department-managers:save', data),
+    deleteDepartmentManager: (params) => ipcRenderer.invoke('department-managers:delete', params),
     queryResults:       (filter) => ipcRenderer.invoke('query-results', filter),
     saveDomainScores:   (data)   => ipcRenderer.invoke('save-domain-scores', data),
     saveTeacherRemark:  (data)   => ipcRenderer.invoke('save-teacher-remark', data),
@@ -125,7 +149,9 @@ const nexusAPI = {
         getCloudStatus: () => ipcRenderer.invoke('pulse:get-cloud-status'),
         triggerSync: () => ipcRenderer.send('pulse:trigger-sync'),
         onCloudSynced: (callback) => ipcRenderer.on('pulse:cloud-synced', (_event, value) => callback(value)),
-        onSyncError: (callback) => ipcRenderer.on('pulse:sync-error', (_event, value) => callback(value))
+        onSyncError: (callback) => ipcRenderer.on('pulse:sync-error', (_event, value) => callback(value)),
+        setAutostart: (enabled) => ipcRenderer.send('pulse:set-autostart', enabled),
+        getAutostart: () => ipcRenderer.invoke('pulse:get-autostart'),
     },
     // Phase 5: Fee Management
     fees: {
@@ -272,8 +298,20 @@ const nexusAPI = {
         importFile:     ()     => ipcRenderer.invoke('license:import'),
         activateOnline: ()     => ipcRenderer.invoke('license:activate-online'),
         getStatus:      ()     => ipcRenderer.invoke('license:get-status'),
+        refresh:        ()     => ipcRenderer.invoke('license:refresh'),
         onStatus:       (cb)   => ipcRenderer.on('license-status', (_e, v) => cb(v)),
     },
+
+    // ── System shell / external links ───────────────────────────────
+    shell: {
+        openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
+    },
+
+    // ── Portal slug ───────────────────────────────────────────────────
+    slug: {
+        checkAvailability: (slug) => ipcRenderer.invoke('slug:check-availability', slug),
+    },
+
 
     // ── Auto-updater ──────────────────────────────────────────────────
     updater: {

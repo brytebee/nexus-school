@@ -76,10 +76,16 @@ export function NexusPulse() {
     if (identity?.principalPhone) {
       setPrincipalPhone(identity.principalPhone);
     }
-    
-    // Autostart toggle loading
+
+    // Autostart toggle: optimistic from localStorage, then reconcile with DB
     const stored = localStorage.getItem('nexus_pulse_autostart');
-    setAutostartBot(stored === 'true');
+    if (stored !== null) setAutostartBot(stored === 'true');
+
+    // Read canonical value from DB (survives app reinstall / new machine)
+    window.electronAPI?.pulse?.getAutostart?.().then((dbValue: boolean) => {
+      setAutostartBot(dbValue);
+      localStorage.setItem('nexus_pulse_autostart', dbValue ? 'true' : 'false');
+    }).catch(() => {});
 
     // Bot initial state sync
     const syncBotState = async () => {

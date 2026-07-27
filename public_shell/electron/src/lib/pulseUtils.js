@@ -115,7 +115,7 @@ export function botStatusReducer(val) {
 
 /**
  * Persists the bot autostart preference to localStorage and notifies the
- * main process via electronAPI.send.
+ * main process via the structured pulse.setAutostart IPC bridge.
  *
  * @param {boolean}  checked
  * @param {Storage}  storage     - window.localStorage (or a mock in tests)
@@ -123,7 +123,12 @@ export function botStatusReducer(val) {
  */
 export function autostartPersist(checked, storage, electronAPI) {
   storage.setItem('nexus_pulse_autostart', checked ? 'true' : 'false');
-  if (electronAPI?.send) electronAPI.send('pulse:set-autostart', checked);
+  // Prefer the structured pulse namespace; fall back to legacy .send for tests
+  if (electronAPI?.pulse?.setAutostart) {
+    electronAPI.pulse.setAutostart(checked);
+  } else if (electronAPI?.send) {
+    electronAPI.send('pulse:set-autostart', checked);
+  }
 }
 
 /**

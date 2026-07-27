@@ -141,3 +141,24 @@ export function validateNonEmpty(v: string, label: string): ValidationResult {
   }
   return { ok: true, error: null };
 }
+
+export function validateScoreComponent(
+  val: number | string | undefined | null,
+  maxScore: number = 100,
+  label: string = 'Score'
+): ValidationResult {
+  if (val === undefined || val === null || val === '') {
+    return { ok: true, error: null };
+  }
+  const num = typeof val === 'number' ? val : parseFloat(String(val).trim());
+  if (isNaN(num)) {
+    return { ok: false, error: `${label} must be a valid number.` };
+  }
+  if (num < 0) {
+    return { ok: false, error: `${label} score cannot be negative.` };
+  }
+  if (num > maxScore) {
+    return { ok: false, error: `${label} score (${num}) exceeds maximum allowed score of ${maxScore}.` };
+  }
+  return { ok: true, error: null };
+}

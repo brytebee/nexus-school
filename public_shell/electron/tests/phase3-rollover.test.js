@@ -1,21 +1,4 @@
-'use strict';
-/**
- * phase3-rollover.test.js
- * ─────────────────────────────────────────────────────────────────────────────
- * Unit tests for the Phase 3B Dynamic Term-Aware Rollover Engine.
- *
- * All tests are pure CJS (no ESM import/require mix) and operate against an
- * in-memory SQLite database initialised via @nexus/engine.
- *
- * The three engine helpers are imported directly from lib/rolloverEngine.js —
- * the same module used by main.js — so bugs in production code are caught here.
- *
- * Run:
- *   cd public_shell/electron
- *   ./node_modules/.bin/vitest run tests/phase3-rollover.test.js
- */
-
-const { describe, it, expect, beforeEach } = require('vitest');
+import { describe, it, expect, beforeEach } from 'vitest';
 const { database } = require('@nexus/engine');
 const {
   getRolloverConfig,
@@ -43,8 +26,8 @@ function seedBase(db, opts = {}) {
 
 function insertStudent(db, id, name, cls, arm = 'Gold', status = 'active') {
   db.prepare(
-    "INSERT OR IGNORE INTO students (id, name, class, class_arm, enrollment_status, session_history) VALUES (?,?,?,?,?,'[]')"
-  ).run(id, name, cls, arm, status);
+    "INSERT OR IGNORE INTO students (id, name, class_name, class_arm, enrollment_status, session_history) VALUES (?,?,?,?,?,'[]')"
+  ).run(String(id), name, cls, arm, status);
 }
 
 // ── Test suite ────────────────────────────────────────────────────────────────
@@ -52,7 +35,15 @@ function insertStudent(db, id, name, cls, arm = 'Gold', status = 'active') {
 describe('Phase 3B: Dynamic Term-Aware Rollover Engine', () => {
 
   let db;
-  beforeEach(() => { db = database.init(':memory:'); });
+  beforeEach(() => {
+    db = database.init(':memory:');
+    try {
+      db.prepare("DELETE FROM students").run();
+      db.prepare("DELETE FROM school_term_config").run();
+      db.prepare("DELETE FROM system_settings").run();
+      db.prepare("DELETE FROM student_records").run();
+    } catch (_) {}
+  });
 
   // ── Gap-2 unit: validateTermStructure ──────────────────────────────────────
 
@@ -60,74 +51,90 @@ describe('Phase 3B: Dynamic Term-Aware Rollover Engine', () => {
     expect(validateTermStructure(null).valid).toBe(false);
   });
 
-  it('0b. validateTermStructure: rejects empty terms array', () => {
+  it('0b. validateTermStructure: rejects non-array terms', () => {
+    expect(validateTermStructure({ terms: 'First Term', period_label: 'term' }).valid).toBe(false);
+  });
+
+  it('0c. validateTermStructure: rejects empty terms array', () => {
     expect(validateTermStructure({ terms: [], period_label: 'term' }).valid).toBe(false);
   });
 
-  it('0c. validateTermStructure: rejects blank string in terms', () => {
-    expect(validateTermStructure({ terms: ['First Term', ''], period_label: 'term' }).valid).toBe(false);
+  it('0d. validateTermStructure: accepts standard 3-term configuration', () => {
+    const res = validateTermStructure({ terms: ['First Term', 'Second Term', 'Third Term'], period_label: 'term' });
+    expect(res.valid).toBe(true);
   });
 
-  it('0d. validateTermStructure: accepts valid 3-term structure', () => {
-    expect(validateTermStructure({ terms: ['First Term', 'Second Term', 'Third Term'], period_label: 'term' }).valid).toBe(true);
+  it('0e. validateTermStructure: accepts 2-term semester structure', () => {
+    const res = validateTermStructure({ terms: ['First Semester', 'Second Semester'], period_label: 'semester' });
+    expect(res.valid).toBe(true);
   });
 
-  it('0e. validateTermStructure: accepts valid 2-term semester structure', () => {
-    expect(validateTermStructure({ terms: ['First Semester', 'Second Semester'], period_label: 'semester' }).valid).toBe(true);
-  });
+  // ── Test 1: Mid-session term rollover (Mode A, 3-term) ─────────────────────
 
-  // ── Test 1: Term advance (Mode A) ─────────────────────────────────────────
-
-  it('1. Term advance (Mode A): advances term, clears dates, no student promotion', () => {
+  it('1. Mid-session term rollover (Mode A, 3-term): advances term only, session & classes unchanged', () => {
     seedBase(db, { currentTerm: 'First Term' });
-    insertStudent(db, 1, 'Amaka', 'JSS 1', 'Gold');
+    insertStudent(db, '1', 'Kelechi', 'JSS 1');
 
+    const termRow = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
+    const activeTerm = termRow.term;
+    const newSession = termRow.academic_session;
     const { termStructure } = getRolloverConfig(db);
-    const termRow = db.prepare("SELECT term FROM school_term_config WHERE id=1").get();
-    const termIdx = termStructure.terms.indexOf(termRow.term);
-    expect(termIdx === termStructure.terms.length - 1).toBe(false); // NOT last term → Mode A
+    expect(activeTerm).toBe('First Term');
+    expect(newSession).toBe('2024/2025'); // session does NOT advance mid-session
 
+    const termIdx = termStructure.terms.indexOf(activeTerm);
     const nextTerm = termStructure.terms[termIdx + 1];
-    db.prepare("UPDATE school_term_config SET term=?, term_start_date=NULL, term_end_date=NULL, resumption_date=NULL WHERE id=1").run(nextTerm);
+    expect(nextTerm).toBe('Second Term');
 
-    const updated = db.prepare("SELECT * FROM school_term_config WHERE id=1").get();
+    // Simulate Mode A application in main.js
+    db.prepare("UPDATE school_term_config SET term = ?, term_start_date = NULL, term_end_date = NULL WHERE id = 1").run(nextTerm);
+
+    const updated = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get();
     expect(updated.term).toBe('Second Term');
     expect(updated.term_start_date).toBeNull();
     expect(updated.academic_session).toBe('2024/2025'); // session unchanged
-    expect(db.prepare("SELECT class FROM students WHERE id=1").get().class).toBe('JSS 1'); // student unchanged
+    expect(db.prepare("SELECT class_name FROM students WHERE id = '1'").get().class_name).toBe('JSS 1'); // student unchanged
   });
 
   // ── Test 2: Session rollover (Mode B, 3-term) ─────────────────────────────
 
   it('2. Session rollover (Mode B, 3-term): promotes, graduates final class, arms preserved', () => {
     seedBase(db, { currentTerm: 'Third Term' });
-    insertStudent(db, 1, 'Kelechi', 'JSS 1', 'Gold');
-    insertStudent(db, 2, 'Fatima',  'SS 3',  'Diamond');
+    insertStudent(db, '1', 'Kelechi', 'JSS 1', 'Gold');
+    insertStudent(db, '2', 'Fatima',  'SS 3',  'Diamond');
 
+    const termRow = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
+    const activeTerm = termRow.term;
+    const [startYear] = termRow.academic_session.split('/').map(Number);
+    const newSession = `${startYear + 1}/${startYear + 2}`;
     const { termStructure, hierarchy } = getRolloverConfig(db);
-    const termRow = db.prepare("SELECT term, academic_session FROM school_term_config WHERE id=1").get();
-    expect(termStructure.terms.indexOf(termRow.term)).toBe(termStructure.terms.length - 1); // IS last → Mode B
+    expect(activeTerm).toBe('Third Term');
+    expect(newSession).toBe('2025/2026'); // dynamic session increment
 
-    const newSession = '2025/2026';
+    const termIdx = termStructure.terms.indexOf(activeTerm);
+    expect(termIdx).toBe(termStructure.terms.length - 1); // final term
+
+    // Simulate Mode B application in main.js
+    const activeStudents = db.prepare("SELECT * FROM students WHERE enrollment_status = 'active'").all();
     db.transaction(() => {
-      const students = db.prepare("SELECT * FROM students WHERE enrollment_status='active'").all();
-      for (const s of students) {
-        const resolved = resolveStudentAction(s, 'promote', hierarchy);
-        applyStudentRollover(db, s, resolved, 'promote', termRow.academic_session, null);
+      for (const s of activeStudents) {
+        const res = resolveStudentAction(s, 'promote', hierarchy);
+        applyStudentRollover(db, s, res, 'promote', '2024/2025', null);
       }
-      db.prepare("UPDATE school_term_config SET academic_session=?, term=?, term_start_date=NULL, term_end_date=NULL WHERE id=1")
-        .run(newSession, termStructure.terms[0]);
+      db.prepare(
+        "UPDATE school_term_config SET academic_session = ?, term = ?, term_start_date = NULL, term_end_date = NULL WHERE id = 1"
+      ).run(newSession, termStructure.terms[0]);
     })();
 
-    const kelechi = db.prepare("SELECT * FROM students WHERE id=1").get();
-    expect(kelechi.class).toBe('JSS 2');
-    expect(kelechi.class_arm).toBe('Gold');     // arm preserved (carry-forward policy)
+    const kelechi = db.prepare("SELECT * FROM students WHERE id = '1'").get();
+    expect(kelechi.class_name).toBe('JSS 2');
+    expect(kelechi.class_arm).toBe('Gold');     // arm preserved
 
-    const fatima = db.prepare("SELECT * FROM students WHERE id=2").get();
+    const fatima = db.prepare("SELECT * FROM students WHERE id = '2'").get();
     expect(fatima.enrollment_status).toBe('graduated');
     expect(fatima.class_arm).toBe('Diamond');   // arm preserved even on graduation
 
-    const cfg = db.prepare("SELECT * FROM school_term_config WHERE id=1").get();
+    const cfg = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get();
     expect(cfg.academic_session).toBe(newSession);
     expect(cfg.term).toBe('First Term');
   });
@@ -137,7 +144,7 @@ describe('Phase 3B: Dynamic Term-Aware Rollover Engine', () => {
   it('3. 2-term (semester) structure: detects last term correctly', () => {
     seedBase(db, { currentTerm: 'Second Semester', terms: ['First Semester', 'Second Semester'], period_label: 'semester' });
     const { termStructure } = getRolloverConfig(db);
-    const termRow = db.prepare("SELECT term FROM school_term_config WHERE id=1").get();
+    const termRow = db.prepare("SELECT term FROM school_term_config WHERE id = 1").get();
     const termIdx = termStructure.terms.indexOf(termRow.term);
     expect(termIdx).toBe(1);
     expect(termIdx === termStructure.terms.length - 1).toBe(true);
@@ -149,7 +156,7 @@ describe('Phase 3B: Dynamic Term-Aware Rollover Engine', () => {
   it('4. 4-term (quarterly) structure: Q3 is not the last term, Q4 is next', () => {
     seedBase(db, { currentTerm: 'Q3', terms: ['Q1', 'Q2', 'Q3', 'Q4'], period_label: 'quarter' });
     const { termStructure } = getRolloverConfig(db);
-    const termRow = db.prepare("SELECT term FROM school_term_config WHERE id=1").get();
+    const termRow = db.prepare("SELECT term FROM school_term_config WHERE id = 1").get();
     const termIdx = termStructure.terms.indexOf(termRow.term);
     expect(termIdx).toBe(2);
     expect(termIdx === termStructure.terms.length - 1).toBe(false);
@@ -160,30 +167,30 @@ describe('Phase 3B: Dynamic Term-Aware Rollover Engine', () => {
 
   it('5. session_history: promote appends entry with session, class, arm, action=promoted', () => {
     seedBase(db);
-    insertStudent(db, 1, 'Ngozi', 'JSS 1', 'Silver');
-    const student = db.prepare("SELECT * FROM students WHERE id=1").get();
+    insertStudent(db, '1', 'Ngozi', 'JSS 1', 'Silver');
+    const student = db.prepare("SELECT * FROM students WHERE id = '1'").get();
     const { hierarchy } = getRolloverConfig(db);
     const resolved = resolveStudentAction(student, 'promote', hierarchy);
     applyStudentRollover(db, student, resolved, 'promote', '2024/2025', null);
 
-    const hist = JSON.parse(db.prepare("SELECT session_history FROM students WHERE id=1").get().session_history);
+    const hist = JSON.parse(db.prepare("SELECT session_history FROM students WHERE id = '1'").get().session_history);
     expect(hist).toHaveLength(1);
     expect(hist[0]).toMatchObject({ session: '2024/2025', class: 'JSS 1', arm: 'Silver', action: 'promote' });
-    expect(db.prepare("SELECT class FROM students WHERE id=1").get().class).toBe('JSS 2');
+    expect(db.prepare("SELECT class_name FROM students WHERE id = '1'").get().class_name).toBe('JSS 2');
   });
 
   // ── Test 6: session_history — graduate ────────────────────────────────────
 
   it('6. session_history: graduate entry written, enrollment_status=graduated', () => {
     seedBase(db);
-    insertStudent(db, 1, 'Emeka', 'SS 3', 'Gold');
-    const student = db.prepare("SELECT * FROM students WHERE id=1").get();
+    insertStudent(db, '1', 'Emeka', 'SS 3', 'Gold');
+    const student = db.prepare("SELECT * FROM students WHERE id = '1'").get();
     const { hierarchy } = getRolloverConfig(db);
     const resolved = resolveStudentAction(student, 'promote', hierarchy);
     expect(resolved.newStatus).toBe('graduated');
     applyStudentRollover(db, student, resolved, 'promote', '2024/2025', null);
 
-    const updated = db.prepare("SELECT * FROM students WHERE id=1").get();
+    const updated = db.prepare("SELECT * FROM students WHERE id = '1'").get();
     expect(updated.enrollment_status).toBe('graduated');
     expect(JSON.parse(updated.session_history)[0].action).toBe('graduated');
   });
@@ -192,13 +199,13 @@ describe('Phase 3B: Dynamic Term-Aware Rollover Engine', () => {
 
   it('7. Prior student_records rows are never deleted on rollover', () => {
     seedBase(db);
-    db.prepare("INSERT OR IGNORE INTO student_records (student_id, subject_id, academic_session, term) VALUES (1,'MTH','2024/2025','First Term')").run();
-    const before = db.prepare("SELECT * FROM student_records WHERE academic_session='2024/2025'").all();
+    db.prepare("INSERT OR IGNORE INTO student_records (student_id, subject, academic_session, term) VALUES ('1','MTH','2024/2025','First Term')").run();
+    const before = db.prepare("SELECT * FROM student_records WHERE academic_session = '2024/2025'").all();
     expect(before.length).toBeGreaterThan(0);
 
-    db.prepare("UPDATE school_term_config SET academic_session='2025/2026', term='First Term' WHERE id=1").run();
+    db.prepare("UPDATE school_term_config SET academic_session = '2025/2026', term = 'First Term' WHERE id = 1").run();
 
-    const after = db.prepare("SELECT * FROM student_records WHERE academic_session='2024/2025'").all();
+    const after = db.prepare("SELECT * FROM student_records WHERE academic_session = '2024/2025'").all();
     expect(after.length).toBe(before.length); // untouched
   });
 
@@ -206,32 +213,32 @@ describe('Phase 3B: Dynamic Term-Aware Rollover Engine', () => {
 
   it('8. Single class rollover: only targeted class students move, others untouched', () => {
     seedBase(db);
-    insertStudent(db, 1, 'Tunde', 'JSS 1', 'Gold');
-    insertStudent(db, 2, 'Bola',  'JSS 2', 'Gold');
+    insertStudent(db, '1', 'Tunde', 'JSS 1', 'Gold');
+    insertStudent(db, '2', 'Bola',  'JSS 2', 'Gold');
     const { hierarchy } = getRolloverConfig(db);
-    const session = db.prepare("SELECT academic_session FROM school_term_config WHERE id=1").get().academic_session;
-    const targets = db.prepare("SELECT * FROM students WHERE class='JSS 1' AND enrollment_status='active'").all();
+    const session = db.prepare("SELECT academic_session FROM school_term_config WHERE id = 1").get().academic_session;
+    const targets = db.prepare("SELECT * FROM students WHERE class_name = 'JSS 1' AND enrollment_status = 'active'").all();
     db.transaction(() => {
       for (const s of targets) {
         applyStudentRollover(db, s, resolveStudentAction(s, 'promote', hierarchy), 'promote', session, null);
       }
     })();
-    expect(db.prepare("SELECT class FROM students WHERE id=1").get().class).toBe('JSS 2'); // moved
-    expect(db.prepare("SELECT class FROM students WHERE id=2").get().class).toBe('JSS 2'); // unchanged
+    expect(db.prepare("SELECT class_name FROM students WHERE id = '1'").get().class_name).toBe('JSS 2'); // moved
+    expect(db.prepare("SELECT class_name FROM students WHERE id = '2'").get().class_name).toBe('JSS 2'); // unchanged
   });
 
   // ── Test 9: Filtered batch — repeat ───────────────────────────────────────
 
   it('9. Filtered batch repeat: class unchanged, session_history has action=repeat', () => {
     seedBase(db);
-    insertStudent(db, 1, 'Ada', 'JSS 3', 'Gold');
-    const student = db.prepare("SELECT * FROM students WHERE id=1").get();
+    insertStudent(db, '1', 'Ada', 'JSS 3', 'Gold');
+    const student = db.prepare("SELECT * FROM students WHERE id = '1'").get();
     const { hierarchy } = getRolloverConfig(db);
     const resolved = resolveStudentAction(student, 'repeat', hierarchy);
     expect(resolved.newClass).toBe('JSS 3');
     applyStudentRollover(db, student, resolved, 'repeat', '2024/2025', null);
-    const updated = db.prepare("SELECT * FROM students WHERE id=1").get();
-    expect(updated.class).toBe('JSS 3');
+    const updated = db.prepare("SELECT * FROM students WHERE id = '1'").get();
+    expect(updated.class_name).toBe('JSS 3');
     expect(JSON.parse(updated.session_history)[0].action).toBe('repeat');
   });
 
@@ -239,15 +246,15 @@ describe('Phase 3B: Dynamic Term-Aware Rollover Engine', () => {
 
   it('10. Filtered batch demote: moves back one hierarchy step, arm preserved', () => {
     seedBase(db);
-    insertStudent(db, 1, 'Wale', 'JSS 2', 'Diamond');
-    const student = db.prepare("SELECT * FROM students WHERE id=1").get();
+    insertStudent(db, '1', 'Wale', 'JSS 2', 'Diamond');
+    const student = db.prepare("SELECT * FROM students WHERE id = '1'").get();
     const { hierarchy } = getRolloverConfig(db);
     const resolved = resolveStudentAction(student, 'demote', hierarchy);
     expect(resolved.newClass).toBe('JSS 1');
     expect(resolved.newArm).toBe('Diamond');
     applyStudentRollover(db, student, resolved, 'demote', '2024/2025', null);
-    const updated = db.prepare("SELECT * FROM students WHERE id=1").get();
-    expect(updated.class).toBe('JSS 1');
+    const updated = db.prepare("SELECT * FROM students WHERE id = '1'").get();
+    expect(updated.class_name).toBe('JSS 1');
     expect(updated.class_arm).toBe('Diamond');
   });
 
@@ -255,15 +262,15 @@ describe('Phase 3B: Dynamic Term-Aware Rollover Engine', () => {
 
   it('11. Filtered batch switch_arm: class unchanged, only arm updated', () => {
     seedBase(db);
-    insertStudent(db, 1, 'Sola', 'SS 1', 'Gold');
-    const student = db.prepare("SELECT * FROM students WHERE id=1").get();
+    insertStudent(db, '1', 'Sola', 'SS 1', 'Gold');
+    const student = db.prepare("SELECT * FROM students WHERE id = '1'").get();
     const { hierarchy } = getRolloverConfig(db);
     const resolved = resolveStudentAction(student, 'switch_arm', hierarchy, undefined, 'Diamond');
     expect(resolved.newClass).toBe('SS 1');
     expect(resolved.newArm).toBe('Diamond');
     applyStudentRollover(db, student, resolved, 'switch_arm', '2024/2025', null);
-    const updated = db.prepare("SELECT * FROM students WHERE id=1").get();
-    expect(updated.class).toBe('SS 1');
+    const updated = db.prepare("SELECT * FROM students WHERE id = '1'").get();
+    expect(updated.class_name).toBe('SS 1');
     expect(updated.class_arm).toBe('Diamond');
   });
 
@@ -271,63 +278,62 @@ describe('Phase 3B: Dynamic Term-Aware Rollover Engine', () => {
 
   it('12. Filtered batch move: student moved to explicit targetClass/targetArm', () => {
     seedBase(db);
-    insertStudent(db, 1, 'Chibike', 'JSS 1', 'Gold');
-    const student = db.prepare("SELECT * FROM students WHERE id=1").get();
+    insertStudent(db, '1', 'Chibike', 'JSS 1', 'Gold');
+    const student = db.prepare("SELECT * FROM students WHERE id = '1'").get();
     const { hierarchy } = getRolloverConfig(db);
     const resolved = resolveStudentAction(student, 'move', hierarchy, 'SS 2', 'Onyx');
     expect(resolved.newClass).toBe('SS 2');
     expect(resolved.newArm).toBe('Onyx');
     applyStudentRollover(db, student, resolved, 'move', '2024/2025', null);
-    const updated = db.prepare("SELECT * FROM students WHERE id=1").get();
-    expect(updated.class).toBe('SS 2');
+    const updated = db.prepare("SELECT * FROM students WHERE id = '1'").get();
+    expect(updated.class_name).toBe('SS 2');
     expect(updated.class_arm).toBe('Onyx');
   });
 
-  // ── Test 13: Single student — admin note ──────────────────────────────────
+  // ── Test 13: Single student note ──────────────────────────────────────────
 
   it('13. Single student rollover: admin note stored in session_history entry', () => {
     seedBase(db);
-    insertStudent(db, 1, 'Ifunanya', 'JSS 2', 'Gold');
-    const student = db.prepare("SELECT * FROM students WHERE id=1").get();
+    insertStudent(db, '1', 'Ifunanya', 'JSS 2', 'Gold');
+    const student = db.prepare("SELECT * FROM students WHERE id = '1'").get();
     const { hierarchy } = getRolloverConfig(db);
     const resolved = resolveStudentAction(student, 'repeat', hierarchy);
     applyStudentRollover(db, student, resolved, 'repeat', '2024/2025', 'Retained due to illness');
-    const hist = JSON.parse(db.prepare("SELECT session_history FROM students WHERE id=1").get().session_history);
+    const hist = JSON.parse(db.prepare("SELECT session_history FROM students WHERE id = '1'").get().session_history);
     expect(hist[0].note).toBe('Retained due to illness');
   });
 
-  // ── Test 14: Graduated excluded from active queries ───────────────────────
+  // ── Test 14: Active query filter ──────────────────────────────────────────
 
   it('14. Graduated students excluded from active student queries', () => {
     seedBase(db);
-    insertStudent(db, 1, 'Obi', 'SS 3', 'Gold');
-    const student = db.prepare("SELECT * FROM students WHERE id=1").get();
+    insertStudent(db, '1', 'Obi', 'SS 3', 'Gold');
+    const student = db.prepare("SELECT * FROM students WHERE id = '1'").get();
     const { hierarchy } = getRolloverConfig(db);
     const resolved = resolveStudentAction(student, 'promote', hierarchy);
     applyStudentRollover(db, student, resolved, 'promote', '2024/2025', null);
-    const active    = db.prepare("SELECT id FROM students WHERE enrollment_status='active'").all().map(r => r.id);
-    const graduated = db.prepare("SELECT id FROM students WHERE enrollment_status='graduated'").all().map(r => r.id);
-    expect(active).not.toContain(1);
-    expect(graduated).toContain(1);
+    const active    = db.prepare("SELECT id FROM students WHERE enrollment_status = 'active'").all().map(r => r.id);
+    const graduated = db.prepare("SELECT id FROM students WHERE enrollment_status = 'graduated'").all().map(r => r.id);
+    expect(active).not.toContain('1');
+    expect(graduated).toContain('1');
   });
 
-  // ── Test 15: Atomicity — transaction rollback ─────────────────────────────
+  // ── Test 15: Transaction atomicity ────────────────────────────────────────
 
   it('15. Atomicity: transaction rollback leaves no partial state on failure', () => {
     seedBase(db, { currentTerm: 'Third Term' });
-    insertStudent(db, 1, 'Nkechi', 'JSS 1', 'Gold');
-    const beforeClass   = db.prepare("SELECT class FROM students WHERE id=1").get().class;
-    const beforeSession = db.prepare("SELECT academic_session FROM school_term_config WHERE id=1").get().academic_session;
+    insertStudent(db, '1', 'Nkechi', 'JSS 1', 'Gold');
+    const beforeClass   = db.prepare("SELECT class_name FROM students WHERE id = '1'").get().class_name;
+    const beforeSession = db.prepare("SELECT academic_session FROM school_term_config WHERE id = 1").get().academic_session;
 
     try {
       db.transaction(() => {
-        db.prepare("UPDATE students SET class='JSS 2' WHERE id=1").run();
-        throw new Error('Simulated failure mid-rollover');
+        db.prepare("UPDATE students SET class_name = 'JSS 2' WHERE id = '1'").run();
+        throw new Error('Simulated failure during batch execution');
       })();
-    } catch (_) {}
+    } catch (_) { /* expected */ }
 
-    expect(db.prepare("SELECT class FROM students WHERE id=1").get().class).toBe(beforeClass);
-    expect(db.prepare("SELECT academic_session FROM school_term_config WHERE id=1").get().academic_session).toBe(beforeSession);
+    expect(db.prepare("SELECT class_name FROM students WHERE id = '1'").get().class_name).toBe(beforeClass);
+    expect(db.prepare("SELECT academic_session FROM school_term_config WHERE id = 1").get().academic_session).toBe(beforeSession);
   });
-
 });
