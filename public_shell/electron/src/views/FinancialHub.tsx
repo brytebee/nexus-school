@@ -307,7 +307,7 @@ export function FinancialHub() {
         adjustment: 'processFeeAdjustmentCSV',
       };
 
-      api?.[listeners[type]]?.((res: { count: number; error: string | null; setupCheck?: any }) => {
+      api?.[listeners[type]]?.((res: { count: number; error: string | null; blocking?: any[]; warnings?: string[]; setupCheck?: any }) => {
         // ── Setup guard intercept ──
         if (res.error === 'SETUP_INCOMPLETE' || res.setupCheck) {
           const sc = res.setupCheck || {};
@@ -318,21 +318,51 @@ export function FinancialHub() {
           return;
         }
 
-        const msg = res.error
-          ? `❌ Error: ${res.error}`
+        const blocking: any[] = res.blocking || [];
+        const warnings: string[] = res.warnings || [];
+        const msg = (res.error || blocking.length > 0)
+          ? `❌ Error: ${res.error || `${blocking.length} conflicting row(s)`}`
           : `✅ ${res.count} row${res.count === 1 ? '' : 's'} imported successfully.`;
         setCsvImportStatus(prev => ({ ...prev, [type]: { loading: false, result: msg } }));
 
         const Swal = (window as any).Swal;
         if (Swal) {
-          if (res.error) {
+          if (res.error || blocking.length > 0) {
+            let htmlContent = '';
+            if (res.error && res.error.startsWith('WRONG_TEMPLATE:')) {
+              htmlContent = '<div style="font-size: 13px; color: #fca5a5;">Wrong file selected. Please use the official Nexus Fee CSV template.</div>';
+            } else if (blocking && blocking.length > 0) {
+              const issuesHtml = blocking.map((b: any) => `
+                <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); padding: 8px 12px; border-radius: 6px; font-size: 12px; text-align: left; margin-bottom: 6px;">
+                  <strong style="color: #f87171;">Row ${b.rowIndex || '?'}${b.field ? ` (${b.field})` : ''}:</strong> <span style="color: #fca5a5;">${b.reason || 'Invalid data value'}</span>
+                </div>
+              `).join('');
+
+              htmlContent = `
+                <div style="display: flex; flex-direction: column; gap: 8px; text-align: left;">
+                  <p style="margin: 0 0 10px; font-size: 13px; color: #fca5a5; font-weight: 600;">
+                    ${res.error || 'Import blocked due to conflicting or unregistered items.'}
+                  </p>
+                  <div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">
+                    Conflicting / Unregistered Items (${blocking.length}):
+                  </div>
+                  <div style="max-height: 220px; overflow-y: auto; padding-right: 4px;">
+                    ${issuesHtml}
+                  </div>
+                </div>
+              `;
+            } else {
+              htmlContent = `<div style="font-size: 13px; color: #fca5a5; text-align: left;">${res.error}</div>`;
+            }
+
             Swal.fire({
               title: 'Import Failed',
-              text: res.error,
+              html: htmlContent,
               icon: 'error',
               background: '#0b0f19',
               color: '#fff',
-              confirmButtonColor: '#ef4444'
+              confirmButtonColor: '#ef4444',
+              width: blocking && blocking.length > 0 ? '540px' : '420px',
             });
           } else if (type === 'structure') {
             Swal.fire({
@@ -344,9 +374,12 @@ export function FinancialHub() {
               confirmButtonColor: '#00E5FF'
             });
           } else {
+            const warningNotice = warnings.length > 0
+              ? `<div style="margin-top: 10px; font-size: 12px; color: #f59e0b;">⚠️ ${warnings.length} warning(s): ${warnings.join(', ')}</div>`
+              : '';
             Swal.fire({
               title: 'Success!',
-              text: `${res.count} row${res.count === 1 ? '' : 's'} imported successfully.`,
+              html: `<div>${res.count} row${res.count === 1 ? '' : 's'} imported successfully.</div>${warningNotice}`,
               icon: 'success',
               background: '#0b0f19',
               color: '#fff',
