@@ -91,11 +91,27 @@ export function useLicense() {
     }
   };
 
+  const refreshQuota = async () => {
+    try {
+      if (window.nexusAPI?.license?.refresh) {
+        const res = await window.nexusAPI.license.refresh();
+        if (res?.licenseStatus) {
+          setLicense(res.licenseStatus);
+        }
+        return res;
+      }
+      return { ok: false, reason: 'license.refresh not available' };
+    } catch (err: any) {
+      return { ok: false, reason: err.message || 'Refresh error' };
+    }
+  };
+
   return { 
     license, 
     loading, 
     error, 
     refreshLicense: fetchLicenseStatus, 
+    refreshQuota,
     importLicenseFile, 
     activateOnline 
   };

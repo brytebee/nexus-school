@@ -251,7 +251,14 @@ describe('E. autostartPersist — localStorage and IPC contract', () => {
     expect(mockStorage.getItem('nexus_pulse_autostart')).toBe('false');
   });
 
-  it('calls electronAPI.send with the correct channel and boolean value', () => {
+  it('calls electronAPI.pulse.setAutostart (preferred path) with correct value', () => {
+    const setAutostart = vi.fn();
+    const electronAPI = { pulse: { setAutostart } };
+    autostartPersist(true, mockStorage, electronAPI);
+    expect(setAutostart).toHaveBeenCalledWith(true);
+  });
+
+  it('falls back to electronAPI.send when pulse.setAutostart is absent (legacy mocks)', () => {
     const electronAPI = { send: vi.fn() };
     autostartPersist(true, mockStorage, electronAPI);
     expect(electronAPI.send).toHaveBeenCalledWith('pulse:set-autostart', true);
@@ -261,10 +268,11 @@ describe('E. autostartPersist — localStorage and IPC contract', () => {
     expect(() => autostartPersist(true, mockStorage, null)).not.toThrow();
   });
 
-  it('sends false correctly to IPC', () => {
-    const electronAPI = { send: vi.fn() };
+  it('sends false correctly via pulse.setAutostart', () => {
+    const setAutostart = vi.fn();
+    const electronAPI = { pulse: { setAutostart } };
     autostartPersist(false, mockStorage, electronAPI);
-    expect(electronAPI.send).toHaveBeenCalledWith('pulse:set-autostart', false);
+    expect(setAutostart).toHaveBeenCalledWith(false);
   });
 });
 

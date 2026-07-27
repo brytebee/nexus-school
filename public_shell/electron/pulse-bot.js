@@ -589,7 +589,7 @@ async function sendResults(msg, session, termOverride = null) {
     text += `\n`;
   }
 
-  text += `${DIV}\n_Powered by Nexus Pulse_ 🎓`;
+  text += `${DIV}\n💡 *Quick Menu:* 1=Results · 2=Attendance · 3=Fees · 0=Main Menu\n\n_Powered by Nexus Pulse_ 🎓`;
   await msg.reply(text);
 }
 
@@ -666,7 +666,7 @@ async function sendAttendance(msg, session, termOverride = null) {
     text += `\n`;
   }
 
-  text += `${DIV}\n_For queries, please contact the school office._\n_Powered by Nexus Pulse_ 🎓`;
+  text += `${DIV}\n💡 *Quick Menu:* 1=Results · 2=Attendance · 3=Fees · 0=Main Menu\n\n_For queries, please contact the school office._\n_Powered by Nexus Pulse_ 🎓`;
   await msg.reply(text);
 }
 
@@ -935,21 +935,31 @@ async function handleMessage(msg) {
   }
 
 
+  // Global shortcut to return to Main Menu from any state
+  if (text === '0' || (text && (text.toLowerCase() === 'menu' || text.toLowerCase() === 'home'))) {
+    session.state = STATE.MENU;
+    setSession(matchable, session);
+    await msg.reply(buildMainMenu(session.schoolName || "Nexus School"));
+    return;
+  }
+
   // ── STATE: MENU — waiting for topic selection (1, 2, 3) ─────────────────────
   if (session.state === STATE.MENU) {
     const choiceMap = { 1: "result", 2: "attendance", 3: "fees" };
     const choice = choiceMap[numericInput];
 
     if (!choice) {
-      await msg.reply("Please reply with *1*, *2*, or *3* to choose an option.");
+      await msg.reply("Please reply with *1*, *2*, or *3* to choose an option, or *0* for Main Menu.");
       return;
     }
 
     session.menuChoice = choice;
 
-    // Fee status has no period — deliver immediately (keep session for AWAITING_RECEIPT)
+    // Fee status has no period — deliver immediately (keep session for menu navigation)
     if (choice === "fees") {
       await sendFeeStatus(msg, session, matchable);
+      session.state = STATE.MENU;
+      setSession(matchable, session);
       return;
     }
 
@@ -963,9 +973,10 @@ async function handleMessage(msg) {
   if (session.state === STATE.SCOPE) {
     const deliver = async (scope, termOverride = null) => {
       session.scope = scope;
-      clearSession(matchable);
       if (session.menuChoice === "result") await sendResults(msg, session, termOverride);
       else await sendAttendance(msg, session, termOverride);
+      session.state = STATE.MENU;
+      setSession(matchable, session);
     };
 
     if (numericInput === 1) {
@@ -976,6 +987,8 @@ async function handleMessage(msg) {
       session.state = STATE.TERM_SELECT;
       setSession(matchable, session);
       await msg.reply(buildTermMenu());
+    } else {
+      await msg.reply("Please reply with *1*, *2*, or *3*, or *0* for Main Menu.");
     }
     return;
   }
@@ -1656,8 +1669,12 @@ module.exports = {
     if (target.length === 10) target = "234" + target;
     else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
     if (!target.includes("@c.us")) target += "@c.us";
-    const media = new MessageMedia("application/pdf", pdfBuffer.toString("base64"), filename);
-    await client.sendMessage(target, media, { caption });
+    // Normalise to Buffer — Electron 31+ printToPDF returns Uint8Array, not Buffer
+    const safeBuffer = Buffer.isBuffer(pdfBuffer) ? pdfBuffer : Buffer.from(pdfBuffer);
+    console.log(`[Pulse Bot] Preparing PDF document send to ${target} (${filename}, ${safeBuffer.length} bytes)…`);
+    const media = new MessageMedia("application/pdf", safeBuffer.toString("base64"), filename);
+    await client.sendMessage(target, media, { caption, sendMediaAsDocument: true });
+    console.log(`[Pulse Bot] Successfully sent PDF document to ${target}`);
   }
 };
 

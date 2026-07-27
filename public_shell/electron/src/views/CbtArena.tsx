@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { generateSessionsList } from '../lib/sessions';
+import { useTermConfig } from '../hooks/useTermConfig';
 import { 
   BookOpen, Upload, Search, FileText, Trash2, Edit2, Database, Settings, HelpCircle, 
   QrCode, CheckCircle, XCircle, ShieldAlert, Plus, ArrowLeft, RefreshCw, Key, Info, Play
@@ -34,6 +35,7 @@ interface CbtArenaProps {
 }
 
 export function CbtArena({ onOpenHelp }: CbtArenaProps) {
+  const { session: configSession, termsList, sessionsList } = useTermConfig();
   const { requireSudo } = useSudoAuth();
   const { configs, fullList } = useClassArms();
   const cbtClassOptions = React.useMemo(() => {
@@ -92,6 +94,15 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
   const [classHierarchy, setClassHierarchy] = useState<string[]>([]);
   const [classArms, setClassArms] = useState<string[]>([]);
   const [availableTerms, setAvailableTerms] = useState<string[]>(['First', 'Second', 'Third']);
+
+  // Bootstrap from global term config (single source of truth)
+  useEffect(() => {
+    if (configSession && !academicSession) setAcademicSession(configSession);
+    if (termsList.length > 0) {
+      setAvailableTerms(termsList);
+      if (!deployTerm) setDeployTerm(termsList[0]);
+    }
+  }, [configSession, termsList]);
   
   // Deploy external candidate state
   const [csvFile, setCsvFile] = useState<File | null>(null);
@@ -375,7 +386,7 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
     if (!window.electronAPI?.cbt?.getSystemSettings) return;
     try {
       const settings = await window.electronAPI.cbt.getSystemSettings();
-      setAcademicSession(settings.current_academic_session || '');
+      setAcademicSession(configSession || settings.current_academic_session || '');
       // Parse class_hierarchy (array of level strings, e.g. ["JSS1","JSS2",...,"SS3"])
       if (settings.class_hierarchy) {
         const hierarchy = typeof settings.class_hierarchy === 'string'
@@ -1564,8 +1575,8 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
     try {
       const res = await window.electronAPI.fees.getTransactions({
         student_id: scanData.trim(),
-        academic_session: '2025/2026',
-        term: 'First Term'
+        academic_session: academicSession || configSession || '2025/2026',
+        term: deployTerm || termsList[0] || 'First Term'
       });
       
       if (res.ok) {
@@ -2040,13 +2051,16 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
 
                 <div>
                   <label className="ph-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)', display: 'block', marginBottom: '6px' }}>Academic Session</label>
-                  <input
-                    type="text"
-                    value={academicSession || 'Not set — configure in Settings'}
-                    readOnly
+                  <select
+                    value={academicSession}
+                    onChange={(e) => setAcademicSession(e.target.value)}
                     className="modern-input"
-                    style={{ width: '100%', opacity: 0.6, cursor: 'default' }}
-                  />
+                    style={{ width: '100%', background: '#0d1235', color: '#fff' }}
+                  >
+                    {sessionsList.map(s => (
+                      <option key={s} value={s} style={{ background: '#0d1235', color: '#fff' }}>{s}</option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>
@@ -2058,7 +2072,7 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                     style={{ width: '100%', background: '#0d1235', color: '#fff' }}
                   >
                     {availableTerms.map(t => (
-                      <option key={t} value={t} style={{ background: '#0d1235', color: '#fff' }}>{t} Term</option>
+                      <option key={t} value={t} style={{ background: '#0d1235', color: '#fff' }}>{t.endsWith('Term') ? t : `${t} Term`}</option>
                     ))}
                   </select>
                 </div>

@@ -69,7 +69,10 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
   };
 
   // Config States
-  const [session, setSession] = useState("2025/2026");
+  const [session, setSession] = useState(() => {
+    const y = new Date().getFullYear();
+    return `${y}/${y + 1}`;
+  });
   const [term, setTerm] = useState("First Term");
   const [resumptionDate, setResumptionDate] = useState("");
   const [termStartDate, setTermStartDate] = useState("");
@@ -317,6 +320,42 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
   };
 
   const handleSaveConfig = async () => {
+    const trimmedSession = (session || "").trim();
+    const trimmedTerm = (term || "").trim();
+    const SESSION_REGEX = /^\d{4}\/\d{4}$/;
+
+    if (!trimmedSession || !SESSION_REGEX.test(trimmedSession)) {
+      if (typeof (window as any).Swal !== "undefined") {
+        (window as any).Swal.fire({
+          title: "Invalid Academic Session",
+          text: "Academic session is required and must follow the YYYY/YYYY format (e.g., 2025/2026).",
+          icon: "error",
+          confirmButtonColor: "#00E5FF",
+          background: "#0d1235",
+          color: "#fff",
+        });
+      } else {
+        alert("Error: Academic session is required and must follow the YYYY/YYYY format (e.g., 2025/2026).");
+      }
+      return;
+    }
+
+    if (!trimmedTerm) {
+      if (typeof (window as any).Swal !== "undefined") {
+        (window as any).Swal.fire({
+          title: "Missing Term Selection",
+          text: "Please select an explicit term (First Term, Second Term, or Third Term).",
+          icon: "error",
+          confirmButtonColor: "#00E5FF",
+          background: "#0d1235",
+          color: "#fff",
+        });
+      } else {
+        alert("Error: Please select an explicit term.");
+      }
+      return;
+    }
+
     if (totalScoreSum > 100) {
       if (typeof (window as any).Swal !== "undefined") {
         (window as any).Swal.fire({
@@ -349,8 +388,8 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
 
       const hasAttendanceAccess = currentTier !== "Silver" && currentTier !== "Standalone";
       const config = {
-        academic_session: session,
-        term,
+        academic_session: trimmedSession,
+        term: trimmedTerm,
         resumption_date: resumptionDate,
         term_start_date: termStartDate,
         term_end_date: termEndDate,
@@ -367,7 +406,43 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
       const res = await window.electronAPI.saveTermConfig(config);
       if (res?.ok) {
         setSaveStatus("✅ Saved successfully.");
+        try {
+          window.dispatchEvent(new CustomEvent('term-config-updated', { detail: config }));
+        } catch (_) {}
         setTimeout(() => setSaveStatus(""), 2500);
+
+        if (typeof (window as any).Swal !== "undefined") {
+          (window as any).Swal.fire({
+            title: "Configuration Saved Successfully!",
+            html: `
+              <div style="text-align: left; font-size: 13px; line-height: 1.7; color: #cbd5e1; font-family: sans-serif;">
+                <div style="background: rgba(0, 229, 255, 0.08); border: 1px solid rgba(0, 229, 255, 0.25); padding: 12px 14px; border-radius: 8px; margin-bottom: 14px;">
+                  <strong style="color: #00E5FF; font-size: 15px; display: block; margin-bottom: 4px;">📌 Active Term Settings</strong>
+                  <div><strong>Academic Session:</strong> <span style="color: #fff; font-weight: 600;">${trimmedSession}</span></div>
+                  <div><strong>Term:</strong> <span style="color: #fff; font-weight: 600;">${trimmedTerm}</span></div>
+                </div>
+                
+                <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); padding: 12px 14px; border-radius: 8px; margin-bottom: 14px;">
+                  <strong style="color: #fff; font-size: 13px; display: block; margin-bottom: 4px;">📅 Calendar Dates</strong>
+                  <div><strong>Term Start:</strong> <span style="color: #94a3b8;">${termStartDate || "Not set"}</span></div>
+                  <div><strong>Term End:</strong> <span style="color: #94a3b8;">${termEndDate || "Not set"}</span></div>
+                  <div><strong>Next Resumption:</strong> <span style="color: #94a3b8;">${resumptionDate || "Not set"}</span></div>
+                </div>
+
+                <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); padding: 12px 14px; border-radius: 8px;">
+                  <strong style="color: #fff; font-size: 13px; display: block; margin-bottom: 4px;">📊 Grading & Rules</strong>
+                  <div><strong>Grading Breakdown Total:</strong> <span style="color: #10b981; font-weight: bold;">${totalScoreSum} pts</span></div>
+                  <div><strong>Exclude Unregistered Courses:</strong> <span style="color: ${excludeUnregistered ? '#10b981' : '#94a3b8'};">${excludeUnregistered ? 'Yes (Enabled)' : 'No (Disabled)'}</span></div>
+                </div>
+              </div>
+            `,
+            icon: "success",
+            confirmButtonColor: "#00E5FF",
+            confirmButtonText: "Got it!",
+            background: "#0d1235",
+            color: "#fff",
+          });
+        }
       } else if (res?.error === 'SETUP_INCOMPLETE' || res?.step) {
         setSaveStatus("❌ Save failed: Setup incomplete.");
         setSetupGuardStep(res.step || 'students');

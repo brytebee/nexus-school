@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useIdentity, SchoolIdentity } from '../hooks/useIdentity';
 import { useLicense } from '../hooks/useLicense';
 import { useSudoAuth } from '../context/SudoAuthContext';
@@ -7,6 +7,16 @@ import { validateUsername, validatePin, validatePhone, validateEmail, validateNo
 interface SettingsProps {
   onResetSuccess?: () => void;
   onTabChange?: (tab: string) => void;
+}
+
+// ── Phase 5: Section manager item shape returned from IPC ─────────────────────
+interface DepartmentManagerItem {
+  id?: number;
+  section_name: string;
+  class_prefixes: string | string[]; // stored as JSON string, may arrive parsed
+  manager_title: string;
+  manager_name: string;
+  sign_base64?: string | null;
 }
 
 const identityTemplateObj = {
@@ -25,7 +35,7 @@ const identityTemplateUri = "data:application/json;charset=utf-8," + encodeURICo
 
 export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
   const { identity, saveIdentity } = useIdentity();
-  const { license } = useLicense();
+  const { license, refreshQuota } = useLicense();
   const { requireSudo } = useSudoAuth();
 
   const currentTier = license?.tier || 'Silver';
@@ -78,6 +88,105 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
   // Terminal mode states
   const [terminalMode, setTerminalMode] = useState('master');
   const [masterIp, setMasterIp] = useState('');
+
+  // Department Managers State (Phase 5)
+  // (DepartmentManagerItem defined at module scope above)
+
+  const [deptManagers, setDeptManagers] = useState<DepartmentManagerItem[]>([]);
+  const [editingDeptMgr, setEditingDeptMgr] = useState<DepartmentManagerItem | null>(null);
+  const [showDeptMgrModal, setShowDeptMgrModal] = useState(false);
+  const [deptSectionName, setDeptSectionName] = useState('');
+  const [deptClassPrefixes, setDeptClassPrefixes] = useState('');
+  const [deptManagerTitle, setDeptManagerTitle] = useState('Principal');
+  const [deptManagerName, setDeptManagerName] = useState('');
+  const [deptSignBase64, setDeptSignBase64] = useState<string | undefined>(undefined);
+
+  const loadDeptManagers = async () => {
+    try {
+      const api = (window as any).electronAPI;
+      const res = api?.listDepartmentManagers ? await api.listDepartmentManagers() : await api?.invoke?.('department-managers:list');
+      if (res && res.ok && Array.isArray(res.managers)) {
+        setDeptManagers(res.managers);
+      }
+    } catch (e) {
+      console.error('Failed to load department managers:', e);
+    }
+  };
+
+  useEffect(() => {
+    loadDeptManagers();
+  }, []);
+
+  const handleSaveDeptManager = async () => {
+    if (!deptSectionName.trim()) {
+      alert('Section name is required (e.g. Secondary, Primary, Nursery).');
+      return;
+    }
+    const api = (window as any).electronAPI;
+    const prefixes = deptClassPrefixes
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+
+    const payload = {
+      id: editingDeptMgr?.id,
+      section_name: deptSectionName.trim(),
+      class_prefixes: prefixes,
+      manager_title: deptManagerTitle.trim() || 'Principal',
+      manager_name: deptManagerName.trim(),
+      sign_base64: deptSignBase64 || null,
+    };
+
+    const res = api?.saveDepartmentManager ? await api.saveDepartmentManager(payload) : await api?.invoke?.('department-managers:save', payload);
+    if (res && res.ok) {
+      setShowDeptMgrModal(false);
+      setEditingDeptMgr(null);
+      setDeptSectionName('');
+      setDeptClassPrefixes('');
+      setDeptManagerTitle('Principal');
+      setDeptManagerName('');
+      setDeptSignBase64(undefined);
+      loadDeptManagers();
+    } else {
+      alert(res?.error || 'Failed to save department manager.');
+    }
+  };
+
+  const handleDeleteDeptManager = async (id: number) => {
+    if (!confirm('Are you sure you want to remove this department manager?')) return;
+    const api = (window as any).electronAPI;
+    const res = api?.deleteDepartmentManager ? await api.deleteDepartmentManager({ id }) : await api?.invoke?.('department-managers:delete', { id });
+    if (res && res.ok) {
+      loadDeptManagers();
+    }
+  };
+
+  const openAddDeptMgr = () => {
+    setEditingDeptMgr(null);
+    setDeptSectionName('');
+    setDeptClassPrefixes('');
+    setDeptManagerTitle('Principal');
+    setDeptManagerName('');
+    setDeptSignBase64(undefined);
+    setShowDeptMgrModal(true);
+  };
+
+  const openEditDeptMgr = (mgr: DepartmentManagerItem) => {
+    setEditingDeptMgr(mgr);
+    setDeptSectionName(mgr.section_name);
+    let prefixes = '';
+    try {
+      const arr = typeof mgr.class_prefixes === 'string' ? JSON.parse(mgr.class_prefixes) : mgr.class_prefixes;
+      if (Array.isArray(arr)) prefixes = arr.join(', ');
+    } catch (_) {
+      prefixes = String(mgr.class_prefixes || '');
+    }
+    setDeptClassPrefixes(prefixes);
+    setDeptManagerTitle(mgr.manager_title || 'Principal');
+    setDeptManagerName(mgr.manager_name || '');
+    setDeptSignBase64(mgr.sign_base64 || undefined);
+    setShowDeptMgrModal(true);
+  };
   const [showMasterIp, setShowMasterIp] = useState(false);
 
   // SVG stamp previews cache
@@ -86,6 +195,19 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [identityUploadStatus, setIdentityUploadStatus] = useState<'idle' | 'success' | 'error' | 'wrong_template'>('idle');
   const [isTemplateDrawerOpen, setIsTemplateDrawerOpen] = useState(false);
+
+  // Slug availability check
+  type SlugStatus = 'idle' | 'checking' | 'available' | 'taken' | 'offline' | 'error';
+  const [slugStatus, setSlugStatus] = useState<SlugStatus>('idle');
+  const [slugStatusMsg, setSlugStatusMsg] = useState('');
+  const slugDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Seat capacity refresh state
+  const [quotaRefreshing, setQuotaRefreshing] = useState(false);
+  const [quotaRefreshMsg, setQuotaRefreshMsg] = useState('');
+
+  // Seat capacity quick-access panel
+  const [seatCapPanelOpen, setSeatCapPanelOpen] = useState(false);
 
   // Load identity values when they arrive
   useEffect(() => {
@@ -106,6 +228,41 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
       setPremiumPlan(!!(identity as any).premiumPlan);
     }
   }, [identity]);
+
+  // Debounced slug availability check — fires 700ms after user stops typing
+  useEffect(() => {
+    if (!portalSlug || portalSlug.length < 3 || portalSlug.length > 60) {
+      setSlugStatus('idle');
+      setSlugStatusMsg('');
+      return;
+    }
+    if (slugDebounceRef.current) clearTimeout(slugDebounceRef.current);
+    setSlugStatus('checking');
+    setSlugStatusMsg('');
+    slugDebounceRef.current = setTimeout(async () => {
+      try {
+        const result = await (window as any).electronAPI?.slug?.checkAvailability(portalSlug);
+        if (!result) { setSlugStatus('idle'); return; }
+        if (result.offline) {
+          setSlugStatus('offline');
+          setSlugStatusMsg('⚠️ Offline — slug saved locally without online verification.');
+        } else if (result.ok && result.available) {
+          setSlugStatus('available');
+          setSlugStatusMsg('✅ Available — this slug is not taken.');
+        } else if (result.ok && !result.available) {
+          setSlugStatus('taken');
+          setSlugStatusMsg('❌ Slug already taken by another school.');
+        } else {
+          setSlugStatus('error');
+          setSlugStatusMsg(result.message || 'Could not verify.');
+        }
+      } catch {
+        setSlugStatus('offline');
+        setSlugStatusMsg('⚠️ Offline — could not verify online.');
+      }
+    }, 700);
+    return () => { if (slugDebounceRef.current) clearTimeout(slugDebounceRef.current); };
+  }, [portalSlug]);
 
   // On mount: check if this launch was triggered by a user-initiated restore
   useEffect(() => {
@@ -734,7 +891,7 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
         principalPhone,
         phone,
         email,
-        portalSlug: portalSlug.toLowerCase().replace(/[^a-z0-9]/g, '') || undefined,
+        portalSlug: portalSlug.toLowerCase().replace(/[^a-z0-9-]/g, '') || undefined,
         themePrimary,
         themeSecondary,
         stampStyle,
@@ -1224,6 +1381,41 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
           >
             📋
           </button>
+
+          {/* 🎓 Seat Capacity quick-access */}
+          <button
+            id="seat-capacity-btn"
+            onClick={() => setSeatCapPanelOpen(true)}
+            title="View Student Seat Capacity"
+            style={{
+              background: 'rgba(0,229,255,0.05)',
+              border: '1px solid rgba(0,229,255,0.2)',
+              borderRadius: '50%',
+              width: '34px',
+              height: '34px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              boxShadow: '0 0 10px rgba(0,0,0,0.2)',
+              fontSize: '16px',
+              color: '#00e5ff',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(0,229,255,0.6)';
+              e.currentTarget.style.boxShadow = '0 0 12px rgba(0,229,255,0.3)';
+              e.currentTarget.style.background = 'rgba(0,229,255,0.15)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(0,229,255,0.2)';
+              e.currentTarget.style.boxShadow = '0 0 10px rgba(0,0,0,0.2)';
+              e.currentTarget.style.background = 'rgba(0,229,255,0.05)';
+            }}
+          >
+            🎓
+          </button>
+
           {(!currentAdminUser || currentAdminUser.role_level >= 9) && (
             <button
               onClick={handleResetData}
@@ -1473,33 +1665,124 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
               value={portalSlug}
               onChange={(e) => setPortalSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
             />
-            {portalSlug.length > 0 && portalSlug.length < 4 && (
+            {portalSlug.length > 0 && portalSlug.length < 3 && (
               <span style={{ fontSize: '10px', color: '#ff4444', display: 'block', marginTop: '4px' }}>
-                ❌ Too short (minimum 4 characters)
+                ❌ Too short (minimum 3 characters)
               </span>
             )}
-            {portalSlug.length > 30 && (
+            {portalSlug.length > 60 && (
               <span style={{ fontSize: '10px', color: '#ff4444', display: 'block', marginTop: '4px' }}>
-                ❌ Too long (maximum 30 characters)
+                ❌ Too long (maximum 60 characters)
               </span>
             )}
             <span style={{ fontSize: '10px', color: 'var(--text-dim)', display: 'block', marginTop: '4px' }}>
               Your portal will be accessible at:{' '}
               <strong>https://sch.nexusos.com.ng/{portalSlug || 'your-slug'}/parent</strong>
             </span>
-            <div style={{
-              marginTop: '8px',
-              padding: '8px 12px',
-              background: 'rgba(255, 193, 7, 0.05)',
-              border: '1px solid rgba(255, 193, 7, 0.2)',
-              borderRadius: '6px',
-              fontSize: '10.5px',
-              color: '#ffc107',
-              lineHeight: 1.4
-            }}>
-              ⚠️ Portal slugs are not verified for uniqueness. Contact your Nexus operator to confirm this slug is reserved before sharing the portal URL with parents.
-            </div>
+            {/* Live slug availability indicator */}
+            {slugStatus === 'checking' && (
+              <span style={{ fontSize: '10px', color: 'var(--text-dim)', display: 'block', marginTop: '6px' }}>🔍 Checking availability…</span>
+            )}
+            {slugStatus === 'available' && (
+              <span style={{ fontSize: '10px', color: '#22c55e', display: 'block', marginTop: '6px', fontWeight: 600 }}>{slugStatusMsg}</span>
+            )}
+            {slugStatus === 'taken' && (
+              <span style={{ fontSize: '10px', color: '#ef4444', display: 'block', marginTop: '6px', fontWeight: 600 }}>{slugStatusMsg}</span>
+            )}
+            {slugStatus === 'offline' && (
+              <span style={{ fontSize: '10px', color: '#fbbf24', display: 'block', marginTop: '6px' }}>{slugStatusMsg}</span>
+            )}
+            {slugStatus === 'error' && (
+              <span style={{ fontSize: '10px', color: '#f97316', display: 'block', marginTop: '6px' }}>{slugStatusMsg}</span>
+            )}
+            {slugStatus === 'idle' && portalSlug.length >= 3 && (
+              <span style={{ fontSize: '10px', color: 'var(--text-dim)', display: 'block', marginTop: '6px' }}>Type to check availability…</span>
+            )}
           </div>
+
+          {/* ── Seat Capacity Card ── */}
+          {(() => {
+            const cap = license?.student_count;
+            const hasCap = typeof cap === 'number' && isFinite(cap) && cap < 999999;
+            const enrolled = (license as any)?.enrolledCount ?? null;
+            const overQuota = (license as any)?.overQuota ?? false;
+            const overflowCount = overQuota && hasCap && enrolled != null ? Math.max(0, enrolled - cap!) : 0;
+            return (
+              <div style={{
+                marginTop: '4px',
+                padding: '14px 16px',
+                background: overQuota ? 'rgba(239,68,68,0.06)' : 'rgba(0,229,255,0.04)',
+                border: `1px solid ${overQuota ? 'rgba(239,68,68,0.25)' : 'rgba(0,229,255,0.15)'}`,
+                borderRadius: '8px',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: overQuota ? '#ef4444' : '#00e5ff' }}>
+                    🎓 Student Seat Capacity
+                  </span>
+                  <span style={{
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    background: overQuota ? 'rgba(239,68,68,0.15)' : 'rgba(0,229,255,0.1)',
+                    color: overQuota ? '#ef4444' : '#00e5ff'
+                  }}>
+                    {enrolled != null ? enrolled : '—'} / {hasCap ? cap : '∞'} seats used
+                  </span>
+                </div>
+                {overQuota && overflowCount > 0 && (
+                  <p style={{ fontSize: '10.5px', color: '#fbbf24', margin: '0 0 8px', lineHeight: 1.5 }}>
+                    ⚠️ <strong>{overflowCount} student{overflowCount !== 1 ? 's' : ''}</strong> registered beyond capacity (marked as overflow).
+                    Expand your seat plan or archive inactive students to activate them.
+                  </p>
+                )}
+                {!overQuota && hasCap && enrolled != null && (
+                  <div style={{ height: '4px', borderRadius: '3px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden', marginBottom: '8px' }}>
+                    <div style={{
+                      height: '100%',
+                      borderRadius: '3px',
+                      width: `${Math.min(100, Math.round((enrolled / cap!) * 100))}%`,
+                      background: enrolled / cap! > 0.85 ? '#f97316' : '#00e5ff',
+                      transition: 'width 0.4s ease'
+                    }} />
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <button
+                    onClick={async () => {
+                      setQuotaRefreshing(true);
+                      setQuotaRefreshMsg('');
+                      const res = await refreshQuota();
+                      setQuotaRefreshing(false);
+                      setQuotaRefreshMsg(res?.ok ? '✅ Quota refreshed' : '⚠️ Could not refresh');
+                      setTimeout(() => setQuotaRefreshMsg(''), 3000);
+                    }}
+                    disabled={quotaRefreshing}
+                    style={{
+                      fontSize: '10.5px', padding: '5px 10px', borderRadius: '5px', cursor: 'pointer',
+                      background: 'rgba(0,229,255,0.08)', border: '1px solid rgba(0,229,255,0.25)',
+                      color: '#00e5ff', fontWeight: 600
+                    }}
+                  >
+                    {quotaRefreshing ? '⌛ Refreshing…' : '↻ Refresh & Activate Overflow'}
+                  </button>
+                  <button
+                    onClick={() => (window as any).electronAPI?.shell?.openExternal?.('https://nexusos.com.ng/portal/billing')}
+                    style={{
+                      fontSize: '10.5px', padding: '5px 10px', borderRadius: '5px', cursor: 'pointer',
+                      background: 'rgba(255,193,7,0.1)', border: '1px solid rgba(255,193,7,0.3)',
+                      color: '#fbbf24', fontWeight: 600
+                    }}
+                  >
+                    ↗ Upgrade Seat Capacity
+                  </button>
+                  {quotaRefreshMsg && (
+                    <span style={{ fontSize: '10px', color: quotaRefreshMsg.startsWith('✅') ? '#22c55e' : '#fbbf24' }}>{quotaRefreshMsg}</span>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           <div className="form-group">
             <label>Principal's Name (Digital Signature)</label>
@@ -1582,6 +1865,194 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
               )}
             </div>
           </div>
+
+          {/* Department Managers Card (Phase 5) */}
+          <div
+            className="form-group"
+            style={{
+              marginTop: '20px',
+              padding: '16px',
+              borderRadius: '10px',
+              background: 'var(--bg-card, rgba(255,255,255,0.03))',
+              border: '1px solid var(--border-color, rgba(255,255,255,0.1))',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div>
+                <label style={{ fontSize: '15px', fontWeight: '700', color: 'var(--text-main)' }}>
+                  🏛️ Department Managers & Signatures
+                </label>
+                <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '2px' }}>
+                  Configure section managers (Headmaster, Nursery Manager, Principal). The correct signature & title will automatically print on report cards based on the student's class.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={openAddDeptMgr}
+                style={{ padding: '6px 12px', fontSize: '12px', whiteSpace: 'nowrap' }}
+              >
+                ＋ Add Section
+              </button>
+            </div>
+
+            {deptManagers.length === 0 ? (
+              <div style={{ padding: '12px', fontSize: '12px', color: 'var(--text-dim)', fontStyle: 'italic', background: 'rgba(255,255,255,0.02)', borderRadius: '6px' }}>
+                No section managers configured yet. All report cards use the default principal signature above.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
+                {deptManagers.map((mgr) => {
+                  let prefixesDisplay = '';
+                  try {
+                    const arr = typeof mgr.class_prefixes === 'string' ? JSON.parse(mgr.class_prefixes) : mgr.class_prefixes;
+                    if (Array.isArray(arr)) prefixesDisplay = arr.join(', ');
+                  } catch (_) {
+                    prefixesDisplay = String(mgr.class_prefixes || '');
+                  }
+                  return (
+                    <div
+                      key={mgr.id || mgr.section_name}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        background: 'rgba(255,255,255,0.04)',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        {mgr.sign_base64 ? (
+                          <img src={mgr.sign_base64} alt={mgr.manager_title} style={{ height: '32px', maxWidth: '80px', objectFit: 'contain' }} />
+                        ) : (
+                          <div style={{ width: '32px', height: '32px', borderRadius: '4px', background: 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px' }}>✍️</div>
+                        )}
+                        <div>
+                          <div style={{ fontWeight: '700', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span>{mgr.section_name}</span>
+                            <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(0,229,255,0.15)', color: '#00e5ff' }}>
+                              {mgr.manager_title}: {mgr.manager_name || '—'}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '2px' }}>
+                            Class prefixes: <code>{prefixesDisplay || 'None'}</code>
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <button
+                          type="button"
+                          onClick={() => openEditDeptMgr(mgr)}
+                          style={{ padding: '4px 8px', fontSize: '11px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '4px', cursor: 'pointer', color: '#fff' }}
+                        >
+                          ✏️ Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => mgr.id && handleDeleteDeptManager(mgr.id)}
+                          style={{ padding: '4px 8px', fontSize: '11px', background: 'rgba(255,107,107,0.2)', border: 'none', borderRadius: '4px', cursor: 'pointer', color: '#ff6b6b' }}
+                        >
+                          🗑 Delete
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Department Manager Edit/Add Modal */}
+          {showDeptMgrModal && (
+            <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}>
+              <div style={{ background: '#1e293b', padding: '24px', borderRadius: '12px', width: '440px', maxWidth: '90%', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)' }}>
+                <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', color: '#fff' }}>
+                  {editingDeptMgr ? 'Edit Section Manager' : 'Add Section Manager'}
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div>
+                    <label style={{ fontSize: '12px', color: 'var(--text-dim)', display: 'block', marginBottom: '4px' }}>Section Name *</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g. Primary, Secondary, Nursery"
+                      value={deptSectionName}
+                      onChange={(e) => setDeptSectionName(e.target.value)}
+                      style={{ width: '100%', padding: '8px 12px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', color: '#fff' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: 'var(--text-dim)', display: 'block', marginBottom: '4px' }}>Class Prefixes (comma separated) *</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g. Primary, Basic, JSS, SSS, Nursery"
+                      value={deptClassPrefixes}
+                      onChange={(e) => setDeptClassPrefixes(e.target.value)}
+                      style={{ width: '100%', padding: '8px 12px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', color: '#fff' }}
+                    />
+                    <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px' }}>
+                      Classes matching these prefixes will display this manager's signature.
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: 'var(--text-dim)', display: 'block', marginBottom: '4px' }}>Manager Title *</label>
+                    <select
+                      value={deptManagerTitle}
+                      onChange={(e) => setDeptManagerTitle(e.target.value)}
+                      style={{ width: '100%', padding: '8px 12px', background: '#0f172a', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', color: '#fff' }}
+                    >
+                      <option value="Headmaster">Headmaster</option>
+                      <option value="Headmistress">Headmistress</option>
+                      <option value="Principal">Principal</option>
+                      <option value="Nursery Manager">Nursery Manager</option>
+                      <option value="Director">Director</option>
+                      <option value="Vice Principal">Vice Principal</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: 'var(--text-dim)', display: 'block', marginBottom: '4px' }}>Manager Name</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g. Dr. A. B. Cole"
+                      value={deptManagerName}
+                      onChange={(e) => setDeptManagerName(e.target.value)}
+                      style={{ width: '100%', padding: '8px 12px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', color: '#fff' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: 'var(--text-dim)', display: 'block', marginBottom: '4px' }}>Signature Image (.png)</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (ev) => setDeptSignBase64(ev.target?.result as string);
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                      style={{ fontSize: '11px', color: '#ccc' }}
+                    />
+                    {deptSignBase64 && (
+                      <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <img src={deptSignBase64} alt="Signature Preview" style={{ height: '30px' }} />
+                        <button type="button" onClick={() => setDeptSignBase64(undefined)} style={{ background: 'none', border: 'none', color: '#ff6b6b', fontSize: '10px', cursor: 'pointer' }}>✕ Clear</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '20px' }}>
+                  <button type="button" onClick={() => setShowDeptMgrModal(false)} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer' }}>Cancel</button>
+                  <button type="button" onClick={handleSaveDeptManager} style={{ padding: '8px 16px', background: '#00e5ff', border: 'none', borderRadius: '6px', color: '#000', fontWeight: '700', cursor: 'pointer' }}>Save Section</button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div
             className="form-group"
@@ -2659,6 +3130,188 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
           </div>
         </>
       )}
+
+      {/* ── Seat Capacity slide-in panel ───────────────────────────────────── */}
+      {seatCapPanelOpen && (
+        <>
+          {/* Backdrop */}
+          <div
+            onClick={() => setSeatCapPanelOpen(false)}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 5000,
+              background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)',
+            }}
+          />
+          {/* Panel */}
+          <div
+            className="slide-in-right"
+            style={{
+              position: 'fixed', top: 0, right: 0, bottom: 0,
+              width: 'min(400px, 92vw)', zIndex: 5001,
+              background: 'linear-gradient(160deg, #0d1235 0%, #060d24 100%)',
+              borderLeft: '1px solid rgba(0,229,255,0.18)',
+              boxShadow: '-20px 0 60px rgba(0,0,0,0.5)',
+              display: 'flex', flexDirection: 'column', overflow: 'hidden',
+            }}
+          >
+            {/* Panel header */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '20px 24px 16px',
+              borderBottom: '1px solid rgba(255,255,255,0.06)',
+            }}>
+              <div>
+                <p style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#fff' }}>
+                  🎓 Student Seat Capacity
+                </p>
+                <p style={{ margin: '4px 0 0', fontSize: '11px', color: 'var(--text-dim)' }}>
+                  Monitor enrollment vs license limit
+                </p>
+              </div>
+              <button
+                onClick={() => setSeatCapPanelOpen(false)}
+                style={{
+                  background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+                  borderRadius: '8px', color: 'var(--text-dim)', cursor: 'pointer',
+                  fontSize: '18px', lineHeight: 1, padding: '6px 10px',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)'; e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Panel body */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+              {(() => {
+                const cap      = license?.student_count;
+                const hasCap   = typeof cap === 'number' && isFinite(cap) && cap < 999999;
+                const enrolled = (license as any)?.enrolledCount ?? null;
+                const overQuota= (license as any)?.overQuota ?? false;
+                const overflowCount = overQuota && hasCap && enrolled != null ? Math.max(0, enrolled - cap!) : 0;
+                const fillPct  = hasCap && enrolled != null ? Math.min(100, Math.round((enrolled / cap!) * 100)) : 0;
+                const isWarning= hasCap && enrolled != null && enrolled / cap! > 0.85;
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
+                    {/* Usage summary */}
+                    <div style={{
+                      padding: '18px 20px',
+                      background: overQuota ? 'rgba(239,68,68,0.07)' : 'rgba(0,229,255,0.05)',
+                      border: `1px solid ${overQuota ? 'rgba(239,68,68,0.3)' : 'rgba(0,229,255,0.18)'}`,
+                      borderRadius: '12px',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '14px' }}>
+                        <div>
+                          <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>Enrolled Students</p>
+                          <p style={{ margin: '4px 0 0', fontSize: '32px', fontWeight: 800, color: overQuota ? '#ef4444' : '#00e5ff', lineHeight: 1 }}>
+                            {enrolled != null ? enrolled : '—'}
+                          </p>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>License Limit</p>
+                          <p style={{ margin: '4px 0 0', fontSize: '32px', fontWeight: 800, color: 'var(--text-dim)', lineHeight: 1 }}>
+                            {hasCap ? cap : '∞'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {hasCap && enrolled != null && (
+                        <>
+                          <div style={{ height: '6px', borderRadius: '4px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden', marginBottom: '8px' }}>
+                            <div style={{
+                              height: '100%', borderRadius: '4px',
+                              width: `${fillPct}%`,
+                              background: overQuota ? '#ef4444' : isWarning ? '#f97316' : '#00e5ff',
+                              transition: 'width 0.4s ease',
+                            }} />
+                          </div>
+                          <p style={{ margin: 0, fontSize: '11px', color: isWarning || overQuota ? (overQuota ? '#ef4444' : '#f97316') : 'var(--text-dim)' }}>
+                            {fillPct}% capacity used
+                            {overQuota && ` · ${overflowCount} student${overflowCount !== 1 ? 's' : ''} in overflow`}
+                          </p>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Overflow warning */}
+                    {overQuota && overflowCount > 0 && (
+                      <div style={{
+                        padding: '14px 16px',
+                        background: 'rgba(239,68,68,0.07)',
+                        border: '1px solid rgba(239,68,68,0.25)',
+                        borderRadius: '10px',
+                        fontSize: '12.5px',
+                        color: '#fca5a5',
+                        lineHeight: 1.6,
+                      }}>
+                        ⚠️ <strong>{overflowCount} student{overflowCount !== 1 ? 's' : ''}</strong> registered beyond capacity and marked <em>overflow</em>. Expand your seat plan or use Refresh to auto-promote them when slots open.
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <button
+                        id="seat-cap-refresh-btn"
+                        onClick={async () => {
+                          setQuotaRefreshing(true);
+                          setQuotaRefreshMsg('');
+                          const res = await refreshQuota();
+                          setQuotaRefreshing(false);
+                          setQuotaRefreshMsg(res?.ok ? '✅ Quota refreshed & overflow promoted' : '⚠️ Could not refresh');
+                          setTimeout(() => setQuotaRefreshMsg(''), 4000);
+                        }}
+                        disabled={quotaRefreshing}
+                        style={{
+                          width: '100%', padding: '12px', borderRadius: '8px', cursor: 'pointer',
+                          background: 'rgba(0,229,255,0.08)', border: '1px solid rgba(0,229,255,0.3)',
+                          color: '#00e5ff', fontWeight: 700, fontSize: '13px',
+                          transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={(e) => { if (!quotaRefreshing) { e.currentTarget.style.background = 'rgba(0,229,255,0.15)'; e.currentTarget.style.borderColor = 'rgba(0,229,255,0.6)'; } }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,229,255,0.08)'; e.currentTarget.style.borderColor = 'rgba(0,229,255,0.3)'; }}
+                      >
+                        {quotaRefreshing ? '⌛ Refreshing…' : '↻ Refresh & Activate Overflow'}
+                      </button>
+
+                      <button
+                        id="seat-cap-upgrade-btn"
+                        onClick={() => (window as any).electronAPI?.shell?.openExternal?.('https://nexusos.com.ng/portal/billing')}
+                        style={{
+                          width: '100%', padding: '12px', borderRadius: '8px', cursor: 'pointer',
+                          background: 'rgba(255,193,7,0.08)', border: '1px solid rgba(255,193,7,0.3)',
+                          color: '#fbbf24', fontWeight: 700, fontSize: '13px',
+                          transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,193,7,0.15)'; e.currentTarget.style.borderColor = 'rgba(255,193,7,0.6)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,193,7,0.08)'; e.currentTarget.style.borderColor = 'rgba(255,193,7,0.3)'; }}
+                      >
+                        ↗ Upgrade Seat Capacity
+                      </button>
+
+                      {quotaRefreshMsg && (
+                        <p style={{ margin: 0, fontSize: '12px', textAlign: 'center', color: quotaRefreshMsg.startsWith('✅') ? '#22c55e' : '#fbbf24', fontWeight: 600 }}>
+                          {quotaRefreshMsg}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Info note */}
+                    <div style={{ padding: '12px 14px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '8px', fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.7 }}>
+                      💡 <strong style={{ color: '#fff' }}>How it works:</strong> Students added beyond the license cap are tagged <em>overflow</em>. Clicking Refresh promotes the oldest overflow students to active status as slots become available (FIFO order).
+                    </div>
+
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </>
+      )}
+
     </div>
   );
 }

@@ -14,9 +14,9 @@ describe('Phase 2 Downstream Setup Chain Guards', () => {
       phone: '08012345678',
       email: 'info@stjude.edu'
     }));
-    db.prepare("INSERT INTO class_configs (class_name) VALUES ('JSS 1')").run();
-    db.prepare("INSERT INTO teachers (id, name) VALUES ('T1', 'Teacher One')").run();
-    db.prepare("INSERT INTO students (id, name, class_name) VALUES ('S1', 'Student One', 'JSS 1')").run();
+    db.prepare("INSERT OR IGNORE INTO class_configs (hierarchy_class) VALUES ('JSS 1')").run();
+    db.prepare("INSERT OR IGNORE INTO teachers (id, name) VALUES ('T1', 'Teacher One')").run();
+    db.prepare("INSERT OR IGNORE INTO students (id, name, class_name) VALUES ('S1', 'Student One', 'JSS 1')").run();
 
     // Partial term config (missing dates)
     db.prepare("INSERT OR REPLACE INTO school_term_config (id, academic_session, term) VALUES (1, '2025/2026', 'First Term')").run();
@@ -38,9 +38,9 @@ describe('Phase 2 Downstream Setup Chain Guards', () => {
       phone: '08012345678',
       email: 'info@stjude.edu'
     }));
-    db.prepare("INSERT INTO class_configs (class_name) VALUES ('JSS 1')").run();
-    db.prepare("INSERT INTO teachers (id, name) VALUES ('T1', 'Teacher One')").run();
-    db.prepare("INSERT INTO students (id, name, class_name) VALUES ('S1', 'Student One', 'JSS 1')").run();
+    db.prepare("INSERT OR IGNORE INTO class_configs (hierarchy_class) VALUES ('JSS 1')").run();
+    db.prepare("INSERT OR IGNORE INTO teachers (id, name) VALUES ('T1', 'Teacher One')").run();
+    db.prepare("INSERT OR IGNORE INTO students (id, name, class_name) VALUES ('S1', 'Student One', 'JSS 1')").run();
 
     // Complete term config with all 5 fields
     db.prepare(`

@@ -42,7 +42,15 @@ const feeCalculator = require("./src/lib/fee-calculator");
 const paystackService = require("./paystack-service.js");
 const { toDisplayTier } = require("./src/tierDisplay.js");
 const receiptGenerator = require('./receipt-generator.js');
-const resultDispatcher = require("@nexus/engine/src/result-dispatcher");
+// Load from source directory first — ensures live edits take effect without re-packing the engine.
+// Falls back to the installed @nexus/engine package if source is unavailable (e.g. production builds).
+const resultDispatcher = (() => {
+  try {
+    return require("../../private_engine/src/result-dispatcher");
+  } catch (_) {
+    return require("@nexus/engine/src/result-dispatcher");
+  }
+})();
 
 
 // Set app name BEFORE createWindow so Menu.buildFromTemplate picks it up correctly
@@ -285,6 +293,82 @@ ipcMain.handle('license:get-status', () => {
     return licenseStatus;
 });
 
+ipcMain.handle('license:refresh', () => {
+    try {
+        const db = database.getDb();
+        const cap = licenseStatus?.student_count;
+        const hasCap = typeof cap === 'number' && isFinite(cap) && cap < 999999;
+        const activeCount = db.prepare("SELECT COUNT(id) AS c FROM students WHERE enrollment_status = 'active' OR enrollment_status IS NULL OR enrollment_status = ''").get().c;
+        const slotsAvailable = hasCap ? Math.max(0, cap - activeCount) : 999999;
+        if (slotsAvailable > 0) {
+            const overflowStudents = db.prepare("SELECT id FROM students WHERE enrollment_status = 'overflow' ORDER BY COALESCE(created_at, rowid) ASC LIMIT ?").all(slotsAvailable);
+            if (overflowStudents.length > 0) {
+                const stmt = db.prepare("UPDATE students SET enrollment_status = 'active' WHERE id = ?");
+                for (const s of overflowStudents) {
+                    stmt.run(s.id);
+                }
+            }
+        }
+    } catch (e) {
+        console.error('[License] Error auto-promoting overflow students:', e);
+    }
+    recheckQuota();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('license-status', licenseStatus);
+    }
+    return { ok: true, licenseStatus };
+});
+
+ipcMain.handle('shell:open-external', async (event, url) => {
+    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+        try {
+            await shell.openExternal(url);
+            return { ok: true };
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
+    }
+    return { ok: false, error: 'Invalid URL' };
+});
+
+ipcMain.handle('slug:check-availability', async (event, slug) => {
+    if (!slug || typeof slug !== 'string' || slug.trim().length < 3) {
+        return { ok: false, message: 'Slug must be at least 3 characters.' };
+    }
+    const cleanSlug = slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+    if (cleanSlug.length < 3 || cleanSlug.length > 60 || cleanSlug.startsWith('-') || cleanSlug.endsWith('-')) {
+        return { ok: false, message: 'Slug must be 3–60 characters (letters, numbers, hyphens; no leading/trailing hyphens).' };
+    }
+
+    // Consistent with all other API handlers: prefer env override, then live server.
+    // In dev mode only, also try localhost candidates if the primary fails.
+    const isDev = process.env.NODE_ENV !== 'production';
+    const primaryBase = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
+    const candidateBases = isDev
+        ? [primaryBase, 'http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3001']
+        : [primaryBase];
+
+    for (const baseUrl of candidateBases) {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 2000);
+            const res = await fetch(
+                `${baseUrl}/api/schools/slug-available?slug=${encodeURIComponent(cleanSlug)}`,
+                { signal: controller.signal } // public endpoint — no auth header needed
+            );
+            clearTimeout(timeoutId);
+            if (res.ok) {
+                const data = await res.json();
+                return { ok: true, available: data.available, claimedByCurrent: data.claimedByCurrent, message: data.message };
+            }
+            // Non-OK from this candidate — try next
+        } catch (_) {
+            // Timeout or network error — try next candidate
+        }
+    }
+    return { ok: false, offline: true, message: 'Could not reach server online (offline fallback active)' };
+});
+
 ipcMain.handle('read-guide-file', async (event, filename) => {
     try {
         const fs = require('fs');
@@ -329,6 +413,15 @@ ipcMain.on("pulse:set-autostart", (event, enabled) => {
         console.log(`[Pulse] Auto-start configuration updated to: ${enabled}`);
     } catch (err) {
         console.error("[Pulse] Failed to save auto-start configuration:", err);
+    }
+});
+ipcMain.handle("pulse:get-autostart", () => {
+    try {
+        const db = database.getDb();
+        const row = db.prepare("SELECT value FROM app_settings WHERE key = 'pulse_autostart'").get();
+        return row?.value === 'true';
+    } catch (_) {
+        return false;
     }
 });
 ipcMain.handle("pulse:status", () => pulseBot.getPulseStatus());
@@ -508,6 +601,66 @@ ipcMain.handle("app-settings:set", (event, { key, value }) => {
         "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)"
     ).run(key, value);
     return { ok: true };
+});
+
+// ── DEPARTMENT MANAGERS (Phase 5) ────────────────────────────────────────────
+ipcMain.handle("department-managers:list", () => {
+    try {
+        const rows = database.getDb().prepare("SELECT * FROM department_managers ORDER BY id ASC").all();
+        return { ok: true, managers: rows };
+    } catch (err) {
+        console.error("Failed to list department managers:", err);
+        return { ok: false, error: err.message, managers: [] };
+    }
+});
+
+ipcMain.handle("department-managers:save", (event, manager) => {
+    try {
+        const { id, section_name, class_prefixes, manager_title, manager_name, sign_base64 } = manager || {};
+        if (!section_name || !section_name.trim()) {
+            return { ok: false, error: "Section name is required." };
+        }
+        const db = database.getDb();
+        const prefixesStr = Array.isArray(class_prefixes) ? JSON.stringify(class_prefixes) : (class_prefixes || '[]');
+        const title = manager_title || 'Principal';
+        const name = manager_name || '';
+        const sign = sign_base64 || null;
+
+        if (id) {
+            db.prepare(`
+                UPDATE department_managers
+                SET section_name = ?, class_prefixes = ?, manager_title = ?, manager_name = ?, sign_base64 = ?, updated_at = datetime('now')
+                WHERE id = ?
+            `).run(section_name.trim(), prefixesStr, title.trim(), name.trim(), sign, id);
+            return { ok: true, id };
+        } else {
+            const res = db.prepare(`
+                INSERT INTO department_managers (section_name, class_prefixes, manager_title, manager_name, sign_base64)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(section_name) DO UPDATE SET
+                    class_prefixes = excluded.class_prefixes,
+                    manager_title = excluded.manager_title,
+                    manager_name = excluded.manager_name,
+                    sign_base64 = excluded.sign_base64,
+                    updated_at = datetime('now')
+            `).run(section_name.trim(), prefixesStr, title.trim(), name.trim(), sign);
+            return { ok: true, id: res.lastInsertRowid };
+        }
+    } catch (err) {
+        console.error("Failed to save department manager:", err);
+        return { ok: false, error: err.message };
+    }
+});
+
+ipcMain.handle("department-managers:delete", (event, { id }) => {
+    try {
+        if (!id) return { ok: false, error: "Manager ID is required." };
+        database.getDb().prepare("DELETE FROM department_managers WHERE id = ?").run(id);
+        return { ok: true };
+    } catch (err) {
+        console.error("Failed to delete department manager:", err);
+        return { ok: false, error: err.message };
+    }
 });
 
 
@@ -1244,12 +1397,19 @@ ipcMain.handle('fees:refund', async (event, { studentId, txRef, amount, reason }
 
 ipcMain.handle('fees:send-receipt-pdf', async (event, { studentId, txRef }) => {
     if (licenseStatus?.tier !== 'Diamond') {
-        return { ok: false, error: 'Diamond license required.' };
+        return { ok: false, error: 'Diamond tier license required for automated receipt dispatch.' };
+    }
+    const botStatus = pulseBot?.getPulseStatus?.();
+    if (botStatus?.status !== 'ready') {
+        return { ok: false, error: 'WhatsApp bot is offline — connect Nexus Pulse first.' };
     }
     const db = database.getDb();
     const session = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(txRef);
     if (!session) {
         return { ok: false, error: 'Payment session not found for this reference.' };
+    }
+    if (!session.parent_phone) {
+        return { ok: false, error: 'No parent phone number recorded for this payment session.' };
     }
 
     try {
@@ -3010,23 +3170,35 @@ ipcMain.handle("get-all-teachers", (event, { limit = 15, offset = 0, search = ""
 });
 
 // ── Directory: Get All Students ─────────────────────────────────────────
-ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = "", class_name = "", subject = "", teacher_id = "", no_arm = false, minimal = false, include_overflow = false } = {}) => {
+ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = "", class_name = "", class_arm = "", subject = "", teacher_id = "", no_arm = false, minimal = false, include_overflow = false, enrollment_status_filter = null } = {}) => {
   try {
     const db = database.getDb();
     const query = search ? `%${search}%` : "%";
 
     // Base WHERE clause (always present)
     let conditions = "(s.name LIKE ? OR s.id LIKE ? OR s.reg_no LIKE ?)";
+    const params = [query, query, query];
     if (!include_overflow) {
       conditions += " AND (s.enrollment_status = 'active' OR s.enrollment_status IS NULL OR s.enrollment_status = '')";
     }
-    const params = [query, query, query];
+    // Explicit enrollment_status filter (e.g. 'overflow' for the Overflow roster tab)
+    if (enrollment_status_filter) {
+      conditions += " AND s.enrollment_status = ?";
+      params.push(enrollment_status_filter);
+    }
 
-    // Optional class/arm filter (normalised, handles "JSS 1 Gold" or "JSS 1")
+    // Optional explicit class_arm filter
+    if (class_arm) {
+      const normArm = class_arm.replace(/\s+/g, '').toUpperCase();
+      conditions += " AND UPPER(replace(COALESCE(s.class_arm, ''), ' ', '')) = ?";
+      params.push(normArm);
+    }
+
+    // Optional class/arm filter (normalised, matches class_name OR combined class_name + class_arm)
     if (class_name) {
       const normClass = class_name.replace(/\s+/g, '').toUpperCase();
-      conditions += " AND UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', '')) = ?";
-      params.push(normClass);
+      conditions += " AND (UPPER(replace(s.class_name, ' ', '')) = ? OR UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', '')) = ?)";
+      params.push(normClass, normClass);
     }
 
     // Optional subject filter — student must be enrolled in this subject
@@ -3167,6 +3339,15 @@ ipcMain.handle("get-term-config", () => {
 
 ipcMain.handle("save-term-config", (event, config) => {
   try {
+    if (!config || !config.academic_session || typeof config.academic_session !== 'string' || !/^\d{4}\/\d{4}$/.test(config.academic_session.trim())) {
+      return { ok: false, error: "Academic session is required and must be in YYYY/YYYY format (e.g. 2025/2026)." };
+    }
+    if (!config.term || typeof config.term !== 'string' || !config.term.trim()) {
+      return { ok: false, error: "Term selection is required." };
+    }
+    const cleanSession = config.academic_session.trim();
+    const cleanTerm = config.term.trim();
+
     const db = database.getDb();
     // Ensure new column exists for DBs that haven't restarted since migration was added
     try { db.exec("ALTER TABLE school_term_config ADD COLUMN exclude_unregistered_from_totals INTEGER DEFAULT 0"); } catch (_) {}
@@ -3194,8 +3375,8 @@ ipcMain.handle("save-term-config", (event, config) => {
         include_attendance_in_grades = excluded.include_attendance_in_grades,
         exclude_unregistered_from_totals = excluded.exclude_unregistered_from_totals
     `).run({
-      academic_session: config.academic_session || "2024/2025",
-      term:             config.term || "First Term",
+      academic_session: cleanSession,
+      term:             cleanTerm,
       resumption_date:  config.resumption_date  || "",
       term_start_date:  config.term_start_date  || "",
       term_end_date:    config.term_end_date    || "",
@@ -3212,12 +3393,10 @@ ipcMain.handle("save-term-config", (event, config) => {
     });
 
     // Unify session/term settings: also update system_settings keys to prevent divergence
-    const sessionVal = config.academic_session || "2024/2025";
-    const termVal = config.term || "First Term";
     db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('current_academic_session', ?)")
-      .run(sessionVal);
+      .run(cleanSession);
     db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('current_term', ?)")
-      .run(termVal);
+      .run(cleanTerm);
 
     return { ok: true };
   } catch (err) {
@@ -4054,6 +4233,8 @@ ipcMain.handle("save-student-grades", (event, { student_id, grades }) => {
 
     const saveAll = db.transaction((items) => {
       for (const item of items) {
+        if (!item || !item.subject || typeof item.subject !== 'string' || !item.subject.trim()) continue;
+        const cleanSubj = item.subject.trim();
         const rawBd = item.breakdown || {};
         const bd = {};
         for (const [k, v] of Object.entries(rawBd)) {
@@ -4064,8 +4245,8 @@ ipcMain.handle("save-student-grades", (event, { student_id, grades }) => {
           ? Object.values(bd).reduce((sum, v) => sum + (Number(v) || 0), 0)
           : (Number(item.score) || 0);
         const total = Math.round(totalRaw * 100) / 100;
-        deleteRow.run(student_id, academic_session, term, item.subject);
-        insertRow.run(student_id, academic_session, term, item.subject, total, JSON.stringify(bd));
+        deleteRow.run(student_id, academic_session, term, cleanSubj);
+        insertRow.run(student_id, academic_session, term, cleanSubj, total, JSON.stringify(bd));
       }
     });
 
@@ -4635,7 +4816,8 @@ ipcMain.handle("generate-reports", async (event, payload) => {
     // Create unique temp directory under OS tmpdir for de-duplicated image storage
     tempDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'nexus-reports-'));
 
-    let finalOutPath = outFolder;
+    const deptMgrs = database.getDb().prepare("SELECT * FROM department_managers ORDER BY id ASC").all() || [];
+    payload.departmentManagers = deptMgrs;
 
     if (reportType !== "broadsheet" && payload.students && payload.students.length > 0) {
         // Group students by class_name (resolving class_arm if present)
@@ -4831,8 +5013,12 @@ ipcMain.handle("generate-reports", async (event, payload) => {
 });
 
 ipcMain.handle("results:dispatch", async (event, payload) => {
+  console.log("[main.js] results:dispatch received payload:", payload);
+  const botStatus = pulseBot?.getPulseStatus?.();
+  console.log("[main.js] pulseBot status at dispatch time:", botStatus);
   try {
-    const result = await resultDispatcher.dispatchResults(payload);
+    const result = await resultDispatcher.dispatchResults({ ...payload, pulseBot });
+    console.log("[main.js] resultDispatcher returned:", result);
     return { ok: true, ...result };
   } catch (err) {
     console.error("[main.js] results:dispatch error:", err);
@@ -6695,8 +6881,8 @@ function createWindow() {
       const fs = require('fs');
       const content = fs.readFileSync(filePath, 'utf8');
       const firstLine = content.split('\n')[0] || '';
-      const headers = firstLine.split(',').map(h => h.trim().toLowerCase());
-      const hasTeacherCols = headers.includes('teacher_id') || headers.includes('teacher_name') || headers.includes('teacher_phone');
+      const normHeaders = firstLine.split(',').map(h => h.trim().toLowerCase().replace(/[\s_]+/g, ''));
+      const hasTeacherCols = normHeaders.includes('teacherid') || normHeaders.includes('teachername') || normHeaders.includes('teacherphone') || normHeaders.includes('staffid') || normHeaders.includes('staffname');
       if (hasTeacherCols) return 'teachers';
       return 'students';
     } catch (e) {
@@ -6704,32 +6890,38 @@ function createWindow() {
     }
   }
 
-  ipcMain.on("process-csv", (event, payload) => {
-    const filePath = typeof payload === 'string' ? payload : payload?.filePath;
-    const newStudentLimit = typeof payload === 'string' ? undefined : payload?.limit;
-    const dryRun = typeof payload === 'object' && payload !== null ? !!payload.dry_run : false;
-    
-    const db = database.getDb();
-    const csvType = detectCSVType(filePath);
-    const guardLevel = csvType === 'teachers' ? 'classes' : 'teachers';
-    const guardCheck = assertSetupChain(db, guardLevel);
-    if (!guardCheck.ok) {
-      event.reply("csv-loaded", { count: 0, error: guardCheck.error, setupCheck: guardCheck });
-      return;
-    }
+  ipcMain.handle("process-csv", async (event, payload) => {
+    return new Promise((resolve) => {
+      const filePath = typeof payload === 'string' ? payload : payload?.filePath;
+      const newStudentLimit = typeof payload === 'string' ? undefined : payload?.limit;
+      const dryRun = typeof payload === 'object' && payload !== null ? !!payload.dry_run : false;
+      
+      const db = database.getDb();
+      const csvType = detectCSVType(filePath);
+      const guardLevel = csvType === 'teachers' ? 'classes' : 'teachers';
+      const guardCheck = assertSetupChain(db, guardLevel);
+      if (!guardCheck.ok) {
+        const res = { count: 0, error: guardCheck.error, setupCheck: guardCheck };
+        if (event.sender && !event.sender.isDestroyed()) event.sender.send("csv-loaded", res);
+        resolve(res);
+        return;
+      }
 
-    handleCSVUpload(filePath, (count, err, result) => {
-      event.reply("csv-loaded", {
-        count,
-        error: err || null,
-        warnings: result?.warnings || [],
-        blocking: result?.blocking || [],
-        normalizable: result?.normalizable || [],
-        cleanCount: result?.cleanCount || count,
-        dry_run: result?.dry_run || false,
-        newStudentsInserted: result?.newStudentsInserted
-      });
-    }, newStudentLimit, dryRun);
+      handleCSVUpload(filePath, (count, err, result) => {
+        const res = {
+          count,
+          error: err || null,
+          warnings: result?.warnings || [],
+          blocking: result?.blocking || [],
+          normalizable: result?.normalizable || [],
+          cleanCount: result?.cleanCount || count,
+          dry_run: result?.dry_run || false,
+          newStudentsInserted: result?.newStudentsInserted
+        };
+        if (event.sender && !event.sender.isDestroyed()) event.sender.send("csv-loaded", res);
+        resolve(res);
+      }, newStudentLimit, dryRun);
+    });
   });
 
   ipcMain.on("process-grades-csv", (event, payload) => {
@@ -7272,7 +7464,7 @@ if (app) {
         const termRow = db.prepare("SELECT academic_session FROM school_term_config WHERE id=1").get();
         const currentSession = termRow?.academic_session || '2025/2026';
 
-        const student = db.prepare("SELECT id, name, class, class_arm, enrollment_status, session_history FROM students WHERE id=?").get(studentId);
+        const student = db.prepare("SELECT id, name, class_name, class_arm, enrollment_status, session_history FROM students WHERE id=?").get(studentId);
         if (!student) return { ok: false, error: 'Student not found' };
 
         const resolved = resolveStudentAction(student, action, hierarchy, targetClass, targetArm);

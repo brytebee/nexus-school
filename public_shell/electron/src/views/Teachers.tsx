@@ -106,98 +106,127 @@ export function Teachers() {
 
   useEffect(() => { fetchTeachers(); }, [page, search, limit]);
 
+  // ── CSV Import Handler ───────────────────────────────────────────────────
+  const handleCSVLoadedPayload = (payload: any) => {
+    const count = typeof payload === 'object' ? payload.count : payload;
+    const error: string | null = typeof payload === 'object' ? (payload.error || null) : null;
+    const warnings: string[] = typeof payload === 'object' ? (payload.warnings || []) : [];
+    const blocking: any[] = typeof payload === 'object' ? (payload.blocking || []) : [];
+
+    const Swal = (window as any).Swal;
+
+    if (error) {
+      if (error === 'SETUP_INCOMPLETE' && payload.setupCheck) {
+        setSetupGuardStep(payload.setupCheck.step || 'classes');
+        setSetupGuardMessage(payload.setupCheck.message || '');
+        setSetupGuardOpen(true);
+        setCsvStatus(null);
+        return;
+      }
+      setCsvStatus(`❌ Import Failed: ${error}`);
+      if (Swal) {
+        let htmlContent = '';
+        if (error.startsWith('WRONG_TEMPLATE:')) {
+          htmlContent = '<div style="font-size: 13px; color: #fca5a5;">Wrong file selected. Please use the official Nexus Teachers CSV template.</div>';
+        } else if (blocking && blocking.length > 0) {
+          const issuesHtml = blocking.map((b: any) => `
+            <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); padding: 8px 12px; border-radius: 6px; font-size: 12px; text-align: left; margin-bottom: 6px;">
+              <strong style="color: #f87171;">Row ${b.rowIndex}${b.field ? ` (${b.field})` : ''}:</strong> <span style="color: #fca5a5;">${b.reason}</span>
+            </div>
+          `).join('');
+
+          htmlContent = `
+            <div style="display: flex; flex-direction: column; gap: 8px; text-align: left;">
+              <p style="margin: 0 0 10px; font-size: 13px; color: #fca5a5; font-weight: 600;">
+                ${error}
+              </p>
+              <div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">
+                Conflicting / Unregistered Items (${blocking.length}):
+              </div>
+              <div style="max-height: 220px; overflow-y: auto; padding-right: 4px;">
+                ${issuesHtml}
+              </div>
+            </div>
+          `;
+        } else {
+          htmlContent = `<div style="font-size: 13px; color: #fca5a5; text-align: left;">${error}</div>`;
+        }
+
+        Swal.fire({
+          title: 'Import Failed',
+          html: htmlContent,
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444',
+          width: blocking && blocking.length > 0 ? '540px' : '420px',
+        });
+      }
+      setTimeout(() => setCsvStatus(null), 6000);
+      return;
+    }
+
+    if (count === 0) {
+      setCsvStatus('⚠️ No records imported. Check that you selected the correct CSV template.');
+      if (Swal) {
+        Swal.fire({
+          title: 'No Records Imported',
+          text: 'Zero rows were processed. Ensure you are using the official Nexus Teachers CSV template with Teacher_ID and Teacher_Name columns.',
+          icon: 'warning',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#f59e0b'
+        });
+      }
+      setTimeout(() => setCsvStatus(null), 6000);
+      return;
+    }
+
+    const baseMsg = `✅ CSV Processed: ${count} Records Imported`;
+    const fullMsg = warnings.length > 0
+      ? `${baseMsg} — ⚠️ ${warnings.length} warning(s): ${warnings.join(' | ')}`
+      : baseMsg;
+    setCsvStatus(fullMsg);
+    fetchTeachers();
+    setTimeout(() => setCsvStatus(null), warnings.length > 0 ? 8000 : 4000);
+
+    if (Swal) {
+      if (warnings.length > 0) {
+        const displayWarnings = warnings.length > 2
+          ? [...warnings.slice(0, 2), `... and ${warnings.length - 2} other(s) affected.`]
+          : warnings;
+        Swal.fire({
+          title: 'Import Processed with Warnings',
+          html: `
+            <p style="color: #fff; margin-bottom: 10px;">Successfully loaded <strong>${count}</strong> teachers.</p>
+            <div style="text-align: left; background: rgba(239, 68, 68, 0.1); border-left: 4px solid #ef4444; padding: 10px; margin-top: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto;">
+              <strong style="color: #ef4444; font-size: 13px;">Warnings (${warnings.length}):</strong>
+              <ul style="margin: 5px 0 0 0; padding-left: 15px; color: #fca5a5; font-size: 11px; line-height: 1.6;">
+                ${displayWarnings.map(w => `<li>${w}</li>`).join('')}
+              </ul>
+            </div>
+          `,
+          icon: 'warning',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#00E5FF'
+        });
+      } else {
+        Swal.fire({
+          title: 'Success!',
+          text: `Successfully loaded ${count} teachers.`,
+          icon: 'success',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#00E5FF'
+        });
+      }
+    }
+  };
+
   useEffect(() => {
     if (window.electronAPI?.onCSVLoaded) {
-      window.electronAPI.onCSVLoaded((payload: any) => {
-        const count = typeof payload === 'object' ? payload.count : payload;
-        const error: string | null = typeof payload === 'object' ? (payload.error || null) : null;
-        const warnings: string[] = typeof payload === 'object' ? (payload.warnings || []) : [];
-
-        const Swal = (window as any).Swal;
-
-        // ── Layer 5: error → wrong-template → success ─────────────────
-        if (error) {
-          if (error === 'SETUP_INCOMPLETE' && payload.setupCheck) {
-            setSetupGuardStep(payload.setupCheck.step || 'classes');
-            setSetupGuardMessage(payload.setupCheck.message || '');
-            setSetupGuardOpen(true);
-            setCsvStatus(null);
-            return;
-          }
-          setCsvStatus(`❌ Import Failed: ${error}`);
-          if (Swal) {
-            Swal.fire({
-              title: 'Import Failed',
-              text: error.startsWith('WRONG_TEMPLATE:')
-                ? 'Wrong file selected. Please use the official Nexus Teachers CSV template.'
-                : error,
-              icon: 'error',
-              background: '#0b0f19',
-              color: '#fff',
-              confirmButtonColor: '#ef4444'
-            });
-          }
-          setTimeout(() => setCsvStatus(null), 6000);
-          return;
-        }
-
-        if (count === 0) {
-          setCsvStatus('⚠️ No records imported. Check that you selected the correct CSV template.');
-          if (Swal) {
-            Swal.fire({
-              title: 'No Records Imported',
-              text: 'Zero rows were processed. Ensure you are using the official Nexus Teachers CSV template with Teacher_ID and Teacher_Name columns.',
-              icon: 'warning',
-              background: '#0b0f19',
-              color: '#fff',
-              confirmButtonColor: '#f59e0b'
-            });
-          }
-          setTimeout(() => setCsvStatus(null), 6000);
-          return;
-        }
-
-        const baseMsg = `✅ CSV Processed: ${count} Records Imported`;
-        const fullMsg = warnings.length > 0
-          ? `${baseMsg} — ⚠️ ${warnings.length} warning(s): ${warnings.join(' | ')}`
-          : baseMsg;
-        setCsvStatus(fullMsg);
-        fetchTeachers();
-        setTimeout(() => setCsvStatus(null), warnings.length > 0 ? 8000 : 4000);
-
-        if (Swal) {
-          if (warnings.length > 0) {
-            const displayWarnings = warnings.length > 2
-              ? [...warnings.slice(0, 2), `... and ${warnings.length - 2} other(s) affected.`]
-              : warnings;
-            Swal.fire({
-              title: 'Import Processed with Warnings',
-              html: `
-                <p style="color: #fff; margin-bottom: 10px;">Successfully loaded <strong>${count}</strong> teachers.</p>
-                <div style="text-align: left; background: rgba(239, 68, 68, 0.1); border-left: 4px solid #ef4444; padding: 10px; margin-top: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto;">
-                  <strong style="color: #ef4444; font-size: 13px;">Warnings (${warnings.length}):</strong>
-                  <ul style="margin: 5px 0 0 0; padding-left: 15px; color: #fca5a5; font-size: 11px; line-height: 1.6;">
-                    ${displayWarnings.map(w => `<li>${w}</li>`).join('')}
-                  </ul>
-                </div>
-              `,
-              icon: 'warning',
-              background: '#0b0f19',
-              color: '#fff',
-              confirmButtonColor: '#00E5FF'
-            });
-          } else {
-            Swal.fire({
-              title: 'Success!',
-              text: `Successfully loaded ${count} teachers.`,
-              icon: 'success',
-              background: '#0b0f19',
-              color: '#fff',
-              confirmButtonColor: '#00E5FF'
-            });
-          }
-        }
-      });
+      window.electronAPI.onCSVLoaded(handleCSVLoadedPayload);
     }
   }, []);
 
@@ -252,18 +281,32 @@ export function Teachers() {
     }
 
     setCsvStatus('⏳ Uploading and processing CSV...');
-    if (api?.processCSV) api.processCSV(file.path);
+    if (api?.processCSV) {
+      try {
+        const res = await api.processCSV(file.path);
+        if (res) handleCSVLoadedPayload(res);
+      } catch (err: any) {
+        handleCSVLoadedPayload({ error: err.message || 'Processing failed' });
+      }
+    }
     e.target.value = '';
   };
 
-  const handleCSVReviewAccept = () => {
+  const handleCSVReviewAccept = async () => {
     setCsvReviewOpen(false);
     if (!pendingCsvFile) return;
     const file = pendingCsvFile;
     setPendingCsvFile(null);
     const api = (window as any).electronAPI;
     setCsvStatus('⏳ Uploading and processing CSV...');
-    if (api?.processCSV) api.processCSV(file.path);
+    if (api?.processCSV) {
+      try {
+        const res = await api.processCSV(file.path);
+        if (res) handleCSVLoadedPayload(res);
+      } catch (err: any) {
+        handleCSVLoadedPayload({ error: err.message || 'Processing failed' });
+      }
+    }
   };
 
   const handleClearTeachers = async () => {
@@ -1124,26 +1167,39 @@ export function Teachers() {
                     Staged Allocation Registry
                   </label>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px', overflowY: 'auto' }}>
-                    {stagedAllocations.map((alloc, idx) => (
-                      <div key={idx} style={{
-                        display: 'flex', alignItems: 'center', gap: '10px',
-                        background: 'rgba(0,229,255,0.04)', border: '1px solid rgba(0,229,255,0.15)',
-                        borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: '11px',
-                      }}>
-                        <span style={{ color: 'var(--accent)', fontWeight: 700, flexShrink: 0 }}>{alloc.class_name}</span>
-                        <span style={{ color: 'var(--text-dim)', flexShrink: 0 }}>|</span>
-                        <span style={{ color: 'var(--text-main)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {alloc.subjects.join(', ')}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveStagedAllocation(idx)}
-                          style={{ background: 'none', border: 'none', color: 'var(--danger)', fontSize: '14px', cursor: 'pointer', fontWeight: 700, flexShrink: 0 }}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
+                    {stagedAllocations.map((alloc, idx) => {
+                      const normFullList = fullList.map(c => (c || '').replace(/\s+/g, '').toUpperCase());
+                      const isUnregistered = fullList.length > 0 && !normFullList.includes((alloc.class_name || '').replace(/\s+/g, '').toUpperCase());
+
+                      return (
+                        <div key={idx} style={{
+                          display: 'flex', alignItems: 'center', gap: '10px',
+                          background: isUnregistered ? 'rgba(245, 158, 11, 0.06)' : 'rgba(0,229,255,0.04)',
+                          border: isUnregistered ? '1px dashed rgba(245, 158, 11, 0.5)' : '1px solid rgba(0,229,255,0.15)',
+                          borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: '11px',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                            <span style={{ color: isUnregistered ? '#fbbf24' : 'var(--accent)', fontWeight: 700 }}>{alloc.class_name}</span>
+                            {isUnregistered && (
+                              <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '3px', background: 'rgba(245,158,11,0.2)', color: '#fbbf24', fontWeight: 600 }} title="Class is not registered in Class Manager">
+                                ⚠️ Unregistered
+                              </span>
+                            )}
+                          </div>
+                          <span style={{ color: 'var(--text-dim)', flexShrink: 0 }}>|</span>
+                          <span style={{ color: 'var(--text-main)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {alloc.subjects.join(', ')}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveStagedAllocation(idx)}
+                            style={{ background: 'none', border: 'none', color: 'var(--danger)', fontSize: '14px', cursor: 'pointer', fontWeight: 700, flexShrink: 0 }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })}
                     {stagedAllocations.length === 0 && (
                       <div style={{ textAlign: 'center', padding: '16px', border: '1px dashed var(--glass-border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-dim)', fontSize: '12px' }}>
                         No allocations staged. Add details above.
@@ -1200,6 +1256,11 @@ export function Teachers() {
       )}
 
       {/* ══════════════════════════════════════════════
+          Staged Allocations in Add/Edit Teacher Drawer
+      ══════════════════════════════════════════════ */}
+      {/* (In drawer staged allocations section) */}
+
+      {/* ══════════════════════════════════════════════
           Class Hosts Modal  (§9C Centered Dialog)
       ══════════════════════════════════════════════ */}
       {isClassHostsOpen && (
@@ -1222,28 +1283,92 @@ export function Teachers() {
               <button onClick={() => setIsClassHostsOpen(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center' }}>✕</button>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {fullList.length === 0 && (
-                <p style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: '13px', padding: '24px' }}>
-                  No classes found. Ensure students are registered in the system.
-                </p>
-              )}
-              {fullList.map(cls => {
-                const currentHost = classHosts.find(m => (m.class_name || '').replace(/\s+/g, '').toUpperCase() === (cls || '').replace(/\s+/g, '').toUpperCase())?.teacher_id || '';
-                return (
-                  <div key={cls} style={{ display: 'flex', alignItems: 'center', gap: '14px', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-sm)', padding: '10px 14px' }}>
-                    <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)', minWidth: '80px' }}>{cls}</span>
-                    <select
-                      value={currentHost}
-                      onChange={e => handleSetClassHost(cls, e.target.value)}
-                      className="modern-input"
-                      style={{ flex: 1, fontSize: '12px', padding: '6px 10px' }}
-                    >
-                      <option value="">— Unassigned —</option>
-                      {classHostTeachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
-                  </div>
+              {(() => {
+                const teacherHostCounts: Record<string, string[]> = {};
+                classHosts.forEach(h => {
+                  if (h.teacher_id) {
+                    if (!teacherHostCounts[h.teacher_id]) teacherHostCounts[h.teacher_id] = [];
+                    teacherHostCounts[h.teacher_id].push(h.class_name);
+                  }
+                });
+                const conflictingTeacherIds = new Set(
+                  Object.keys(teacherHostCounts).filter(tId => teacherHostCounts[tId].length > 1)
                 );
-              })}
+
+                return (
+                  <>
+                    {conflictingTeacherIds.size > 0 && (
+                      <div style={{
+                        padding: '12px 16px',
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'rgba(245, 158, 11, 0.1)',
+                        border: '1px solid rgba(245, 158, 11, 0.3)',
+                        color: '#fbbf24',
+                        fontSize: '12px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px',
+                        marginBottom: '4px'
+                      }}>
+                        <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>⚠️ Attention Required: Multi-Class Host Assignments</span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#fde68a', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          {Array.from(conflictingTeacherIds).map(tId => {
+                            const teacher = classHostTeachers.find(t => t.id === tId);
+                            const classes = teacherHostCounts[tId].join(', ');
+                            return (
+                              <div key={tId}>
+                                • <strong>{teacher?.name || tId}</strong> is assigned as host to multiple classes: <em>{classes}</em>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {fullList.length === 0 && (
+                      <p style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: '13px', padding: '24px' }}>
+                        No classes found. Ensure students are registered in the system.
+                      </p>
+                    )}
+                    {fullList.map(cls => {
+                      const currentHost = classHosts.find(m => (m.class_name || '').replace(/\s+/g, '').toUpperCase() === (cls || '').replace(/\s+/g, '').toUpperCase())?.teacher_id || '';
+                      const isConflict = Boolean(currentHost && conflictingTeacherIds.has(currentHost));
+
+                      return (
+                        <div key={cls} style={{
+                          display: 'flex', alignItems: 'center', gap: '14px',
+                          background: isConflict ? 'rgba(245, 158, 11, 0.06)' : 'var(--glass)',
+                          border: isConflict ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid var(--glass-border)',
+                          borderRadius: 'var(--radius-sm)', padding: '10px 14px'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: '110px' }}>
+                            <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)' }}>{cls}</span>
+                            {isConflict && (
+                              <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '3px', background: 'rgba(245,158,11,0.2)', color: '#fbbf24', fontWeight: 600 }} title="Teacher hosts multiple classes">
+                                ⚠️ Multi-Host
+                              </span>
+                            )}
+                          </div>
+                          <select
+                            value={currentHost}
+                            onChange={e => handleSetClassHost(cls, e.target.value)}
+                            className="modern-input"
+                            style={{
+                              flex: 1, fontSize: '12px', padding: '6px 10px',
+                              borderColor: isConflict ? 'rgba(245,158,11,0.5)' : undefined
+                            }}
+                          >
+                            <option value="">— Unassigned —</option>
+                            {classHostTeachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </>
+                );
+              })()}
             </div>
             <div style={{ padding: '16px 24px', borderTop: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.15)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
               <button className="primary-btn" onClick={() => { setIsClassHostsOpen(false); fetchTeachers(); }}>Done</button>

@@ -3,6 +3,7 @@ import { useLicense } from '../hooks/useLicense';
 import { useClassArms } from '../hooks/useClassArms';
 import { Combobox } from '../components/Combobox';
 import { generateSessionsList } from '../lib/sessions';
+import { useTermConfig } from '../hooks/useTermConfig';
 import { applyInlineEdit, validatePaymentInput, validateRefundInput, validateBankAccounts } from '../lib/financialUtils';
 import { SetupGuardModal } from '../components/SetupGuardModal';
 import { CSVReviewModal } from '../components/CSVReviewModal';
@@ -153,6 +154,7 @@ function PaystackBankSelect({ value, onChange }: { value: string; onChange: (nam
 export function FinancialHub() {
   const { license } = useLicense();
   const { fullList, configs } = useClassArms();
+  const { termsList } = useTermConfig();
   const tier       = license?.tier || 'Silver';
   const isDiamond  = tier === 'Diamond';
   const isGoldPlus = tier === 'Gold' || tier === 'Diamond';
@@ -1707,9 +1709,7 @@ export function FinancialHub() {
                 <Lbl>Term</Lbl>
                 <select id="fees-term-select" value={selectedTerm} onChange={e => { setSelectedTerm(e.target.value); termRef.current = e.target.value; }}
                   className="modern-input" style={{ width:'140px', fontSize:'12px' }}>
-                  <option value="First Term">First Term</option>
-                  <option value="Second Term">Second Term</option>
-                  <option value="Third Term">Third Term</option>
+                  {termsList.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
               <div className="ph-config-group">
@@ -1856,9 +1856,7 @@ export function FinancialHub() {
                 <Lbl>Applies To</Lbl>
                 <select id="fs-term-filter" value={structTerm} onChange={e => setStructTerm(e.target.value)} className="modern-input" style={{ width:'140px', fontSize:'12px' }}>
                   <option value="All Terms">All Terms</option>
-                  <option value="First Term">First Term</option>
-                  <option value="Second Term">Second Term</option>
-                  <option value="Third Term">Third Term</option>
+                  {termsList.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
               <div style={{ marginLeft:'auto', display:'flex', gap:'8px' }}>
@@ -1907,7 +1905,7 @@ export function FinancialHub() {
                 <tfoot>
                   <tr>
                     <td style={{ padding:'10px 12px' }}><input type="text" id="fs-new-name" placeholder="e.g. Tuition Fee" value={newName} onChange={e => setNewName(e.target.value)} className="modern-input" style={{ width:'100%', fontSize:'12px' }} /></td>
-                    <td style={{ padding:'10px 12px' }}><select id="fs-new-term" value={newTerm} onChange={e => setNewTerm(e.target.value)} className="modern-input" style={{ width:'100%', fontSize:'12px' }}><option value="All Terms">All Terms</option><option value="First Term">First Term</option><option value="Second Term">Second Term</option><option value="Third Term">Third Term</option></select></td>
+                    <td style={{ padding:'10px 12px' }}><select id="fs-new-term" value={newTerm} onChange={e => setNewTerm(e.target.value)} className="modern-input" style={{ width:'100%', fontSize:'12px' }}><option value="All Terms">All Terms</option>{termsList.map(t => <option key={t} value={t}>{t}</option>)}</select></td>
                     <td style={{ padding:'10px 12px' }}><input type="number" id="fs-new-amount" placeholder="e.g. 80000" min={0} value={newAmount} onChange={e => setNewAmount(e.target.value)} className="modern-input" style={{ width:'100%', textAlign:'right', fontSize:'12px' }} /></td>
                     <td style={{ textAlign:'center', padding:'10px 12px' }}><button id="btn-fs-add-item" onClick={handleAddItem} disabled={addingItem||!newName.trim()||!newAmount} className="primary-btn" style={{ padding:'5px 12px', fontSize:'12px' }}>+ Add</button></td>
                   </tr>
@@ -2891,7 +2889,7 @@ export function FinancialHub() {
               </div>
               <div><label style={{ fontSize:'11px', color:'var(--text-dim)' }}>Reference Number</label><input id="receipt-approve-ref" placeholder="e.g. FT25ABC1234567" value={approveRef} onChange={e => setApproveRef(e.target.value)} className="modern-input" style={{ marginTop:'4px', width:'100%' }} /></div>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
-                <div><label style={{ fontSize:'11px', color:'var(--text-dim)' }}>Term</label><select id="receipt-approve-term" value={approveTerm} onChange={e => setApproveTerm(e.target.value)} className="modern-input" style={{ marginTop:'4px', width:'100%' }}><option>First Term</option><option>Second Term</option><option>Third Term</option></select></div>
+                <div><label style={{ fontSize:'11px', color:'var(--text-dim)' }}>Term</label><select id="receipt-approve-term" value={approveTerm} onChange={e => setApproveTerm(e.target.value)} className="modern-input" style={{ marginTop:'4px', width:'100%' }}>{termsList.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
                 <div><label style={{ fontSize:'11px', color:'var(--text-dim)' }}>Session</label><input id="receipt-approve-session" placeholder="e.g. 2024/2025" value={approveSession} onChange={e => setApproveSession(e.target.value)} className="modern-input" style={{ marginTop:'4px', width:'100%' }} /></div>
               </div>
               <div><label style={{ fontSize:'11px', color:'var(--text-dim)' }}>Note (optional)</label><input id="receipt-approve-note" placeholder="e.g. Verified via receipt #12" value={approveNote} onChange={e => setApproveNote(e.target.value)} className="modern-input" style={{ marginTop:'4px', width:'100%' }} /></div>

@@ -6,7 +6,8 @@ import {
   validatePin,
   validateName,
   validateSecurityAnswer,
-  validateDOB
+  validateDOB,
+  validateScoreComponent
 } from '../src/lib/validators';
 
 describe('Validators Unit Tests', () => {
@@ -117,6 +118,35 @@ describe('Validators Unit Tests', () => {
       expect(validateDOB('2099-01-01', true).ok).toBe(false); // future
       expect(validateDOB('1800-01-01', true).ok).toBe(false); // pre-1920
       expect(validateDOB('not-a-date', true).ok).toBe(false);
+    });
+  });
+
+  describe('validateScoreComponent', () => {
+    it('accepts valid score values within max bounds', () => {
+      expect(validateScoreComponent(0, 15, 'C.A. 1').ok).toBe(true);
+      expect(validateScoreComponent(10, 15, 'C.A. 1').ok).toBe(true);
+      expect(validateScoreComponent(15, 15, 'C.A. 1').ok).toBe(true);
+      expect(validateScoreComponent('7.5', 10, 'C.A. 2').ok).toBe(true);
+      expect(validateScoreComponent('', 15, 'C.A. 1').ok).toBe(true);
+      expect(validateScoreComponent(null, 15, 'C.A. 1').ok).toBe(true);
+    });
+
+    it('rejects negative scores', () => {
+      const res = validateScoreComponent(-20, 15, 'C.A. 1');
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain('cannot be negative');
+    });
+
+    it('rejects scores exceeding maximum component cap', () => {
+      const res = validateScoreComponent(50, 15, 'C.A. 1');
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain('exceeds maximum allowed score of 15');
+    });
+
+    it('rejects non-numeric score inputs', () => {
+      const res = validateScoreComponent('abc', 100, 'Exam');
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain('must be a valid number');
     });
   });
 });

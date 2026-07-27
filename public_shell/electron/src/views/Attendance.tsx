@@ -49,12 +49,12 @@ export function Attendance() {
   const limit = 15;
 
   // Truancy Radar State
-  const [truancyList, setTruancyList] = useState<TruancyRow[]>([]);
-  const [radarLoading, setRadarLoading] = useState(false);
+  const [truancyRows, setTruancyRows] = useState<TruancyRow[]>([]);
+  const [loadingRadar, setLoadingRadar] = useState(false);
   const [enableDaily, setEnableDaily] = useState(true);
   const [enableSubject, setEnableSubject] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
   const [escalationFlow, setEscalationFlow] = useState<EscalationStep[]>([]);
-  const [selectedStudentForModal, setSelectedStudentForModal] = useState<TruancyRow | null>(null);
 
   // Edit Escalation State
   const [isEscalationModalOpen, setIsEscalationModalOpen] = useState(false);

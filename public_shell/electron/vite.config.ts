@@ -50,5 +50,6 @@ export default defineConfig({
     include: ['tests/*.test.{js,ts}'],
     exclude: ['tests/e2e/**', 'node_modules/**'],
     environment: 'node',
+    globalSetup: ['tests/globalSetup.js'],
   },
 });
