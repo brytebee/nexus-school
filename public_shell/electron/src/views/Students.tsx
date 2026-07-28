@@ -23,6 +23,7 @@ interface Student {
   subjects?: string[];
   photo?: string;
   enrollment_status?: string;
+  is_active?: number; // Phase 7: 1 = active, 0 = deactivated
 }
 
 const splitClass = (selected: string, configs: { hierarchy_class: string }[]) => {
@@ -1308,7 +1309,26 @@ export function Students() {
         }
       },
       'Delete Student Profile',
-      `You are about to permanently remove ${student.name}'s profile and all associated data. This cannot be undone.`
+      `You are about to permanently remove ${student.name}'s profile and all associated data. This cannot be undone. (Requires Superadmin)`
+    );
+  };
+
+  // Phase 7: Soft-deactivate / re-enable a student (Manager+)
+  const handleDeactivateStudent = (student: Student, activate: boolean) => {
+    const label = activate ? 'Re-enable' : 'Deactivate';
+    const msg = activate
+      ? `Re-enable ${student.name}? They will appear in attendance, grade entry, and fee billing again.`
+      : `Deactivate ${student.name}? They will be hidden from all rosters until re-enabled. No data is deleted.`;
+    requireSudo(
+      async () => {
+        try {
+          const res = await (window.electronAPI as any).students?.deactivate({ studentId: student.id, is_active: activate });
+          if (res?.ok) fetchStudents();
+          else alert(`Error: ${res?.error}`);
+        } catch (err: any) { alert(`Error: ${err.message}`); }
+      },
+      `${label} Student`,
+      msg
     );
   };
 
@@ -1447,32 +1467,42 @@ export function Students() {
           <button
             onClick={() => openEditDrawer(s)}
             className="secondary-btn"
-            style={{
-              padding: '6px 10px',
-              fontSize: '11px',
-              borderRadius: 'var(--radius-sm)',
-              color: 'var(--accent-gold)',
-              borderColor: 'rgba(255, 215, 0, 0.35)',
-            }}
+            style={{ padding: '6px 10px', fontSize: '11px', borderRadius: 'var(--radius-sm)', color: 'var(--accent-gold)', borderColor: 'rgba(255, 215, 0, 0.35)' }}
           >
             <span style={{ marginRight: '4px' }}>✏️</span> Edit
           </button>
+          {/* Phase 7: Deactivate / Re-enable (Manager+) */}
+          {s.is_active !== 0 ? (
+            <button
+              onClick={() => handleDeactivateStudent(s, false)}
+              className="secondary-btn"
+              title="Deactivate — hides student from all rosters without deleting data"
+              style={{ padding: '6px 10px', fontSize: '11px', borderRadius: 'var(--radius-sm)', color: 'var(--accent-gold)', borderColor: 'rgba(251,191,36,0.35)' }}
+            >
+              <span style={{ marginRight: '4px' }}>⏸</span> Deactivate
+            </button>
+          ) : (
+            <button
+              onClick={() => handleDeactivateStudent(s, true)}
+              className="secondary-btn"
+              title="Re-enable this student"
+              style={{ padding: '6px 10px', fontSize: '11px', borderRadius: 'var(--radius-sm)', color: '#4ade80', borderColor: 'rgba(74,222,128,0.35)' }}
+            >
+              <span style={{ marginRight: '4px' }}>▶</span> Re-enable
+            </button>
+          )}
+          {/* Phase 7: Permanent Delete (Superadmin only — level 9) */}
           <button
             onClick={() => handleDeleteStudent(s)}
             className="secondary-btn"
-            style={{
-              padding: '6px 10px',
-              fontSize: '11px',
-              borderRadius: 'var(--radius-sm)',
-              color: 'var(--danger)',
-              borderColor: 'rgba(239, 68, 68, 0.35)',
-            }}
+            title="Permanently delete student record — Superadmin only"
+            style={{ padding: '6px 10px', fontSize: '11px', borderRadius: 'var(--radius-sm)', color: 'var(--danger)', borderColor: 'rgba(239, 68, 68, 0.35)' }}
           >
-            <span style={{ marginRight: '4px' }}>🗑️</span> Remove
+            <span style={{ marginRight: '4px' }}>🗑️</span> Delete
           </button>
         </div>
       ),
-      width: '180px',
+      width: '260px',
     },
   ];
 
