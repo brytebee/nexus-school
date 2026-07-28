@@ -281,6 +281,13 @@ const nexusAPI = {
         saveGrades:     (data) => ipcRenderer.invoke('save-student-grades',    data),
         validateCSV:    (data) => ipcRenderer.invoke('students:validate-csv',  data),
         getCount:       ()     => ipcRenderer.invoke('students:get-count'),
+        // Phase 7: Soft-deactivation (Manager+) — pass { studentId, is_active: bool }
+        deactivate:     (data) => ipcRenderer.invoke('student:deactivate',     data),
+    },
+    // ── Phase 7: Teacher Directory Management ────────────────────────────
+    teachers: {
+        // Soft-deactivation (Manager+) — pass { teacherId, is_active: bool }
+        deactivate: (data) => ipcRenderer.invoke('teacher:deactivate', data),
     },
     // ── Generic bridge (Guardian Shield, etc.) ───────────────────────
     invoke: (channel, data)  => ipcRenderer.invoke(channel, data),

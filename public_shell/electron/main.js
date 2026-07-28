@@ -3135,17 +3135,19 @@ ipcMain.handle('students:save-settings', (_, data) => {
 });
 
 // ── Directory: Get All Teachers (with allocations) ──────────────────────────
-ipcMain.handle("get-all-teachers", (event, { limit = 15, offset = 0, search = "", minimal = false } = {}) => {
+ipcMain.handle("get-all-teachers", (event, { limit = 15, offset = 0, search = "", minimal = false, includeInactive = false } = {}) => {
   try {
     const db = database.getDb();
     const query = search ? `%${search}%` : "%";
-    
-    const total = db.prepare("SELECT COUNT(*) as total FROM teachers WHERE name LIKE ? OR id LIKE ?").get(query, query).total;
+    // Phase 7: By default only return active teachers. includeInactive=true for Settings admin views.
+    const activeClause = includeInactive ? "" : " AND COALESCE(t.is_active, 1) = 1";
+
+    const total = db.prepare(`SELECT COUNT(*) as total FROM teachers t WHERE (t.name LIKE ? OR t.id LIKE ?)${activeClause}`).get(query, query).total;
 
     const teachers = db.prepare(`
       SELECT t.*, (SELECT group_concat(class_name, ', ') FROM form_teachers WHERE teacher_id = t.id) as host_class
       FROM teachers t
-      WHERE t.name LIKE ? OR t.id LIKE ? 
+      WHERE (t.name LIKE ? OR t.id LIKE ?)${activeClause}
       ORDER BY t.name ASC 
       LIMIT ? OFFSET ?
     `).all(query, query, limit, offset);
@@ -3170,7 +3172,7 @@ ipcMain.handle("get-all-teachers", (event, { limit = 15, offset = 0, search = ""
 });
 
 // ── Directory: Get All Students ─────────────────────────────────────────
-ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = "", class_name = "", class_arm = "", subject = "", teacher_id = "", no_arm = false, minimal = false, include_overflow = false, enrollment_status_filter = null } = {}) => {
+ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = "", class_name = "", class_arm = "", subject = "", teacher_id = "", no_arm = false, minimal = false, include_overflow = false, include_inactive = false, enrollment_status_filter = null } = {}) => {
   try {
     const db = database.getDb();
     const query = search ? `%${search}%` : "%";
@@ -3178,8 +3180,13 @@ ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = ""
     // Base WHERE clause (always present)
     let conditions = "(s.name LIKE ? OR s.id LIKE ? OR s.reg_no LIKE ?)";
     const params = [query, query, query];
+    // Phase 7: Exclude deactivated students from all operational views (grade entry, attendance, fees, results)
+    // Callers that explicitly need archived students must pass includeInactive = true
     if (!include_overflow) {
       conditions += " AND (s.enrollment_status = 'active' OR s.enrollment_status IS NULL OR s.enrollment_status = '')";
+    }
+    if (!include_inactive) {
+      conditions += " AND COALESCE(s.is_active, 1) = 1";
     }
     // Explicit enrollment_status filter (e.g. 'overflow' for the Overflow roster tab)
     if (enrollment_status_filter) {
@@ -3327,10 +3334,17 @@ ipcMain.handle("subjects:clear-sync-warnings", () => {
   }
 });
 
-// ── Directory: Delete Teacher ─────────────────────────────────────────────────
+// ── Directory: Delete Teacher (Superadmin only) ───────────────────────────────
 ipcMain.handle("delete-teacher", (event, { id }) => {
   try {
     const db = database.getDb();
+    // Phase 7 RBAC: Only Superadmin (level 9) may permanently delete a teacher.
+    // Managers (level 5) must use teacher:deactivate instead.
+    if (!currentAdminSession || currentAdminSession.role_level < 9) {
+      return { ok: false, error: 'Superadmin access required to permanently delete a teacher. Managers may deactivate instead.' };
+    }
+    const target = db.prepare("SELECT name FROM teachers WHERE id = ?").get(id);
+    if (!target) return { ok: false, error: 'Teacher not found.' };
     // Purge allocations, attributed records, and audit logs before removing
     // the teacher row itself to avoid orphaned foreign key references.
     db.transaction(() => {
@@ -3341,17 +3355,46 @@ ipcMain.handle("delete-teacher", (event, { id }) => {
       db.prepare("UPDATE sync_logs       SET teacher_id = 'DELETED' WHERE teacher_id = ?").run(id);
       db.prepare("DELETE FROM teachers WHERE id = ?").run(id);
     })();
-    console.log(`[Dir] Teacher ${id} and all allocations deleted.`);
+    if (currentAdminSession) db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'DELETE_TEACHER', 'teachers', ?)").run(currentAdminSession.id, `Deleted teacher: ${target.name} (${id})`);
+    console.log(`[Dir] Teacher ${id} (${target.name}) permanently deleted by ${currentAdminSession.username}.`);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
   }
 });
 
-// ── Directory: Delete Student ─────────────────────────────────────────────────
+// ── Phase 7: Deactivate / Re-enable Teacher (Manager+) ───────────────────────
+// Soft-deactivation: sets is_active = 0/1. Deactivated teachers are excluded
+// from grade entry dropdowns, attendance, and result queries.
+ipcMain.handle("teacher:deactivate", (event, { teacherId, is_active }) => {
+  try {
+    const db = database.getDb();
+    if (!currentAdminSession || currentAdminSession.role_level < 5) {
+      return { ok: false, error: 'Manager access required to deactivate a teacher.' };
+    }
+    const target = db.prepare("SELECT name FROM teachers WHERE id = ?").get(teacherId);
+    if (!target) return { ok: false, error: 'Teacher not found.' };
+    const newState = is_active ? 1 : 0;
+    db.prepare("UPDATE teachers SET is_active = ? WHERE id = ?").run(newState, teacherId);
+    const action = newState === 1 ? 'REACTIVATE_TEACHER' : 'DEACTIVATE_TEACHER';
+    const label  = newState === 1 ? 'Re-enabled' : 'Deactivated';
+    if (currentAdminSession) db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, ?, 'teachers', ?)").run(currentAdminSession.id, action, `${label}: ${target.name} (${teacherId})`);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// ── Directory: Delete Student (Superadmin only) ───────────────────────────────
 ipcMain.handle("delete-student", (event, { id }) => {
   try {
     const db = database.getDb();
+    // Phase 7 RBAC: Only Superadmin (level 9) may permanently delete a student.
+    if (!currentAdminSession || currentAdminSession.role_level < 9) {
+      return { ok: false, error: 'Superadmin access required to permanently delete a student. Managers may deactivate instead.' };
+    }
+    const target = db.prepare("SELECT name FROM students WHERE id = ?").get(id);
+    if (!target) return { ok: false, error: 'Student not found.' };
     // Purge all related rows explicitly so no orphans remain,
     // regardless of whether FK cascade is active on this SQLite build.
     db.transaction(() => {
@@ -3361,7 +3404,30 @@ ipcMain.handle("delete-student", (event, { id }) => {
       db.prepare("DELETE FROM teacher_remarks   WHERE student_id = ?").run(id);
       db.prepare("DELETE FROM students          WHERE id         = ?").run(id);
     })();
-    console.log(`[Dir] Student ${id} and all related records deleted.`);
+    if (currentAdminSession) db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'DELETE_STUDENT', 'students', ?)").run(currentAdminSession.id, `Deleted student: ${target.name} (${id})`);
+    console.log(`[Dir] Student ${id} (${target.name}) permanently deleted by ${currentAdminSession.username}.`);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// ── Phase 7: Deactivate / Re-enable Student (Manager+) ───────────────────────
+// Soft-deactivation: sets is_active = 0/1. Deactivated students are excluded
+// from grade entry, attendance rosters, fee billing, and result queries.
+ipcMain.handle("student:deactivate", (event, { studentId, is_active }) => {
+  try {
+    const db = database.getDb();
+    if (!currentAdminSession || currentAdminSession.role_level < 5) {
+      return { ok: false, error: 'Manager access required to deactivate a student.' };
+    }
+    const target = db.prepare("SELECT name FROM students WHERE id = ?").get(studentId);
+    if (!target) return { ok: false, error: 'Student not found.' };
+    const newState = is_active ? 1 : 0;
+    db.prepare("UPDATE students SET is_active = ? WHERE id = ?").run(newState, studentId);
+    const action = newState === 1 ? 'REACTIVATE_STUDENT' : 'DEACTIVATE_STUDENT';
+    const label  = newState === 1 ? 'Re-enabled' : 'Deactivated';
+    if (currentAdminSession) db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, ?, 'students', ?)").run(currentAdminSession.id, action, `${label}: ${target.name} (${studentId})`);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -3491,6 +3557,7 @@ ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, 
         AND f.academic_session = ?
         AND f.term             = ?
       WHERE (s.name LIKE ? OR s.id LIKE ?)
+        AND COALESCE(s.is_active, 1) = 1
         AND (? = 'all' OR COALESCE(f.status, 'unpaid') = ?)
     `).get(academic_session, term, query, query, filter, filter).total;
 
@@ -3512,6 +3579,7 @@ ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, 
         AND f.academic_session = ?
         AND f.term             = ?
       WHERE (s.name LIKE ? OR s.id LIKE ?)
+        AND COALESCE(s.is_active, 1) = 1
         AND (? = 'all' OR COALESCE(f.status, 'unpaid') = ?)
       ORDER BY s.class_name ASC, s.name ASC
       LIMIT ? OFFSET ?

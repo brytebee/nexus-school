@@ -78,6 +78,7 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
   const [staffAccounts, setStaffAccounts] = useState<any[]>([]);
   const [newStaffUsername, setNewStaffUsername] = useState('');
   const [newStaffPin, setNewStaffPin] = useState('');
+  const [newStaffAuthType, setNewStaffAuthType] = useState<'pin' | 'password'>('pin'); // Phase 7
   const [newStaffRole, setNewStaffRole] = useState(1);
   const [newStaffPhone, setNewStaffPhone] = useState('');
   const [newStaffQuestion, setNewStaffQuestion] = useState('');
@@ -474,8 +475,13 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
     const uRes = validateUsername(newStaffUsername);
     if (!uRes.ok && uRes.error) return showErr(uRes.error);
 
-    const pRes = validatePin(newStaffPin, 'pin');
-    if (!pRes.ok && pRes.error) return showErr(pRes.error);
+    // Phase 7: Branch validation by auth type
+    if (newStaffAuthType === 'pin') {
+      const pRes = validatePin(newStaffPin, 'pin');
+      if (!pRes.ok && pRes.error) return showErr(pRes.error);
+    } else {
+      if (!newStaffPin.trim() || newStaffPin.trim().length < 6) return showErr('Password must be at least 6 characters.');
+    }
 
     if (newStaffPhone.trim()) {
       const phRes = validatePhone(newStaffPhone);
@@ -492,6 +498,7 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
       const res = await (window as any).electronAPI.createAdmin({
         username: newStaffUsername.trim(),
         pin: newStaffPin.trim(),
+        authType: newStaffAuthType,
         roleLevel: newStaffRole,
         phone: newStaffPhone.trim() || undefined,
         question: newStaffQuestion.trim() || undefined,
@@ -506,6 +513,7 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
         // Reset form
         setNewStaffUsername('');
         setNewStaffPin('');
+        setNewStaffAuthType('pin');
         setNewStaffRole(1);
         setNewStaffPhone('');
         setNewStaffQuestion('');
@@ -3028,16 +3036,49 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
                       required
                     />
                   </div>
-                  
+
+                  {/* Phase 7: Auth Type Toggle */}
                   <div className="form-group" style={{ margin: 0 }}>
-                    <label style={{ fontSize: '11px' }}>PIN * (numeric, min 4 digits)</label>
+                    <label style={{ fontSize: '11px' }}>Auth Type *</label>
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                      <button
+                        type="button"
+                        onClick={() => { setNewStaffAuthType('pin'); setNewStaffPin(''); }}
+                        style={{
+                          flex: 1, padding: '6px 10px', fontSize: '11px', borderRadius: 'var(--radius-sm)',
+                          background: newStaffAuthType === 'pin' ? 'rgba(0,229,255,0.15)' : 'transparent',
+                          border: `1px solid ${newStaffAuthType === 'pin' ? 'rgba(0,229,255,0.5)' : 'var(--glass-border)'}`,
+                          color: newStaffAuthType === 'pin' ? '#00e5ff' : 'var(--text-dim)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        🔢 PIN
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setNewStaffAuthType('password'); setNewStaffPin(''); }}
+                        style={{
+                          flex: 1, padding: '6px 10px', fontSize: '11px', borderRadius: 'var(--radius-sm)',
+                          background: newStaffAuthType === 'password' ? 'rgba(251,191,36,0.15)' : 'transparent',
+                          border: `1px solid ${newStaffAuthType === 'password' ? 'rgba(251,191,36,0.5)' : 'var(--glass-border)'}`,
+                          color: newStaffAuthType === 'password' ? '#fbbf24' : 'var(--text-dim)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        🔑 Password
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label style={{ fontSize: '11px' }}>{newStaffAuthType === 'pin' ? 'PIN * (numeric, min 4 digits)' : 'Password * (min 6 characters)'}</label>
                     <input
                       type="password"
                       className="modern-input"
                       style={{ fontSize: '11px', padding: '6px 10px' }}
-                      placeholder="••••"
+                      placeholder={newStaffAuthType === 'pin' ? '••••' : '••••••'}
                       value={newStaffPin}
-                      onChange={(e) => setNewStaffPin(e.target.value.replace(/[^0-9]/g, ''))}
+                      onChange={(e) => setNewStaffPin(newStaffAuthType === 'pin' ? e.target.value.replace(/[^0-9]/g, '') : e.target.value)}
                       required
                     />
                   </div>
