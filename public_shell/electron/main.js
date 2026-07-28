@@ -3220,7 +3220,48 @@ ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = ""
     }
 
     const totalSql   = `SELECT COUNT(*) as total FROM students s WHERE ${conditions}`;
-    const selectSql  = `SELECT s.id, s.name, s.class_name, COALESCE(s.class_arm, '') as class_arm, s.reg_no, s.gender, s.dob, s.photo, s.parent_email, s.parent_phone, s.parent_name, s.fee_status, s.enrollment_status FROM students s WHERE ${conditions} ORDER BY s.class_name ASC, s.name ASC LIMIT ? OFFSET ?`;
+    
+    const tier = licenseStatus?.tier || 'Silver';
+    const isFinancialTier = (tier === 'Gold' || tier === 'Diamond');
+    let selectSql = '';
+
+    if (isFinancialTier) {
+      const activeTerm = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
+      const session = (activeTerm?.academic_session || '2025/2026').replace(/'/g, "''");
+      const term = (activeTerm?.term || 'First Term').replace(/'/g, "''");
+
+      selectSql = `
+        SELECT s.id, s.name, s.class_name, COALESCE(s.class_arm, '') as class_arm, 
+               s.reg_no, s.gender, s.dob, s.photo, s.parent_email, s.parent_phone, s.parent_name, s.enrollment_status,
+               CASE 
+                 WHEN f.id IS NOT NULL AND (COALESCE(f.total_billed, 0) - COALESCE(f.total_paid, 0)) <= 0 THEN 'cleared'
+                 WHEN f.id IS NOT NULL AND (COALESCE(f.total_billed, 0) - COALESCE(f.total_paid, 0)) > 0 THEN 'owing'
+                 WHEN s.fee_status = 'cleared' THEN 'cleared'
+                 ELSE 'owing'
+               END AS fee_status
+        FROM students s
+        LEFT JOIN student_fees f 
+          ON s.id = f.student_id 
+         AND f.academic_session = '${session}' 
+         AND f.term = '${term}'
+        WHERE ${conditions} 
+        ORDER BY s.class_name ASC, s.name ASC 
+        LIMIT ? OFFSET ?
+      `;
+    } else {
+      selectSql = `
+        SELECT s.id, s.name, s.class_name, COALESCE(s.class_arm, '') as class_arm, 
+               s.reg_no, s.gender, s.dob, s.photo, s.parent_email, s.parent_phone, s.parent_name, s.enrollment_status,
+               CASE 
+                 WHEN s.fee_status = 'cleared' THEN 'cleared'
+                 ELSE 'owing'
+               END AS fee_status
+        FROM students s
+        WHERE ${conditions} 
+        ORDER BY s.class_name ASC, s.name ASC 
+        LIMIT ? OFFSET ?
+      `;
+    }
 
     const total    = db.prepare(totalSql).get(...params).total;
     const students = db.prepare(selectSql).all(...params, limit, offset);
@@ -4069,6 +4110,16 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
       WHERE student_id = ? AND status IN ('Present', 'Late') AND academic_session = ? AND term = ?
     `);
 
+    // Dynamic fee_status: ALL tiers check student_fees balance from student_fees table.
+    // No fee record this term → student hasn't been billed → treat as cleared.
+    // balance <= 0 → fully paid → cleared.
+    // balance > 0 → outstanding → owing.
+    const getFeeBalance = (() => {
+      try {
+        return db.prepare(`SELECT COALESCE(total_billed, 0) - COALESCE(total_paid, 0) AS balance FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ? LIMIT 1`);
+      } catch (_) { return null; }
+    })();
+
     const results = students.map((stu) => {
       const records = getRecords.all(stu.id, session, term);
       const explicitSubjs = getExplicitSubjects.all(stu.id).map(r => r.subject);
@@ -4160,6 +4211,17 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
         // Image signature (for clean_slate, azure and any template using identity.principalSignatureBase64)
         // This is forwarded to report-compiler via the identity object directly — not this per-student field
         principal_stamp: schoolStamp,
+        // Dynamic fee_status — derived from actual student_fees balance for ALL tiers.
+        // This is what the pre-flight audit modal in ResultStudio uses to split cleared/owing.
+        fee_status: (() => {
+          try {
+            if (!getFeeBalance) return 'cleared'; // student_fees table doesn't exist yet
+            const fRow = getFeeBalance.get(stu.id, session, term);
+            // No row = no fee billed this term = cleared (not in debt)
+            if (!fRow) return 'cleared';
+            return fRow.balance <= 0 ? 'cleared' : 'owing';
+          } catch (_) { return 'cleared'; }
+        })(),
       };
     });
 
@@ -4773,10 +4835,16 @@ ipcMain.handle("generate-reports", async (event, payload) => {
       const _licTier = licenseStatus?.tier || identityPacket?.planTier || identityPacket?.plan_tier || 'Standalone';
       const _feeGated = _licTier === 'Gold' || _licTier === 'Diamond';
 
-      // Hoist statements to avoid re-preparing on every student in the loop
-      const feeStmt = _feeGated ? db.prepare(
-        `SELECT status FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ? LIMIT 1`
-      ) : null;
+      // Hoist statements to avoid re-preparing on every student in the loop.
+      // ALL tiers: check student_fees balance dynamically (never hardcode 'cleared').
+      // feeStatus = 'cleared' only when balance <= 0 OR no fee record exists for this term.
+      const feeStmt = (() => {
+        try {
+          return db.prepare(
+            `SELECT COALESCE(total_billed, 0) - COALESCE(total_paid, 0) AS balance FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ? LIMIT 1`
+          );
+        } catch (_) { return null; }
+      })();
 
       let attStmt = null;
       try {
@@ -4784,15 +4852,15 @@ ipcMain.handle("generate-reports", async (event, payload) => {
       } catch (_) {}
 
       for (const s of payload.students) {
-        if (!_feeGated) {
+        try {
+          const feeRow = feeStmt?.get(s.id, termConfig?.academic_session, termConfig?.term);
+          // No row → student has no billed fees this term → treat as cleared
+          // Row with balance <= 0 → fully paid → cleared
+          // Row with balance > 0 → outstanding balance → owing
+          s.feeStatus = (!feeRow || feeRow.balance <= 0) ? 'cleared' : 'owing';
+        } catch (_) {
+          // If student_fees table doesn't exist yet, don't block generation
           s.feeStatus = 'cleared';
-        } else {
-          try {
-            const feeRow = feeStmt.get(s.id, termConfig?.academic_session, termConfig?.term);
-            s.feeStatus = feeRow?.status ?? 'cleared';
-          } catch (feeErr) {
-            s.feeStatus = 'cleared';
-          }
         }
 
         if (attStmt) {

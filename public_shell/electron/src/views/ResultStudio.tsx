@@ -16,6 +16,8 @@ interface StudentResult {
   principal_remark?: string;
   days_attended?: number;
   total_days?: number;
+  fee_status?: string;   // 'cleared' | 'owing' — dynamically computed by query-results handler
+  feeStatus?: string;    // alias used by generate-reports handler
 }
 
 // Map template IDs → PNG preview filenames (mirrors printhub.js updateTemplatePreview)
@@ -244,11 +246,83 @@ export function ResultStudio() {
     }
   };
 
+  // Fee Clearance pre-flight audit — ALWAYS runs when owing students are present.
+  // The admin sees a modal listing cleared vs owing students and chooses:
+  //   - Proceed with cleared-only  → returns cleared[]
+  //   - Cancel                     → returns null (action aborted)
+  // fee_shield_enabled setting only controls whether the modal CAN be dismissed
+  // with the full list (warn mode) or must filter (block mode).
+  const auditFeeClearanceAndConfirm = async (students: any[], actionLabel: string): Promise<any[] | null> => {
+    // Separate cleared from owing using BOTH field aliases for safety
+    const cleared = students.filter((s: any) =>
+      s.fee_status === 'cleared' || s.feeStatus === 'cleared'
+    );
+    const owing = students.filter((s: any) =>
+      s.fee_status !== 'cleared' && s.feeStatus !== 'cleared'
+    );
+
+    // If nobody is owing, proceed immediately — no modal needed
+    if (owing.length === 0) return students;
+
+    // Build a compact list of owing students to show the admin (max 8 names, then "… and N more")
+    const owingNames = owing.slice(0, 8).map((s: any) => `• ${s.name} (${s.class_name || ''})`).join('<br/>');
+    const moreCount = owing.length > 8 ? `<br/><em style="color:#94a3b8">… and ${owing.length - 8} more</em>` : '';
+
+    const Swal = (window as any).Swal;
+    if (!Swal) {
+      // No SweetAlert: fall back to native confirm
+      const proceed = window.confirm(
+        `Fee Clearance Audit — ${actionLabel}\n\n` +
+        `✅ Cleared: ${cleared.length}\n⛔ Outstanding: ${owing.length}\n\n` +
+        (cleared.length > 0
+          ? `Proceed with ${cleared.length} cleared student(s) only?`
+          : 'All students have outstanding balances. Cancel to review.')
+      );
+      return (proceed && cleared.length > 0) ? cleared : null;
+    }
+
+    const result = await Swal.fire({
+      title: '🛡️ Fee Clearance Audit',
+      html: `
+        <div style="text-align:left;font-size:13px;line-height:1.6">
+          <p style="margin:0 0 10px;color:#94a3b8">
+            The following student(s) have <strong style="color:#f87171">outstanding fee balances</strong>.
+            Only cleared students will be included in <strong>${actionLabel}</strong>.
+          </p>
+          <div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);
+                      padding:10px 14px;border-radius:8px;color:#fca5a5;margin-bottom:10px;max-height:160px;overflow-y:auto">
+            <strong>⛔ Outstanding (${owing.length}):</strong><br/>${owingNames}${moreCount}
+          </div>
+          <div style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);
+                      padding:8px 14px;border-radius:8px;color:#34d399">
+            ✅ <strong>Cleared &amp; ready:</strong> ${cleared.length} student(s)
+          </div>
+          ${cleared.length === 0 ? '<p style="margin:10px 0 0;font-size:12px;color:#f87171">⚠️ No cleared students — cannot proceed. Settle fees first.</p>' : ''}
+        </div>
+      `,
+      icon: cleared.length > 0 ? 'warning' : 'error',
+      background: '#0b0f19',
+      color: '#fff',
+      showCancelButton: true,
+      confirmButtonColor: cleared.length > 0 ? '#10b981' : '#ef4444',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: cleared.length > 0
+        ? `✅ Proceed with ${cleared.length} Cleared Student${cleared.length !== 1 ? 's' : ''}`
+        : '❌ Cannot Proceed',
+      cancelButtonText: 'Cancel',
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+    });
+
+    if (result.isConfirmed && cleared.length > 0) return cleared;
+    return null;
+  };
+
   // S8-4: Dispatch Results via WhatsApp/Email (Gold/Diamond)
   const handleDispatch = async () => {
     if (!queryResults.length || !(window as any).electronAPI?.results?.dispatch) return;
     const activeSkip = skipZeroGrades || skipUngraded;
-    const targetStudents = activeSkip
+    let targetStudents = activeSkip
       ? queryResults.filter((s: any) => (s.average ?? 0) > 0)
       : queryResults;
 
@@ -256,6 +330,10 @@ export function ResultStudio() {
       setDispatchStatus("⚠️ No students to dispatch — all have zero grades and filter is enabled.");
       return;
     }
+
+    const audited = await auditFeeClearanceAndConfirm(targetStudents, "Dispatching Results");
+    if (!audited || !audited.length) return;
+    targetStudents = audited;
 
     setDispatching(true);
     setDispatchStatus("⏳ Dispatching to " + targetStudents.length + " student(s)…");
@@ -307,7 +385,7 @@ export function ResultStudio() {
   const handlePublishToPortal = async () => {
     if (!queryResults.length || !(window as any).electronAPI?.results?.publish) return;
     const activeSkip = skipZeroGrades || skipUngraded;
-    const targetStudents = activeSkip
+    let targetStudents = activeSkip
       ? queryResults.filter((s: any) => (s.average ?? 0) > 0)
       : queryResults;
 
@@ -315,6 +393,10 @@ export function ResultStudio() {
       setPublishStatus("⚠️ No students to publish — all have zero grades and filter is enabled.");
       return;
     }
+
+    const audited = await auditFeeClearanceAndConfirm(targetStudents, "Publishing to Portal");
+    if (!audited || !audited.length) return;
+    targetStudents = audited;
 
     setPublishingPortal(true);
     setPublishProgress("Generating PDFs…");
@@ -346,7 +428,7 @@ export function ResultStudio() {
   const handleGenerate = async () => {
     if (!queryResults.length || !window.electronAPI?.generateReports) return;
     const activeSkip = skipZeroGrades || skipUngraded;
-    const studentsToGenerate = activeSkip
+    let studentsToGenerate = activeSkip
       ? queryResults.filter((s) => (s.average ?? 0) > 0)
       : queryResults;
 
@@ -356,6 +438,10 @@ export function ResultStudio() {
       );
       return;
     }
+
+    const audited = await auditFeeClearanceAndConfirm(studentsToGenerate, "Generating Reports");
+    if (!audited || !audited.length) return;
+    studentsToGenerate = audited;
 
     setGenerating(true);
     setGenStatus("⏳ Generating reports...");
@@ -1312,7 +1398,7 @@ export function ResultStudio() {
                       disabled={publishingPortal}
                       style={{ padding: "6px 14px", fontSize: "12px", animation: "none", boxShadow: "none" }}
                     >
-                      {publishingPortal ? `⏳ ${publishProgress || "Publishing…"}` : "🌐 Publish to Portal"}
+                      {publishingPortal ? `⧗ ${publishProgress || "Publishing…"}` : "🌐 Publish to Portal"}
                     </button>
                     {publishStatus && (
                       <span style={{ fontSize: "12px", color: "var(--text-dim)" }}>{publishStatus}</span>
@@ -1321,70 +1407,89 @@ export function ResultStudio() {
                 </div>
               )}
 
-              <div
-                className="table-container"
-                id="rs-preview-container"
-                style={{ margin: "0 0 16px" }}
-              >
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>Student Name</th>
-                      <th>Class</th>
-                      <th>Subjects Recorded</th>
-                      <th>Total Score</th>
-                      <th>Average</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {queryResults.length === 0 ? (
-                      <tr>
-                        <td
-                          colSpan={6}
-                          style={{
-                            textAlign: "center",
-                            padding: "30px",
-                            color: "var(--text-dim)",
-                          }}
-                        >
-                          {queryMessage.includes("Querying")
-                            ? "⏳ Loading…"
-                            : "No results found. Ensure grades have been synced from teacher devices."}
-                        </td>
-                      </tr>
-                    ) : (
-                      (skipUngraded
-                        ? queryResults.filter((s) => (s.average ?? 0) > 0)
-                        : queryResults
-                      ).map((s, i) => (
-                        <tr key={s.id}>
-                          <td>{i + 1}</td>
-                          <td>
-                            <strong>{s.name}</strong>
-                          </td>
-                          <td>{s.class_name}{s.class_arm ? ` ${s.class_arm}` : ''}</td>
-                          <td>
-                            {s.subjects?.filter((x: any) => x.score !== null)
-                              .length || 0}{" "}
-                            graded
-                          </td>
-                          <td>
-                            {s.total_score != null && !isNaN(Number(s.total_score))
-                              ? Number(s.total_score).toFixed(2)
-                              : "—"}
-                          </td>
-                          <td>{s.average ?? "—"}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+               <div
+                 className="table-container"
+                 id="rs-preview-container"
+                 style={{ margin: "0 0 16px" }}
+               >
+                 <table className="data-table">
+                   <thead>
+                     <tr>
+                       <th>#</th>
+                       <th>Student Name</th>
+                       <th>Class</th>
+                       <th>Subjects Recorded</th>
+                       <th>Total Score</th>
+                       <th>Average</th>
+                       <th>Fee Status</th>
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {queryResults.length === 0 ? (
+                       <tr>
+                         <td
+                           colSpan={7}
+                           style={{
+                             textAlign: "center",
+                             padding: "30px",
+                             color: "var(--text-dim)",
+                           }}
+                         >
+                           {queryMessage.includes("Querying")
+                             ? "⏳ Loading…"
+                             : "No results found. Ensure grades have been synced from teacher devices."}
+                         </td>
+                       </tr>
+                     ) : (
+                       (skipUngraded
+                         ? queryResults.filter((s) => (s.average ?? 0) > 0)
+                         : queryResults
+                       ).map((s, i) => {
+                         const isOwing = s.fee_status === 'owing' || s.feeStatus === 'owing';
+                         return (
+                           <tr key={s.id} style={isOwing ? { background: 'rgba(239,68,68,0.06)' } : undefined}>
+                             <td>{i + 1}</td>
+                             <td>
+                               <strong>{s.name}</strong>
+                             </td>
+                             <td>{s.class_name}{s.class_arm ? ` ${s.class_arm}` : ''}</td>
+                             <td>
+                               {s.subjects?.filter((x: any) => x.score !== null)
+                                 .length || 0}{" "}
+                               graded
+                             </td>
+                             <td>
+                               {s.total_score != null && !isNaN(Number(s.total_score))
+                                 ? Number(s.total_score).toFixed(2)
+                                 : "—"}
+                             </td>
+                             <td>{s.average ?? "—"}</td>
+                             <td>
+                               <span style={{
+                                 display: 'inline-block',
+                                 padding: '2px 8px',
+                                 borderRadius: '9999px',
+                                 fontSize: '11px',
+                                 fontWeight: 600,
+                                 background: isOwing ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)',
+                                 color: isOwing ? '#f87171' : '#34d399',
+                                 border: `1px solid ${isOwing ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}`,
+                               }}>
+                                 {isOwing ? '⛔ Owing' : '✅ Cleared'}
+                               </span>
+                             </td>
+                           </tr>
+                         );
+                       })
+                     )}
+                   </tbody>
+                 </table>
+               </div>
+             </div>
+           )}
+         </div>
+       </div>
+
 
       {/* ── Bulk Remarks Modal ── */}
       {isRemarksOpen && (
@@ -1779,14 +1884,33 @@ export function ResultStudio() {
                 </p>
               )}
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                {previewResults.slice(0, 50).map((s, idx) => (
-                  <div key={s.id || idx} style={{ background: "rgba(255,255,255,0.04)", borderRadius: "6px", padding: "10px 12px", fontSize: "12px", border: "1px solid rgba(255,255,255,0.06)" }}>
-                    <div style={{ fontWeight: 600, color: "#fff" }}>{s.name}</div>
-                    <div style={{ color: "var(--text-dim)", fontSize: "11px", marginTop: "2px" }}>
-                      Class: {s.class_name} {s.class_arm || ""} · Score: {s.total_score ?? "—"} · Avg: {s.average ? `${s.average}%` : "—"}
+                {previewResults.slice(0, 50).map((s, idx) => {
+                  const isOwing = (s as any).fee_status === 'owing' || (s as any).feeStatus === 'owing';
+                  return (
+                    <div key={s.id || idx} style={{
+                      background: isOwing ? 'rgba(239,68,68,0.08)' : 'rgba(255,255,255,0.04)',
+                      borderRadius: '6px', padding: '10px 12px', fontSize: '12px',
+                      border: `1px solid ${isOwing ? 'rgba(239,68,68,0.25)' : 'rgba(255,255,255,0.06)'}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px',
+                    }}>
+                      <div>
+                        <div style={{ fontWeight: 600, color: '#fff' }}>{s.name}</div>
+                        <div style={{ color: 'var(--text-dim)', fontSize: '11px', marginTop: '2px' }}>
+                          Class: {s.class_name} {(s as any).class_arm || ''} · Score: {(s as any).total_score ?? '—'} · Avg: {s.average ? `${s.average}%` : '—'}
+                        </div>
+                      </div>
+                      <span style={{
+                        flexShrink: 0, padding: '2px 8px', borderRadius: '9999px', fontSize: '10px',
+                        fontWeight: 600,
+                        background: isOwing ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)',
+                        color: isOwing ? '#f87171' : '#34d399',
+                        border: `1px solid ${isOwing ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}`,
+                      }}>
+                        {isOwing ? '⛔ Owing' : '✅ Cleared'}
+                      </span>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
