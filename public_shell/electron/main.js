@@ -1202,20 +1202,20 @@ ipcMain.handle('fee-structure:get-all', (event, { className } = {}) => {
     return db.prepare('SELECT * FROM fee_structures ORDER BY class_name ASC, item_name ASC').all();
 });
 
-ipcMain.handle('fee-structure:upsert-item', (event, { id, className, itemName, amount, term }) => {
+ipcMain.handle('fee-structure:upsert-item', (event, { id, className, itemName, amount, term, bankAccountId, isOptional }) => {
     const db = database.getDb();
     const adminId = currentAdminSession ? currentAdminSession.id : null;
-    
+    const bankId = bankAccountId || null;
+    const optional = isOptional ? 1 : 0;
+
     if (id) {
-        db.prepare('UPDATE fee_structures SET class_name=?, item_name=?, amount=?, term=? WHERE id=?')
-          .run(className, itemName, amount, term || 'All Terms', id);
-        
+        db.prepare('UPDATE fee_structures SET class_name=?, item_name=?, amount=?, term=?, bank_account_id=?, is_optional=? WHERE id=?')
+          .run(className, itemName, amount, term || 'All Terms', bankId, optional, id);
         db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'UPDATE_FEE_ITEM', 'fee_structures', ?)").run(adminId, `Updated ${itemName} for ${className} (₦${amount})`);
         return { ok: true, id };
     }
-    const result = db.prepare('INSERT OR REPLACE INTO fee_structures (class_name, item_name, amount, term) VALUES (?,?,?,?)')
-      .run(className, itemName, amount, term || 'All Terms');
-      
+    const result = db.prepare('INSERT OR REPLACE INTO fee_structures (class_name, item_name, amount, term, bank_account_id, is_optional) VALUES (?,?,?,?,?,?)')
+      .run(className, itemName, amount, term || 'All Terms', bankId, optional);
     db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'ADD_FEE_ITEM', 'fee_structures', ?)").run(adminId, `Added ${itemName} for ${className} (₦${amount})`);
     return { ok: true, id: result.lastInsertRowid };
 });
@@ -1460,6 +1460,69 @@ ipcMain.handle('fees:print-receipt', async (event, { txRef, studentId, format })
         });
     }
 
+    // ── Phase 8: Build bank-sectioned fee breakdown ──────────────────────────
+    // Map bank_account_id → { label, items[] }
+    const bankSectionsMap = new Map();
+    const CASH_KEY = '__cash__';
+
+    // Helper: ensure a section bucket exists
+    const ensureSection = (key, label) => {
+        if (!bankSectionsMap.has(key)) bankSectionsMap.set(key, { bankLabel: label, items: [] });
+    };
+
+    try {
+        // 1. Fetch standard fee structure items for the student's class + term
+        const structRows = db.prepare(`
+            SELECT fs.item_name, fs.amount, fs.bank_account_id,
+                   ba.bank_name AS bank_name, ba.account_name AS account_name
+            FROM fee_structures fs
+            LEFT JOIN bank_accounts ba ON ba.id = fs.bank_account_id
+            WHERE fs.class_name = ?
+              AND (fs.term = ? OR fs.term = 'All Terms')
+        `).all(studentClass, tx.term);
+
+        for (const row of structRows) {
+            const key = row.bank_account_id ?? CASH_KEY;
+            const label = row.bank_account_id
+                ? (row.bank_name || row.bank_bank || `Bank Account #${row.bank_account_id}`)
+                : '💵 Cash / Unrouted';
+            ensureSection(key, label);
+            bankSectionsMap.get(key).items.push({ name: row.item_name, amount: row.amount });
+        }
+
+        // 2. Fetch extras this student opted into for this session/term
+        const extraRows = db.prepare(`
+            SELECT fe.item_name, fe.amount, fe.bank_account_id,
+                   ba.bank_name AS bank_name, ba.account_name AS account_name
+            FROM student_extra_selections ses
+            JOIN fee_extras fe ON fe.id = ses.extra_id
+            LEFT JOIN bank_accounts ba ON ba.id = fe.bank_account_id
+            WHERE ses.student_id = ?
+              AND ses.academic_session = ?
+              AND ses.term = ?
+        `).all(studentId, tx.academic_session, tx.term);
+
+        for (const row of extraRows) {
+            const key = row.bank_account_id ?? CASH_KEY;
+            const label = row.bank_account_id
+                ? (row.bank_name || row.bank_bank || `Bank Account #${row.bank_account_id}`)
+                : '💵 Cash / Unrouted';
+            ensureSection(key, label);
+            bankSectionsMap.get(key).items.push({ name: `${row.item_name} (Extra)`, amount: row.amount });
+        }
+    } catch (e) {
+        // Non-fatal: if schema columns aren't present yet, fall back gracefully
+        console.warn('[print-receipt] bankSections build failed (non-fatal):', e.message);
+    }
+
+    // Convert map → ordered array (non-cash first, cash last)
+    const bankSections = [];
+    for (const [key, section] of bankSectionsMap.entries()) {
+        if (key !== CASH_KEY) bankSections.push(section);
+    }
+    if (bankSectionsMap.has(CASH_KEY)) bankSections.push(bankSectionsMap.get(CASH_KEY));
+    // ────────────────────────────────────────────────────────────────────────
+
     let schoolName = identityPacket?.name || "The School";
     let schoolAddress = identityPacket?.address || "";
     let schoolPhone = identityPacket?.phone || "";
@@ -1490,7 +1553,8 @@ ipcMain.handle('fees:print-receipt', async (event, { txRef, studentId, format })
         amountPaid: session ? session.total_amount : amountPaid,
         paymentMethod: PAY_LABELS_VALUE[tx.payment_method] || tx.payment_method,
         paymentDate: new Date(tx.created_at).toLocaleDateString('en-NG'),
-        allocations
+        allocations,
+        bankSections   // Phase 8: per-bank fee breakdown (may be empty for old transactions)
     };
 
     activePrintData = { data: printData, format };
@@ -1729,7 +1793,7 @@ async function processSuccessfulPayment(ref, amountInKobo, transactionId = null)
       db.prepare(`
         INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(studentId, academicSession, term, remainingPaid, "transfer", ref, "Online Payment Leftover (Paystack)");
+      `).run(studentId, academicSession, term, remainingPaid, "transfer", ref, session.payment_type || "Online Payment Leftover (Paystack)");
 
       const { total_paid_sum } = db.prepare(`
         SELECT COALESCE(SUM(amount), 0) AS total_paid_sum FROM fee_transactions
@@ -1798,6 +1862,53 @@ async function sendBrandedReceiptHelper(db, ref, session) {
     });
   }
 
+  // ── Phase 8: Build itemized fee line items for receipt ──────────────────
+  // Pull fee structure items + extras for the primary student's class/term
+  const feeItems = [];
+  try {
+    // 1. Standard mandatory fee items
+    const structRows = db.prepare(`
+      SELECT fs.item_name, fs.amount, fs.bank_account_id,
+             ba.account_name AS account_name, ba.bank_name AS bank_name
+      FROM fee_structures fs
+      LEFT JOIN bank_accounts ba ON ba.id = fs.bank_account_id
+      WHERE fs.class_name = ?
+        AND (fs.term = ? OR fs.term = 'All Terms')
+      ORDER BY fs.item_name ASC
+    `).all(studentClass, term);
+
+    for (const row of structRows) {
+      const bankLabel = row.bank_account_id
+        ? (row.account_name || row.bank_name || `Account #${row.bank_account_id}`)
+        : null;
+      feeItems.push({ name: row.item_name, amount: row.amount, bankLabel, type: 'mandatory' });
+    }
+
+    // 2. Extras this student opted into
+    const extraRows = db.prepare(`
+      SELECT fe.item_name, fe.amount, fe.bank_account_id,
+             ba.account_name AS account_name, ba.bank_name AS bank_name
+      FROM student_extra_selections ses
+      JOIN fee_extras fe ON fe.id = ses.extra_id
+      LEFT JOIN bank_accounts ba ON ba.id = fe.bank_account_id
+      WHERE ses.student_id = ?
+        AND ses.academic_session = ?
+        AND ses.term = ?
+      ORDER BY fe.item_name ASC
+    `).all(firstStudentId, academicSession, term);
+
+    for (const row of extraRows) {
+      const bankLabel = row.bank_account_id
+        ? (row.account_name || row.bank_name || `Account #${row.bank_account_id}`)
+        : null;
+      feeItems.push({ name: `${row.item_name} (Optional)`, amount: row.amount, bankLabel, type: 'extra' });
+    }
+  } catch (feeItemsErr) {
+    // Non-fatal: fall back gracefully if schema not present
+    console.warn('[Receipt] feeItems build failed (non-fatal):', feeItemsErr.message);
+  }
+
+
   let schoolName = identityPacket?.name || "the school";
   let schoolAddress = identityPacket?.address || "";
   let schoolPhone = identityPacket?.phone || "";
@@ -1828,7 +1939,8 @@ async function sendBrandedReceiptHelper(db, ref, session) {
     amountPaid: session.total_amount,
     paymentMethod: "Paystack Online",
     paymentDate: new Date(session.settled_at || Date.now()).toLocaleDateString('en-NG'),
-    allocations: receiptRecords
+    allocations: receiptRecords,
+    feeItems, // Phase 8: itemised breakdown — Tuition, PTA, Extras, etc.
   };
 
   try {
@@ -1855,6 +1967,19 @@ async function sendBrandedReceiptHelper(db, ref, session) {
       receiptMsg += `     Allocated:   ₦${rec.amount.toLocaleString('en-NG')}\n`;
       receiptMsg += `     New Balance: ₦${rec.balance.toLocaleString('en-NG')}\n`;
     });
+    if (feeItems.length > 0) {
+      receiptMsg += `\n📋 *Payment Breakdown*:\n`;
+      const mandatory = feeItems.filter(f => f.type === 'mandatory');
+      const extras = feeItems.filter(f => f.type === 'extra');
+      if (mandatory.length > 0) {
+        receiptMsg += `   _School Fees_:\n`;
+        mandatory.forEach(f => { receiptMsg += `     • ${f.name}: ₦${Number(f.amount).toLocaleString('en-NG')}${f.bankLabel ? ` (${f.bankLabel})` : ''}\n`; });
+      }
+      if (extras.length > 0) {
+        receiptMsg += `   _Optional Items_:\n`;
+        extras.forEach(f => { receiptMsg += `     • ${f.name}: ₦${Number(f.amount).toLocaleString('en-NG')}\n`; });
+      }
+    }
     receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
     receiptMsg += `_Your official school records have been updated automatically._\n_Powered by Nexus Pulse_ 🎓`;
     
@@ -1899,8 +2024,8 @@ async function processFailedPayment(ref, reason) {
 }
 
 function startPaystackPollingWorker() {
-  console.log("[Paystack Poller] Active. Scanning for pending payment checkouts every 15s...");
-  const POLL_INTERVAL_MS = 15000;
+  console.log("[Paystack Poller] Active. Scanning for pending payment checkouts every 5s...");
+  const POLL_INTERVAL_MS = 5000;
 
   setInterval(async () => {
     const db = database.getDb();
@@ -3942,6 +4067,347 @@ ipcMain.handle("fees:save-settings", async (event, patch) => {
     return { ok: true };
   } catch (err) {
     console.error("[Fees] save-settings error:", err);
+    return { ok: false, error: err.message };
+  }
+});
+
+// ── Phase 8: Financial Hub Completion ─────────────────────────────────────────
+
+/**
+ * fees:reverse-transaction — Insert a negative reversal row (audit-safe).
+ * Recalculates student_fees.total_paid and status. Requires level >= 5.
+ */
+ipcMain.handle('fees:reverse-transaction', (event, { transactionId, reason }) => {
+  try {
+    const db = database.getDb();
+    if (!currentAdminSession || currentAdminSession.role_level < 5) {
+      return { ok: false, error: 'Manager access required to reverse transactions.' };
+    }
+    const tx = db.prepare('SELECT * FROM fee_transactions WHERE id = ?').get(transactionId);
+    if (!tx) return { ok: false, error: 'Transaction not found.' };
+    if (tx.amount < 0) return { ok: false, error: 'Cannot reverse an already-reversed entry.' };
+
+    const reversalNote = `REVERSAL of #${transactionId}: ${reason || 'Admin correction'}`;
+    db.prepare(`
+      INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note, recorded_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(tx.student_id, tx.academic_session, tx.term, -tx.amount, tx.payment_method, tx.reference_number, reversalNote, currentAdminSession.username || 'Admin');
+
+    // Recalculate total_paid
+    const newPaid = db.prepare(
+      'SELECT COALESCE(SUM(amount), 0) as t FROM fee_transactions WHERE student_id = ? AND academic_session = ? AND term = ?'
+    ).get(tx.student_id, tx.academic_session, tx.term).t;
+
+    const sf = db.prepare(
+      'SELECT total_billed FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?'
+    ).get(tx.student_id, tx.academic_session, tx.term);
+
+    if (sf) {
+      const billed = sf.total_billed || 0;
+      const newStatus = newPaid >= billed ? 'Cleared' : newPaid > 0 ? 'Partial' : 'Unpaid';
+      db.prepare(
+        'UPDATE student_fees SET total_paid = ?, status = ?, updated_at = datetime(\'now\') WHERE student_id = ? AND academic_session = ? AND term = ?'
+      ).run(newPaid, newStatus, tx.student_id, tx.academic_session, tx.term);
+    }
+
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'REVERSE_TRANSACTION', 'fee_transactions', ?)")
+      .run(currentAdminSession.id, `Reversed txn #${transactionId} (₦${tx.amount}) — ${reason || 'Admin correction'}`);
+
+    return { ok: true };
+  } catch (err) {
+    console.error('[Fees] reverse-transaction error:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+/**
+ * fees:get-payment-sessions — List Paystack online payment sessions with pagination.
+ * Filter by status: 'all' | 'pending' | 'settled' | 'failed'
+ */
+ipcMain.handle('fees:get-payment-sessions', (event, { limit = 20, offset = 0, filter = 'all', search = '' } = {}) => {
+  try {
+    const db = database.getDb();
+    const whereParts = [];
+    const params = [];
+
+    if (filter !== 'all') { whereParts.push('fps.status = ?'); params.push(filter); }
+    if (search.trim()) {
+      whereParts.push('(fps.paystack_ref LIKE ? OR fps.parent_phone LIKE ?)');
+      const q = `%${search.trim()}%`;
+      params.push(q, q);
+    }
+    const where = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
+
+    const total = db.prepare(`SELECT COUNT(*) as c FROM fee_payment_sessions fps ${where}`).get(...params).c;
+    const rows = db.prepare(`
+      SELECT fps.id, fps.parent_phone, fps.student_ids, fps.total_amount,
+             fps.payment_type, fps.partial_percent, fps.paystack_ref,
+             fps.status, fps.created_at, fps.settled_at, fps.paystack_tx_id
+      FROM fee_payment_sessions fps
+      ${where}
+      ORDER BY fps.created_at DESC
+      LIMIT ? OFFSET ?
+    `).all(...params, limit, offset);
+
+    return { ok: true, data: rows, total };
+  } catch (err) {
+    console.error('[Fees] get-payment-sessions error:', err);
+    return { ok: false, error: err.message, data: [], total: 0 };
+  }
+});
+
+/**
+ * fees:mark-session-settled — Manual reconciliation for sessions where webhook missed.
+ * Requires level >= 5.
+ */
+ipcMain.handle('fees:mark-session-settled', (event, { sessionId, note }) => {
+  try {
+    const db = database.getDb();
+    if (!currentAdminSession || currentAdminSession.role_level < 5) {
+      return { ok: false, error: 'Manager access required.' };
+    }
+    const session = db.prepare('SELECT * FROM fee_payment_sessions WHERE id = ?').get(sessionId);
+    if (!session) return { ok: false, error: 'Payment session not found.' };
+    if (session.status === 'settled') return { ok: false, error: 'Session is already settled.' };
+
+    db.prepare("UPDATE fee_payment_sessions SET status = 'settled', settled_at = datetime('now') WHERE id = ?").run(sessionId);
+
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'MANUAL_SETTLE_SESSION', 'fee_payment_sessions', ?)")
+      .run(currentAdminSession.id, `Manually settled session #${sessionId} (ref: ${session.paystack_ref}) — ${note || 'Manual reconciliation'}`);
+
+    return { ok: true };
+  } catch (err) {
+    console.error('[Fees] mark-session-settled error:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+/**
+ * fees:export-roster-csv — Full unpaginated roster as a CSV string.
+ */
+ipcMain.handle('fees:export-roster-csv', (event, { academic_session, term, filter = 'all' }) => {
+  try {
+    const db = database.getDb();
+    const whereParts = [
+      "COALESCE(s.is_active, 1) = 1",
+      "sf.academic_session = ?",
+      "sf.term = ?"
+    ];
+    const params = [academic_session, term];
+
+    if (filter === 'unpaid')  { whereParts.push("COALESCE(sf.status,'Unpaid') = 'Unpaid'"); }
+    if (filter === 'partial') { whereParts.push("sf.status = 'Partial'"); }
+    if (filter === 'cleared') { whereParts.push("sf.status = 'Cleared'"); }
+
+    const rows = db.prepare(`
+      SELECT s.id, s.name, s.class_name, s.class_arm, s.reg_no,
+             COALESCE(sf.total_billed, 0)  AS total_billed,
+             COALESCE(sf.total_paid, 0)    AS total_paid,
+             COALESCE(sf.total_billed, 0) - COALESCE(sf.total_paid, 0) AS outstanding,
+             COALESCE(sf.status, 'Unpaid') AS status,
+             sf.next_due_date
+      FROM students s
+      LEFT JOIN student_fees sf
+        ON sf.student_id = s.id AND sf.academic_session = ? AND sf.term = ?
+      WHERE ${whereParts.join(' AND ')}
+      ORDER BY s.class_name ASC, s.name ASC
+    `).all(academic_session, term, ...params);
+
+    // Build CSV
+    const header = ['Student ID','Name','Class','Arm','Reg No','Total Billed','Total Paid','Outstanding','Status','Next Due Date'];
+    const lines = [header.join(',')];
+    for (const r of rows) {
+      lines.push([
+        r.id, `"${r.name}"`, `"${r.class_name}"`, `"${r.class_arm||''}"`, `"${r.reg_no||''}"`,
+        r.total_billed, r.total_paid, r.outstanding, r.status, r.next_due_date || ''
+      ].join(','));
+    }
+    return { ok: true, csv: lines.join('\n'), count: rows.length };
+  } catch (err) {
+    console.error('[Fees] export-roster-csv error:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+/**
+ * fees:dry-run-recovery-pulse — Read-only audit report before sending Financial Recovery Pulses.
+ * Returns: unpaid count, outstanding total, Paystack config health, sample message.
+ */
+ipcMain.handle('fees:dry-run-recovery-pulse', (event, { academic_session, term }) => {
+  try {
+    const db = database.getDb();
+
+    const unpaidRows = db.prepare(`
+      SELECT s.name, s.parent_phone,
+             COALESCE(sf.total_billed, 0) - COALESCE(sf.total_paid, 0) AS outstanding
+      FROM students s
+      LEFT JOIN student_fees sf ON sf.student_id = s.id AND sf.academic_session = ? AND sf.term = ?
+      WHERE COALESCE(s.is_active, 1) = 1
+        AND COALESCE(sf.status, 'Unpaid') IN ('Unpaid', 'Partial')
+        AND s.parent_phone IS NOT NULL AND s.parent_phone != ''
+      ORDER BY outstanding DESC
+    `).all(academic_session, term);
+
+    const totalOutstanding = unpaidRows.reduce((sum, r) => sum + (r.outstanding || 0), 0);
+    const uniquePhones = new Set(unpaidRows.map(r => r.parent_phone));
+
+    // Paystack config health
+    const feeSettings = _parseFeeSettings(db);
+    const subaccountCode = feeSettings.paystack_subaccount_code || null;
+    const secretKeyRow = db.prepare("SELECT value FROM app_settings WHERE key = 'paystack_secret_key'").get();
+    const hasSecret = !!(secretKeyRow?.value);
+    const paystackHealthy = hasSecret && !!subaccountCode;
+
+    // Sample message (first unpaid student)
+    let sampleMessage = null;
+    if (unpaidRows.length > 0) {
+      const first = unpaidRows[0];
+      const schoolRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_name'").get();
+      const schoolName = schoolRow?.value || 'Your School';
+      sampleMessage = `💰 *Fee Reminder — ${schoolName}*\n\nDear Parent,\n\nThis is a reminder that *${first.name}*'s school fees have an outstanding balance of *₦${Number(first.outstanding).toLocaleString()}* for ${term}, ${academic_session}.\n\nKindly settle at your earliest convenience.\n\n_Powered by Nexus School OS_`;
+    }
+
+    return {
+      ok: true,
+      data: {
+        unpaidStudentCount: unpaidRows.length,
+        uniqueParentCount: uniquePhones.size,
+        totalOutstanding,
+        paystackHealthy,
+        hasPaystackSecret: hasSecret,
+        hasSubaccount: !!subaccountCode,
+        sampleMessage,
+        topUnpaid: unpaidRows.slice(0, 5).map(r => ({ name: r.name, outstanding: r.outstanding })),
+      }
+    };
+  } catch (err) {
+    console.error('[Fees] dry-run-recovery-pulse error:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+// ── Phase 8: Optional Fees & Multi-Bank Routing ────────────────────────────────
+
+/**
+ * fee-extras:get-all — Fetch all active extra items, optionally filtered by class/term.
+ */
+ipcMain.handle('fee-extras:get-all', (event, { class_name, term } = {}) => {
+  try {
+    const db = database.getDb();
+    const whereParts = ['fe.is_active = 1'];
+    const params = [];
+    if (class_name) { whereParts.push('(fe.class_name = ? OR fe.class_name = \'All Classes\')'); params.push(class_name); }
+    if (term)       { whereParts.push('(fe.term = ? OR fe.term = \'All Terms\')'); params.push(term); }
+    const where = 'WHERE ' + whereParts.join(' AND ');
+    const rows = db.prepare(`
+      SELECT fe.*, ba.bank_name, ba.account_number, ba.subaccount_code
+      FROM fee_extras fe
+      LEFT JOIN bank_accounts ba ON ba.id = fe.bank_account_id
+      ${where}
+      ORDER BY fe.class_name ASC, fe.item_name ASC
+    `).all(...params);
+    return { ok: true, data: rows };
+  } catch (err) {
+    console.error('[Fees] fee-extras:get-all error:', err);
+    return { ok: false, error: err.message, data: [] };
+  }
+});
+
+/**
+ * fee-extras:upsert — Create or update an optional extra item.
+ * Requires Manager (level >= 5).
+ */
+ipcMain.handle('fee-extras:upsert', (event, { id, class_name, item_name, amount, term, bank_account_id }) => {
+  try {
+    const db = database.getDb();
+    if (!currentAdminSession || currentAdminSession.role_level < 5) {
+      return { ok: false, error: 'Manager access required.' };
+    }
+    const bankId = bank_account_id || null;
+    const adminId = currentAdminSession.id;
+    if (id) {
+      db.prepare('UPDATE fee_extras SET class_name=?, item_name=?, amount=?, term=?, bank_account_id=? WHERE id=?')
+        .run(class_name, item_name, amount, term || 'All Terms', bankId, id);
+      db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'UPDATE_FEE_EXTRA', 'fee_extras', ?)")
+        .run(adminId, `Updated extra: ${item_name} (₦${amount})`);
+      return { ok: true, id };
+    }
+    const result = db.prepare('INSERT OR REPLACE INTO fee_extras (class_name, item_name, amount, term, bank_account_id) VALUES (?,?,?,?,?)')
+      .run(class_name, item_name, amount, term || 'All Terms', bankId);
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'ADD_FEE_EXTRA', 'fee_extras', ?)")
+      .run(adminId, `Added extra: ${item_name} for ${class_name} (₦${amount})`);
+    return { ok: true, id: result.lastInsertRowid };
+  } catch (err) {
+    console.error('[Fees] fee-extras:upsert error:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+/**
+ * fee-extras:delete — Soft-delete (is_active = 0) an extra item.
+ * Requires Manager (level >= 5).
+ */
+ipcMain.handle('fee-extras:delete', (event, { id }) => {
+  try {
+    const db = database.getDb();
+    if (!currentAdminSession || currentAdminSession.role_level < 5) {
+      return { ok: false, error: 'Manager access required.' };
+    }
+    const extra = db.prepare('SELECT * FROM fee_extras WHERE id = ?').get(id);
+    if (!extra) return { ok: false, error: 'Extra item not found.' };
+    db.prepare('UPDATE fee_extras SET is_active = 0 WHERE id = ?').run(id);
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'DELETE_FEE_EXTRA', 'fee_extras', ?)")
+      .run(currentAdminSession.id, `Deactivated extra: ${extra.item_name}`);
+    return { ok: true };
+  } catch (err) {
+    console.error('[Fees] fee-extras:delete error:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+/**
+ * fee-extras:get-selections — Get the extras a student has opted into for a term.
+ */
+ipcMain.handle('fee-extras:get-selections', (event, { student_id, academic_session, term }) => {
+  try {
+    const db = database.getDb();
+    const rows = db.prepare(`
+      SELECT ses.*, fe.item_name, fe.amount, fe.class_name, fe.bank_account_id,
+             ba.bank_name, ba.subaccount_code
+      FROM student_extra_selections ses
+      JOIN fee_extras fe ON fe.id = ses.extra_id
+      LEFT JOIN bank_accounts ba ON ba.id = fe.bank_account_id
+      WHERE ses.student_id = ? AND ses.academic_session = ? AND ses.term = ?
+      ORDER BY fe.item_name ASC
+    `).all(student_id, academic_session, term);
+    return { ok: true, data: rows };
+  } catch (err) {
+    console.error('[Fees] fee-extras:get-selections error:', err);
+    return { ok: false, error: err.message, data: [] };
+  }
+});
+
+/**
+ * fee-extras:toggle-selection — Student opts in or out of a fee extra.
+ * select: true = opt in, false = opt out.
+ */
+ipcMain.handle('fee-extras:toggle-selection', (event, { student_id, extra_id, academic_session, term, select }) => {
+  try {
+    const db = database.getDb();
+    if (select) {
+      db.prepare(`
+        INSERT OR IGNORE INTO student_extra_selections (student_id, extra_id, academic_session, term)
+        VALUES (?, ?, ?, ?)
+      `).run(student_id, extra_id, academic_session, term);
+    } else {
+      db.prepare(`
+        DELETE FROM student_extra_selections
+        WHERE student_id = ? AND extra_id = ? AND academic_session = ? AND term = ?
+      `).run(student_id, extra_id, academic_session, term);
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error('[Fees] fee-extras:toggle-selection error:', err);
     return { ok: false, error: err.message };
   }
 });

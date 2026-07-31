@@ -119,8 +119,64 @@ function generateReceiptPdf(data) {
          .text('TOTAL PAID (₦)', 335, currentY + 16)
          .fontSize(13).text(Number(data.amountPaid || 0).toLocaleString('en-NG'), 415, currentY + 15, { width: 130, align: 'right' });
 
+      // ── Phase 8: Fee Breakdown Section ──────────────────────────────────────
+      const feeItems = data.feeItems || [];
+      if (feeItems.length > 0) {
+        currentY += 60;
+
+        // Section header
+        doc.rect(40, currentY, 515, 20).fill('#1e293b');
+        doc.fillColor('#94a3b8').fontSize(9).font('Helvetica-Bold')
+           .text('FEE BREAKDOWN', 50, currentY + 6)
+           .text('Amount (₦)', 440, currentY + 6, { width: 110, align: 'right' });
+
+        currentY += 20;
+
+        const mandatory = feeItems.filter(f => f.type === 'mandatory');
+        const extras = feeItems.filter(f => f.type === 'extra');
+
+        // Mandatory fee items
+        if (mandatory.length > 0) {
+          doc.fillColor('#64748b').fontSize(8).font('Helvetica-Bold')
+             .text('SCHOOL FEES', 50, currentY + 5);
+          currentY += 16;
+
+          mandatory.forEach((item, idx) => {
+            if (idx % 2 === 0) {
+              doc.rect(40, currentY, 515, 18).fill('#f8fafc');
+            }
+            const label = item.bankLabel ? `${item.name}  ·  ${item.bankLabel}` : item.name;
+            doc.fillColor('#334155').fontSize(9).font('Helvetica')
+               .text(label, 58, currentY + 4)
+               .font('Helvetica-Bold').text(Number(item.amount || 0).toLocaleString('en-NG'), 440, currentY + 4, { width: 110, align: 'right' });
+            doc.moveTo(40, currentY + 18).lineTo(555, currentY + 18).strokeColor('#e2e8f0').lineWidth(0.5).stroke();
+            currentY += 18;
+          });
+        }
+
+        // Optional/extras items
+        if (extras.length > 0) {
+          currentY += 6;
+          doc.fillColor('#64748b').fontSize(8).font('Helvetica-Bold')
+             .text('OPTIONAL ITEMS', 50, currentY + 5);
+          currentY += 16;
+
+          extras.forEach((item, idx) => {
+            if (idx % 2 === 0) {
+              doc.rect(40, currentY, 515, 18).fill('#f8fafc');
+            }
+            const name = item.name.replace(' (Optional)', '');
+            doc.fillColor('#334155').fontSize(9).font('Helvetica')
+               .text(name, 58, currentY + 4)
+               .font('Helvetica-Bold').text(Number(item.amount || 0).toLocaleString('en-NG'), 440, currentY + 4, { width: 110, align: 'right' });
+            doc.moveTo(40, currentY + 18).lineTo(555, currentY + 18).strokeColor('#e2e8f0').lineWidth(0.5).stroke();
+            currentY += 18;
+          });
+        }
+      }
+
       // Footer notice / Seal
-      currentY += 75;
+      currentY += 30;
       doc.moveTo(40, currentY).lineTo(555, currentY).strokeColor('#e2e8f0').lineWidth(0.5).stroke();
       
       doc.fillColor('#64748b').fontSize(8).font('Helvetica')
@@ -128,6 +184,7 @@ function generateReceiptPdf(data) {
          .text('Thank you for your payment. For inquiries, please contact the school administration.', 40, currentY + 22, { align: 'center' });
 
       doc.end();
+
     } catch (err) {
       reject(err);
     }
