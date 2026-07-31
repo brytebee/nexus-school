@@ -36,6 +36,7 @@ export function Teachers() {
   const [searchVal, setSearchVal] = useState('');
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(10);
+  const [showDeactivated, setShowDeactivated] = useState(false); // Phase 7: show archived teachers
 
   // Add / Edit Drawer
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -84,7 +85,7 @@ export function Teachers() {
     if (!window.electronAPI?.getAllTeachers) return;
     setLoading(true);
     try {
-      const res = await window.electronAPI.getAllTeachers({ limit, offset: page * limit, search });
+      const res = await window.electronAPI.getAllTeachers({ limit, offset: page * limit, search, includeInactive: showDeactivated });
       if (res?.ok) {
         setTeachers(res.data || []);
         setTotalTeachers(res.total || 0);
@@ -105,7 +106,7 @@ export function Teachers() {
     return () => clearTimeout(handler);
   }, [searchVal]);
 
-  useEffect(() => { fetchTeachers(); }, [page, search, limit]);
+  useEffect(() => { fetchTeachers(); }, [page, search, limit, showDeactivated]);
 
   // ── CSV Import Handler ───────────────────────────────────────────────────
   const handleCSVLoadedPayload = (payload: any) => {
@@ -605,7 +606,17 @@ export function Teachers() {
       header: 'TEACHER PROFILE',
       cell: (t) => (
         <div>
-          <div style={{ fontWeight: 700, color: 'var(--text-main)', fontSize: '13px' }}>{t.name}</div>
+          <div style={{ fontWeight: 700, color: t.is_active === 0 ? 'var(--text-dim)' : 'var(--text-main)', fontSize: '13px', opacity: t.is_active === 0 ? 0.6 : 1 }}>{t.name}</div>
+          {t.is_active === 0 && (
+            <span style={{
+              display: 'inline-block', marginTop: '4px', fontSize: '9px', fontWeight: 700,
+              background: 'rgba(251,191,36,0.12)', color: '#fbbf24',
+              border: '1px solid rgba(251,191,36,0.3)', padding: '2px 8px',
+              borderRadius: 'var(--radius-sm)',
+            }}>
+              ⏸ DEACTIVATED
+            </span>
+          )}
           {t.host_class && (
             <span style={{
               display: 'inline-block', marginTop: '6px', fontSize: '9px', fontWeight: 700,
@@ -825,7 +836,38 @@ export function Teachers() {
         )}
       </div>
 
+      {/* 👁 Show Deactivated Toggle — Phase 7 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <button
+          id="btn-teachers-show-deactivated"
+          onClick={() => { setShowDeactivated(v => !v); setPage(0); }}
+          title={showDeactivated ? 'Showing deactivated teachers — click to hide' : 'Show deactivated / archived teachers'}
+          style={{
+            background: showDeactivated ? 'rgba(251,191,36,0.2)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${showDeactivated ? 'rgba(251,191,36,0.6)' : 'var(--glass-border)'}`,
+            borderRadius: 'var(--radius-sm)',
+            padding: '6px 14px',
+            cursor: 'pointer',
+            fontSize: '12px',
+            color: showDeactivated ? '#fbbf24' : 'var(--text-dim)',
+            fontWeight: 600,
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          👁 {showDeactivated ? 'Hide Deactivated' : 'Show Deactivated'}
+        </button>
+        {showDeactivated && (
+          <span style={{ fontSize: '11px', color: '#fbbf24', opacity: 0.8 }}>
+            ⚠ Archived staff visible — use Re-enable button to restore
+          </span>
+        )}
+      </div>
+
       {/* ── Data Table ── */}
+
       <DataTable
         data={teachers}
         columns={columns}

@@ -140,6 +140,7 @@ export function Students() {
   const [filterTeacherId, setFilterTeacherId] = useState('');
   const [filterNoArm, setFilterNoArm] = useState(false);
   const [filterOverflow, setFilterOverflow] = useState(false);
+  const [showDeactivated, setShowDeactivated] = useState(false); // Phase 7: show archived students
 
   // Filter metadata — teachers list and all known subjects
   const [filterTeachers, setFilterTeachers] = useState<{ id: string; name: string; allocations?: { class_name: string; subject: string }[] }[]>([]);
@@ -236,6 +237,7 @@ export function Students() {
         no_arm: filterNoArm,
         include_overflow: true,
         enrollment_status_filter: filterOverflow ? 'overflow' : undefined,
+        include_inactive: showDeactivated, // Phase 7: allow admins to view archived students
       });
       if (res && res.ok) {
         setStudents(res.data || []);
@@ -259,7 +261,7 @@ export function Students() {
 
   useEffect(() => {
     fetchStudents();
-  }, [page, search, limit, filterClass, filterSubject, filterTeacherId, filterNoArm, filterOverflow]);
+  }, [page, search, limit, filterClass, filterSubject, filterTeacherId, filterNoArm, filterOverflow, showDeactivated]);
 
 
   // Load student directory settings on mount
@@ -1360,7 +1362,8 @@ export function Students() {
                 borderRadius: '50%',
                 objectFit: 'cover',
                 border: '1px solid var(--glass-border)',
-                flexShrink: 0
+                flexShrink: 0,
+                opacity: s.is_active === 0 ? 0.45 : 1,
               }}
             />
           ) : (
@@ -1376,12 +1379,13 @@ export function Students() {
               fontSize: '12px',
               color: 'var(--text-dim)',
               fontWeight: 'bold',
-              flexShrink: 0
+              flexShrink: 0,
+              opacity: s.is_active === 0 ? 0.45 : 1,
             }}>
               {s.name ? s.name.charAt(0).toUpperCase() : '?'}
             </div>
           )}
-          <span style={{ fontWeight: 'bold', color: 'var(--text-main)', fontSize: '13px' }}>{s.name}</span>
+          <span style={{ fontWeight: 'bold', color: s.is_active === 0 ? 'var(--text-dim)' : 'var(--text-main)', fontSize: '13px', opacity: s.is_active === 0 ? 0.6 : 1 }}>{s.name}</span>
           {s.enrollment_status === 'overflow' && (
             <span style={{
               background: 'rgba(239, 68, 68, 0.1)',
@@ -1397,8 +1401,24 @@ export function Students() {
               OVERFLOW
             </span>
           )}
+          {s.is_active === 0 && (
+            <span style={{
+              background: 'rgba(251,191,36,0.12)',
+              color: '#fbbf24',
+              border: '1px solid rgba(251,191,36,0.3)',
+              fontSize: '10px',
+              borderRadius: '4px',
+              padding: '1px 5px',
+              fontWeight: 700,
+              marginLeft: '6px',
+              flexShrink: 0,
+            }}>
+              DEACTIVATED
+            </span>
+          )}
         </div>
       ),
+
     },
     {
       header: 'ENROLLED CLASS & SUBJECTS',
@@ -1626,7 +1646,39 @@ export function Students() {
             🚫
           </button>
 
-          {/* 🗑️ Clear Data */}
+          {/* 👁 Show Deactivated Toggle — Phase 7 */}
+          <button
+            id="btn-students-show-deactivated"
+            onClick={() => { setShowDeactivated(v => !v); setPage(0); }}
+            title={showDeactivated ? 'Showing deactivated students — click to hide' : 'Show deactivated / archived students'}
+            style={{
+              background: showDeactivated ? 'rgba(251,191,36,0.25)' : 'rgba(251,191,36,0.06)',
+              border: `1px solid ${showDeactivated ? 'rgba(251,191,36,0.7)' : 'rgba(251,191,36,0.25)'}`,
+              borderRadius: '50%',
+              width: '34px',
+              height: '34px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              fontSize: '15px',
+              color: showDeactivated ? '#fbbf24' : 'rgba(251,191,36,0.7)',
+              transition: 'all 0.2s',
+              boxShadow: showDeactivated ? '0 0 12px rgba(251,191,36,0.4)' : '0 0 10px rgba(0,0,0,0.2)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(251,191,36,0.8)';
+              e.currentTarget.style.background = 'rgba(251,191,36,0.3)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = showDeactivated ? 'rgba(251,191,36,0.25)' : 'rgba(251,191,36,0.06)';
+              e.currentTarget.style.borderColor = showDeactivated ? 'rgba(251,191,36,0.7)' : 'rgba(251,191,36,0.25)';
+            }}
+          >
+            👁
+          </button>
+
+
           {students.length > 0 && (
             <button
               onClick={handleClearStudents}
