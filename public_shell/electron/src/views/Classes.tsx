@@ -15,6 +15,12 @@ export default function Classes() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [newArmName, setNewArmName] = useState('');
 
+  // ── Phase 10: ILS curriculum type per class ──────────────────────────
+  const [ilsClassType, setIlsClassType] = useState<'STANDARD_NIGERIAN' | 'ILS'>('STANDARD_NIGERIAN');
+  const [ilsPacCount, setIlsPacCount] = useState<number>(12);
+  const [ilsPacLabels, setIlsPacLabels] = useState<string[]>([]);
+  const [ilsTypeLoading, setIlsTypeLoading] = useState(false);
+
   // Manual Class Creation Form states
   const [createClassName, setCreateClassName] = useState('');
   const [createMaxSubjects, setCreateMaxSubjects] = useState('10');
@@ -666,7 +672,22 @@ export default function Classes() {
     setSelectedClass(c);
     setDrawerOpen(true);
     setNewArmName('');
+    // Phase 10: load this class's curriculum_type, pac_count & pac_labels
+    setIlsClassType('STANDARD_NIGERIAN');
+    setIlsPacCount(12);
+    setIlsPacLabels([]);
+    const api = (window as any).electronAPI;
+    if (api?.ils?.getClassType) {
+      api.ils.getClassType(c.hierarchy_class).then((res: any) => {
+        if (res?.ok) {
+          setIlsClassType(res.type || 'STANDARD_NIGERIAN');
+          setIlsPacCount(res.pacCount || 12);
+          setIlsPacLabels(Array.isArray(res.pacLabels) ? res.pacLabels : []);
+        }
+      }).catch(() => {});
+    }
   };
+
 
   return (
     <div className="animate-in fade-in duration-300 h-full flex flex-col min-h-0" style={{ padding: '24px', background: '#020617', color: '#f8fafc', overflowY: 'auto' }}>
@@ -1136,6 +1157,198 @@ export default function Classes() {
                     className="modern-input"
                   />
                 </div>
+              </div>
+
+              {/* ── Phase 10: Curriculum Mode ───────────────────────── */}
+              <div style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <span style={{ fontSize: '11px', color: '#00E5FF', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  Curriculum Mode
+                </span>
+                <p style={{ fontSize: '11px', color: '#94a3b8', margin: 0, lineHeight: 1.5 }}>
+                  Switch to <strong style={{ color: '#fff' }}>ILS</strong> for ACE PAC-based grading (affects score entry &amp; reports only). All other features remain unchanged.
+                </p>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {(['STANDARD_NIGERIAN', 'ILS'] as const).map(mode => (
+                    <button
+                      key={mode}
+                      id={`curriculum-mode-${mode.toLowerCase()}-btn`}
+                      disabled={ilsTypeLoading}
+                      onClick={async () => {
+                        if (ilsTypeLoading || !selectedClass || ilsClassType === mode) return;
+                        setIlsTypeLoading(true);
+                        try {
+                          const api = (window as any).electronAPI;
+                          const recCheck = await api?.ils?.checkClassRecords(selectedClass.hierarchy_class);
+
+                          const applySwitch = async () => {
+                            const res = await api?.ils?.setClassType({ className: selectedClass.hierarchy_class, type: mode, pacCount: ilsPacCount });
+                            if (res?.ok) {
+                              setIlsClassType(mode);
+                              const Swal = (window as any).Swal;
+                              const purgedMsg = (res?.purgedCount ?? 0) > 0 ? ` (${res.purgedCount} record(s) cleared)` : '';
+                              Swal?.fire({
+                                toast: true,
+                                position: 'top-end',
+                                icon: 'success',
+                                title: `Curriculum set to ${mode === 'ILS' ? 'ILS (PAC)' : 'Standard Nigerian'}${purgedMsg}`,
+                                showConfirmButton: false,
+                                timer: 3000,
+                                background: '#0d1235',
+                                color: '#fff',
+                              });
+                            } else {
+                              const Swal = (window as any).Swal;
+                              Swal?.fire({
+                                toast: true,
+                                position: 'top-end',
+                                icon: 'error',
+                                title: res?.error || 'Failed to update',
+                                showConfirmButton: false,
+                                timer: 3000,
+                                background: '#0d1235',
+                                color: '#fff',
+                              });
+                            }
+                          };
+
+                          // ── Always require Principal/Superadmin (Level 7+) to switch curriculum ──
+                          const modeLabel = mode === 'ILS' ? 'ILS (ACE PAC)' : 'Standard Nigerian';
+                          let bodyMsg: string;
+                          if ((recCheck?.recordCount ?? 0) > 0) {
+                            const prevSystem = mode === 'ILS' ? 'Standard Nigerian' : 'ILS (ACE PAC)';
+                            bodyMsg = `⚠️ ${selectedClass.hierarchy_class} has ${recCheck.recordCount} existing record(s) for the active term (${recCheck.academicSession} – ${recCheck.term}).
+
+Switching to ${modeLabel} will archive the current ${prevSystem} records for this term — they will NOT be deleted but will be inaccessible during the new mode.
+
+A Principal or Superadmin (Level 7+) must authorize this change.`;
+                          } else {
+                            bodyMsg = `You are switching ${selectedClass.hierarchy_class} to ${modeLabel} curriculum mode. This affects score entry and report templates for all arms of this class. A Principal or Superadmin (Level 7+) must authorize this change.`;
+                          }
+
+                          await requireSudo(
+                            async () => { await applySwitch(); },
+                            `Authorize Curriculum Switch: ${selectedClass.hierarchy_class} → ${modeLabel}`,
+                            bodyMsg,
+                            true,
+                            7 // minRoleLevel: Principal/Superadmin+
+                          );
+                        } finally {
+                          setIlsTypeLoading(false);
+                        }
+                      }}
+                      style={{
+                        flex: 1, padding: '10px 0',
+                        borderRadius: '8px', fontWeight: 700, fontSize: '12px',
+                        cursor: ilsTypeLoading ? 'not-allowed' : 'pointer',
+                        transition: 'all 0.2s ease',
+                        border: ilsClassType === mode ? '2px solid #00E5FF' : '2px solid rgba(255,255,255,0.1)',
+                        background: ilsClassType === mode ? 'rgba(0,229,255,0.12)' : 'rgba(255,255,255,0.03)',
+                        color: ilsClassType === mode ? '#00E5FF' : '#94a3b8',
+                      }}
+                    >
+                      {mode === 'STANDARD_NIGERIAN' ? '🇳🇬 Standard Nigerian' : '📚 ILS (PAC)'}
+                    </button>
+                  ))}
+                </div>
+
+                {ilsClassType === 'ILS' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                    <label style={{ fontSize: '11px', color: '#94a3b8', display: 'block', fontWeight: 600 }}>
+                      PAC Count per Subject (5–25):
+                    </label>
+                    <input
+                      type="number"
+                      min={5}
+                      max={25}
+                      value={ilsPacCount}
+                      onChange={async (e) => {
+                        const val = Math.min(25, Math.max(5, parseInt(e.target.value) || 12));
+                        setIlsPacCount(val);
+                        if (selectedClass) {
+                          const api = (window as any).electronAPI;
+                          await api?.ils?.setClassType({ className: selectedClass.hierarchy_class, type: 'ILS', pacCount: val });
+                        }
+                      }}
+                      className="modern-input"
+                      style={{ width: '100%' }}
+                    />
+                    <p style={{ fontSize: '10px', color: '#f59e0b', margin: 0, padding: '8px 10px', background: 'rgba(245,158,11,0.08)', borderRadius: '6px', border: '1px solid rgba(245,158,11,0.25)', lineHeight: 1.5 }}>
+                      ⚠️ ILS mode: Score entry in Result Studio will show PAC inputs (Packs 1–{ilsPacCount}, pass ≥ 85). Report cards will use the ILS Landscape template. Class position ranking is suppressed.
+                    </p>
+
+                    {/* ── Editable PAC Column Labels ── */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <label style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>
+                          PAC Column Labels <span style={{ color: '#64748b', fontWeight: 400 }}>(leave blank to use P1, P2…)</span>
+                        </label>
+                        <button
+                          id="save-pac-labels-btn"
+                          onClick={async () => {
+                            if (!selectedClass) return;
+                            const api = (window as any).electronAPI;
+                            const cleanLabels = ilsPacLabels.map(l => l.trim());
+                            const res = await api?.ils?.setClassType({
+                              className: selectedClass.hierarchy_class,
+                              type: 'ILS',
+                              pacCount: ilsPacCount,
+                              pacLabels: cleanLabels,
+                            });
+                            const Swal = (window as any).Swal;
+                            if (res?.ok) {
+                              Swal?.fire({ toast: true, position: 'top-end', icon: 'success', title: 'PAC labels saved', showConfirmButton: false, timer: 2500, background: '#0d1235', color: '#fff' });
+                            } else {
+                              Swal?.fire({ toast: true, position: 'top-end', icon: 'error', title: res?.error || 'Failed to save labels', showConfirmButton: false, timer: 3000, background: '#0d1235', color: '#fff' });
+                            }
+                          }}
+                          style={{
+                            padding: '4px 12px',
+                            borderRadius: '6px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            background: 'rgba(0,229,255,0.12)',
+                            border: '1px solid rgba(0,229,255,0.4)',
+                            color: '#00E5FF',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s',
+                          }}
+                          onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(0,229,255,0.22)'; }}
+                          onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(0,229,255,0.12)'; }}
+                        >
+                          💾 Save Labels
+                        </button>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '6px' }}>
+                        {Array.from({ length: ilsPacCount }, (_, i) => {
+                          const idx = i;
+                          const placeholder = `P${i + 1}`;
+                          const val = ilsPacLabels[idx] ?? '';
+                          return (
+                            <input
+                              key={idx}
+                              type="text"
+                              placeholder={placeholder}
+                              value={val}
+                              maxLength={12}
+                              className="modern-input"
+                              style={{ fontSize: '11px', padding: '5px 8px', textAlign: 'center' }}
+                              onChange={(e) => {
+                                const updated = [...ilsPacLabels];
+                                while (updated.length <= idx) updated.push('');
+                                updated[idx] = e.target.value;
+                                setIlsPacLabels(updated);
+                              }}
+                            />
+                          );
+                        })}
+                      </div>
+                      <p style={{ fontSize: '10px', color: '#64748b', margin: 0 }}>
+                        Tip: Edit labels then click <strong style={{ color: '#00E5FF' }}>💾 Save Labels</strong> to persist. Blank fields default to P1, P2…
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Arms Management */}

@@ -102,6 +102,20 @@ export function ResultStudio() {
   const [skipZeroGradesState, setSkipZeroGradesState] = useState(true);
   const [skipUngradedState, setSkipUngradedState] = useState(true);
 
+  // ── Phase 10: ILS state ────────────────────────────────────────────
+  const [ilsClassType, setIlsClassType] = useState<'STANDARD_NIGERIAN' | 'ILS'>('STANDARD_NIGERIAN');
+  const [ilsPacCount, setIlsPacCount] = useState<number>(12);
+  const [ilsPacLabels, setIlsPacLabels] = useState<string[]>([]);
+  const [ilsSkipZeroPacs, setIlsSkipZeroPacs] = useState(true);
+  const [ilsSkipP1Unstarted, setIlsSkipP1Unstarted] = useState(false);
+  const [ilsSelectedStudent, setIlsSelectedStudent] = useState('');
+  const [ilsSelectedSubject, setIlsSelectedSubject] = useState('');
+  const [ilsPacScores, setIlsPacScores] = useState<Record<number, string>>({});
+  const [ilsVerseCount, setIlsVerseCount] = useState('');
+  const [ilsSaving, setIlsSaving] = useState(false);
+  const [ilsMsg, setIlsMsg] = useState('');
+  const [ilsStudentSummary, setIlsStudentSummary] = useState<any[]>([]);
+
   const skipZeroGrades = skipZeroGradesState;
   const skipUngraded = skipUngradedState;
 
@@ -113,6 +127,41 @@ export function ResultStudio() {
   const setSkipUngraded = (val: boolean) => {
     setSkipZeroGradesState(val);
     setSkipUngradedState(val);
+  };
+
+  /**
+   * getFilteredStudents — single source of truth for the active preview/action filter.
+   * - ILS classes: applies ilsSkipZeroPacs and ilsSkipP1Unstarted.
+   * - Standard classes: applies the skipZeroGrades toggle.
+   * All three action handlers (generate, dispatch, publish) call this.
+   */
+  const getFilteredStudents = (): any[] => {
+    if (ilsClassType === 'ILS') {
+      return queryResults.filter((s: any) => {
+        const ilSubs: any[] = s.il_subjects || [];
+        // Filter 1: skip students with zero graded PACs
+        if (ilsSkipZeroPacs) {
+          const totalGraded = ilSubs.reduce((acc: number, sub: any) => acc + (sub.packs_completed || 0), 0);
+          if (totalGraded === 0) return false;
+        }
+        // Filter 2: skip students where Pack 1 has not been graded in any subject
+        if (ilsSkipP1Unstarted) {
+          const hasAnyP1 = ilSubs.some((sub: any) => {
+            const packs = sub.packs || {};
+            return packs[1] !== undefined && packs[1] !== null;
+          });
+          if (!hasAnyP1) return false;
+        }
+        return true;
+      });
+    }
+    // Standard: honour skipZeroGrades (but never drop ILS students by average)
+    if (skipZeroGrades || skipUngraded) {
+      return queryResults.filter((s: any) =>
+        (s.average ?? 0) > 0 || Array.isArray(s.il_subjects) || s.curriculum_type === 'ILS'
+      );
+    }
+    return queryResults;
   };
 
   // Computed brand colors from theme
@@ -198,6 +247,31 @@ export function ResultStudio() {
 
   useEffect(() => {
     fetchMetadata();
+  }, []);
+
+  // Phase 10: when selectedClass changes and scope=class, check ILS type
+  useEffect(() => {
+    if (scope !== 'class' || !selectedClass) {
+      setIlsClassType('STANDARD_NIGERIAN');
+      return;
+    }
+    const api = (window as any).electronAPI;
+    if (api?.ils?.getClassType) {
+      api.ils.getClassType(selectedClass).then((res: any) => {
+        setIlsClassType(res?.ok ? (res.type || 'STANDARD_NIGERIAN') : 'STANDARD_NIGERIAN');
+        setIlsPacCount(res?.pacCount || 12);
+        setIlsPacLabels(Array.isArray(res?.pacLabels) ? res.pacLabels : []);
+        setIlsSelectedStudent('');
+        setIlsSelectedSubject('');
+        setIlsPacScores({});
+        setIlsVerseCount('');
+        setIlsMsg('');
+        setIlsStudentSummary([]);
+      }).catch(() => setIlsClassType('STANDARD_NIGERIAN'));
+    }
+  }, [selectedClass, scope]);
+
+  useEffect(() => {
     // Clear rs_report_type so it doesn't persist across fresh navigations
     sessionStorage.removeItem("rs_report_type");
   }, []);
@@ -321,13 +395,10 @@ export function ResultStudio() {
   // S8-4: Dispatch Results via WhatsApp/Email (Gold/Diamond)
   const handleDispatch = async () => {
     if (!queryResults.length || !(window as any).electronAPI?.results?.dispatch) return;
-    const activeSkip = skipZeroGrades || skipUngraded;
-    let targetStudents = activeSkip
-      ? queryResults.filter((s: any) => (s.average ?? 0) > 0)
-      : queryResults;
+    let targetStudents = getFilteredStudents();
 
     if (!targetStudents.length) {
-      setDispatchStatus("⚠️ No students to dispatch — all have zero grades and filter is enabled.");
+      setDispatchStatus("⚠️ No students to dispatch — all are filtered out by the active preview filters.");
       return;
     }
 
@@ -384,13 +455,10 @@ export function ResultStudio() {
   // S8-5: Publish Results to parent portal
   const handlePublishToPortal = async () => {
     if (!queryResults.length || !(window as any).electronAPI?.results?.publish) return;
-    const activeSkip = skipZeroGrades || skipUngraded;
-    let targetStudents = activeSkip
-      ? queryResults.filter((s: any) => (s.average ?? 0) > 0)
-      : queryResults;
+    let targetStudents = getFilteredStudents();
 
     if (!targetStudents.length) {
-      setPublishStatus("⚠️ No students to publish — all have zero grades and filter is enabled.");
+      setPublishStatus("⚠️ No students to publish — all are filtered out by the active preview filters.");
       return;
     }
 
@@ -427,14 +495,11 @@ export function ResultStudio() {
   // Generate Reports
   const handleGenerate = async () => {
     if (!queryResults.length || !window.electronAPI?.generateReports) return;
-    const activeSkip = skipZeroGrades || skipUngraded;
-    let studentsToGenerate = activeSkip
-      ? queryResults.filter((s) => (s.average ?? 0) > 0)
-      : queryResults;
+    let studentsToGenerate = getFilteredStudents();
 
     if (!studentsToGenerate.length) {
       setGenStatus(
-        "⚠️ No students to generate — all are ungraded and skip-ungraded is enabled.",
+        "⚠️ No students to generate — all are filtered out by the active preview filters.",
       );
       return;
     }
@@ -519,9 +584,8 @@ export function ResultStudio() {
     setIsRemarksOpen(true);
     setRemarksSaveStatus("");
     try {
-      const sourceList = skipUngraded
-        ? queryResults.filter((s) => (s.average ?? 0) > 0)
-        : queryResults;
+      // Use the shared filter helper so ILS checkboxes are respected
+      const sourceList = getFilteredStudents();
       const mapped = sourceList.map((student) => ({
         ...student,
         days_attended:
@@ -540,18 +604,28 @@ export function ResultStudio() {
     const isEndTerm =
       currentTerm.toLowerCase().includes("third") ||
       currentTerm.toLowerCase().includes("3rd");
+    const isILS = ilsClassType === 'ILS';
 
     setRemarksData((prev) =>
       prev.map((student) => {
         let remark = student.remark;
         let princ = student.principal_remark;
         const avgRaw = parseFloat(student.average);
-        const hasGrades = !isNaN(avgRaw);
-        const avg = hasGrades ? avgRaw : 0;
+        const hasILSData = isILS && Array.isArray((student as any).il_subjects);
+        const hasGrades = hasILSData || !isNaN(avgRaw);
+        const avg = !isNaN(avgRaw) ? avgRaw : 0;
 
         if (!remark) {
           if (!hasGrades) {
             remark = "No academic records for this term.";
+          } else if (isILS) {
+            // ILS-flavored teacher remarks based on PAC average
+            if (avg >= 85)
+              remark = "An excellent PAC performance. Keep excelling!";
+            else if (avg >= 70)
+              remark = "A commendable PAC record. Keep pushing higher.";
+            else
+              remark = "More diligence is required in PAC completion. Work harder.";
           } else {
             remark = "An impressive performance. Keep it up.";
             if (avg < 50)
@@ -563,6 +637,16 @@ export function ResultStudio() {
         if (!princ) {
           if (!hasGrades) {
             princ = "No academic records.";
+          } else if (isILS) {
+            // ILS-flavored manager remarks
+            if (avg >= 85)
+              princ = "Outstanding dedication to the ILS curriculum. Well done!";
+            else if (avg >= 70)
+              princ = "A satisfactory ILS term. Continue to strive for mastery.";
+            else if (isEndTerm)
+              princ = "Greater commitment to the PAC programme is required next session.";
+            else
+              princ = "Consistent effort in PAC studies will yield better results.";
           } else if (isEndTerm) {
             princ = "Promoted to next class.";
             if (avg < 40) princ = "To repeat the class.";
@@ -1023,6 +1107,211 @@ export function ResultStudio() {
                     </option>
                   ))}
                 </select>
+              </div>
+            )}
+
+            {/* ── Phase 10: ILS Score Entry Panel ────────────────────── */}
+            {scope === 'class' && ilsClassType === 'ILS' && (
+              <div style={{ marginTop: '16px', border: '1px solid rgba(0,229,255,0.25)', borderRadius: '10px', overflow: 'hidden' }}>
+                <div style={{ background: 'rgba(0,229,255,0.08)', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#00E5FF' }}>📚 ILS PAC Score Entry</span>
+                  <span style={{ fontSize: '10px', color: '#94a3b8', marginLeft: 'auto' }}>Pass ≥ 85</span>
+                </div>
+                <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {/* Student selector */}
+                  <div>
+                    <label style={{ fontSize: '11px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Student</label>
+                    <select
+                      id="ils-student-select"
+                      className="modern-input"
+                      style={{ width: '100%' }}
+                      value={ilsSelectedStudent}
+                      onChange={async (e) => {
+                        const sid = e.target.value;
+                        setIlsSelectedStudent(sid);
+                        setIlsPacScores({});
+                        setIlsVerseCount('');
+                        setIlsMsg('');
+                        if (sid) {
+                          const api = (window as any).electronAPI;
+                          const [pvRes, vRes] = await Promise.all([
+                            api?.ils?.getPacScores(sid),
+                            api?.ils?.getVerseCount(sid),
+                          ]);
+                          const scoreMap: Record<number, string> = {};
+                          (pvRes?.scores || []).forEach((r: any) => {
+                            if (r.subject === ilsSelectedSubject) scoreMap[r.pack_number] = String(r.score);
+                          });
+                          setIlsPacScores(scoreMap);
+                          setIlsVerseCount(String(vRes?.verse_count || ''));
+                          // Build per-subject summary for this student
+                          setIlsStudentSummary(pvRes?.subjects || []);
+                        }
+                      }}
+                    >
+                      <option value="">— Select student —</option>
+                      {students
+                        .filter((s: any) => {
+                          const cn = selectedClass.trim();
+                          const fullName = s.class_arm ? `${s.class_name} ${s.class_arm}` : s.class_name;
+                          return fullName?.trim() === cn || s.class_name?.trim() === cn;
+                        })
+                        .map((s: any) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                    </select>
+                  </div>
+
+                  {/* Subject selector */}
+                  {ilsSelectedStudent && (
+                    <div>
+                      <label style={{ fontSize: '11px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Subject</label>
+                      <select
+                        id="ils-subject-select"
+                        className="modern-input"
+                        style={{ width: '100%' }}
+                        value={ilsSelectedSubject}
+                        onChange={async (e) => {
+                          const sub = e.target.value;
+                          setIlsSelectedSubject(sub);
+                          setIlsMsg('');
+                          if (ilsSelectedStudent && sub) {
+                            const api = (window as any).electronAPI;
+                            const pvRes = await api?.ils?.getPacScores(ilsSelectedStudent);
+                            const scoreMap: Record<number, string> = {};
+                            (pvRes?.scores || []).forEach((r: any) => {
+                              if (r.subject === sub) scoreMap[r.pack_number] = String(r.score);
+                            });
+                            setIlsPacScores(scoreMap);
+                            setIlsStudentSummary(pvRes?.subjects || []);
+                          }
+                        }}
+                      >
+                        <option value="">— Select subject —</option>
+                        {subjects.map((s: string) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* PAC score grid */}
+                  {ilsSelectedStudent && ilsSelectedSubject && (
+                    <div>
+                      <label style={{ fontSize: '11px', color: '#94a3b8', display: 'block', marginBottom: '6px' }}>Pack Scores (1–{ilsPacCount})</label>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                        {Array.from({ length: ilsPacCount }, (_, i) => i + 1).map(pack => {
+                          const val = ilsPacScores[pack] ?? '';
+                          const num = parseFloat(val);
+                          const isPassed = val !== '' && !isNaN(num) && num >= 85;
+                          const isFailed = val !== '' && !isNaN(num) && num < 85;
+                          return (
+                            <div key={pack} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <label style={{ fontSize: '10px', color: '#64748b', width: '42px', flexShrink: 0 }}>{ilsPacLabels[pack - 1]?.trim() || `P${pack}`}</label>
+                              <input
+                                id={`ils-pack-${pack}-input`}
+                                type="number"
+                                min={0} max={100} step={1}
+                                placeholder="—"
+                                value={val}
+                                onChange={(e) => setIlsPacScores(prev => ({ ...prev, [pack]: e.target.value }))}
+                                style={{
+                                  flex: 1, padding: '5px 8px', borderRadius: '6px', fontSize: '12px',
+                                  background: isPassed ? 'rgba(16,185,129,0.1)' : isFailed ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.05)',
+                                  border: `1px solid ${isPassed ? '#10b981' : isFailed ? '#ef4444' : 'rgba(255,255,255,0.1)'}`,
+                                  color: '#f8fafc', outline: 'none',
+                                }}
+                              />
+                              {isPassed && <span style={{ fontSize: '10px', color: '#10b981' }}>✓</span>}
+                              {isFailed && <span style={{ fontSize: '10px', color: '#ef4444' }}>✗</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Save PAC scores */}
+                      <button
+                        id="ils-save-pac-btn"
+                        disabled={ilsSaving}
+                        onClick={async () => {
+                          if (!ilsSelectedStudent || !ilsSelectedSubject) return;
+                          setIlsSaving(true); setIlsMsg('');
+                          try {
+                            const api = (window as any).electronAPI;
+                            const entries = Object.entries(ilsPacScores).filter(([, v]) => v !== '');
+                            for (const [pack, score] of entries) {
+                              await api?.ils?.insertPacScore({ studentId: ilsSelectedStudent, subject: ilsSelectedSubject, packNumber: parseInt(pack), score: parseFloat(score as string) });
+                            }
+                            // Refresh summary
+                            const pvRes = await api?.ils?.getPacScores(ilsSelectedStudent);
+                            setIlsStudentSummary(pvRes?.subjects || []);
+                            setIlsMsg('✅ Saved');
+                          } catch (err: any) {
+                            setIlsMsg(`❌ ${err?.message || 'Save failed'}`);
+                          } finally {
+                            setIlsSaving(false);
+                            setTimeout(() => setIlsMsg(''), 3000);
+                          }
+                        }}
+                        style={{ marginTop: '8px', width: '100%', padding: '8px', borderRadius: '7px', fontWeight: 700, fontSize: '12px', cursor: ilsSaving ? 'not-allowed' : 'pointer', background: 'rgba(0,229,255,0.15)', border: '1px solid rgba(0,229,255,0.35)', color: '#00E5FF', transition: 'all 0.2s' }}
+                      >
+                        {ilsSaving ? '⏳ Saving…' : '💾 Save PAC Scores'}
+                      </button>
+                      {ilsMsg && <span style={{ fontSize: '11px', color: ilsMsg.startsWith('✅') ? '#10b981' : '#ef4444' }}>{ilsMsg}</span>}
+                    </div>
+                  )}
+
+                  {/* Verse count */}
+                  {ilsSelectedStudent && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                      <label style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }}>📖 Bible Verse Memory</label>
+                      <input
+                        id="ils-verse-count-input"
+                        type="number" min={0} step={1}
+                        placeholder="0"
+                        value={ilsVerseCount}
+                        onChange={(e) => setIlsVerseCount(e.target.value)}
+                        style={{ flex: 1, padding: '5px 8px', borderRadius: '6px', fontSize: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#f8fafc', outline: 'none' }}
+                      />
+                      <button
+                        id="ils-save-verse-btn"
+                        onClick={async () => {
+                          const api = (window as any).electronAPI;
+                          const res = await api?.ils?.setVerseCount(ilsSelectedStudent, parseInt(ilsVerseCount) || 0);
+                          setIlsMsg(res?.ok ? '✅ Verse count saved' : `❌ ${res?.error}`);
+                          setTimeout(() => setIlsMsg(''), 2500);
+                        }}
+                        style={{ padding: '5px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.35)', color: '#a78bfa' }}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Per-subject summary for the selected student */}
+                  {ilsStudentSummary.length > 0 && (
+                    <div style={{ marginTop: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '7px', overflow: 'hidden' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                        <thead>
+                          <tr style={{ background: 'rgba(0,229,255,0.08)' }}>
+                            <th style={{ padding: '6px 10px', textAlign: 'left', color: '#94a3b8' }}>Subject</th>
+                            <th style={{ padding: '6px', textAlign: 'right', color: '#94a3b8' }}>Done</th>
+                            <th style={{ padding: '6px', textAlign: 'right', color: '#94a3b8' }}>Hundreds</th>
+                            <th style={{ padding: '6px 10px', textAlign: 'right', color: '#94a3b8' }}>Avg</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ilsStudentSummary.map((sub: any) => (
+                            <tr key={sub.subject} style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                              <td style={{ padding: '6px 10px', color: '#f8fafc' }}>{sub.subject}</td>
+                              <td style={{ padding: '6px', textAlign: 'right', color: sub.packs_completed >= 10 ? '#10b981' : '#f59e0b' }}>{sub.packs_completed}/10</td>
+                              <td style={{ padding: '6px', textAlign: 'right', color: '#00E5FF' }}>{sub.total_hundreds}</td>
+                              <td style={{ padding: '6px 10px', textAlign: 'right', color: '#f8fafc' }}>{sub.average}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1617,7 +1906,7 @@ export function ResultStudio() {
                         <th style={{ width: "150px" }}>Term Attendance</th>
                       )}
                       <th>Class Teacher's Remarks</th>
-                      <th>Principal's Remarks</th>
+                      <th>{ilsClassType === 'ILS' ? "Section Manager's Remarks" : "Principal's Remarks"}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1634,8 +1923,8 @@ export function ResultStudio() {
                               fontFamily: "var(--font-mono)",
                             }}
                           >
-                            {student.class_name}{student.class_arm ? ` ${student.class_arm}` : ''} · Avg: {student.average ?? '—'}
-                            %
+                            {student.class_name}{student.class_arm ? ` ${student.class_arm}` : ''} · {ilsClassType === 'ILS' ? 'ILS Avg' : 'Avg'}: {student.average ?? '—'}
+                            {ilsClassType === 'ILS' ? '' : '%'}
                           </div>
                         </td>
                         {tier !== "Standalone" && tier !== "Silver" && (
@@ -1782,9 +2071,30 @@ export function ResultStudio() {
 
       {/* ── Fullscreen Report Card Preview Modal ── */}
       {isPreviewModalOpen && (() => {
-        const previewResults = skipZeroGrades
-          ? queryResults.filter((s) => (s.average ?? 0) > 0)
-          : queryResults;
+        const isILSPreview = ilsClassType === 'ILS';
+        const previewResults = (() => {
+          if (isILSPreview) {
+            return queryResults.filter((s) => {
+              const ilSubs: any[] = (s as any).il_subjects || [];
+              const totalGraded = ilSubs.reduce((acc: number, sub: any) => acc + (sub.packs_completed || 0), 0);
+              // Filter 1: skip students with zero graded PACs
+              if (ilsSkipZeroPacs && totalGraded === 0) return false;
+              // Filter 2: skip students where Pack 1 has not been graded in any subject
+              if (ilsSkipP1Unstarted) {
+                const hasAnyP1 = ilSubs.some((sub: any) => {
+                  const packs = sub.packs || {};
+                  return packs[1] !== undefined && packs[1] !== null;
+                });
+                if (!hasAnyP1) return false;
+              }
+              return true;
+            });
+          }
+          // Standard students: use existing skipZeroGrades logic
+          return skipZeroGrades
+            ? queryResults.filter((s) => (s.average ?? 0) > 0)
+            : queryResults;
+        })();
         return (
         <div
           style={{
@@ -1821,23 +2131,62 @@ export function ResultStudio() {
                 </span>
               </p>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <label
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '6px',
-                  fontSize: '12px', color: '#fff', cursor: 'pointer',
-                  background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
-                  padding: '5px 10px', borderRadius: '6px', userSelect: 'none'
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={skipZeroGrades}
-                  onChange={(e) => setSkipZeroGrades(e.target.checked)}
-                  style={{ accentColor: '#00E5FF' }}
-                />
-                Skip students with zero grades
-              </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              {/* ── ILS-specific filters ── */}
+              {ilsClassType === 'ILS' ? (
+                <>
+                  <label
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '6px',
+                      fontSize: '12px', color: '#fff', cursor: 'pointer',
+                      background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+                      padding: '5px 10px', borderRadius: '6px', userSelect: 'none'
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={ilsSkipZeroPacs}
+                      onChange={(e) => setIlsSkipZeroPacs(e.target.checked)}
+                      style={{ accentColor: '#10b981' }}
+                    />
+                    Skip 0-graded PAC students
+                  </label>
+                  <label
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '6px',
+                      fontSize: '12px', color: '#fff', cursor: 'pointer',
+                      background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+                      padding: '5px 10px', borderRadius: '6px', userSelect: 'none'
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={ilsSkipP1Unstarted}
+                      onChange={(e) => setIlsSkipP1Unstarted(e.target.checked)}
+                      style={{ accentColor: '#f59e0b' }}
+                    />
+                    Skip students with Pack 1 &lt; N grading
+                  </label>
+                </>
+              ) : (
+                /* ── Standard filter ── */
+                <label
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '6px',
+                    fontSize: '12px', color: '#fff', cursor: 'pointer',
+                    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+                    padding: '5px 10px', borderRadius: '6px', userSelect: 'none'
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={skipZeroGrades}
+                    onChange={(e) => setSkipZeroGrades(e.target.checked)}
+                    style={{ accentColor: '#00E5FF' }}
+                  />
+                  Skip students with zero grades
+                </label>
+              )}
               <button
                 onClick={() => setIsPreviewModalOpen(false)}
                 className="secondary-btn"
@@ -1864,7 +2213,7 @@ export function ResultStudio() {
             {/* Template Card Visual Preview */}
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.3)", borderRadius: "8px", padding: "16px" }}>
               <img
-                src={`libs/templates/previews/${TEMPLATE_IMG_MAP[template] || "classic"}.png`}
+                src={templateImgSrc}
                 alt="Report Card Template Preview"
                 style={{ maxWidth: "100%", maxHeight: "550px", borderRadius: "8px", boxShadow: "0 10px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.1)" }}
                 onError={(e) => {
@@ -1876,11 +2225,11 @@ export function ResultStudio() {
             {/* Queried Student Roster & Scores */}
             <div style={{ display: "flex", flexDirection: "column", gap: "12px", overflowY: "auto" }}>
               <h4 style={{ margin: 0, fontSize: "14px", color: "#fff" }}>
-                Queried Students ({previewResults.length}{skipZeroGrades && previewResults.length !== queryResults.length ? ` / ${queryResults.length} total` : ''})
+                Queried Students ({previewResults.length}{previewResults.length !== queryResults.length ? ` / ${queryResults.length} total` : ''})
               </h4>
-              {skipZeroGrades && previewResults.length !== queryResults.length && (
+              {previewResults.length !== queryResults.length && (
                 <p style={{ margin: '0 0 4px', fontSize: '11px', color: '#f59e0b', fontStyle: 'italic' }}>
-                  ⚠️ {queryResults.length - previewResults.length} student(s) hidden — no grades recorded for this term.
+                  ⚠️ {queryResults.length - previewResults.length} student(s) hidden by active filters.
                 </p>
               )}
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -1896,7 +2245,16 @@ export function ResultStudio() {
                       <div>
                         <div style={{ fontWeight: 600, color: '#fff' }}>{s.name}</div>
                         <div style={{ color: 'var(--text-dim)', fontSize: '11px', marginTop: '2px' }}>
-                          Class: {s.class_name} {(s as any).class_arm || ''} · Score: {(s as any).total_score ?? '—'} · Avg: {s.average ? `${s.average}%` : '—'}
+                          {Array.isArray((s as any).il_subjects) || (s as any).curriculum_type === 'ILS' ? (() => {
+                            const ilSubs = (s as any).il_subjects || [];
+                            const subCount = ilSubs.length;
+                            const totalGradedPacks = ilSubs.reduce((acc: number, sub: any) => acc + (sub.packs_completed || 0), 0);
+                            const pacCap = (s as any).pac_count || ilsPacCount || 12;
+                            const totalPossible = subCount * pacCap;
+                            return `Class: ${s.class_name} · Subjects: ${subCount} · PACs: ${totalGradedPacks} / ${totalPossible}`;
+                          })() : (
+                            `Class: ${s.class_name} ${(s as any).class_arm || ''} · Score: ${(s as any).total_score ?? '—'} · Avg: ${s.average ? `${s.average}%` : '—'}`
+                          )}
                         </div>
                       </div>
                       <span style={{

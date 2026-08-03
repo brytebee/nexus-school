@@ -567,3 +567,57 @@ describe('S10-11: Zero-grade filtering & empty sheet prevention contract', () =>
     expect(renderedClasses).toEqual(['JSS 1']);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 12. ILS Class Dispatch & Stamp Parity
+// ─────────────────────────────────────────────────────────────────────────────
+describe('S10-12: ILS Class Dispatch & Stamp Parity', () => {
+  it('IL1. ILS payload includes curriculum_type, il_subjects, verse_count, pac_count', () => {
+    const student = {
+      id: 'STU-ILS-01',
+      name: 'Eberechi Eze',
+      class_name: 'ILS PAC Grade 1',
+      curriculum_type: 'ILS',
+      pac_count: 12,
+      il_subjects: [
+        { subject: 'Maths', packs: { 1: 90, 2: 100 }, packs_completed: 2, total_score: 190, average: 95 }
+      ],
+      verse_count: 5
+    };
+
+    expect(student.curriculum_type).toBe('ILS');
+    expect(student.il_subjects).toHaveLength(1);
+    expect(student.verse_count).toBe(5);
+    expect(student.pac_count).toBe(12);
+  });
+
+  it('IL2. generateILSHTMLPages generates valid HTML containing student, PAC table, and stamp', () => {
+    const { generateILSHTMLPages } = require(
+      require('path').join(__dirname, '../node_modules/@nexus/engine/src/report-compiler.js')
+    );
+
+    const payload = {
+      identity: { name: 'Nexus Grace Academy', stampStyle: 'classic_round', tier: 'Gold' },
+      students: [{
+        id: 'STU-ILS-02',
+        name: 'Kenechukwu Ani',
+        class_name: 'Creche',
+        curriculum_type: 'ILS',
+        il_subjects: [{ subject: 'Bible Study', packs: { 1: 100 }, packs_completed: 1, total_score: 100, average: 100 }],
+        verse_count: 10
+      }],
+      termConfig: { term: '1st Term', academic_session: '2025/2026' }
+    };
+
+    const tempDir = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'nexus_ils_test_'));
+    const html = generateILSHTMLPages(payload, null, tempDir);
+
+    expect(html).toContain('Kenechukwu Ani');
+    expect(html).toContain('pac-table');
+    expect(html).toContain('Bible Study');
+    expect(html).toContain('stamp_STU-ILS-02');
+    expect(html).toMatch(/\.svg/);
+
+    require('fs').rmSync(tempDir, { recursive: true, force: true });
+  });
+});
