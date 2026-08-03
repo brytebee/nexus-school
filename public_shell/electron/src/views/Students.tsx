@@ -6,7 +6,7 @@ import { Combobox } from '../components/Combobox';
 import { useClassArms } from '../hooks/useClassArms';
 import { SetupGuardModal } from '../components/SetupGuardModal';
 import { CSVReviewModal } from '../components/CSVReviewModal';
-import { validateName, validatePhone, validateEmail, validateDOB, validateNonEmpty, validateScoreComponent } from '../lib/validators';
+import { validateName, validatePhone, validateEmail, validateDOB, validateNonEmpty, validateScoreComponent, validatePacScore } from '../lib/validators';
 
 interface Student {
   id: string;
@@ -1041,10 +1041,46 @@ export function Students() {
     setGradesStatus(null);
   };
 
+  // Phase 10: ILS state variables
+  const [studentClassType, setStudentClassType] = useState<'STANDARD_NIGERIAN' | 'ILS'>('STANDARD_NIGERIAN');
+  const [ilsPacScores, setIlsPacScores] = useState<Record<string, Record<number, { score: number; passed: boolean }>>>({});
+  const [ilsVerseCount, setIlsVerseCount] = useState<number>(0);
+  const [ilsPacCount, setIlsPacCount] = useState<number>(12);
+  const [ilsPacLabels, setIlsPacLabels] = useState<string[]>([]);
+
   // Fetch grades for the grade panel
   const fetchGrades = async (studentId: string) => {
     setGradesLoading(true);
     try {
+      const api = (window as any).electronAPI;
+      if (detailStudent?.class_name && api?.ils?.getClassType) {
+        const clsRes = await api.ils.getClassType(detailStudent.class_name);
+        if (clsRes?.type === 'ILS') {
+          setStudentClassType('ILS');
+          setIlsPacCount(clsRes.pacCount || 12);
+          setIlsPacLabels(Array.isArray(clsRes.pacLabels) ? clsRes.pacLabels : []);
+          const [pacRes, verseRes] = await Promise.all([
+            api.ils.getPacScores(studentId),
+            api.ils.getVerseCount(studentId)
+          ]);
+          if (pacRes?.ok) {
+            const map: Record<string, Record<number, { score: number; passed: boolean }>> = {};
+            for (const r of (pacRes.scores || [])) {
+              if (!map[r.subject]) map[r.subject] = {};
+              map[r.subject][r.pack_number] = { score: r.score, passed: Boolean(r.passed) };
+            }
+            setIlsPacScores(map);
+          }
+          if (verseRes?.ok) {
+            setIlsVerseCount(verseRes.verse_count ?? verseRes.verseCount ?? 0);
+          }
+        } else {
+          setStudentClassType('STANDARD_NIGERIAN');
+        }
+      } else {
+        setStudentClassType('STANDARD_NIGERIAN');
+      }
+
       const termCfg = await (window.electronAPI as any)?.getTermConfig?.();
       if (termCfg?.grading_scale) {
         try {
@@ -2742,7 +2778,148 @@ export function Students() {
                     </div>
                   )}
 
-                  {/* Add Score Inline Form */}
+                  {studentClassType === 'ILS' ? (
+                    /* ────── ILS PAC Grade View ────── */
+                    <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto' }}>
+                      {/* ILS Header Pill */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(0,229,255,0.08)', border: '1px solid rgba(0,229,255,0.25)', padding: '10px 16px', borderRadius: '12px' }}>
+                        <div>
+                          <div style={{ fontSize: '13px', fontWeight: 700, color: '#00e5ff' }}>📖 ILS / ACE Packet System</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-dim)' }}>Scores required: 85% or higher to pass a PAC</div>
+                        </div>
+                        <span style={{ fontSize: '11px', color: '#10b981', background: 'rgba(16,185,129,0.15)', padding: '4px 10px', borderRadius: '10px', fontWeight: 600 }}>
+                          📌 {activeSession} · {activeTerm}
+                        </span>
+                      </div>
+
+                      {/* Memory Verses Counter */}
+                      <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--glass-border)', padding: '14px 18px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div>
+                          <div style={{ fontSize: '12px', fontWeight: 700, color: '#fff' }}>📜 Memory Verses Completed</div>
+                          <div style={{ fontSize: '10px', color: 'var(--text-dim)' }}>Total Scripture verses memorized for this term</div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const newCount = Math.max(0, ilsVerseCount - 1);
+                              setIlsVerseCount(newCount);
+                              if (detailStudent) {
+                                await (window as any).electronAPI?.ils?.setVerseCount(detailStudent.id, newCount);
+                              }
+                            }}
+                            className="secondary-btn"
+                            style={{ padding: '4px 10px', fontSize: '14px', borderRadius: '6px' }}
+                          >-</button>
+                          <span style={{ fontSize: '15px', fontWeight: 700, color: '#00e5ff', minWidth: '30px', textAlign: 'center' }}>{ilsVerseCount}</span>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const newCount = ilsVerseCount + 1;
+                              setIlsVerseCount(newCount);
+                              if (detailStudent) {
+                                await (window as any).electronAPI?.ils?.setVerseCount(detailStudent.id, newCount);
+                              }
+                            }}
+                            className="secondary-btn"
+                            style={{ padding: '4px 10px', fontSize: '14px', borderRadius: '6px' }}
+                          >+</button>
+                        </div>
+                      </div>
+
+                      {/* Subject PAC Score Cards */}
+                      {(detailStudent?.subjects && detailStudent.subjects.length > 0) ? (
+                        detailStudent.subjects.map(subj => {
+                          const subjScores = ilsPacScores[subj] || {};
+                          return (
+                            <div key={subj} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <span style={{ fontSize: '13px', fontWeight: 700, color: '#fff' }}>📘 {subj}</span>
+                                <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
+                                  Completed PACs: {Math.min(ilsPacCount, Object.values(subjScores).filter(p => p.passed).length)} / {ilsPacCount}
+                                </span>
+                              </div>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '8px' }}>
+                                {Array.from({ length: ilsPacCount }, (_, i) => i + 1).map(packNum => {
+                                  const item = subjScores[packNum];
+                                  const currentScore = item?.score !== undefined ? String(item.score) : '';
+                                  const isPassed = item?.passed ?? false;
+                                  const labelText = ilsPacLabels[packNum - 1]?.trim() || `P${packNum}`;
+
+                                  return (
+                                    <div key={packNum} style={{ background: isPassed ? 'rgba(16,185,129,0.08)' : 'rgba(255,255,255,0.03)', border: `1px solid ${isPassed ? 'rgba(16,185,129,0.3)' : 'rgba(255,255,255,0.1)'}`, borderRadius: '8px', padding: '6px', display: 'flex', flexDirection: 'column', gap: '4px', textAlign: 'center' }}>
+                                      <span style={{ fontSize: '9px', fontWeight: 700, color: isPassed ? '#10b981' : 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={labelText}>
+                                        {labelText} {isPassed ? '✓' : ''}
+                                      </span>
+                                      <input
+                                        type="number"
+                                        min="80"
+                                        max="100"
+                                        placeholder="—"
+                                        value={currentScore}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          const num = parseFloat(val);
+                                          setIlsPacScores(prev => ({
+                                            ...prev,
+                                            [subj]: {
+                                              ...(prev[subj] || {}),
+                                              [packNum]: {
+                                                score: isNaN(num) ? 0 : num,
+                                                passed: !isNaN(num) && num >= 85
+                                              }
+                                            }
+                                          }));
+                                        }}
+                                        onBlur={async (e) => {
+                                          const val = e.target.value;
+                                          if (!val || !detailStudent) return;
+                                          const scoreNum = parseFloat(val);
+                                          const vRes = validatePacScore(scoreNum, `PAC ${packNum}`);
+                                          if (!vRes.ok) {
+                                            setGradesStatus(`❌ ${vRes.error}`);
+                                            setTimeout(() => setGradesStatus(null), 3500);
+                                            return;
+                                          }
+
+                                          const api = (window as any).electronAPI;
+                                          const res = await api?.ils?.insertPacScore({
+                                            studentId: detailStudent.id,
+                                            subject: subj,
+                                            packNumber: packNum,
+                                            score: scoreNum
+                                          });
+                                          if (res?.ok) {
+                                            setGradesStatus(`✅ Saved PAC ${packNum} for ${subj}`);
+                                            setTimeout(() => setGradesStatus(null), 2500);
+                                          } else {
+                                            setGradesStatus(`❌ ${res?.error || 'Failed to save PAC score'}`);
+                                            setTimeout(() => setGradesStatus(null), 3500);
+                                          }
+                                        }}
+                                        style={{
+                                          width: '100%', padding: '4px 2px', borderRadius: '4px',
+                                          background: '#0d1235', border: '1px solid var(--glass-border)',
+                                          color: isPassed ? '#10b981' : '#fff', fontSize: '11px',
+                                          fontWeight: 700, textAlign: 'center', boxSizing: 'border-box'
+                                        }}
+                                      />
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-dim)', fontSize: '12px' }}>
+                          No subjects enrolled for this student.
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* ────── Standard Nigerian Grade View (untouched) ────── */
+                    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflowY: 'auto' }}>
                   <form
                     onSubmit={async (e) => {
                       e.preventDefault();
@@ -2987,6 +3164,8 @@ export function Students() {
                     )}
                   </div>
                 </div>
+              )}
+            </div>
 
               ) : (
                 /* ────── Details View ────── */

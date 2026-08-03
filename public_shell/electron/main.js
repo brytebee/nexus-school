@@ -3488,6 +3488,304 @@ ipcMain.handle("delete-teacher", (event, { id }) => {
   }
 });
 
+// ── Phase 10: ILS (Individualized Learning System) Schema Migrations ──────────
+// Safe additive migrations — wrapped in try/catch so they no-op on existing DBs.
+(() => {
+  try {
+    const db = database.getDb();
+    // Add curriculum_type to classes table (DEFAULT keeps all existing classes standard)
+    try { db.exec("ALTER TABLE class_configs ADD COLUMN curriculum_type TEXT DEFAULT 'STANDARD_NIGERIAN'"); } catch (_) {}
+    // PAC score records — completely separate from student_records
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ils_records (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id       TEXT    NOT NULL,
+        academic_session TEXT    NOT NULL,
+        term             TEXT    NOT NULL,
+        subject          TEXT    NOT NULL,
+        pack_number      INTEGER NOT NULL CHECK(pack_number BETWEEN 1 AND 12),
+        score            REAL    NOT NULL DEFAULT 0,
+        passed           INTEGER NOT NULL DEFAULT 0,
+        created_at       TEXT    DEFAULT (datetime('now')),
+        UNIQUE(student_id, academic_session, term, subject, pack_number)
+      )
+    `);
+    // Bible verse memory count per student per term
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ils_verse_memory (
+        student_id       TEXT NOT NULL,
+        academic_session TEXT NOT NULL,
+        term             TEXT NOT NULL,
+        verse_count      INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (student_id, academic_session, term)
+      )
+    `);
+    console.log('[Phase 10] ILS schema ready.');
+  } catch (err) {
+    console.error('[Phase 10] ILS schema migration error:', err.message);
+  }
+})();
+
+function ensureIlsSchema(db) {
+  if (!db) return;
+  try { db.exec("ALTER TABLE class_configs ADD COLUMN curriculum_type TEXT DEFAULT 'STANDARD_NIGERIAN'"); } catch (_) {}
+  try { db.exec("ALTER TABLE class_configs ADD COLUMN pac_count INTEGER DEFAULT 12"); } catch (_) {}
+  try {
+    try { db.exec("ALTER TABLE class_configs ADD COLUMN curriculum_type TEXT DEFAULT 'STANDARD_NIGERIAN'"); } catch (_) {}
+    try { db.exec("ALTER TABLE class_configs ADD COLUMN pac_count INTEGER DEFAULT 12"); } catch (_) {}
+    try { db.exec("ALTER TABLE class_configs ADD COLUMN pac_labels TEXT DEFAULT NULL"); } catch (_) {}
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ils_records (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id       TEXT    NOT NULL,
+        academic_session TEXT    NOT NULL,
+        term             TEXT    NOT NULL,
+        subject          TEXT    NOT NULL,
+        pack_number      INTEGER NOT NULL CHECK(pack_number BETWEEN 1 AND 25),
+        score            REAL    NOT NULL DEFAULT 0,
+        passed           INTEGER NOT NULL DEFAULT 0,
+        created_at       TEXT    DEFAULT (datetime('now')),
+        UNIQUE(student_id, academic_session, term, subject, pack_number)
+      );
+    `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ils_verse_memory (
+        student_id       TEXT NOT NULL,
+        academic_session TEXT NOT NULL,
+        term             TEXT NOT NULL,
+        verse_count      INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (student_id, academic_session, term)
+      );
+    `);
+  } catch (err) {
+    console.error('[Phase 10] ensureIlsSchema error:', err.message);
+  }
+}
+
+// ── Phase 10: ILS IPC Handlers ────────────────────────────────────────────────
+
+/** ils:get-class-type — returns 'STANDARD_NIGERIAN' | 'ILS', pacCount, and pacLabels for a class name */
+ipcMain.handle('ils:get-class-type', (event, className) => {
+  try {
+    const db = database.getDb();
+    ensureIlsSchema(db);
+    const baseClassName = (className || '').split(' ').slice(0, -1).join(' ') || className;
+    const row = db.prepare("SELECT curriculum_type, pac_count, pac_labels FROM class_configs WHERE hierarchy_class = ? OR hierarchy_class = ?").get(className, baseClassName);
+    let pacLabels = null;
+    try { if (row?.pac_labels) pacLabels = JSON.parse(row.pac_labels); } catch (_) {}
+    return { ok: true, type: row?.curriculum_type || 'STANDARD_NIGERIAN', pacCount: row?.pac_count || 12, pacLabels };
+  } catch (err) {
+    return { ok: false, error: err.message, type: 'STANDARD_NIGERIAN', pacCount: 12, pacLabels: null };
+  }
+});
+
+/** ils:check-class-records — checks if standard or ILS records exist for active term */
+ipcMain.handle('ils:check-class-records', (event, className) => {
+  try {
+    const db = database.getDb();
+    ensureIlsSchema(db);
+    const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
+    if (!termConfig) return { ok: true, hasStandardRecords: false, hasIlsRecords: false, recordCount: 0 };
+    const { academic_session, term } = termConfig;
+
+    const stdCount = db.prepare(`
+      SELECT COUNT(*) as c FROM student_records sr
+      JOIN students s ON sr.student_id = s.id
+      WHERE (s.class_name = ? OR (s.class_name || ' ' || COALESCE(s.class_arm, '')) = ?)
+        AND sr.academic_session = ? AND sr.term = ?
+    `).get(className, className, academic_session, term)?.c || 0;
+
+    const ilsCount = db.prepare(`
+      SELECT COUNT(*) as c FROM ils_records ir
+      JOIN students s ON ir.student_id = s.id
+      WHERE (s.class_name = ? OR (s.class_name || ' ' || COALESCE(s.class_arm, '')) = ?)
+        AND ir.academic_session = ? AND ir.term = ?
+    `).get(className, className, academic_session, term)?.c || 0;
+
+    return {
+      ok: true,
+      hasStandardRecords: stdCount > 0,
+      hasIlsRecords: ilsCount > 0,
+      recordCount: stdCount + ilsCount,
+      academicSession: academic_session,
+      term
+    };
+  } catch (err) {
+    return { ok: false, error: err.message, hasStandardRecords: false, hasIlsRecords: false, recordCount: 0 };
+  }
+});
+
+/** ils:set-class-type — sets curriculum_type, pacCount, and pacLabels for a class and purges opposite system records (Principal+ required) */
+ipcMain.handle('ils:set-class-type', (event, { className, type, pacCount, pacLabels }) => {
+  try {
+    if (!currentAdminSession || currentAdminSession.role_level < 7) {
+      return { ok: false, error: 'Principal or Superadmin access required (Level 7+).' };
+    }
+    const allowed = ['STANDARD_NIGERIAN', 'ILS'];
+    if (!allowed.includes(type)) return { ok: false, error: `Invalid curriculum_type: ${type}` };
+    const db = database.getDb();
+    ensureIlsSchema(db);
+
+    const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
+    const activeSession = termConfig?.academic_session;
+    const activeTerm = termConfig?.term;
+
+    const validatedPacCount = Math.min(25, Math.max(5, parseInt(pacCount) || 12));
+    const labelsJson = Array.isArray(pacLabels) && pacLabels.length > 0 ? JSON.stringify(pacLabels) : null;
+    let purgedCount = 0;
+    let prevType = 'STANDARD_NIGERIAN';
+
+    // Wrap update and purge in atomic transaction
+    const switchTransaction = db.transaction(() => {
+      const prevRow = db.prepare("SELECT curriculum_type FROM class_configs WHERE hierarchy_class = ?").get(className);
+      prevType = prevRow?.curriculum_type || 'STANDARD_NIGERIAN';
+
+      const updateRes = db.prepare("UPDATE class_configs SET curriculum_type = ?, pac_count = ?, pac_labels = ? WHERE hierarchy_class = ?").run(type, validatedPacCount, labelsJson, className);
+      if (updateRes.changes === 0) throw new Error(`Class not found: ${className}`);
+
+      if (activeSession && activeTerm) {
+        if (type === 'ILS') {
+          // Purge standard Nigerian records for students in this class for active term
+          const delRes = db.prepare(`
+            DELETE FROM student_records WHERE student_id IN (
+              SELECT id FROM students
+              WHERE class_name = ? OR (class_name || ' ' || COALESCE(class_arm, '')) = ?
+            ) AND academic_session = ? AND term = ?
+          `).run(className, className, activeSession, activeTerm);
+          purgedCount = delRes.changes || 0;
+        } else if (type === 'STANDARD_NIGERIAN') {
+          // Purge ILS records for students in this class for active term
+          const delRes = db.prepare(`
+            DELETE FROM ils_records WHERE student_id IN (
+              SELECT id FROM students
+              WHERE class_name = ? OR (class_name || ' ' || COALESCE(class_arm, '')) = ?
+            ) AND academic_session = ? AND term = ?
+          `).run(className, className, activeSession, activeTerm);
+          purgedCount = delRes.changes || 0;
+        }
+      }
+
+      try {
+        const details = `Switched ${className} from ${prevType} to ${type} (PAC count: ${validatedPacCount}). Purged ${purgedCount} ${type === 'ILS' ? 'Standard' : 'ILS'} record(s) for ${activeSession || 'N/A'} - ${activeTerm || 'N/A'}.`;
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'CURRICULUM_MODE_CHANGED', 'class_configs', ?)").run(currentAdminSession.id, details);
+      } catch (_) {}
+    });
+
+    switchTransaction();
+
+    return { ok: true, purgedCount, prevType, type, pacCount: validatedPacCount };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+/** ils:insert-pac-score — upsert a single PAC score for a student/subject/pack */
+ipcMain.handle('ils:insert-pac-score', (event, { studentId, subject, packNumber, score }) => {
+  try {
+    if (!studentId || !subject || packNumber === undefined || packNumber === null) {
+      return { ok: false, error: 'Missing required: studentId, subject, packNumber' };
+    }
+    const packNum = parseInt(packNumber);
+    if (isNaN(packNum) || packNum < 1 || packNum > 25) {
+      return { ok: false, error: 'PAC packNumber must be an integer between 1 and 25.' };
+    }
+    const scoreNum = Math.round((Number(score) || 0) * 100) / 100;
+    if (isNaN(scoreNum) || scoreNum < 80 || scoreNum > 100) {
+      return { ok: false, error: `PAC score (${score}) must be between 80 and 100.` };
+    }
+    const db         = database.getDb();
+    ensureIlsSchema(db);
+    const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
+    if (!termConfig) return { ok: false, error: 'School term not configured' };
+    const { academic_session, term } = termConfig;
+    const passed = scoreNum >= 85 ? 1 : 0;
+
+    db.prepare(`
+      INSERT INTO ils_records (student_id, academic_session, term, subject, pack_number, score, passed)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(student_id, academic_session, term, subject, pack_number)
+      DO UPDATE SET score = excluded.score, passed = excluded.passed
+    `).run(studentId, academic_session, term, subject.trim(), packNum, scoreNum, passed);
+
+    return { ok: true, passed: passed === 1 };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+/** ils:get-pac-scores — returns all PAC scores for a student in the active term */
+ipcMain.handle('ils:get-pac-scores', (event, studentId) => {
+  try {
+    const db         = database.getDb();
+    ensureIlsSchema(db);
+    const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
+    if (!termConfig) return { ok: false, error: 'School term not configured', scores: [] };
+    const { academic_session, term } = termConfig;
+
+    const rows = db.prepare(`
+      SELECT subject, pack_number, score, passed
+      FROM   ils_records
+      WHERE  student_id = ? AND academic_session = ? AND term = ?
+      ORDER  BY subject, pack_number
+    `).all(studentId, academic_session, term);
+
+    // Group by subject and compute summary
+    const bySubject = {};
+    for (const r of rows) {
+      if (!bySubject[r.subject]) bySubject[r.subject] = [];
+      bySubject[r.subject].push(r);
+    }
+    const subjects = Object.entries(bySubject).map(([subject, packs]) => {
+      const passed  = packs.filter(p => p.passed === 1);
+      const total   = passed.reduce((s, p) => s + p.score, 0);
+      const avg     = passed.length > 0 ? Math.round((total / passed.length) * 10) / 10 : 0;
+      return { subject, packs, packs_completed: passed.length, total_hundreds: total, average: avg };
+    });
+
+    return { ok: true, scores: rows, subjects };
+  } catch (err) {
+    return { ok: false, error: err.message, scores: [] };
+  }
+});
+
+/** ils:get-verse-count — returns verse memory count for a student in the active term */
+ipcMain.handle('ils:get-verse-count', (event, studentId) => {
+  try {
+    const db         = database.getDb();
+    ensureIlsSchema(db);
+    const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
+    if (!termConfig) return { ok: false, verse_count: 0 };
+    const { academic_session, term } = termConfig;
+    const row = db.prepare(`
+      SELECT verse_count FROM ils_verse_memory
+      WHERE student_id = ? AND academic_session = ? AND term = ?
+    `).get(studentId, academic_session, term);
+    return { ok: true, verse_count: row?.verse_count || 0 };
+  } catch (err) {
+    return { ok: false, error: err.message, verse_count: 0 };
+  }
+});
+
+/** ils:set-verse-count — upsert verse memory count for a student */
+ipcMain.handle('ils:set-verse-count', (event, { studentId, count }) => {
+  try {
+    const db         = database.getDb();
+    ensureIlsSchema(db);
+    const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
+    if (!termConfig) return { ok: false, error: 'School term not configured' };
+    const { academic_session, term } = termConfig;
+    db.prepare(`
+      INSERT INTO ils_verse_memory (student_id, academic_session, term, verse_count)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(student_id, academic_session, term)
+      DO UPDATE SET verse_count = excluded.verse_count
+    `).run(studentId, academic_session, term, Math.max(0, Number(count) || 0));
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 // ── Phase 7: Deactivate / Re-enable Teacher (Manager+) ───────────────────────
 // Soft-deactivation: sets is_active = 0/1. Deactivated teachers are excluded
 // from grade entry dropdowns, attendance, and result queries.
@@ -4654,6 +4952,36 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
       } catch (_) { return null; }
     })();
 
+    // Phase 10: Pre-load ILS curriculum types for all class names in this result set
+    // so ILS students get il_subjects attached and are never filtered out as "ungraded".
+    const ilsClassTypeMap = {};
+    try {
+      ensureIlsSchema(db);
+      db.prepare("SELECT hierarchy_class, curriculum_type, pac_count FROM class_configs").all()
+        .forEach(r => {
+          ilsClassTypeMap[r.hierarchy_class] = {
+            type: r.curriculum_type || 'STANDARD_NIGERIAN',
+            pacCount: r.pac_count || 12
+          };
+        });
+    } catch (_) {}
+
+    const ilsPacStmt = (() => {
+      try {
+        return db.prepare(`
+          SELECT subject, pack_number, score, passed
+          FROM ils_records
+          WHERE student_id = ? AND academic_session = ? AND term = ?
+          ORDER BY subject, pack_number
+        `);
+      } catch (_) { return null; }
+    })();
+    const ilsVerseStmt = (() => {
+      try {
+        return db.prepare(`SELECT verse_count FROM ils_verse_memory WHERE student_id = ? AND academic_session = ? AND term = ?`);
+      } catch (_) { return null; }
+    })();
+
     const results = students.map((stu) => {
       const records = getRecords.all(stu.id, session, term);
       const explicitSubjs = getExplicitSubjects.all(stu.id).map(r => r.subject);
@@ -4725,6 +5053,49 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
         schoolStamp = generateStampSVG(identityPacket.stampStyle, identityPacket.name, null, identityPacket.signature, stampColor);
       }
 
+      // Phase 10: If this student's class is ILS, attach PAC data and mark with il_subjects
+      const stuFullClass = (stu.class_arm && !stu.class_name.includes(stu.class_arm))
+        ? `${stu.class_name} ${stu.class_arm}` : stu.class_name;
+      const stuBaseClass = stu.class_name;
+      const classInfo = ilsClassTypeMap[stuFullClass] || ilsClassTypeMap[stuBaseClass] || { type: 'STANDARD_NIGERIAN', pacCount: 12 };
+      const stuCurriculumType = typeof classInfo === 'object' ? classInfo.type : classInfo;
+      const stuPacCount = typeof classInfo === 'object' ? classInfo.pacCount : 12;
+
+      let ilSubjects = undefined;
+      let verseCount = 0;
+      if (stuCurriculumType === 'ILS' && ilsPacStmt) {
+        try {
+          const pacRows = ilsPacStmt.all(stu.id, session, term);
+          const bySubject = {};
+          for (const r of pacRows) {
+            if (!bySubject[r.subject]) bySubject[r.subject] = [];
+            bySubject[r.subject].push(r);
+          }
+          ilSubjects = Object.entries(bySubject).map(([subject, packs]) => {
+            const packsMap = {};
+            let hundredsCount = 0;
+            packs.forEach(p => {
+              packsMap[p.pack_number] = p.score;
+              if (p.score === 100) hundredsCount++;
+            });
+            const passed = packs.filter(p => p.passed === 1);
+            const total = packs.reduce((s, p) => s + p.score, 0);
+            const avg = packs.length > 0 ? Math.round((total / packs.length) * 10) / 10 : 0;
+            return {
+              subject,
+              packs: packsMap,
+              packs_completed: passed.length,
+              hundreds_count: hundredsCount,
+              total_score: total,
+              average: avg
+            };
+          });
+          verseCount = ilsVerseStmt?.get(stu.id, session, term)?.verse_count || 0;
+        } catch (_) {
+          ilSubjects = [];
+        }
+      }
+
       return {
         ...stu,
         class_name: fullClassName,
@@ -4740,22 +5111,18 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
         principal_remark: remark.principal_remark || "",
         form_teacher_name: ft.name || "",
         form_teacher_signature: ft.signature || null,
-        // Text name (for calligraphy-style templates like Monarch, Sterling, Apex)
         principal_signature: identityPacket.signature || null,
-        // Image signature (for clean_slate, azure and any template using identity.principalSignatureBase64)
-        // This is forwarded to report-compiler via the identity object directly — not this per-student field
         principal_stamp: schoolStamp,
-        // Dynamic fee_status — derived from actual student_fees balance for ALL tiers.
-        // This is what the pre-flight audit modal in ResultStudio uses to split cleared/owing.
         fee_status: (() => {
           try {
-            if (!getFeeBalance) return 'cleared'; // student_fees table doesn't exist yet
+            if (!getFeeBalance) return 'cleared';
             const fRow = getFeeBalance.get(stu.id, session, term);
-            // No row = no fee billed this term = cleared (not in debt)
             if (!fRow) return 'cleared';
             return fRow.balance <= 0 ? 'cleared' : 'owing';
           } catch (_) { return 'cleared'; }
         })(),
+        // Phase 10: ILS fields (undefined for Standard students)
+        ...(ilSubjects !== undefined ? { il_subjects: ilSubjects, verse_count: verseCount, pac_count: stuPacCount, curriculum_type: 'ILS' } : {}),
       };
     });
 
@@ -5446,6 +5813,7 @@ ipcMain.handle("generate-reports", async (event, payload) => {
             };
 
             let groupHtml = "";
+            let classType = 'STANDARD_NIGERIAN';
             const safeClassName = cn.replace(/[^a-zA-Z0-9]/g, "_");
             let groupOutPath = path.join(outFolder, `${reportType === "portal_card" ? "Parent_Access_Cards" : "TerminalReport"}_${safeClassName}_${termConfig?.term?.replace(/\s/g,"_")||"Term"}.${format === "image" ? "png" : "pdf"}`);
             finalOutPath = groupOutPath;
@@ -5453,8 +5821,86 @@ ipcMain.handle("generate-reports", async (event, payload) => {
             if (reportType === "portal_card") {
                 groupHtml = reports.generatePortalCards(groupPayload);
             } else {
-                groupHtml = reports.generateHTMLPages(groupPayload, baseDir, tempDir);
+                // ── Phase 10: ILS routing ──────────────────────────────────
+                // Detect curriculum_type for this class group (all students share the same class)
+                let classPacCount = 12;
+                let classPacLabels = null;
+                try {
+                    // Lazy migration: ensure column exists on DBs created before Phase 10
+                    try { db.exec("ALTER TABLE class_configs ADD COLUMN curriculum_type TEXT DEFAULT 'STANDARD_NIGERIAN'"); } catch (_) {}
+                    try { db.exec("ALTER TABLE class_configs ADD COLUMN pac_count INTEGER DEFAULT 12"); } catch (_) {}
+                    try { db.exec("ALTER TABLE class_configs ADD COLUMN pac_labels TEXT DEFAULT NULL"); } catch (_) {}
+                    const baseClassName = cn.split(' ').slice(0, -1).join(' ') || cn; // strip arm suffix
+                    const ctRow = db.prepare("SELECT curriculum_type, pac_count, pac_labels FROM class_configs WHERE hierarchy_class = ? OR hierarchy_class = ?")
+                                    .get(cn, baseClassName);
+                    classType = ctRow?.curriculum_type || 'STANDARD_NIGERIAN';
+                    classPacCount = ctRow?.pac_count || 12;
+                    try { if (ctRow?.pac_labels) classPacLabels = JSON.parse(ctRow.pac_labels); } catch (_) {}
+                } catch (_) {}
+
+                if (classType === 'ILS') {
+                    groupPayload.pac_labels = classPacLabels;
+                    // Enrich each student with PAC data from ils_records + ils_verse_memory
+                    const ilsSession = termConfig?.academic_session;
+                    const ilsTerm    = termConfig?.term;
+                    groupPayload.students = groupStudents.map(s => {
+                        try {
+                            const rows = db.prepare(`
+                                SELECT subject, pack_number, score, passed
+                                FROM   ils_records
+                                WHERE  student_id = ? AND academic_session = ? AND term = ?
+                                ORDER  BY subject, pack_number
+                            `).all(s.id, ilsSession, ilsTerm);
+
+                            // Group by subject
+                            const bySubject = {};
+                            for (const r of rows) {
+                                if (!bySubject[r.subject]) bySubject[r.subject] = [];
+                                bySubject[r.subject].push(r);
+                            }
+                            const il_subjects = Object.entries(bySubject).map(([subject, packs]) => {
+                                const packsMap = {};
+                                let hundredsCount = 0;
+                                packs.forEach(p => {
+                                    packsMap[p.pack_number] = p.score;
+                                    if (p.score === 100) hundredsCount++;
+                                });
+                                const passed  = packs.filter(p => p.passed === 1);
+                                const total   = packs.reduce((sum, p) => sum + p.score, 0);
+                                const avg     = packs.length > 0 ? Math.round((total / packs.length) * 10) / 10 : 0;
+                                return {
+                                    subject,
+                                    packs: packsMap,
+                                    packs_completed: passed.length,
+                                    hundreds_count: hundredsCount,
+                                    total_score: total,
+                                    average: avg
+                                };
+                            });
+
+                            const verseRow = db.prepare(`
+                                SELECT verse_count FROM ils_verse_memory
+                                WHERE student_id = ? AND academic_session = ? AND term = ?
+                            `).get(s.id, ilsSession, ilsTerm);
+
+                            return {
+                                ...s,
+                                il_subjects,
+                                pac_count: classPacCount,
+                                verse_count: verseRow?.verse_count || 0,
+                                academic_session: ilsSession,
+                                term: ilsTerm
+                            };
+                        } catch (_) {
+                            return { ...s, il_subjects: [], pac_count: classPacCount, verse_count: 0, academic_session: ilsSession, term: ilsTerm };
+                        }
+                    });
+                    groupHtml = reports.generateILSHTMLPages(groupPayload, baseDir, tempDir);
+                } else {
+                    groupHtml = reports.generateHTMLPages(groupPayload, baseDir, tempDir);
+                }
             }
+
 
             if (format === "html") {
                  groupOutPath = groupOutPath.replace(".pdf", ".html").replace(".png", ".html");
@@ -5470,8 +5916,8 @@ ipcMain.handle("generate-reports", async (event, payload) => {
             await new Promise((resolve, reject) => {
                 let hw = new BrowserWindow({
                   show: false,
-                  width: 794,
-                  height: 1123,
+                  width: classType === 'ILS' ? 1123 : 794,
+                  height: classType === 'ILS' ? 794 : 1123,
                   webPreferences: {
                     offscreen: true,
                     webSecurity: false // Allow loading file:// URLs for local temp images
@@ -5490,7 +5936,7 @@ ipcMain.handle("generate-reports", async (event, payload) => {
                       const buf = await hw.webContents.printToPDF({
                         printBackground: true,
                         pageSize: "A4",
-                        landscape: false
+                        landscape: classType === 'ILS'
                       });
                       fs.writeFileSync(groupOutPath, buf);
                     }
@@ -5833,28 +6279,87 @@ function createWindow() {
   }
 
   // ── Auto-updater (electron-updater + GitHub Releases) ───────────────────────
-  // Only active in production builds. Silently downloads; user triggers install.
-  let _updaterAvailable = false;
+  // Active in production builds only. Downloads silently; user triggers install.
+  // Phase 9: Gaps 2, 3, 5, 6 addressed here.
+  let _updaterAvailable  = false;
+  let _updateDownloaded  = false; // Gap 5: persist so banner survives renderer reload
+  let _updateInfo        = null;
+
+  function _reEmitPendingUpdate() {
+    // Gap 5: if a download completed before the renderer was ready, re-emit now
+    if (_updateDownloaded && _updateInfo && mainWindow) {
+      mainWindow.webContents.send('update:ready', _updateInfo);
+    }
+  }
+
   try {
     const { autoUpdater } = require('electron-updater');
-    autoUpdater.autoDownload    = true;  // download silently in background
-    autoUpdater.autoInstallOnAppQuit = false; // let the user trigger install
-    autoUpdater.on('update-available',  (info) => { _updaterAvailable = true;  mainWindow?.webContents.send('update-available',  info); });
-    autoUpdater.on('update-downloaded', (info) => { 
-      mainWindow?.webContents.send('update-downloaded', info); 
-      mainWindow?.webContents.send('update:ready', info); 
+
+    // Gap 6: Linux AppImage — electron-updater patches in-place when $APPIMAGE is set
+    if (process.platform === 'linux') {
+      if (process.env.APPIMAGE) {
+        console.log('[Updater] Linux AppImage detected — OTA patch-in-place enabled');
+      } else {
+        // Running as .deb or dev — disable download to avoid broken partial update
+        autoUpdater.autoDownload = false;
+        console.log('[Updater] Linux non-AppImage build — OTA download disabled (use package manager)');
+      }
+    }
+
+    autoUpdater.autoDownload         = process.platform === 'linux' ? !!process.env.APPIMAGE : true;
+    autoUpdater.autoInstallOnAppQuit = false; // let the user trigger install via banner
+
+    autoUpdater.on('update-available', (info) => {
+      _updaterAvailable = true;
+      mainWindow?.webContents.send('update-available', info);
+      console.log(`[Updater] Update available: v${info.version}`);
     });
-    autoUpdater.on('download-progress', (p)    => { mainWindow?.webContents.send('update-progress',   p);    });
-    autoUpdater.on('error',             (err)  => { mainWindow?.webContents.send('update-error', err.message); });
+
+    autoUpdater.on('update-not-available', (info) => {
+      // Gap 3: notify renderer so Settings/manual check can show "You're up to date"
+      mainWindow?.webContents.send('update:none', info);
+      console.log(`[Updater] Already on latest version (v${info.version})`);
+    });
+
+    autoUpdater.on('update-downloaded', (info) => {
+      _updateDownloaded = true; // Gap 5: persist flag
+      _updateInfo       = info;
+      // Gap 2: emit canonical event name only — preload maps both for legacy consumers
+      mainWindow?.webContents.send('update:ready', info);
+      console.log(`[Updater] v${info.version} downloaded and ready to install`);
+    });
+
+    autoUpdater.on('download-progress', (p) => {
+      mainWindow?.webContents.send('update-progress', p);
+    });
+
+    autoUpdater.on('error', (err) => {
+      // Ignore macOS unsigned-app errors gracefully — expected without Developer ID
+      const msg = err.message || '';
+      if (process.platform === 'darwin' && (msg.includes('Could not get code signature') || msg.includes('no identity found'))) {
+        console.warn('[Updater] macOS: unsigned build — OTA not available until Apple Developer ID is added');
+        return;
+      }
+      mainWindow?.webContents.send('update-error', msg);
+      console.error('[Updater] Error:', msg);
+    });
+
     // Check 30s after launch so it doesn't compete with app startup
     setTimeout(() => { try { autoUpdater.checkForUpdatesAndNotify(); } catch {} }, 30_000);
+
     ipcMain.handle('updater:check',   () => autoUpdater.checkForUpdatesAndNotify());
     ipcMain.handle('updater:install', () => { autoUpdater.quitAndInstall(false, true); });
+
+    // Gap 5: re-emit to newly loaded renderer (e.g. after hot-reload or navigate)
+    ipcMain.on('renderer:ready', () => _reEmitPendingUpdate());
+
   } catch (e) {
-    // electron-updater not yet installed — no-op
+    // electron-updater not available (should not happen after Gap 1 fix)
+    console.warn('[Updater] electron-updater unavailable:', e.message);
     ipcMain.handle('updater:check',   () => ({ available: false }));
     ipcMain.handle('updater:install', () => {});
   }
+
 
   // ── App menu ─────────────────────────────────────────────────────────────────
   const isMac = process.platform === 'darwin';

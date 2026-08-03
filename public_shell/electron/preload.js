@@ -168,6 +168,12 @@ const nexusAPI = {
         refund:          (params) => ipcRenderer.invoke('fees:refund',             params),
         sendReceiptPdf:  (params) => ipcRenderer.invoke('fees:send-receipt-pdf',   params),
         printReceipt:    (params) => ipcRenderer.invoke('fees:print-receipt',       params),
+        // Phase 8: Financial Hub completion
+        reverseTransaction:    (data)   => ipcRenderer.invoke('fees:reverse-transaction',    data),
+        getPaymentSessions:    (params) => ipcRenderer.invoke('fees:get-payment-sessions',   params),
+        markSessionSettled:    (data)   => ipcRenderer.invoke('fees:mark-session-settled',   data),
+        exportRosterCsv:       (params) => ipcRenderer.invoke('fees:export-roster-csv',      params),
+        dryRunRecoveryPulse:   (params) => ipcRenderer.invoke('fees:dry-run-recovery-pulse', params),
     },
     results: {
         dispatch:          (params) => ipcRenderer.invoke('results:dispatch', params),
@@ -216,6 +222,14 @@ const nexusAPI = {
         getAdjustments: (params) => ipcRenderer.invoke('fee-structure:get-adjustments', params),
         addAdjustment:  (data)   => ipcRenderer.invoke('fee-structure:add-adjustment',  data),
         deleteAdjustment:(id)    => ipcRenderer.invoke('fee-structure:delete-adjustment',id),
+    },
+    // ── Phase 8: Optional Fees & Multi-Bank Routing ───────────────────
+    feeExtras: {
+        getAll:         (params) => ipcRenderer.invoke('fee-extras:get-all',          params),
+        upsert:         (data)   => ipcRenderer.invoke('fee-extras:upsert',           data),
+        delete:         (data)   => ipcRenderer.invoke('fee-extras:delete',           data),
+        getSelections:  (params) => ipcRenderer.invoke('fee-extras:get-selections',   params),
+        toggleSelection:(data)   => ipcRenderer.invoke('fee-extras:toggle-selection', data),
     },
     // ── Message Queue (WhatsApp bulk send) ───────────────────────────
     queue: {
@@ -320,16 +334,32 @@ const nexusAPI = {
     },
 
 
-    // ── Auto-updater ──────────────────────────────────────────────────
+    // ── Auto-updater (Phase 9 hardened) ───────────────────────────────
     updater: {
-        check:          ()     => ipcRenderer.invoke('updater:check'),
-        install:        ()     => ipcRenderer.invoke('updater:install'),
-        onAvailable:    (cb)   => ipcRenderer.on('update-available',  (_e, v) => cb(v)),
-        onDownloaded:   (cb)   => ipcRenderer.on('update-downloaded', (_e, v) => cb(v)),
-        onProgress:     (cb)   => ipcRenderer.on('update-progress',   (_e, v) => cb(v)),
-        onError:        (cb)   => ipcRenderer.on('update-error',      (_e, v) => cb(v)),
-        onUpdateReady:  (cb)   => ipcRenderer.on('update:ready',      (_e, v) => cb(v)),
-        installUpdate:  ()     => ipcRenderer.invoke('updater:install'),
+        check:         ()    => ipcRenderer.invoke('updater:check'),
+        install:       ()    => ipcRenderer.invoke('updater:install'),
+        // Gap 2: canonical event is now update:ready only (main.js no longer dual-emits)
+        onReady:       (cb)  => ipcRenderer.on('update:ready',     (_e, v) => cb(v)),
+        // legacy alias so UpdateBanner.tsx onUpdateReady still works
+        onUpdateReady: (cb)  => ipcRenderer.on('update:ready',     (_e, v) => cb(v)),
+        onAvailable:   (cb)  => ipcRenderer.on('update-available', (_e, v) => cb(v)),
+        onProgress:    (cb)  => ipcRenderer.on('update-progress',  (_e, v) => cb(v)),
+        onError:       (cb)  => ipcRenderer.on('update-error',     (_e, v) => cb(v)),
+        // Gap 3: fires when checkForUpdates finds nothing new
+        onNone:        (cb)  => ipcRenderer.on('update:none',      (_e, v) => cb(v)),
+        // Gap 5: renderer calls this once mounted so main can re-emit any pending update:ready
+        notifyReady:   ()    => ipcRenderer.send('renderer:ready'),
+    },
+
+    // ── Phase 10: ILS (Individualized Learning System) ────────────────
+    ils: {
+        getClassType:      (className)               => ipcRenderer.invoke('ils:get-class-type', className),
+        setClassType:      (payload)                  => ipcRenderer.invoke('ils:set-class-type', payload),
+        checkClassRecords: (className)               => ipcRenderer.invoke('ils:check-class-records', className),
+        insertPacScore:    (data)                    => ipcRenderer.invoke('ils:insert-pac-score', data),
+        getPacScores:      (studentId)               => ipcRenderer.invoke('ils:get-pac-scores', studentId),
+        getVerseCount:     (studentId)               => ipcRenderer.invoke('ils:get-verse-count', studentId),
+        setVerseCount:     (studentId, count)        => ipcRenderer.invoke('ils:set-verse-count', { studentId, count }),
     },
 
     // ── Standalone Pack ───────────────────────────────────────────────
