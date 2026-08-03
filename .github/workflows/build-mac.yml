@@ -1,0 +1,73 @@
+name: Build macOS DMG (Unsigned — Dev / Pre-cert)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-mac:
+    name: Build macOS DMG & Publish to GitHub Releases
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: public_shell/electron/package-lock.json
+
+      - name: Install npm dependencies
+        run: npm install
+        working-directory: public_shell/electron
+
+      - name: Run test suite
+        run: npm test
+        working-directory: public_shell/electron
+
+      - name: Inject production environment keys
+        run: |
+          echo "PAYSTACK_SECRET_KEY=${{ secrets.PAYSTACK_SECRET_KEY }}"   >> .env
+          echo "PAYSTACK_PUBLIC_KEY=${{ secrets.PAYSTACK_PUBLIC_KEY }}"   >> .env
+          echo "NEXUS_API_SECRET=${{ secrets.NEXUS_API_SECRET }}"         >> .env
+          echo "NEXUS_API_URL=${{ secrets.NEXUS_API_URL }}"               >> .env
+          echo "NEXUS_LICENSE_PUBLIC_KEY=${{ secrets.NEXUS_LICENSE_PUBLIC_KEY }}" >> .env
+          echo "CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }}" >> .env
+          echo "CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }}"     >> .env
+          echo "CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}" >> .env
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json'));
+            pkg.build.files = pkg.build.files.filter(f => f !== '!.env');
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          "
+        working-directory: public_shell/electron
+
+      - name: Build & Publish macOS DMG
+        # NOTE: Without CSC_LINK the app is UNSIGNED.
+        # - Gatekeeper warning on first install (right-click → Open to bypass)
+        # - OTA auto-updates will NOT work on macOS until Apple Developer ID cert is added.
+        # TODO: uncomment CSC_* and APPLE_* lines below when cert is purchased ($99/yr).
+        run: npm run publish:mac
+        working-directory: public_shell/electron
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          # CSC_LINK: ${{ secrets.CSC_LINK }}                         # base64-encoded .p12
+          # CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}                         # for notarization
+          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Upload macOS DMG artifact (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexusschoolos-mac-dmg
+          path: public_shell/electron/release/*.dmg
+          retention-days: 30
