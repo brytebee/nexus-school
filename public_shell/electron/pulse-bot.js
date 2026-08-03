@@ -50,6 +50,7 @@ const STATE = Object.freeze({
   AWAITING_PARTIAL_PLAN:   "AWAITING_PARTIAL_PLAN",
   AWAITING_CUSTOM_AMOUNT:  "AWAITING_CUSTOM_AMOUNT",
   AWAITING_EMAIL_INPUT:    "AWAITING_EMAIL_INPUT",
+  AWAITING_EXTRAS_SELECTION: "AWAITING_EXTRAS_SELECTION",
 });
 
 function createSession(students, termConfig, schoolName) {
@@ -160,6 +161,24 @@ async function startPulse() {
   const chromiumPath = resolveChromiumPath();
 
   _authPath = path.join(os.homedir(), ".nexus_pulse_auth");
+  
+  // Clean any stale Chromium locks left by crashed or abruptly closed sessions
+  function clearStaleLocks(dir) {
+    try {
+      if (!fs.existsSync(dir)) return;
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          clearStaleLocks(fullPath);
+        } else if (entry.name.startsWith("Singleton") || entry.name === "DevToolsActivePort") {
+          try { fs.unlinkSync(fullPath); } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
+  clearStaleLocks(_authPath);
+
   try {
     client = new Client({
       authStrategy: new LocalAuth({ dataPath: _authPath }),
@@ -410,15 +429,33 @@ function formatDate(dateStr) {
   }
 }
 
-// ─── Menu Builders ─────────────────────────────────────────────────────────────
+// ─── Menu Builders & Intent Detection ──────────────────────────────────────────
+function detectIntent(text) {
+  if (!text) return 'UNKNOWN';
+  const clean = text.toLowerCase().trim();
+
+  if (/\b(fee|fees|pay|payment|billed|balance|owing|tuition|cost)\b/.test(clean)) return 'FEES';
+  if (/\b(news|announcements?|notice|ptas?|updates?)\b/.test(clean)) return 'NEWS';
+  if (/\b(policy|policies|rules?|faqs?|resumption|calendar|term date|dates?)\b/.test(clean)) return 'POLICIES';
+  if (/\b(result|grade|score|report|card|performance)\b/.test(clean)) return 'RESULTS';
+  if (/\b(attendance|absent|present|truancy)\b/.test(clean)) return 'ATTENDANCE';
+  if (/\b(extra|extras|uniform|books?|excursion|supplies)\b/.test(clean)) return 'EXTRAS';
+  if (/\b(menu|options|help|start|hello|hi)\b/.test(clean)) return 'MENU';
+
+  return 'UNKNOWN';
+}
+
 function buildMainMenu(schoolName) {
   return (
     `🎓 *${schoolName} — Parent Portal*\n${DIV}\n` +
     `Hello! How can I help you today?\n\n` +
     `*1.* 📊 Academic Results\n` +
     `*2.* 📅 Attendance Record\n` +
-    `*3.* 💳 Fee Status\n\n` +
-    `_Reply with 1, 2, or 3._`
+    `*3.* 💳 Fee Status & Pay Online\n` +
+    `*4.* 🧩 Optional Extras (Uniforms, Books & Materials)\n` +
+    `*5.* 📢 School News & Announcements\n` +
+    `*6.* 📋 School Policies & Resumption Calendar\n\n` +
+    `_Reply with 1, 2, 3, 4, 5, or 6, or type any question naturally._`
   );
 }
 
@@ -589,7 +626,7 @@ async function sendResults(msg, session, termOverride = null) {
     text += `\n`;
   }
 
-  text += `${DIV}\n💡 *Quick Menu:* 1=Results · 2=Attendance · 3=Fees · 0=Main Menu\n\n_Powered by Nexus Pulse_ 🎓`;
+  text += `${DIV}\n💡 *Quick Menu:* 1=Results · 2=Attendance · 3=Fees · 4=Extras · 5=News · 6=Policies · 0=Menu\n\n_Powered by Nexus Pulse_ 🎓`;
   await msg.reply(text);
 }
 
@@ -666,7 +703,7 @@ async function sendAttendance(msg, session, termOverride = null) {
     text += `\n`;
   }
 
-  text += `${DIV}\n💡 *Quick Menu:* 1=Results · 2=Attendance · 3=Fees · 0=Main Menu\n\n_For queries, please contact the school office._\n_Powered by Nexus Pulse_ 🎓`;
+  text += `${DIV}\n💡 *Quick Menu:* 1=Results · 2=Attendance · 3=Fees · 4=Extras · 5=News · 6=Policies · 0=Menu\n\n_For queries, please contact the school office._\n_Powered by Nexus Pulse_ 🎓`;
   await msg.reply(text);
 }
 
@@ -694,38 +731,55 @@ async function sendFeeStatus(msg, session, matchable) {
         AND  term             = ?
     `).get(student.id, termConfig.academic_session, termConfig.term);
 
-    if (!fees || (!fees.total_billed && !fees.total_paid)) {
-      text += `⚪ _No fee record for this term._\n\n`;
-      continue;
-    }
-
-    const balance = (fees.total_billed || 0) - (fees.total_paid || 0);
-    const cleared = balance <= 0;
-
-    // Fetch fee breakdown items
+    // Fetch fee breakdown — try arm-qualified name first, fall back to plain class name
+    // so fee items are found regardless of how the school entered the class name.
+    let breakdown = [];
     try {
-      const breakdown = db.prepare(`
+      breakdown = db.prepare(`
         SELECT item_name, amount
         FROM   fee_structures
-        WHERE  class_name = ?
+        WHERE  (class_name = ? OR class_name = ?)
           AND  (term = 'All Terms' OR term = ?)
         ORDER BY item_name ASC
-      `).all(studentClassNameWithArm, termConfig.term);
-
-      if (breakdown.length > 0) {
-        text += `📋 *Fee Breakdown*:\n`;
-        for (const item of breakdown) {
-          text += `   • ${item.item_name}: ${fmt(item.amount)}\n`;
-        }
-        text += `   ─────────────────────\n`;
-      }
+      `).all(studentClassNameWithArm, student.class_name, termConfig.term);
     } catch (err) {
       console.error("[Pulse Bot] Failed to query breakdown for status:", err);
     }
 
+    // Compute balance — if no ledger row yet, estimate from fee_structures
+    // so the parent still sees what they owe and gets payment options.
+    let totalBilled, totalPaid, balance, cleared;
+    if (fees && (fees.total_billed || fees.total_paid)) {
+      totalBilled = fees.total_billed || 0;
+      totalPaid   = fees.total_paid   || 0;
+      balance     = totalBilled - totalPaid;
+      cleared     = balance <= 0;
+    } else {
+      const estimatedTotal = breakdown.reduce((sum, item) => sum + (item.amount || 0), 0);
+      if (estimatedTotal <= 0) {
+        // Truly no data at all — nothing we can show
+        text += `⚪ _No fee record for this term. Please contact the school office._\n\n`;
+        continue;
+      }
+      // Ledger not yet initialised by the bursar — estimate from fee structures
+      totalBilled = estimatedTotal;
+      totalPaid   = 0;
+      balance     = estimatedTotal;
+      cleared     = false;
+      text += `⚠️ _Fee total estimated from current fee schedule (ledger not yet initialised)._\n`;
+    }
+
+    if (breakdown.length > 0) {
+      text += `📋 *Fee Breakdown*:\n`;
+      for (const item of breakdown) {
+        text += `   • ${item.item_name}: ${fmt(item.amount)}\n`;
+      }
+      text += `   ─────────────────────\n`;
+    }
+
     text += `${cleared ? '🟢' : '🔴'} *${cleared ? 'Fees Cleared ✅' : 'Outstanding Balance ⚠️'}*\n`;
-    text += `   Billed : ${fmt(fees.total_billed)}\n`;
-    text += `   Paid   : ${fmt(fees.total_paid)}\n`;
+    text += `   Billed : ${fmt(totalBilled)}\n`;
+    text += `   Paid   : ${fmt(totalPaid)}\n`;
 
     if (!cleared) {
       text += `   *Balance: ${fmt(balance)}*\n`;
@@ -776,6 +830,144 @@ async function sendFeeStatus(msg, session, matchable) {
   await msg.reply(text);
 }
 
+// ─── News & Announcements Response ───────────────────────────────────────────
+async function sendNewsAnnouncements(msg, session) {
+  const db = database.getDb();
+  let text = `📢 *School News & Announcements*\n_${session.schoolName || 'Nexus School'}_\n${DIV}\n\n`;
+
+  try {
+    const newsItems = db.prepare(`
+      SELECT title, category, body, created_at
+      FROM portal_news
+      WHERE is_published = 1
+      ORDER BY id DESC
+      LIMIT 5
+    `).all();
+
+    if (!newsItems || newsItems.length === 0) {
+      text += `_No published news or announcements at this time._\n\n`;
+    } else {
+      for (const item of newsItems) {
+        text += `📌 *${item.title}* [${item.category || 'Notice'}]\n`;
+        text += `${item.body}\n\n`;
+      }
+    }
+  } catch (err) {
+    console.error('[Pulse Bot] Failed to query portal news:', err.message);
+    text += `_No announcements currently available._\n\n`;
+  }
+
+  text += `${DIV}\n💡 *Quick Menu:* 1=Results · 2=Attendance · 3=Fees · 4=Extras · 5=News · 6=Policies · 0=Menu\n\n_Powered by Nexus Pulse_ 🎓`;
+  await msg.reply(text);
+}
+
+// ─── Policies & School Calendar Response ──────────────────────────────────────
+async function sendPoliciesAndFaq(msg, session) {
+  const db = database.getDb();
+  let text = `📋 *School Policies & Calendar*\n_${session.schoolName || 'Nexus School'}_\n${DIV}\n\n`;
+
+  try {
+    const termConfig = db.prepare("SELECT academic_session, term, resumption_date FROM school_term_config WHERE id = 1").get();
+    if (termConfig) {
+      text += `🗓️ *Current Term:* ${termConfig.term}, ${termConfig.academic_session}\n`;
+      if (termConfig.resumption_date) {
+        text += `🚪 *Next Resumption Date:* ${termConfig.resumption_date}\n`;
+      }
+      text += `\n`;
+    }
+
+    const policies = db.prepare(`
+      SELECT title, body
+      FROM portal_policies
+      WHERE is_published = 1
+      ORDER BY order_num ASC, id ASC
+      LIMIT 5
+    `).all();
+
+    if (policies && policies.length > 0) {
+      text += `📜 *School Policies & Rules:*\n\n`;
+      for (const p of policies) {
+        text += `• *${p.title}*:\n  ${p.body}\n\n`;
+      }
+    }
+  } catch (err) {
+    console.error('[Pulse Bot] Failed to query portal policies:', err.message);
+  }
+
+  text += `${DIV}\n💡 *Quick Menu:* 1=Results · 2=Attendance · 3=Fees · 4=Extras · 5=News · 6=Policies · 0=Menu\n\n_Powered by Nexus Pulse_ 🎓`;
+  await msg.reply(text);
+}
+
+// ─── Optional Extras & Materials Response ─────────────────────────────────────
+async function sendOptionalExtras(msg, session, matchable) {
+  const db = database.getDb();
+  const { students, termConfig, schoolName } = session;
+
+  const fmt = (n) => `₦${Number(n || 0).toLocaleString('en-NG')}`;
+
+  let text = `🧩 *Optional Extras & Materials*\n_${termConfig.term}, ${termConfig.academic_session}_\n${DIV}\n\n`;
+
+  const availableExtrasMap = new Map();
+
+  for (const student of students) {
+    const fullClassName = student.class_name + (student.class_arm ? ' ' + student.class_arm : '');
+    text += `👤 *${student.name}* (${fullClassName})\n`;
+
+    const extras = db.prepare(`
+      SELECT fe.id, fe.item_name, fe.amount, fe.term
+      FROM fee_extras fe
+      WHERE (fe.class_name = ? OR fe.class_name = ? OR fe.class_name = 'All Classes')
+        AND (fe.term = 'All Terms' OR fe.term = ?)
+        AND fe.is_active = 1
+      ORDER BY fe.id ASC
+    `).all(fullClassName, student.class_name, termConfig.term);
+
+    const selections = db.prepare(`
+      SELECT extra_id
+      FROM student_extra_selections
+      WHERE student_id = ?
+        AND academic_session = ?
+        AND term = ?
+    `).all(student.id, termConfig.academic_session, termConfig.term);
+
+    const selectedExtraIds = new Set(selections.map(s => s.extra_id));
+
+    if (extras.length === 0) {
+      text += `_No optional extras registered for this class._\n\n`;
+    } else {
+      extras.forEach((ex) => {
+        const isSelected = selectedExtraIds.has(ex.id);
+        text += `${isSelected ? '✅' : '⚪'} *${ex.item_name}*: ${fmt(ex.amount)}\n`;
+        text += `   _${isSelected ? 'Opted In' : 'Not Selected'}_\n`;
+        if (!availableExtrasMap.has(ex.id)) {
+          availableExtrasMap.set(ex.id, ex);
+        }
+      });
+      text += `\n`;
+    }
+  }
+
+  const selectableExtras = Array.from(availableExtrasMap.values());
+  const paystackConnected = db.prepare("SELECT value FROM app_settings WHERE key = 'paystack_connected'").get()?.value === 'true';
+
+  if (paystackConnected && selectableExtras.length > 0) {
+    text += `${DIV}\n💳 *Pay Online for Optional Extras*\n\n`;
+    selectableExtras.forEach((ex, idx) => {
+      text += `Reply *${idx + 1}* to Pay Online for *${ex.item_name}* (${fmt(ex.amount)})\n`;
+    });
+    text += `\n_Reply 0 to return to the main menu_`;
+
+    session.state = STATE.AWAITING_EXTRAS_SELECTION;
+    session.selectableExtras = selectableExtras;
+    if (matchable) setSession(matchable, session);
+  } else {
+    text += `${DIV}\n💡 *Quick Menu:* 1=Results · 2=Attendance · 3=Fees · 4=Extras · 5=News · 6=Policies · 0=Menu`;
+  }
+
+  await msg.reply(text);
+}
+
+
 // ─── Main Message Handler (State Machine) ──────────────────────────────────────
 async function handleMessage(msg) {
   // Allow media messages even when body is empty (needed for receipt photo uploads)
@@ -783,7 +975,7 @@ async function handleMessage(msg) {
   if (msg.from.includes("@g.us") || msg.from === "status@broadcast") return;
 
   const text = (msg.body || '').trim();
-  const numericInput = /^[123]$/.test(text) ? parseInt(text, 10) : null;
+  const numericInput = /^[1-6]$/.test(text) ? parseInt(text, 10) : null;
 
   // ── Resolve phone ────────────────────────────────────────────────────────────
   const rawPhone = await resolvePhoneNumber(msg);
@@ -832,7 +1024,7 @@ async function handleMessage(msg) {
   // ── Determine if the incoming message will be handled by the bot ──
   let isBotHandled = false;
   if (session) {
-    if (session.state === STATE.MENU && numericInput !== null) {
+    if (session.state === STATE.MENU && (numericInput !== null || detectIntent(text) !== 'UNKNOWN')) {
       isBotHandled = true;
     } else if (session.state === STATE.SCOPE && numericInput !== null) {
       isBotHandled = true;
@@ -898,7 +1090,7 @@ async function handleMessage(msg) {
     console.error("[Pulse Bot] Failed to log incoming message to inbox:", dbErr);
   }
 
-  // ── Any non-numeric input OR new session → show main menu ───────────────────
+  // ── Any non-numeric input OR new session → evaluate intent or show main menu ─
   // Exception: states that expect free-text input must bypass this gate so the
   // parent's typed email / custom amount reaches the correct handler below.
   const FREE_TEXT_STATES = [STATE.AWAITING_EMAIL_INPUT, STATE.AWAITING_CUSTOM_AMOUNT, STATE.AWAITING_RECEIPT];
@@ -928,7 +1120,57 @@ async function handleMessage(msg) {
       if (schoolRow?.value) schoolName = schoolRow.value;
     } catch (_) { /* table not yet migrated — use default */ }
 
-    session = createSession(students, termConfig, schoolName);
+    if (!session) {
+      session = createSession(students, termConfig, schoolName);
+      setSession(matchable, session);
+    }
+
+    // Smart Intent Engine: check natural language query before defaulting to Main Menu
+    const detected = detectIntent(text);
+    const intentChoiceMap = {
+      FEES: "fees",
+      EXTRAS: "extras",
+      NEWS: "news",
+      POLICIES: "policies",
+      RESULTS: "result",
+      ATTENDANCE: "attendance",
+    };
+    const inferredChoice = intentChoiceMap[detected];
+
+    if (inferredChoice) {
+      session.menuChoice = inferredChoice;
+      if (inferredChoice === "fees") {
+        await sendFeeStatus(msg, session, matchable);
+        // sendFeeStatus sets its own session state (AWAITING_PAYMENT_OPTION or
+        // AWAITING_RECEIPT) before returning — do NOT overwrite it here.
+        return;
+      }
+      if (inferredChoice === "extras") {
+        await sendOptionalExtras(msg, session, matchable);
+        // sendOptionalExtras manages its own session state (AWAITING_EXTRAS_SELECTION or MENU)
+        return;
+      }
+      if (inferredChoice === "news") {
+        await sendNewsAnnouncements(msg, session);
+        session.state = STATE.MENU;
+        setSession(matchable, session);
+        return;
+      }
+      if (inferredChoice === "policies") {
+        await sendPoliciesAndFaq(msg, session);
+        session.state = STATE.MENU;
+        setSession(matchable, session);
+        return;
+      }
+      if (inferredChoice === "result" || inferredChoice === "attendance") {
+        session.state = STATE.SCOPE;
+        setSession(matchable, session);
+        await msg.reply(buildScopeMenu(inferredChoice, session.termConfig));
+        return;
+      }
+    }
+
+    session.state = STATE.MENU;
     setSession(matchable, session);
     await msg.reply(buildMainMenu(schoolName));
     return;
@@ -943,21 +1185,55 @@ async function handleMessage(msg) {
     return;
   }
 
-  // ── STATE: MENU — waiting for topic selection (1, 2, 3) ─────────────────────
+  // ── STATE: MENU — waiting for topic selection (1, 2, 3, 4, 5, 6) ─────────────
   if (session.state === STATE.MENU) {
-    const choiceMap = { 1: "result", 2: "attendance", 3: "fees" };
-    const choice = choiceMap[numericInput];
+    const choiceMap = {
+      1: "result",
+      2: "attendance",
+      3: "fees",
+      4: "extras",
+      5: "news",
+      6: "policies",
+    };
+    const intentChoiceMap = {
+      FEES: "fees",
+      EXTRAS: "extras",
+      NEWS: "news",
+      POLICIES: "policies",
+      RESULTS: "result",
+      ATTENDANCE: "attendance",
+    };
+    const choice = choiceMap[numericInput] || intentChoiceMap[detectIntent(text)];
 
     if (!choice) {
-      await msg.reply("Please reply with *1*, *2*, or *3* to choose an option, or *0* for Main Menu.");
+      await msg.reply("Please reply with *1*, *2*, *3*, *4*, *5*, or *6* to choose an option, or *0* for Main Menu.");
       return;
     }
 
     session.menuChoice = choice;
 
-    // Fee status has no period — deliver immediately (keep session for menu navigation)
     if (choice === "fees") {
       await sendFeeStatus(msg, session, matchable);
+      // sendFeeStatus sets its own session state (AWAITING_PAYMENT_OPTION or
+      // AWAITING_RECEIPT) before returning — do NOT overwrite it here.
+      return;
+    }
+
+    if (choice === "extras") {
+      await sendOptionalExtras(msg, session, matchable);
+      // sendOptionalExtras manages its own session state (AWAITING_EXTRAS_SELECTION or MENU)
+      return;
+    }
+
+    if (choice === "news") {
+      await sendNewsAnnouncements(msg, session);
+      session.state = STATE.MENU;
+      setSession(matchable, session);
+      return;
+    }
+
+    if (choice === "policies") {
+      await sendPoliciesAndFaq(msg, session);
       session.state = STATE.MENU;
       setSession(matchable, session);
       return;
@@ -1104,7 +1380,18 @@ async function handleMessage(msg) {
       return;
     }
 
-    await msg.reply("Please reply with *1* (Pay Online), *2* (Manual Transfer), or *0* (Cancel).");
+    // Re-prompt with a balance reminder so the parent has context
+    let rePromptBalance = '';
+    try {
+      const db = database.getDb();
+      let runningTotal = 0;
+      for (const std of session.students) {
+        const row = db.prepare("SELECT COALESCE(total_billed - total_paid, 0) as bal FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?").get(std.id, session.termConfig.academic_session, session.termConfig.term);
+        runningTotal += row?.bal || 0;
+      }
+      if (runningTotal > 0) rePromptBalance = `\n\nOutstanding Balance: *₦${runningTotal.toLocaleString('en-NG')}*`;
+    } catch (_) {}
+    await msg.reply(`⚠️ Please choose a valid option:${rePromptBalance}\n\nReply *1* to Pay Online via Paystack\nReply *2* to Pay via Manual Bank Transfer\nReply *0* to return to the Main Menu`);
     return;
   }
 
@@ -1223,6 +1510,47 @@ async function handleMessage(msg) {
     const totalBalance = session.paymentContext.totalBalance;
     const partialAmount = Math.round((plan.percent / 100) * totalBalance);
     await checkOrPromptEmail(msg, session, matchable, partialAmount, `Milestone: ${plan.label} (${plan.percent}%)`, plan.percent);
+    return;
+  }
+
+  // ── STATE: AWAITING_EXTRAS_SELECTION ──────────────────────────────────────────
+  if (session.state === STATE.AWAITING_EXTRAS_SELECTION) {
+    if (text === '0') {
+      clearSession(matchable);
+      await msg.reply(buildMainMenu(session.schoolName));
+      return;
+    }
+
+    const selectableExtras = session.selectableExtras || [];
+    const selectedIndex = numericInput != null ? numericInput - 1 : -1;
+    const selectedExtra = selectableExtras[selectedIndex];
+
+    if (!selectedExtra) {
+      await msg.reply(`⚠️ Invalid selection. Please reply with a number between *1* and *${selectableExtras.length}* to pay for an optional extra, or reply *0* for Main Menu.`);
+      return;
+    }
+
+    // Auto opt-in the extra selection for all students in this session
+    const db = database.getDb();
+    const termConfig = session.termConfig;
+    for (const stu of session.students) {
+      try {
+        db.prepare(`
+          INSERT OR IGNORE INTO student_extra_selections (student_id, extra_id, academic_session, term)
+          VALUES (?, ?, ?, ?)
+        `).run(stu.id, selectedExtra.id, termConfig.academic_session, termConfig.term);
+      } catch (_) {}
+    }
+
+    const totalAmount = selectedExtra.amount * session.students.length;
+    session.paymentContext = {
+      studentDetails: session.students.map(s => ({ id: s.id, name: s.name, balance: selectedExtra.amount })),
+      totalBalance: totalAmount,
+      extraId: selectedExtra.id,
+      extraItemName: selectedExtra.item_name,
+    };
+
+    await checkOrPromptEmail(msg, session, matchable, totalAmount, `Optional Extra: ${selectedExtra.item_name}`);
     return;
   }
 
@@ -1677,6 +2005,14 @@ module.exports = {
     const media = new MessageMedia("application/pdf", safeBuffer.toString("base64"), filename);
     await client.sendMessage(target, media, { caption, sendMediaAsDocument: true });
     console.log(`[Pulse Bot] Successfully sent PDF document to ${target}`);
-  }
+  },
+
+  // ── Smart Intent & Knowledge Engine Exports ──────────────────────────────────
+  detectIntent,
+  buildMainMenu,
+  sendFeeStatus,
+  sendNewsAnnouncements,
+  sendPoliciesAndFaq,
+  sendOptionalExtras,
 };
 
