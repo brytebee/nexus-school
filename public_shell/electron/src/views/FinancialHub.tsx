@@ -161,7 +161,7 @@ export function FinancialHub() {
   const Swal       = (window as any).Swal;
 
   // ── Active tab ────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<'roster'|'structure'|'adjustments'|'receipts'|'import'>('roster');
+  const [activeTab, setActiveTab] = useState<'roster'|'structure'|'adjustments'|'receipts'|'online-payments'|'import'>('roster');
 
   // ── Session/Term ──────────────────────────────────────────────────────────
   const [sessions,        setSessions]        = useState<string[]>([]);
@@ -285,6 +285,36 @@ export function FinancialHub() {
   const [csvReviewOpen, setCsvReviewOpen] = useState(false);
   const [csvReviewResult, setCsvReviewResult] = useState<any>(null);
   const [pendingFeeCSV, setPendingFeeCSV] = useState<{ file: any; type: 'structure'|'payment'|'adjustment' } | null>(null);
+
+  // ── Phase 7: Online Payment Sessions ─────────────────────────────────────
+  const [paymentSessions,     setPaymentSessions]     = useState<any[]>([]);
+  const [loadingSessions,     setLoadingSessions]     = useState(false);
+  const [sessionsFilter,      setSessionsFilter]      = useState<'all'|'pending'|'settled'|'failed'>('all');
+  const [markingSessionId,    setMarkingSessionId]    = useState<number|null>(null);
+
+  // ── Phase 7: Reversal state ───────────────────────────────────────────────
+  const [reversalTarget,   setReversalTarget]   = useState<{ txId: number; studentId: string; amount: number; ref: string } | null>(null);
+  const [reversalReason,   setReversalReason]   = useState('');
+  const [reversingTx,      setReversingTx]      = useState(false);
+
+  // ── Phase 7: Recovery Pulse dry-run ──────────────────────────────────────
+  const [pulsePreview,     setPulsePreview]     = useState<any>(null);
+  const [pulseLoading,     setPulseLoading]     = useState(false);
+  const [dispatchingPulse, setDispatchingPulse] = useState(false);
+
+  // ── Phase 8: Extras Manager state ────────────────────────────────────────
+  const [extras,           setExtras]           = useState<any[]>([]);
+  const [loadingExtras,    setLoadingExtras]    = useState(false);
+  const [extrasOpen,       setExtrasOpen]       = useState(false);
+  const [newExtraName,     setNewExtraName]     = useState('');
+  const [newExtraAmount,   setNewExtraAmount]   = useState('');
+  const [newExtraTerm,     setNewExtraTerm]     = useState('All Terms');
+  const [newExtraBankId,   setNewExtraBankId]   = useState<number|null>(null);
+  const [addingExtra,      setAddingExtra]      = useState(false);
+  // ── Phase 8: Roster row expand (student extras) ───────────────────────────
+  const [expandedStudentId,  setExpandedStudentId]  = useState<string|null>(null);
+  const [studentExtrasCache, setStudentExtrasCache] = useState<Record<string, any[]>>({});
+  const [loadingStudentExtras, setLoadingStudentExtras] = useState(false);
 
   const handleFeeCSV = (type: 'structure' | 'payment' | 'adjustment') => {
     const api = (window as any).electronAPI;
@@ -467,13 +497,28 @@ export function FinancialHub() {
         sessionRef.current = initSession;
         termRef.current    = initTerm;
 
-        // 5. Receipt badge
+        // 5. Load bank accounts and settings for bank routing dropdowns
+        try {
+          if (window.electronAPI?.fees?.getSettings) {
+            const settingsRes = await window.electronAPI.fees.getSettings();
+            if (settingsRes?.ok && settingsRes.data?.bank_accounts) {
+              setBankAccounts(settingsRes.data.bank_accounts);
+              if (settingsRes.data.active_bank_account_id) {
+                setActiveBankAccountId(settingsRes.data.active_bank_account_id);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[FinancialHub] Failed to load initial bank settings:', e);
+        }
+
+        // 6. Receipt badge
         try {
           const cnt = await window.electronAPI.receipts?.getCount?.();
           if (cnt?.ok) setReceiptBadge(cnt.count || 0);
         } catch (_) {}
 
-        // 6. Auto-load roster — exact V1 _loadRoster call
+        // 7. Auto-load roster — exact V1 _loadRoster call
         await doLoadRoster(initSession, initTerm, 0, '', 'all');
       } catch (err) {
         console.error('[FinancialHub] boot error:', err);
@@ -1141,6 +1186,209 @@ export function FinancialHub() {
   };
 
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 7 — ONLINE PAYMENT SESSIONS
+  // ═══════════════════════════════════════════════════════════════════════════
+  const loadPaymentSessions = async () => {
+    if (!window.electronAPI?.fees?.getPaymentSessions) return;
+    setLoadingSessions(true);
+    try {
+      const res = await window.electronAPI.fees.getPaymentSessions({ filter: 'all' });
+      if (res?.ok) setPaymentSessions(res.data || []);
+      else console.error('[FinancialHub] getPaymentSessions error:', res?.error);
+    } catch (err) { console.error('[FinancialHub] getPaymentSessions threw:', err); }
+    finally { setLoadingSessions(false); }
+  };
+
+  useEffect(() => { if (activeTab === 'online-payments') loadPaymentSessions(); }, [activeTab]);
+
+  const handleMarkSettled = async (sessionId: number) => {
+    if (!window.electronAPI?.fees?.markSessionSettled) return;
+    setMarkingSessionId(sessionId);
+    try {
+      const res = await window.electronAPI.fees.markSessionSettled({ sessionId });
+      if (res?.ok) {
+        showIndicator('✅ Session marked as settled');
+        await loadPaymentSessions();
+      } else {
+        if (Swal) Swal.fire({ title: 'Error', text: res?.error || 'Failed to mark settled.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+      }
+    } catch (err: any) {
+      if (Swal) Swal.fire({ title: 'Error', text: err?.message || 'Unexpected error.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+    } finally { setMarkingSessionId(null); }
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 7 — EXPORT ROSTER CSV
+  // ═══════════════════════════════════════════════════════════════════════════
+  const handleExportRosterCsv = async () => {
+    if (!window.electronAPI?.fees?.exportRosterCsv) return;
+    try {
+      const res = await window.electronAPI.fees.exportRosterCsv({
+        academic_session: sessionRef.current,
+        term: termRef.current,
+        filter: statusFilter,
+        search: searchQuery,
+      });
+      if (res?.ok && res.csv) {
+        const blob = new Blob([res.csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `fee-roster-${sessionRef.current || 'export'}-${termRef.current || ''}.csv`.replace(/\s/g, '-');
+        a.click();
+        URL.revokeObjectURL(url);
+        showIndicator(`✅ Exported ${res.rowCount || ''} rows`);
+      } else {
+        if (Swal) Swal.fire({ title: 'Export Failed', text: res?.error || 'No data to export.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+      }
+    } catch (err: any) {
+      if (Swal) Swal.fire({ title: 'Export Error', text: err?.message || 'Unexpected error.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+    }
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 7 — RECOVERY PULSE DRY-RUN
+  // ═══════════════════════════════════════════════════════════════════════════
+  const handlePreviewRecoveryPulse = async () => {
+    if (!window.electronAPI?.fees?.dryRunRecoveryPulse) return;
+    setPulseLoading(true);
+    try {
+      const res = await window.electronAPI.fees.dryRunRecoveryPulse({
+        academic_session: sessionRef.current,
+        term: termRef.current,
+      });
+      if (res?.ok) {
+        setPulsePreview(res);
+      } else {
+        if (Swal) Swal.fire({ title: 'Dry-Run Failed', text: res?.error || 'Could not preview pulse.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+      }
+    } catch (err: any) {
+      if (Swal) Swal.fire({ title: 'Error', text: err?.message || 'Unexpected error.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+    } finally { setPulseLoading(false); }
+  };
+
+  const handleConfirmPulse = async () => {
+    if (!pulsePreview) return;
+    setDispatchingPulse(true);
+    try {
+      const res = await (window as any).electronAPI?.fees?.dispatchRecoveryPulse?.({
+        academic_session: sessionRef.current,
+        term: termRef.current,
+      });
+      setPulsePreview(null);
+      if (res?.ok) {
+        showIndicator(`✅ Pulse dispatched to ${pulsePreview.uniqueParentCount} parents`);
+        if (Swal) Swal.fire({ title: 'Recovery Pulse Sent!', text: `Sent reminders to ${pulsePreview.uniqueParentCount} parent${pulsePreview.uniqueParentCount !== 1 ? 's' : ''} for ${pulsePreview.unpaidStudentCount} unpaid student${pulsePreview.unpaidStudentCount !== 1 ? 's' : ''}.`, icon: 'success', background: '#0b0f19', color: '#fff', confirmButtonColor: '#00E5FF' });
+      } else {
+        if (Swal) Swal.fire({ title: 'Dispatch Failed', text: res?.error || 'Could not send pulse.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+      }
+    } catch (err: any) {
+      if (Swal) Swal.fire({ title: 'Error', text: err?.message || 'Unexpected error.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+    } finally { setDispatchingPulse(false); }
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 7 — TRANSACTION REVERSAL
+  // ═══════════════════════════════════════════════════════════════════════════
+  const handleReversalSubmit = async () => {
+    if (!reversalTarget || !reversalReason.trim()) return;
+    setReversingTx(true);
+    try {
+      const res = await window.electronAPI.fees.reverseTransaction({
+        txId: reversalTarget.txId,
+        studentId: reversalTarget.studentId,
+        reason: reversalReason.trim(),
+      });
+      if (res?.ok) {
+        setReversalTarget(null);
+        setReversalReason('');
+        showIndicator('✅ Transaction reversed');
+        if (Swal) Swal.fire({ title: 'Reversed', text: `Payment of ₦${fmt(reversalTarget.amount)} has been reversed. The ledger has been updated.`, icon: 'success', background: '#0b0f19', color: '#fff', confirmButtonColor: '#00E5FF' });
+        // Refresh ledger if open
+        if (ledgerStudent) {
+          const lr = await window.electronAPI.fees.getLedger({ studentId: ledgerStudent.id });
+          if (lr?.ok) setLedgerTx(lr.data || []);
+        }
+        doLoadRoster(sessionRef.current, termRef.current, rosterPage, searchQuery, statusFilter);
+      } else {
+        if (Swal) Swal.fire({ title: 'Reversal Failed', text: res?.error || 'Could not reverse transaction.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+      }
+    } catch (err: any) {
+      if (Swal) Swal.fire({ title: 'Error', text: err?.message || 'Unexpected error.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+    } finally { setReversingTx(false); }
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 8 — OPTIONAL EXTRAS
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Load extras opted-in for a specific student (roster row expand)
+  const loadStudentExtras = useCallback(async (studentId: string, session: string, term: string) => {
+    if (!window.electronAPI?.feeExtras?.getSelections) return;
+    setLoadingStudentExtras(true);
+    try {
+      const res = await window.electronAPI.feeExtras.getSelections({ student_id: studentId, academic_session: session, term });
+      if (res?.ok) {
+        setStudentExtrasCache(prev => ({ ...prev, [studentId]: res.data || [] }));
+      } else {
+        setStudentExtrasCache(prev => ({ ...prev, [studentId]: [] }));
+      }
+    } catch (_) {
+      setStudentExtrasCache(prev => ({ ...prev, [studentId]: [] }));
+    } finally {
+      setLoadingStudentExtras(false);
+    }
+  }, []);
+
+  const loadExtras = useCallback(async () => {
+    if (!structClass || !window.electronAPI?.feeExtras?.getAll) return;
+    setLoadingExtras(true);
+    try {
+      const res = await window.electronAPI.feeExtras.getAll({ class_name: structClass, term: structTerm === 'All Terms' ? undefined : structTerm });
+      if (res?.ok) setExtras(res.data || []);
+      else setExtras([]);
+    } catch (e) { console.error(e); setExtras([]); }
+    finally { setLoadingExtras(false); }
+  }, [structClass, structTerm]);
+
+  const handleAddExtra = async () => {
+    if (!newExtraName.trim() || !newExtraAmount || !structClass) return;
+    setAddingExtra(true);
+    try {
+      const res = await window.electronAPI.feeExtras.upsert({
+        class_name: structClass,
+        item_name: newExtraName.trim(),
+        amount: Number(newExtraAmount) || 0,
+        term: newExtraTerm,
+        bank_account_id: newExtraBankId,
+      });
+      if (res?.ok) {
+        setNewExtraName('');
+        setNewExtraAmount('');
+        setNewExtraBankId(null);
+        showIndicator('✅ Extra item added');
+        await loadExtras();
+      } else {
+        if (Swal) Swal.fire({ title: 'Failed', text: res?.error || 'Could not add extra.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+      }
+    } catch (err: any) {
+      if (Swal) Swal.fire({ title: 'Error', text: err?.message || 'Unexpected error.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+    } finally { setAddingExtra(false); }
+  };
+
+  const handleDeleteExtra = async (extraId: number) => {
+    const ok = Swal
+      ? (await Swal.fire({ title: 'Delete Extra?', text: 'Remove this optional fee item?', icon: 'warning', showCancelButton: true, confirmButtonText: 'Yes, Delete', confirmButtonColor: '#ef4444', background: '#0b0f19', color: '#fff' })).isConfirmed
+      : confirm('Delete this extra item?');
+    if (!ok) return;
+    try {
+      await window.electronAPI.feeExtras.delete({ id: extraId });
+      showIndicator('✅ Extra deleted');
+      await loadExtras();
+    } catch (err: any) {
+      if (Swal) Swal.fire({ title: 'Error', text: err?.message || 'Failed to delete extra.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+    }
+  };
 
   // ═══════════════════════════════════════════════════════════════════════════
   // RECEIPTS
@@ -1351,6 +1599,17 @@ export function FinancialHub() {
       if (isDiamond) { patch.fee_shield_enabled = shieldEnabled; patch.fee_shield_mode = shieldMode; }
       const res = await window.electronAPI.fees.saveSettings(patch);
       if (res?.ok) {
+        // Re-fetch settings so newly assigned bank account IDs are reflected in state
+        try {
+          const freshRes = await window.electronAPI.fees.getSettings();
+          if (freshRes?.ok && freshRes.data?.bank_accounts) {
+            setBankAccounts(freshRes.data.bank_accounts);
+            if (freshRes.data.active_bank_account_id) {
+              setActiveBankAccountId(freshRes.data.active_bank_account_id);
+            }
+          }
+        } catch (_) {}
+
         setSettingsOpen(false);
         showIndicator('✅ Settings saved');
         if (Swal) {
@@ -1712,6 +1971,13 @@ export function FinancialHub() {
           )}
         </button>
         <button
+          id="fees-tab-btn-online-payments"
+          className={`fees-tab-btn${activeTab==='online-payments'?' active':''}`}
+          onClick={() => setActiveTab('online-payments')}
+        >
+          💳 Online Payments
+        </button>
+        <button
           id="fees-tab-btn-import"
           className={`fees-tab-btn${activeTab==='import'?' active':''}`}
           onClick={() => setActiveTab('import')}
@@ -1764,6 +2030,23 @@ export function FinancialHub() {
                 <span id="fees-summary-pill" style={{ fontSize:'12px', background:'rgba(0,0,0,0.25)', border:'1px solid var(--glass-border)', borderRadius:'20px', padding:'4px 14px', color:'var(--text-dim)', whiteSpace:'nowrap' }}>
                   {summaryText}
                 </span>
+                <button
+                  id="btn-fees-export-csv"
+                  onClick={handleExportRosterCsv}
+                  className="primary-btn"
+                  style={{ padding:'7px 16px', fontSize:'12px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.15)' }}
+                >
+                  📤 Export CSV
+                </button>
+                <button
+                  id="btn-fees-recovery-pulse"
+                  onClick={handlePreviewRecoveryPulse}
+                  disabled={pulseLoading}
+                  className="primary-btn"
+                  style={{ padding:'7px 16px', fontSize:'12px', background:'rgba(0,229,255,0.07)', border:'1px solid rgba(0,229,255,0.2)', color:'#00e5ff' }}
+                >
+                  {pulseLoading ? '⌛' : '🤖 Recovery Pulse'}
+                </button>
                 <button id="btn-fees-load" onClick={handleLoad} disabled={loading} className="primary-btn" style={{ padding:'7px 18px', fontSize:'12px' }}>
                   {loading ? '⌛ Loading...' : 'Load'}
                 </button>
@@ -1784,6 +2067,7 @@ export function FinancialHub() {
                     <th style={{ textAlign:'center' }}>Status</th>
                     <th style={{ textAlign:'center' }}>Due Date</th>
                     {isDiamond && <th id="fees-th-actions" style={{ textAlign:'center' }}>Actions</th>}
+                    <th style={{ width:'32px' }} />
                   </tr>
                 </thead>
                 <tbody id="fees-tbody">
@@ -1804,37 +2088,98 @@ export function FinancialHub() {
                     // Re-derive status from live values (pending edits change it)
                     const st: 'cleared'|'partial'|'unpaid' = bal <= 0 ? 'cleared' : (paid as number) > 0 ? 'partial' : 'unpaid';
                     const sc = STATUS_CONFIG[st];
+                    const isExpanded = expandedStudentId === row.student_id;
+                    const studentExtras = studentExtrasCache[row.student_id] || [];
+                    const colSpan = isDiamond ? 10 : 9;
                     return (
-                      <tr key={row.student_id} data-id={row.student_id}>
-                        <td style={{ color:'var(--text-dim)', fontSize:'12px' }}>{rosterPage*PAGE_SIZE+i+1}</td>
-                        <td style={{ fontWeight:500 }}>{row.name}</td>
-                        <td style={{ fontSize:'12px', color:'var(--text-dim)' }}>{row.class_name}</td>
-                        {/* Total Billed */}
-                        {isDiamond
-                          ? <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'13px' }}>₦{fmt(billed)}</td>
-                          : <td style={{ textAlign:'right' }}><input type="number" className="fee-inline-input" value={billed as number} min={0} onChange={e => handleInlineChange(row.student_id,'total_billed',e.target.value)} style={{ width:'100%', maxWidth:'110px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'6px', color:'#fff', padding:'4px 8px', textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'12px' }} /></td>}
-                        {/* Amount Paid */}
-                        {isDiamond
-                          ? <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'13px', color:'#4CAF50' }}>₦{fmt(paid)}</td>
-                          : <td style={{ textAlign:'right' }}><input type="number" className="fee-inline-input" value={paid as number} min={0} onChange={e => handleInlineChange(row.student_id,'total_paid',e.target.value)} style={{ width:'100%', maxWidth:'110px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'6px', color:'#fff', padding:'4px 8px', textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'12px' }} /></td>}
-                        {/* Balance */}
-                        <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'13px', color: bal>0 ? '#FF5252' : '#4CAF50' }}>₦{fmt(bal)}</td>
-                        {/* Status */}
-                        <td style={{ textAlign:'center' }}>
-                          <span style={{ display:'inline-block', padding:'3px 10px', borderRadius:'12px', fontSize:'11px', fontWeight:600, background:sc.bg, color:sc.color }}>{sc.label}</span>
-                        </td>
-                        {/* Due Date */}
-                        {isDiamond
-                          ? <td style={{ textAlign:'center', fontSize:'12px' }}>{fmtDate(due as string)}</td>
-                          : <td style={{ textAlign:'center' }}><input type="date" className="fee-inline-input" value={(due as string)||''} onChange={e => handleInlineChange(row.student_id,'next_due_date',e.target.value)} style={{ background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'6px', color:'#fff', padding:'4px 8px', fontSize:'11px', fontFamily:'var(--font-mono)' }} /></td>}
-                        {/* Diamond actions */}
-                        {isDiamond && (
-                          <td style={{ textAlign:'center', whiteSpace:'nowrap' }}>
-                            <button onClick={() => { setPayStudent({id:row.student_id,name:row.name}); setPayAmount(''); setPayRef(''); setPayNote(''); setPayMethod('cash'); }} className="small-btn btn-record-payment" style={{ fontSize:'11px', padding:'4px 10px', marginRight:'4px', background:'rgba(0,229,255,0.08)', color:'var(--accent)', borderColor:'rgba(0,229,255,0.3)' }}>+Pay</button>
-                            <button onClick={() => openLedger(row.student_id, row.name)} className="small-btn btn-view-ledger" style={{ fontSize:'11px', padding:'4px 10px', background:'rgba(255,255,255,0.05)', color:'var(--text-dim)', borderColor:'var(--glass-border)' }}>Ledger</button>
+                      <>
+                        <tr key={row.student_id} data-id={row.student_id}
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => {
+                            if (isExpanded) {
+                              setExpandedStudentId(null);
+                            } else {
+                              setExpandedStudentId(row.student_id);
+                              if (!studentExtrasCache[row.student_id]) {
+                                loadStudentExtras(row.student_id, selectedSession, selectedTerm);
+                              }
+                            }
+                          }}
+                        >
+                          <td style={{ color:'var(--text-dim)', fontSize:'12px' }}>{rosterPage*PAGE_SIZE+i+1}</td>
+                          <td style={{ fontWeight:500 }}>{row.name}</td>
+                          <td style={{ fontSize:'12px', color:'var(--text-dim)' }}>{row.class_name}</td>
+                          {/* Total Billed */}
+                          {isDiamond
+                            ? <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'13px' }}>₦{fmt(billed)}</td>
+                            : <td style={{ textAlign:'right' }} onClick={e => e.stopPropagation()}><input type="number" className="fee-inline-input" value={billed as number} min={0} onChange={e => handleInlineChange(row.student_id,'total_billed',e.target.value)} style={{ width:'100%', maxWidth:'110px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'6px', color:'#fff', padding:'4px 8px', textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'12px' }} /></td>}
+                          {/* Amount Paid */}
+                          {isDiamond
+                            ? <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'13px', color:'#4CAF50' }}>₦{fmt(paid)}</td>
+                            : <td style={{ textAlign:'right' }} onClick={e => e.stopPropagation()}><input type="number" className="fee-inline-input" value={paid as number} min={0} onChange={e => handleInlineChange(row.student_id,'total_paid',e.target.value)} style={{ width:'100%', maxWidth:'110px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'6px', color:'#fff', padding:'4px 8px', textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'12px' }} /></td>}
+                          {/* Balance */}
+                          <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'13px', color: bal>0 ? '#FF5252' : '#4CAF50' }}>₦{fmt(bal)}</td>
+                          {/* Status */}
+                          <td style={{ textAlign:'center' }}>
+                            <span style={{ display:'inline-block', padding:'3px 10px', borderRadius:'12px', fontSize:'11px', fontWeight:600, background:sc.bg, color:sc.color }}>{sc.label}</span>
                           </td>
+                          {/* Due Date */}
+                          {isDiamond
+                            ? <td style={{ textAlign:'center', fontSize:'12px' }}>{fmtDate(due as string)}</td>
+                            : <td style={{ textAlign:'center' }} onClick={e => e.stopPropagation()}><input type="date" className="fee-inline-input" value={(due as string)||''} onChange={e => handleInlineChange(row.student_id,'next_due_date',e.target.value)} style={{ background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'6px', color:'#fff', padding:'4px 8px', fontSize:'11px', fontFamily:'var(--font-mono)' }} /></td>}
+                          {/* Diamond actions */}
+                          {isDiamond && (
+                            <td style={{ textAlign:'center', whiteSpace:'nowrap' }} onClick={e => e.stopPropagation()}>
+                              <button onClick={() => { setPayStudent({id:row.student_id,name:row.name}); setPayAmount(''); setPayRef(''); setPayNote(''); setPayMethod('cash'); }} className="small-btn btn-record-payment" style={{ fontSize:'11px', padding:'4px 10px', marginRight:'4px', background:'rgba(0,229,255,0.08)', color:'var(--accent)', borderColor:'rgba(0,229,255,0.3)' }}>+Pay</button>
+                              <button onClick={() => openLedger(row.student_id, row.name)} className="small-btn btn-view-ledger" style={{ fontSize:'11px', padding:'4px 10px', background:'rgba(255,255,255,0.05)', color:'var(--text-dim)', borderColor:'var(--glass-border)' }}>Ledger</button>
+                            </td>
+                          )}
+                          {/* Expand chevron */}
+                          <td style={{ textAlign:'center', width:'32px', color:'var(--text-dim)', fontSize:'10px', userSelect:'none' }}>
+                            {isExpanded ? '▲' : '▼'}
+                          </td>
+                        </tr>
+                        {/* Expanded extras sub-row */}
+                        {isExpanded && (
+                          <tr key={`${row.student_id}-extras`} style={{ background:'rgba(0,229,255,0.03)' }}>
+                            <td colSpan={colSpan} style={{ padding:'10px 24px 12px 36px', borderBottom:'1px solid rgba(0,229,255,0.1)' }}>
+                              <div style={{ display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap' }}>
+                                <span style={{ fontSize:'11px', fontWeight:600, color:'#00e5ff', textTransform:'uppercase', letterSpacing:'0.5px' }}>🧩 Extras:</span>
+                                {loadingStudentExtras && !studentExtrasCache[row.student_id] ? (
+                                  <span style={{ fontSize:'11px', color:'var(--text-dim)' }}>Loading…</span>
+                                ) : studentExtras.length === 0 ? (
+                                  <span style={{ fontSize:'11px', color:'var(--text-dim)', fontStyle:'italic' }}>No extras opted-in for this term.</span>
+                                ) : studentExtras.map((ex: any) => (
+                                  <div key={ex.extra_id} style={{ display:'inline-flex', alignItems:'center', gap:'6px', background:'rgba(0,229,255,0.08)', border:'1px solid rgba(0,229,255,0.2)', borderRadius:'20px', padding:'3px 10px', fontSize:'11px' }}>
+                                    <span style={{ fontWeight:600 }}>{ex.item_name}</span>
+                                    <span style={{ color:'#4CAF50', fontFamily:'var(--font-mono)' }}>₦{fmt(ex.amount)}</span>
+                                    {ex.bank_name && (
+                                      <span style={{ color:'var(--text-dim)' }}>· 🏦 {ex.bank_name}</span>
+                                    )}
+                                    <button
+                                      title="Remove this extra selection"
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        await window.electronAPI?.feeExtras?.toggleSelection({
+                                          student_id: row.student_id,
+                                          extra_id: ex.extra_id,
+                                          academic_session: selectedSession,
+                                          term: selectedTerm,
+                                          action: 'deselect',
+                                        });
+                                        // Invalidate cache to force reload on next expand
+                                        setStudentExtrasCache(prev => { const n = {...prev}; delete n[row.student_id]; return n; });
+                                        loadStudentExtras(row.student_id, selectedSession, selectedTerm);
+                                      }}
+                                      style={{ background:'none', border:'none', color:'#FF5252', cursor:'pointer', fontSize:'11px', padding:'0 2px', lineHeight:1 }}
+                                    >✕</button>
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
                         )}
-                      </tr>
+                      </>
                     );
                   })}
                 </tbody>
@@ -1917,18 +2262,45 @@ export function FinancialHub() {
                   <th>Fee Item</th>
                   <th style={{ width:'160px' }}>Applies To</th>
                   <th style={{ textAlign:'right', width:'140px' }}>Amount (₦)</th>
+                  <th style={{ width:'180px' }}>Bank Routing</th>
                   <th style={{ width:'80px', textAlign:'center' }}>Action</th>
                 </tr></thead>
                 <tbody id="fs-tbody">
                   {loadingStruct ? (
-                    <tr><td colSpan={4} style={{ textAlign:'center', padding:'30px', color:'var(--text-dim)' }}>Loading...</td></tr>
+                    <tr><td colSpan={5} style={{ textAlign:'center', padding:'30px', color:'var(--text-dim)' }}>Loading...</td></tr>
                   ) : structItems.length === 0 ? (
-                    <tr><td colSpan={4} style={{ textAlign:'center', padding:'40px', color:'var(--text-dim)' }}>Select a class and click Load.</td></tr>
-                  ) : structItems.map(item => (
+                    <tr><td colSpan={5} style={{ textAlign:'center', padding:'40px', color:'var(--text-dim)' }}>Select a class and click Load.</td></tr>
+                  ) : structItems.map((item: any) => (
                     <tr key={item.id}>
                       <td style={{ fontWeight:500 }}>{item.item_name}</td>
                       <td style={{ fontSize:'12px', color:'var(--text-dim)' }}>{item.term}</td>
                       <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'13px' }}>₦{fmt(item.amount)}</td>
+                      <td style={{ fontSize:'12px' }}>
+                        <select
+                          className="modern-input"
+                          style={{ width:'100%', fontSize:'11px', padding:'4px 8px', background:'var(--bg-card)' }}
+                          value={item.bank_account_id ?? ''}
+                          onChange={async e => {
+                            const bankId = e.target.value ? Number(e.target.value) : null;
+                            await window.electronAPI.feeStructure.upsertItem({
+                              id: item.id,
+                              className: item.class_name,
+                              itemName: item.item_name,
+                              term: item.term,
+                              amount: item.amount,
+                              bankAccountId: bankId,
+                            });
+                            loadStructure();
+                          }}
+                        >
+                          <option value="">💵 Cash (no routing)</option>
+                          {bankAccounts.filter((b: any) => b.id).map((b: any) => (
+                            <option key={b.id} value={b.id}>
+                              🏦 {b.bank} {b.name ? `(${b.name})` : b.number ? `(${b.number})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
                       <td style={{ textAlign:'center' }}>
                         <button className="small-btn btn-fs-del" onClick={() => handleDeleteItem(item.id)} style={{ color:'#ff6b6b', borderColor:'rgba(255,107,107,0.2)' }}>✕</button>
                       </td>
@@ -1940,11 +2312,122 @@ export function FinancialHub() {
                     <td style={{ padding:'10px 12px' }}><input type="text" id="fs-new-name" placeholder="e.g. Tuition Fee" value={newName} onChange={e => setNewName(e.target.value)} className="modern-input" style={{ width:'100%', fontSize:'12px' }} /></td>
                     <td style={{ padding:'10px 12px' }}><select id="fs-new-term" value={newTerm} onChange={e => setNewTerm(e.target.value)} className="modern-input" style={{ width:'100%', fontSize:'12px' }}><option value="All Terms">All Terms</option>{termsList.map(t => <option key={t} value={t}>{t}</option>)}</select></td>
                     <td style={{ padding:'10px 12px' }}><input type="number" id="fs-new-amount" placeholder="e.g. 80000" min={0} value={newAmount} onChange={e => setNewAmount(e.target.value)} className="modern-input" style={{ width:'100%', textAlign:'right', fontSize:'12px' }} /></td>
+                    <td style={{ padding:'10px 12px' }}>
+                      <select
+                        value={''}
+                        className="modern-input"
+                        style={{ width:'100%', fontSize:'11px', padding:'4px 8px' }}
+                        disabled
+                      >
+                        <option value="">Set after add</option>
+                      </select>
+                    </td>
                     <td style={{ textAlign:'center', padding:'10px 12px' }}><button id="btn-fs-add-item" onClick={handleAddItem} disabled={addingItem||!newName.trim()||!newAmount} className="primary-btn" style={{ padding:'5px 12px', fontSize:'12px' }}>+ Add</button></td>
                   </tr>
                 </tfoot>
               </table>
             </div>
+
+            {/* Extras Sub-section (Optional Fee Items) */}
+            <div style={{ borderTop:'1px solid var(--glass-border)', flexShrink:0 }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 20px', background:'rgba(0,0,0,0.15)' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+                  <span style={{ fontSize:'13px', fontWeight:600, color:'var(--text-dim)' }}>🧩 Optional Extras</span>
+                  {extras.length > 0 && (
+                    <span style={{ fontSize:'11px', background:'rgba(0,229,255,0.1)', color:'#00e5ff', borderRadius:'10px', padding:'1px 8px' }}>
+                      {extras.length} item{extras.length !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+                <button
+                  id="btn-fs-extras-toggle"
+                  onClick={() => { setExtrasOpen(!extrasOpen); if (!extrasOpen && structClass) loadExtras(); }}
+                  className="small-btn"
+                  style={{ fontSize:'11px' }}
+                >
+                  {extrasOpen ? '▲ Hide' : '▼ Show Extras'}
+                </button>
+              </div>
+              {extrasOpen && (
+                <div id="fs-extras-panel" style={{ padding:'12px 20px', display:'flex', flexDirection:'column', gap:'8px' }}>
+                  {loadingExtras ? (
+                    <p style={{ fontSize:'12px', color:'var(--text-dim)' }}>Loading extras...</p>
+                  ) : extras.length === 0 ? (
+                    <p style={{ fontSize:'12px', color:'var(--text-dim)', margin:0 }}>No optional extras for {structClass}.</p>
+                  ) : extras.map((ex: any) => (
+                    <div key={ex.id} style={{ display:'flex', alignItems:'center', gap:'10px', background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'8px', padding:'8px 12px' }}>
+                      <span style={{ flex:1, fontSize:'13px', fontWeight:500 }}>{ex.item_name}</span>
+                      <span style={{ fontSize:'12px', fontFamily:'var(--font-mono)', color:'#00e5ff' }}>₦{fmt(ex.amount)}</span>
+                      <span style={{ fontSize:'11px', color:'var(--text-dim)' }}>{ex.term}</span>
+                      <span style={{ fontSize:'11px', color: ex.bank_account_id ? '#4CAF50' : 'var(--text-dim)' }}>
+                        {ex.bank_name ? `🏦 ${ex.bank_name}` : '💵 Cash'}
+                      </span>
+                      <button
+                        className="small-btn"
+                        onClick={() => handleDeleteExtra(ex.id)}
+                        style={{ color:'#ff6b6b', borderColor:'rgba(255,107,107,0.2)', fontSize:'11px', padding:'2px 8px' }}
+                      >✕</button>
+                    </div>
+                  ))}
+                  {/* Add new extra */}
+                  <div style={{ display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap', paddingTop:'4px' }}>
+                    <input
+                      id="extras-new-name"
+                      type="text"
+                      placeholder="Item name (e.g. School Uniform)"
+                      value={newExtraName}
+                      onChange={e => setNewExtraName(e.target.value)}
+                      className="modern-input"
+                      style={{ flex:2, minWidth:'140px', fontSize:'12px' }}
+                    />
+                    <input
+                      id="extras-new-amount"
+                      type="number"
+                      placeholder="Amount"
+                      min={0}
+                      value={newExtraAmount}
+                      onChange={e => setNewExtraAmount(e.target.value)}
+                      className="modern-input"
+                      style={{ width:'110px', fontSize:'12px', textAlign:'right' }}
+                    />
+                    <select
+                      id="extras-new-term"
+                      value={newExtraTerm}
+                      onChange={e => setNewExtraTerm(e.target.value)}
+                      className="modern-input"
+                      style={{ width:'130px', fontSize:'12px' }}
+                    >
+                      <option value="All Terms">All Terms</option>
+                      {termsList.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <select
+                      id="extras-new-bank"
+                      value={newExtraBankId ?? ''}
+                      onChange={e => setNewExtraBankId(e.target.value ? Number(e.target.value) : null)}
+                      className="modern-input"
+                      style={{ width:'140px', fontSize:'12px', background:'var(--bg-card)' }}
+                    >
+                      <option value="">💵 Cash (no routing)</option>
+                      {bankAccounts.filter((b: any) => b.id).map((b: any) => (
+                        <option key={b.id} value={b.id}>
+                          🏦 {b.bank} {b.name ? `(${b.name})` : b.number ? `(${b.number})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      id="btn-extras-add"
+                      onClick={handleAddExtra}
+                      disabled={addingExtra || !newExtraName.trim() || !newExtraAmount}
+                      className="primary-btn"
+                      style={{ padding:'5px 14px', fontSize:'12px' }}
+                    >
+                      {addingExtra ? '...' : '+ Add Extra'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 20px', borderTop:'1px solid var(--glass-border)', flexShrink:0, background:'rgba(0,0,0,0.15)' }}>
               <span id="fs-class-count" style={{ fontSize:'12px', color:'var(--text-dim)' }}>{structClass ? `${structItems.length} item${structItems.length!==1?'s':''} for ${structClass}` : ''}</span>
               <span id="fs-total-display" style={{ fontSize:'15px', fontWeight:600 }}>Total ({structTerm}): ₦{fmt(structTotal)}</span>
@@ -2149,6 +2632,102 @@ export function FinancialHub() {
             </p>
           </div>
         )}
+
+        {/* ══ TAB: ONLINE PAYMENTS ══ */}
+        {activeTab === 'online-payments' && (
+          <div id="fees-tab-online-payments" style={{ display:'flex', flexDirection:'column', flex:1, overflow:'hidden' }}>
+            <div style={{ display:'flex', gap:'12px', alignItems:'center', padding:'16px 20px', borderBottom:'1px solid var(--glass-border)', flexShrink:0, flexWrap:'wrap' }}>
+              <div>
+                <div style={{ fontWeight:600, fontSize:'15px' }}>💳 Online Payment Sessions</div>
+                <div style={{ fontSize:'12px', color:'var(--text-dim)', marginTop:'2px' }}>Paystack checkout sessions from parent payments via WhatsApp bot</div>
+              </div>
+              <div style={{ marginLeft:'auto', display:'flex', gap:'8px', alignItems:'center' }}>
+                <select
+                  id="op-filter-select"
+                  value={sessionsFilter}
+                  onChange={e => setSessionsFilter(e.target.value as any)}
+                  className="modern-input"
+                  style={{ fontSize:'12px', width:'130px' }}
+                >
+                  <option value="all">All Sessions</option>
+                  <option value="pending">Pending</option>
+                  <option value="settled">Settled</option>
+                  <option value="failed">Failed</option>
+                </select>
+                <button
+                  id="btn-op-refresh"
+                  onClick={loadPaymentSessions}
+                  disabled={loadingSessions}
+                  className="small-btn"
+                  style={{ fontSize:'12px' }}
+                >
+                  {loadingSessions ? '⌛' : '🔄 Refresh'}
+                </button>
+              </div>
+            </div>
+            <div className="table-container" style={{ flex:1, overflowY:'auto' }}>
+              <table className="data-table" id="op-table">
+                <thead><tr>
+                  <th>Date</th>
+                  <th>Student</th>
+                  <th>Class</th>
+                  <th style={{ textAlign:'right' }}>Amount (₦)</th>
+                  <th>Reference</th>
+                  <th style={{ textAlign:'center' }}>Status</th>
+                  <th style={{ textAlign:'center', width:'120px' }}>Action</th>
+                </tr></thead>
+                <tbody id="op-tbody">
+                  {loadingSessions ? (
+                    <tr><td colSpan={7} style={{ textAlign:'center', padding:'40px', color:'var(--text-dim)' }}>Loading…</td></tr>
+                  ) : paymentSessions.length === 0 ? (
+                    <tr><td colSpan={7} style={{ textAlign:'center', padding:'50px', color:'var(--text-dim)' }}>
+                      No payment sessions found. Click Refresh to load.
+                    </td></tr>
+                  ) : paymentSessions
+                      .filter(s => sessionsFilter === 'all' || s.status === sessionsFilter)
+                      .map((s: any) => {
+                        const STATUS_BADGES: Record<string, { label: string; color: string; bg: string }> = {
+                          pending:  { label:'Pending',  color:'#FFC107', bg:'rgba(255,193,7,0.1)' },
+                          settled:  { label:'Settled',  color:'#4CAF50', bg:'rgba(76,175,80,0.1)' },
+                          failed:   { label:'Failed',   color:'#FF5252', bg:'rgba(255,82,82,0.1)' },
+                          abandoned:{ label:'Abandoned',color:'#94a3b8', bg:'rgba(148,163,184,0.1)' },
+                        };
+                        const badge = STATUS_BADGES[s.status] || { label: s.status, color:'#94a3b8', bg:'rgba(148,163,184,0.1)' };
+                        return (
+                          <tr key={s.id}>
+                            <td style={{ fontSize:'12px', whiteSpace:'nowrap' }}>{fmtDate(s.created_at)}</td>
+                            <td style={{ fontWeight:500, fontSize:'13px' }}>{s.student_name}</td>
+                            <td style={{ fontSize:'12px', color:'var(--text-dim)' }}>{s.class_name}</td>
+                            <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'13px', color:'#00e5ff' }}>₦{fmt(s.amount)}</td>
+                            <td style={{ fontSize:'11px', fontFamily:'var(--font-mono)', color:'var(--text-dim)' }}>{s.reference || '—'}</td>
+                            <td style={{ textAlign:'center' }}>
+                              <span style={{ fontSize:'11px', fontWeight:600, padding:'3px 10px', borderRadius:'20px', color:badge.color, background:badge.bg, border:`1px solid ${badge.color}30` }}>
+                                {badge.label}
+                              </span>
+                            </td>
+                            <td style={{ textAlign:'center' }}>
+                              {s.status === 'pending' && (
+                                <button
+                                  id={`btn-op-settle-${s.id}`}
+                                  onClick={() => handleMarkSettled(s.id)}
+                                  disabled={markingSessionId === s.id}
+                                  className="small-btn"
+                                  style={{ fontSize:'11px', padding:'3px 8px', background:'rgba(76,175,80,0.1)', color:'#4CAF50', borderColor:'rgba(76,175,80,0.3)' }}
+                                >
+                                  {markingSessionId === s.id ? '...' : '✓ Mark Settled'}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                  }
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
@@ -2783,7 +3362,7 @@ export function FinancialHub() {
                               >
                                 📄 Receipt
                               </button>
-                              {isPaystack && (
+                              {isPaystack ? (
                                 <button 
                                   onClick={() => setRefundTarget({ studentId: ledgerStudent.id, txRef: tx.reference_number, amount: tx.amount, maxAmount: tx.amount })}
                                   className="small-btn"
@@ -2791,6 +3370,16 @@ export function FinancialHub() {
                                   title="Issue Online Refund"
                                 >
                                   ↩️ Refund
+                                </button>
+                              ) : (
+                                <button
+                                  id={`btn-reverse-tx-${tx.id}`}
+                                  onClick={() => setReversalTarget({ txId: tx.id, studentId: ledgerStudent.id, amount: tx.amount, ref: tx.reference_number || '' })}
+                                  className="small-btn"
+                                  style={{ fontSize: '10px', padding: '3px 6px', background: 'rgba(255,82,82,0.08)', color: '#FF5252', borderColor: 'rgba(255,82,82,0.25)' }}
+                                  title="Reverse this payment"
+                                >
+                                  ⏪ Reverse
                                 </button>
                               )}
                             </div>
@@ -2977,6 +3566,108 @@ export function FinancialHub() {
           </div>
         </div>
       )}
+      {/* ══════════════════════════════════════════════════════════════════════
+          MODAL: Reverse Transaction (Phase 7 Hardening)
+      ══════════════════════════════════════════════════════════════════════ */}
+      {reversalTarget && (
+        <div id="modal-reversal" style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', backdropFilter:'blur(6px)', zIndex:1500, display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <div style={{ background:'var(--bg-panel)', border:'1px solid rgba(255,82,82,0.3)', borderRadius:'16px', padding:'28px 32px', width:'440px', maxWidth:'94vw' }}>
+            <h3 style={{ marginBottom:'4px', fontSize:'16px', color:'#FF5252' }}>⏪ Reverse Transaction</h3>
+            <p style={{ fontSize:'12px', color:'var(--text-dim)', marginBottom:'16px' }}>
+              This will post a <strong>negative entry</strong> equal to the original payment amount, reducing the student's total paid.
+              {reversalTarget.ref && (
+                <> Reference: <span style={{ fontFamily:'monospace', color:'var(--text)' }}>{reversalTarget.ref}</span></>
+              )}
+            </p>
+            <div style={{ background:'rgba(255,82,82,0.06)', border:'1px solid rgba(255,82,82,0.18)', borderRadius:'8px', padding:'12px 14px', marginBottom:'16px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <span style={{ fontSize:'12px', color:'var(--text-dim)' }}>Amount being reversed</span>
+              <span style={{ fontSize:'16px', fontWeight:700, fontFamily:'var(--font-mono)', color:'#FF5252' }}>₦{fmt(reversalTarget.amount)}</span>
+            </div>
+            <div>
+              <label style={{ fontSize:'11px', color:'var(--text-dim)' }}>Reason for reversal *</label>
+              <textarea
+                id="reversal-reason-input"
+                rows={3}
+                placeholder="e.g. Duplicate payment, wrong student, bank error..."
+                value={reversalReason}
+                onChange={e => setReversalReason(e.target.value)}
+                className="modern-input"
+                style={{ marginTop:'4px', resize:'none', width:'100%', background:'rgba(255,255,255,0.06)', border:'1px solid var(--glass-border)', borderRadius:'6px', color:'#fff', padding:'8px 12px' }}
+              />
+            </div>
+            <div style={{ display:'flex', gap:'10px', marginTop:'20px', justifyContent:'flex-end' }}>
+              <button className="small-btn" onClick={() => { setReversalTarget(null); setReversalReason(''); }}>Cancel</button>
+              <button
+                id="btn-reversal-confirm"
+                onClick={handleReversalSubmit}
+                disabled={reversingTx || !reversalReason.trim()}
+                className="primary-btn"
+                style={{ background:'rgba(255,82,82,0.12)', borderColor:'rgba(255,82,82,0.35)', color:'#FF5252' }}
+              >
+                {reversingTx ? 'Reversing…' : '⏪ Confirm Reversal'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          MODAL: Recovery Pulse Preview (Phase 7 Hardening)
+      ══════════════════════════════════════════════════════════════════════ */}
+      {pulsePreview && (
+        <div id="modal-recovery-pulse" style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', backdropFilter:'blur(6px)', zIndex:1500, display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <div style={{ background:'var(--bg-panel)', border:'1px solid rgba(0,229,255,0.25)', borderRadius:'16px', padding:'28px 32px', width:'500px', maxWidth:'94vw' }}>
+            <h3 style={{ marginBottom:'4px', fontSize:'16px', color:'#00e5ff' }}>🤖 Recovery Pulse — Preview</h3>
+            <p style={{ fontSize:'12px', color:'var(--text-dim)', marginBottom:'20px' }}>
+              Review the impact before sending. This will dispatch WhatsApp fee reminders.
+            </p>
+
+            {/* Stats */}
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'12px', marginBottom:'20px' }}>
+              {[
+                { label:'Unpaid Students', value: pulsePreview.unpaidStudentCount ?? '—', color:'#FF5252' },
+                { label:'Unique Parents', value: pulsePreview.uniqueParentCount ?? '—', color:'#FFC107' },
+                { label:'Total Outstanding', value: `₦${fmt(pulsePreview.totalOutstanding ?? 0)}`, color:'#00e5ff' },
+              ].map(stat => (
+                <div key={stat.label} style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'10px', padding:'12px', textAlign:'center' }}>
+                  <div style={{ fontSize:'20px', fontWeight:700, color:stat.color, fontFamily:'var(--font-mono)' }}>{stat.value}</div>
+                  <div style={{ fontSize:'11px', color:'var(--text-dim)', marginTop:'4px' }}>{stat.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Sample message preview */}
+            {pulsePreview.sampleMessage && (
+              <div style={{ marginBottom:'20px' }}>
+                <label style={{ fontSize:'11px', color:'var(--text-dim)', display:'block', marginBottom:'6px' }}>📱 Sample WhatsApp Message (first parent)</label>
+                <pre style={{ background:'rgba(0,0,0,0.3)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'8px', padding:'12px', fontSize:'11px', color:'#e0e0e0', whiteSpace:'pre-wrap', lineHeight:1.6, maxHeight:'140px', overflowY:'auto', fontFamily:'monospace', margin:0 }}>
+                  {pulsePreview.sampleMessage}
+                </pre>
+              </div>
+            )}
+
+            {pulsePreview.uniqueParentCount === 0 && (
+              <div style={{ background:'rgba(255,193,7,0.08)', border:'1px solid rgba(255,193,7,0.25)', borderRadius:'8px', padding:'12px', fontSize:'12px', color:'#FFC107', marginBottom:'16px' }}>
+                ⚠️ No parents to notify — all students are fully paid or have no WhatsApp number on record.
+              </div>
+            )}
+
+            <div style={{ display:'flex', gap:'10px', justifyContent:'flex-end' }}>
+              <button className="small-btn" onClick={() => setPulsePreview(null)}>Cancel</button>
+              <button
+                id="btn-pulse-send"
+                onClick={handleConfirmPulse}
+                disabled={dispatchingPulse || pulsePreview.uniqueParentCount === 0}
+                className="primary-btn"
+                style={{ background:'rgba(0,229,255,0.1)', borderColor:'rgba(0,229,255,0.3)', color:'#00e5ff' }}
+              >
+                {dispatchingPulse ? 'Sending…' : `🤖 Send to ${pulsePreview.uniqueParentCount} Parent${pulsePreview.uniqueParentCount !== 1 ? 's' : ''}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <SetupGuardModal
         isOpen={setupGuardOpen}
         onClose={() => setSetupGuardOpen(false)}

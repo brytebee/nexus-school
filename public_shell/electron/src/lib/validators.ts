@@ -162,3 +162,23 @@ export function validateScoreComponent(
   }
   return { ok: true, error: null };
 }
+
+export function validatePacScore(
+  val: number | string | undefined | null,
+  label: string = 'PAC Score'
+): ValidationResult {
+  if (val === undefined || val === null || val === '') {
+    return { ok: true, error: null };
+  }
+  const num = typeof val === 'number' ? val : parseFloat(String(val).trim());
+  if (isNaN(num)) {
+    return { ok: false, error: `${label} must be a valid number.` };
+  }
+  if (num < 80) {
+    return { ok: false, error: `${label} (${num}) cannot be less than 80.` };
+  }
+  if (num > 100) {
+    return { ok: false, error: `${label} (${num}) cannot exceed 100.` };
+  }
+  return { ok: true, error: null };
+}
