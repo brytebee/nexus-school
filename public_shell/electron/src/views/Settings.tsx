@@ -3,6 +3,7 @@ import { useIdentity, SchoolIdentity } from '../hooks/useIdentity';
 import { useLicense } from '../hooks/useLicense';
 import { useSudoAuth } from '../context/SudoAuthContext';
 import { validateUsername, validatePin, validatePhone, validateEmail, validateNonEmpty, validateSecurityAnswer } from '../lib/validators';
+import { SYSTEM_ROLES, getRoleConfig } from '../lib/roles';
 
 interface SettingsProps {
   onResetSuccess?: () => void;
@@ -2903,22 +2904,11 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
                       const isOnlySuper = account.role_level === 9 && staffAccounts.filter(a => a.role_level === 9).length <= 1;
                       const canDelete = !isCurrentUser && !isOnlySuper;
                       
-                      let roleLabel = 'Staff';
-                      let roleColor = 'rgba(51,153,0,0.15)';
-                      let roleBorder = 'rgba(51,153,0,0.4)';
-                      let roleTextColor = '#55ff55';
-                      
-                      if (account.role_level === 9) {
-                        roleLabel = 'Super Admin';
-                        roleColor = 'rgba(255,215,0,0.15)';
-                        roleBorder = 'rgba(255,215,0,0.4)';
-                        roleTextColor = '#ffd700';
-                      } else if (account.role_level === 5) {
-                        roleLabel = 'Manager';
-                        roleColor = 'rgba(199,125,255,0.15)';
-                        roleBorder = 'rgba(199,125,255,0.4)';
-                        roleTextColor = '#c77dff';
-                      }
+                      const roleCfg = getRoleConfig(account.role_level);
+                      const roleLabel = roleCfg.shortLabel;
+                      const roleColor = roleCfg.color;
+                      const roleBorder = roleCfg.border;
+                      const roleTextColor = roleCfg.textColor;
 
                       return (
                         <div
@@ -3091,9 +3081,15 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
                       value={newStaffRole}
                       onChange={(e) => setNewStaffRole(parseInt(e.target.value))}
                     >
-                      <option value={1}>Staff (Level 1)</option>
-                      <option value={5}>Manager (Level 5)</option>
-                      <option value={9}>Super Admin (Level 9)</option>
+                      {SYSTEM_ROLES.map((r) => {
+                        const maxRole = currentAdminUser?.role_level ?? 9;
+                        const isAllowed = r.level <= maxRole || maxRole === 9;
+                        return (
+                          <option key={r.level} value={r.level} disabled={!isAllowed}>
+                            {r.label} (Level {r.level}){r.level > maxRole ? ' — Higher privilege' : ''}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
 

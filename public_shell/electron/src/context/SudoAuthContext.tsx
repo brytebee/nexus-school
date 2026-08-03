@@ -3,6 +3,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 interface Admin {
   id: string;
   username: string;
+  role_level?: number;
   auth_type?: string;
 }
 
@@ -11,7 +12,8 @@ interface SudoAuthContextType {
     onConfirm: () => Promise<void> | void,
     title?: string,
     body?: string,
-    destructive?: boolean
+    destructive?: boolean,
+    minRoleLevel?: number
   ) => Promise<void>;
   resetSudo: () => void;
 }
@@ -36,6 +38,7 @@ export function SudoAuthProvider({ children }: { children: React.ReactNode }) {
     title: string;
     body: string;
     destructive: boolean;
+    minRoleLevel?: number;
   } | null>(null);
 
   // ── PIN modal state ─────────────────────────────────────────────────────────
@@ -66,6 +69,16 @@ export function SudoAuthProvider({ children }: { children: React.ReactNode }) {
     fetchAdmins();
   }, []);
 
+  // When a new modal opens, pre-select the first admin that meets the minRoleLevel requirement
+  useEffect(() => {
+    if (!pendingAction) return;
+    const minLevel = pendingAction.minRoleLevel ?? 0;
+    const eligible = minLevel > 0 ? admins.filter(a => (a.role_level ?? 0) >= minLevel) : admins;
+    if (eligible.length > 0 && !eligible.find(a => String(a.id) === String(selectedAdmin))) {
+      setSelectedAdmin(eligible[0].id);
+    }
+  }, [pendingAction, admins]);
+
   const resetSudo = () => {
     setLastAuthTime(null);
   };
@@ -74,7 +87,8 @@ export function SudoAuthProvider({ children }: { children: React.ReactNode }) {
     onConfirm: () => Promise<void> | void,
     title = 'Confirm Destructive Action',
     body = 'This action is irreversible and will permanently destroy data. Are you sure you want to continue?',
-    destructive = true
+    destructive = true,
+    minRoleLevel?: number
   ) => {
     const now = Date.now();
     const isSessionValid = lastAuthTime && (now - lastAuthTime < 30 * 60 * 1000); // 30 minutes
@@ -82,22 +96,28 @@ export function SudoAuthProvider({ children }: { children: React.ReactNode }) {
     setPin('');
     setPinError('');
 
-    if (isSessionValid) {
+    if (isSessionValid && !minRoleLevel) {
       if (!destructive) {
-        // Non-destructive read action (e.g. View Grades) — session is valid,
+        // Non-destructive read action with no level requirement — session is valid,
         // skip the confirm dialog entirely and call the callback immediately.
         await onConfirm();
         return;
       }
       // Destructive action within a valid session — show confirm-only modal
-      setPendingAction({ onConfirm, title, body, destructive });
+      setPendingAction({ onConfirm, title, body, destructive, minRoleLevel });
       setIsConfirmOpen(true);
     } else {
-      // Session expired — full PIN verification required
-      setPendingAction({ onConfirm, title, body, destructive });
+      // Session expired OR action requires a specific role level — full PIN verification required.
+      // Level-gated actions always re-challenge so the correct manager authenticates.
+      setPendingAction({ onConfirm, title, body, destructive, minRoleLevel });
       setIsPinOpen(true);
     }
   };
+
+  // ── force PIN for level-gated actions even when session is valid ──────────
+  // (re-evaluated inline in requireSudo — see the isSessionValid branch above)
+  // When minRoleLevel is set, the confirm-only shortcut is bypassed; the full
+  // PIN modal is always shown so a Manager must explicitly re-authenticate.
 
   // ── Confirm modal handler (session valid path) ──────────────────────────────
   const handleConfirmOnly = async () => {
@@ -107,6 +127,11 @@ export function SudoAuthProvider({ children }: { children: React.ReactNode }) {
     }
     setPendingAction(null);
   };
+
+  // Admins eligible for the current pending action (filtered by minRoleLevel)
+  const eligibleAdmins = pendingAction?.minRoleLevel
+    ? admins.filter(a => (a.role_level ?? 0) >= (pendingAction.minRoleLevel ?? 0))
+    : admins;
 
   // ── PIN modal handler (session expired path) ────────────────────────────────
   const handlePinConfirm = async (e: React.FormEvent) => {
@@ -120,6 +145,12 @@ export function SudoAuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await window.electronAPI.auth.verifyPin({ adminId: selectedAdmin, pin: pin.trim() });
       if (res && res.ok) {
+        // Enforce role level requirement if specified
+        if (pendingAction?.minRoleLevel && (res.role_level ?? 0) < pendingAction.minRoleLevel) {
+          setPinError(`Insufficient authority. This action requires a Manager (Level ${pendingAction.minRoleLevel}+). Current level: ${res.role_level ?? 0}.`);
+          setPinLoading(false);
+          return;
+        }
         setLastAuthTime(Date.now());
         setIsPinOpen(false);
         if (pendingAction) {
@@ -229,9 +260,11 @@ export function SudoAuthProvider({ children }: { children: React.ReactNode }) {
             </div>
 
             {/* Admin selector */}
-            {admins.length > 0 && (
+            {eligibleAdmins.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                <label style={{ fontSize: '11px', color: 'var(--text-dim)', fontWeight: 500 }}>Admin Account</label>
+                <label style={{ fontSize: '11px', color: 'var(--text-dim)', fontWeight: 500 }}>
+                  Admin Account{pendingAction?.minRoleLevel ? ` (Manager Level ${pendingAction.minRoleLevel}+ only)` : ''}
+                </label>
                 <select
                   className="modern-input"
                   value={selectedAdmin}
@@ -242,8 +275,12 @@ export function SudoAuthProvider({ children }: { children: React.ReactNode }) {
                   }}
                   style={{ fontSize: '12px', width: '100%', background: '#0d1235', color: '#fff' }}
                 >
-                  {admins.map(a => <option key={a.id} value={a.id}>{a.username}</option>)}
+                  {eligibleAdmins.map(a => <option key={a.id} value={a.id}>{a.username} (Lvl {a.role_level})</option>)}
                 </select>
+              </div>
+            ) : (
+              <div style={{ fontSize: '12px', color: '#f59e0b', background: 'rgba(245,158,11,0.1)', padding: '10px 12px', borderRadius: '8px' }}>
+                ⚠️ No admin account with sufficient authority (Level {pendingAction?.minRoleLevel}+) found on this device.
               </div>
             )}
 
