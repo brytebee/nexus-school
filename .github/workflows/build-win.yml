@@ -1,0 +1,70 @@
+name: Build & Publish Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'   # triggers on v1.0.2, v1.0.3-beta.1, etc.
+
+jobs:
+  build-win:
+    name: Build NSIS Installer & Publish to GitHub Releases
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: public_shell/electron/package-lock.json
+
+      - name: Install npm dependencies
+        run: npm install
+        working-directory: public_shell/electron
+
+      - name: Run test suite
+        run: npm test
+        working-directory: public_shell/electron
+
+      - name: Inject production environment keys
+        shell: bash
+        run: |
+          echo "PAYSTACK_SECRET_KEY=${{ secrets.PAYSTACK_SECRET_KEY }}"   >> .env
+          echo "PAYSTACK_PUBLIC_KEY=${{ secrets.PAYSTACK_PUBLIC_KEY }}"   >> .env
+          echo "NEXUS_API_SECRET=${{ secrets.NEXUS_API_SECRET }}"         >> .env
+          echo "NEXUS_API_URL=${{ secrets.NEXUS_API_URL }}"               >> .env
+          echo "NEXUS_LICENSE_PUBLIC_KEY=${{ secrets.NEXUS_LICENSE_PUBLIC_KEY }}" >> .env
+          echo "CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }}" >> .env
+          echo "CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }}"     >> .env
+          echo "CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}" >> .env
+          # Allow .env to be included in the asar bundle
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json'));
+            pkg.build.files = pkg.build.files.filter(f => f !== '!.env');
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          "
+        working-directory: public_shell/electron
+
+      - name: Build & Publish Windows NSIS installer
+        # WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD: inject when EV cert is purchased
+        # Without them: SmartScreen warning on first install only — updates still work
+        run: npm run publish:win
+        working-directory: public_shell/electron
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          # WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}           # TODO: add when cert purchased
+          # WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      - name: Upload Windows artifact (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexusschoolos-win-nsis
+          path: public_shell/electron/release/*.exe
+          retention-days: 30
