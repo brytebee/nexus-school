@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus ILS Report Card</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #fff;
+            color: #1a1a2e;
+        }
+
+        .report-page {
+            width: 210mm;
+            min-height: 297mm;
+            padding: 16mm 16mm 12mm 16mm;
+            page-break-after: always;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        .report-page:last-child { page-break-after: auto; }
+
+        /* ── HEADER ── */
+        .report-header {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            padding-bottom: 14px;
+            border-bottom: 3px solid var(--primary, #1A237E);
+        }
+        .school-logo { width: 72px; height: 72px; border-radius: 12px; object-fit: contain; }
+        .logo-placeholder {
+            width: 72px; height: 72px; border-radius: 12px;
+            background: var(--primary, #1A237E); color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 32px; font-weight: 700; flex-shrink: 0;
+        }
+        .school-info { flex: 1; }
+        .school-name {
+            font-size: 17px; font-weight: 700;
+            color: var(--primary, #1A237E);
+            text-transform: uppercase; letter-spacing: 1px;
+        }
+        .school-address { font-size: 11px; color: #666; margin-top: 2px; }
+        .school-motto   { font-size: 11px; color: #999; font-style: italic; margin-top: 2px; }
+        .report-title   { text-align: right; font-size: 11px; }
+        .report-title strong {
+            display: block; font-size: 13px; font-weight: 700;
+            color: var(--primary, #1A237E);
+        }
+        .ils-badge {
+            display: inline-block;
+            background: var(--primary, #1A237E);
+            color: #fff;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            padding: 2px 8px;
+            border-radius: 20px;
+            margin-top: 4px;
+        }
+
+        /* ── STUDENT BAND ── */
+        .student-band {
+            background: var(--primary, #1A237E);
+            color: #fff; border-radius: 12px;
+            padding: 14px 20px; margin: 16px 0;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .student-name { font-size: 19px; font-weight: 700; }
+        .student-id   { font-size: 11px; opacity: 0.7; margin-top: 3px; }
+        .student-class {
+            font-size: 13px;
+            background: rgba(255,255,255,0.15);
+            padding: 6px 14px; border-radius: 20px;
+        }
+
+        /* ── TERM INFO ── */
+        .term-info {
+            display: flex; gap: 12px; margin-bottom: 14px;
+        }
+        .term-chip {
+            flex: 1; background: #f5f7ff; border: 1px solid #e0e4ff;
+            border-radius: 8px; padding: 8px 14px; font-size: 11px;
+        }
+        .term-chip strong { display: block; font-size: 13px; color: var(--primary, #1A237E); }
+
+        /* ── PAC TABLE ── */
+        .section-title {
+            font-size: 10px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 1px; color: #999; margin: 12px 0 8px;
+        }
+        .pac-table {
+            width: 100%; border-collapse: collapse; margin-bottom: 16px;
+            font-size: 12px;
+        }
+        .pac-table th {
+            background: #f0f2ff; color: var(--primary, #1A237E);
+            font-size: 10px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.5px; padding: 9px 12px; text-align: left;
+            border-bottom: 2px solid var(--primary, #1A237E);
+        }
+        .pac-table td { padding: 9px 12px; border-bottom: 1px solid #eee; }
+        .pac-table tr:last-child td { border-bottom: none; }
+        .pac-table tr:hover td { background: #fafbff; }
+
+        .num-cell { font-weight: 700; text-align: right; color: var(--primary, #1A237E); }
+        .pass-badge {
+            display: inline-block; padding: 2px 9px;
+            border-radius: 20px; font-size: 10px; font-weight: 700;
+        }
+        .pass-badge.passed   { background: #e8f5e9; color: #2e7d32; }
+        .pass-badge.progress { background: #fff8e1; color: #f57f17; }
+
+        /* ── SUMMARY CARDS ── */
+        .summary-row {
+            display: flex; gap: 10px; margin-bottom: 16px;
+        }
+        .summary-card {
+            flex: 1; border: 2px solid var(--primary, #1A237E);
+            border-radius: 12px; padding: 12px 14px; text-align: center;
+        }
+        .summary-card .value {
+            font-size: 26px; font-weight: 700; color: var(--primary, #1A237E);
+        }
+        .summary-card .label {
+            font-size: 9px; color: #999; margin-top: 4px;
+            text-transform: uppercase; letter-spacing: 1px;
+        }
+        .highlight-card {
+            border-color: #4caf50; background: #f1f8e9;
+        }
+        .highlight-card .value { color: #2e7d32; }
+
+        /* ── VERSE MEMORY ── */
+        .verse-row {
+            display: flex; align-items: center; gap: 12px;
+            background: #f5f7ff; border: 1px solid #e0e4ff;
+            border-radius: 10px; padding: 12px 16px; margin-bottom: 16px;
+        }
+        .verse-icon { font-size: 22px; }
+        .verse-label { font-size: 11px; color: #666; }
+        .verse-count { font-size: 22px; font-weight: 700; color: var(--primary, #1A237E); margin-left: auto; }
+
+        /* ── FOOTER ── */
+        .report-footer {
+            margin-top: auto; display: flex; justify-content: space-between;
+            align-items: flex-end; padding-top: 16px;
+            border-top: 1px solid #eee;
+        }
+        .footer-note { font-size: 9px; color: #ccc; }
+        .footer-scale { font-size: 9px; color: #999; }
+        .signature-block { text-align: center; }
+        .signature-img { max-height: 50px; margin-bottom: 4px; display: block; margin: 0 auto 4px; }
+        .signature-name {
+            font-size: 13px; font-weight: 700; color: var(--primary, #1A237E);
+            border-top: 1px solid #ccc; padding-top: 6px;
+        }
+        .signature-title { font-size: 9px; color: #999; margin-top: 2px; }
+
+        @media print {
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+    </style>
+</head>
+<body>
+<div id="report-container">
+    <!-- Pages injected by JS -->
+</div>
+
+<script>
+    function renderILSReports(identity, studentsWithPacs) {
+        const primary = identity.themePrimary || '#1A237E';
+        document.documentElement.style.setProperty('--primary', primary);
+
+        const logoHtml = identity.logoBase64
+            ? `<img src="${identity.logoBase64}" class="school-logo" alt="Logo">`
+            : `<div class="logo-placeholder">${(identity.name || 'N').charAt(0).toUpperCase()}</div>`;
+
+        const container = document.getElementById('report-container');
+        container.innerHTML = '';
+
+        const now    = new Date();
+        const dateStr = now.toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' });
+
+        studentsWithPacs.forEach(student => {
+            const page = document.createElement('div');
+            page.className = 'report-page';
+
+            const subjects     = student.il_subjects || [];
+            const verseCount   = student.verse_count || 0;
+            const termLabel    = student.term || '';
+            const sessionLabel = student.academic_session || '';
+
+            // Grand totals across all subjects
+            const totalPacked = subjects.reduce((s, x) => s + (x.packs_completed || 0), 0);
+            const totalHundreds = subjects.reduce((s, x) => s + (x.total_hundreds || 0), 0);
+            const maxPacks    = subjects.length * 10;
+
+            // PAC subject rows
+            const subjectRows = subjects.map(sub => {
+                const avg = sub.packs_completed > 0
+                    ? (sub.total_hundreds / sub.packs_completed).toFixed(1)
+                    : '—';
+                return `
+                    <tr>
+                        <td>${sub.subject}</td>
+                        <td class="num-cell">${sub.packs_completed} / 10</td>
+                        <td class="num-cell">${sub.total_hundreds}</td>
+                        <td class="num-cell">${avg}</td>
+                        <td>
+                            <span class="pass-badge ${sub.packs_completed >= 10 ? 'passed' : 'progress'}">
+                                ${sub.packs_completed >= 10 ? '✓ Complete' : 'In Progress'}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            // Manager signature
+            const mgr = student._resolvedManager || {};
+            const sigName  = mgr.manager_name  || identity.signature || 'Principal';
+            const sigTitle = mgr.manager_title  || 'Head Teacher';
+            const sigImg   = mgr.signature_base64
+                ? `<img src="${mgr.signature_base64}" class="signature-img" alt="Signature">`
+                : '';
+
+            page.innerHTML = `
+                <div class="report-header">
+                    ${logoHtml}
+                    <div class="school-info">
+                        <div class="school-name">${identity.name || 'Nexus Academy'}</div>
+                        <div class="school-address">${identity.address || ''}</div>
+                        <div class="school-motto">${identity.motto ? '"' + identity.motto + '"' : ''}</div>
+                    </div>
+                    <div class="report-title">
+                        <strong>ILS Report Card</strong>
+                        ${dateStr}
+                        <div class="ils-badge">Individualized Learning</div>
+                    </div>
+                </div>
+
+                <div class="student-band">
+                    <div>
+                        <div class="student-name">${student.name}</div>
+                        <div class="student-id">Student ID: ${student.id}</div>
+                    </div>
+                    <div class="student-class">${student.class_name || 'N/A'}</div>
+                </div>
+
+                <div class="term-info">
+                    <div class="term-chip">
+                        <strong>${sessionLabel}</strong>Academic Session
+                    </div>
+                    <div class="term-chip">
+                        <strong>${termLabel}</strong>Term
+                    </div>
+                </div>
+
+                <div class="section-title">PAC Performance by Subject</div>
+                <table class="pac-table">
+                    <thead>
+                        <tr>
+                            <th>Subject</th>
+                            <th style="text-align:right">Packs Done</th>
+                            <th style="text-align:right">Total Hundreds</th>
+                            <th style="text-align:right">Average</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${subjectRows || '<tr><td colspan="5" style="color:#999;text-align:center;padding:16px">No PAC scores recorded</td></tr>'}
+                    </tbody>
+                </table>
+
+                <div class="summary-row">
+                    <div class="summary-card">
+                        <div class="value">${totalPacked}</div>
+                        <div class="label">Packs Completed</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="value">${maxPacks > 0 ? Math.round((totalPacked / maxPacks) * 100) + '%' : '—'}</div>
+                        <div class="label">Completion Rate</div>
+                    </div>
+                    <div class="summary-card highlight-card">
+                        <div class="value">${totalHundreds}</div>
+                        <div class="label">Total Hundreds</div>
+                    </div>
+                </div>
+
+                <div class="verse-row">
+                    <div class="verse-icon">📖</div>
+                    <div>
+                        <div style="font-weight:600;font-size:13px">Bible Verse Memory</div>
+                        <div class="verse-label">Verses memorised this term</div>
+                    </div>
+                    <div class="verse-count">${verseCount}</div>
+                </div>
+
+                <div class="report-footer">
+                    <div>
+                        <div class="footer-note">Generated by Nexus School OS • ${dateStr}</div>
+                        <div class="footer-scale">ILS PAC Scale: Pass ≥ 85 • 10 Packs per Subject per Term</div>
+                    </div>
+                    <div class="signature-block">
+                        ${sigImg}
+                        <div class="signature-name">${sigName}</div>
+                        <div class="signature-title">${sigTitle}</div>
+                    </div>
+                </div>
+            `;
+            container.appendChild(page);
+        });
+
+        if (window.__nexusPrint) window.__nexusPrint();
+    }
+
+    if (window.nexusPDF) {
+        window.nexusPDF.onPrintData(({ identity, students }) => {
+            renderILSReports(identity, students);
+        });
+        window.nexusPDF.ready();
+    }
+</script>
+</body>
+</html>
