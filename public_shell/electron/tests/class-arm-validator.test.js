@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { validateClassArmRef } from '../../../private_engine/src/classArmValidator';
+const { classArmValidator } = require('@nexus/engine');
+const { validateClassArmRef } = classArmValidator;
 
 describe('Global Class & Arm Validator (validateClassArmRef)', () => {
     const classConfigs = ['JSS 1', 'JSS 2', 'Primary 1'];
