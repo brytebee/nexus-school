@@ -54,14 +54,16 @@
     "directories": {
       "output": "release"
     },
+    "releaseInfo": {
+      "releaseNotesFile": "../../RELEASE_NOTES.md"
+    },
     "publish": [
       {
         "provider": "github",
         "owner": "brytebee",
         "repo": "nexus-school-releases",
         "private": false,
-        "releaseType": "release",
-        "releaseNotesFile": "../../RELEASE_NOTES.md"
+        "releaseType": "release"
       }
     ],
     "mac": {
