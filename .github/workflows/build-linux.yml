@@ -43,9 +43,20 @@ jobs:
 
       - name: Inject Production environment keys and enable .env packaging
         run: |
-          echo "PAYSTACK_SECRET_KEY=${{ secrets.PAYSTACK_SECRET_KEY }}" >> .env
-          echo "PAYSTACK_PUBLIC_KEY=${{ secrets.PAYSTACK_PUBLIC_KEY }}" >> .env
-          node -e "const fs = require('fs'); const pkg = JSON.parse(fs.readFileSync('package.json')); pkg.build.files = pkg.build.files.filter(f => f !== '!.env'); fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));"
+          echo "PAYSTACK_SECRET_KEY=${{ secrets.PAYSTACK_SECRET_KEY }}"   >> .env
+          echo "PAYSTACK_PUBLIC_KEY=${{ secrets.PAYSTACK_PUBLIC_KEY }}"   >> .env
+          echo "NEXUS_API_SECRET=${{ secrets.NEXUS_API_SECRET }}"         >> .env
+          echo "NEXUS_API_URL=${{ secrets.NEXUS_API_URL }}"               >> .env
+          echo "NEXUS_LICENSE_PUBLIC_KEY=${{ secrets.NEXUS_LICENSE_PUBLIC_KEY }}" >> .env
+          echo "CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }}" >> .env
+          echo "CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }}"     >> .env
+          echo "CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}" >> .env
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json'));
+            pkg.build.files = pkg.build.files.filter(f => f !== '!.env');
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          "
         working-directory: public_shell/electron
 
       - name: Build & Publish Linux packages (.deb + AppImage)
