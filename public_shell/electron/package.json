@@ -20,7 +20,7 @@
     "test:e2e:report": "playwright show-report test-results/html-report",
     "videos:transcode": "node scripts/transcode-videos.js",
     "test:all": "npm run test && npm run test:e2e",
-    "sync-engine": "cp ../../private_engine/src/*.js node_modules/@nexus/engine/src/ && echo '✅ Engine source synced to installed package'",
+    "sync-engine": "node scripts/sync-engine.js",
     "predist:mac": "npm run build && npm run test",
     "predist:win": "npm run build && npm run test",
     "predist:linux": "npm run build && npm run test",
