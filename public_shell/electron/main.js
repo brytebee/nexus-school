@@ -1076,7 +1076,7 @@ ipcMain.handle('auth:create-admin', (event, { username, pin, authType, roleLevel
         }
 
         // Limit enforcement based on license tier
-        const ADMIN_LIMITS = { Standalone: 2, Silver: 2, Gold: 5, Diamond: Infinity };
+        const ADMIN_LIMITS = { Standalone: 2, Silver: 5, Gold: 5, Diamond: Infinity };
         const tierLimit = ADMIN_LIMITS[licenseStatus?.tier] ?? 2;
         if (currentCount >= tierLimit) {
             return { ok: false, error: `Your ${licenseStatus?.tier || 'Silver'} plan supports up to ${tierLimit} admin accounts. Upgrade to add more.` };
@@ -3621,6 +3621,11 @@ ipcMain.handle('ils:set-class-type', (event, { className, type, pacCount, pacLab
     if (!currentAdminSession || currentAdminSession.role_level < 7) {
       return { ok: false, error: 'Principal or Superadmin access required (Level 7+).' };
     }
+    // ILS/PAC curriculum is a Gold+ feature — Standalone and Silver schools use Standard Nigerian grading only
+    const _ilsTier = licenseStatus?.tier || 'Standalone';
+    if (type === 'ILS' && (_ilsTier === 'Standalone' || _ilsTier === 'Silver')) {
+      return { ok: false, error: `ILS/ACE PAC curriculum mode requires a Gold or Diamond plan. Your current plan is ${_ilsTier}.` };
+    }
     const allowed = ['STANDARD_NIGERIAN', 'ILS'];
     if (!allowed.includes(type)) return { ok: false, error: `Invalid curriculum_type: ${type}` };
     const db = database.getDb();
@@ -5720,6 +5725,14 @@ console.log("[Electron] Registering generate-reports handler...");
 ipcMain.handle("generate-reports", async (event, payload) => {
   const { termConfig, reportType = "terminal", format = "pdf" } = payload || {};
   let tempDir = "";
+  // ── Standalone scope lock: Standalone schools may only generate reports for the entire school ──
+  const _grTier = licenseStatus?.tier || 'Standalone';
+  if (_grTier === 'Standalone') {
+    const _reqScope = payload?.scope;
+    if (_reqScope && _reqScope !== 'all') {
+      return { ok: false, error: 'Standalone plan is restricted to whole-school report generation. Per-class and per-teacher scoping requires a Gold or Diamond plan.' };
+    }
+  }
   // Keep display awake for the duration of report generation
   const sleepBlockerId = powerSaveBlocker.start('prevent-display-sleep');
   try {
@@ -6079,6 +6092,12 @@ ipcMain.handle("results:dispatch", async (event, payload) => {
 // ── S8-5: Publish results to the parent portal (nexus-api) ─────────────────
 ipcMain.handle("results:publish", async (event, { term, academicSession }) => {
   try {
+    // ── Standalone scope lock: Portal publish requires Gold+ (Portal is not part of Standalone pack) ──
+    const _rpTier = licenseStatus?.tier || 'Standalone';
+    if (_rpTier === 'Standalone') {
+      return { ok: false, error: 'Portal publishing is not available on the Standalone plan. Upgrade to Gold or Diamond to enable the Parent Portal.' };
+    }
+
     const db = database.getDb();
 
     // Read school identity file (contains portalSlug set during onboarding)
