@@ -60,7 +60,8 @@
         "owner": "brytebee",
         "repo": "nexus-school-releases",
         "private": false,
-        "releaseType": "release"
+        "releaseType": "release",
+        "releaseNotesFile": "../../RELEASE_NOTES.md"
       }
     ],
     "mac": {
