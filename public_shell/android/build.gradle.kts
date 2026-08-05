@@ -24,6 +24,7 @@ android {
             storePassword =      project.findProperty("NEXUS_STORE_PASSWORD") as String
             keyAlias      =      project.findProperty("NEXUS_KEY_ALIAS")      as String
             keyPassword   =      project.findProperty("NEXUS_KEY_PASSWORD")   as String
+            storeType     = "PKCS12"
         }
     }
 
