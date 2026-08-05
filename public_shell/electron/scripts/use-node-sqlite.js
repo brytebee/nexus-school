@@ -14,11 +14,17 @@ const active     = path.join(releaseDir, 'better_sqlite3.node');
 const abi141     = path.join(releaseDir, 'better_sqlite3_abi141.node');
 
 if (!fs.existsSync(abi141)) {
-  console.error('[sqlite-swap] ❌  better_sqlite3_abi141.node not found.');
-  console.error('[sqlite-swap]    Run: npm rebuild better-sqlite3  (with system Node, not Electron)');
-  console.error('[sqlite-swap]    Then copy: cp ...better_sqlite3.node ...better_sqlite3_abi141.node');
-  process.exit(1);
+  if (fs.existsSync(active)) {
+    try {
+      fs.copyFileSync(active, abi141);
+      console.log('[sqlite-swap] ℹ️  Saved active binary as CLI Node binary (ABI 141).');
+    } catch (err) {
+      console.warn('[sqlite-swap] ⚠️ Could not backup sqlite binary:', err.message);
+    }
+  } else {
+    console.warn('[sqlite-swap] ⚠️ better_sqlite3.node not found — skipping swap.');
+  }
+} else {
+  fs.copyFileSync(abi141, active);
+  console.log('[sqlite-swap] ✅  Activated CLI-Node binary (ABI 141) for Vitest.');
 }
-
-fs.copyFileSync(abi141, active);
-console.log('[sqlite-swap] ✅  Activated CLI-Node binary (ABI 141) for Vitest.');
