@@ -50,34 +50,11 @@ jobs:
           "
         working-directory: public_shell/electron
 
-      - name: Set Release Notes body
-        id: release_notes
-        run: echo "RELEASE_BODY<<EOF" >> $GITHUB_OUTPUT && cat RELEASE_NOTES.md >> $GITHUB_OUTPUT && echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Build macOS DMG
-        # NOTE: Without CSC_LINK the app is UNSIGNED.
-        # - Gatekeeper warning on first install (right-click → Open to bypass)
-        # - OTA auto-updates will NOT work on macOS until Apple Developer ID cert is added.
-        # TODO: uncomment CSC_* and APPLE_* lines below when cert is purchased ($99/yr).
+      - name: Build & Publish macOS DMG
         run: npm run publish:mac
         working-directory: public_shell/electron
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          # CSC_LINK: ${{ secrets.CSC_LINK }}                         # base64-encoded .p12
-          # CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          # APPLE_ID: ${{ secrets.APPLE_ID }}                         # for notarization
-          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
-      - name: Publish Release Notes to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          repository: brytebee/nexus-school-releases
-          tag_name: ${{ github.ref_name }}
-          name: Nexus School OS ${{ github.ref_name }}
-          body: ${{ steps.release_notes.outputs.RELEASE_BODY }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
 
       - name: Upload macOS DMG artifact (backup)
         uses: actions/upload-artifact@v4

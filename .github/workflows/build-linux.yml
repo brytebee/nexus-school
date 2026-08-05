@@ -59,27 +59,11 @@ jobs:
           "
         working-directory: public_shell/electron
 
-      - name: Set Release Notes body
-        id: release_notes
-        run: echo "RELEASE_BODY<<EOF" >> $GITHUB_OUTPUT && cat RELEASE_NOTES.md >> $GITHUB_OUTPUT && echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Build Linux packages (.deb + AppImage)
-        run: npm run dist:linux:native -- --publish never
+      - name: Build & Publish Linux packages (.deb + AppImage)
+        run: npm run dist:linux:native -- --publish always
         working-directory: public_shell/electron
-
-      - name: Publish to GitHub Releases with notes
-        uses: softprops/action-gh-release@v2
-        with:
-          repository: brytebee/nexus-school-releases
-          tag_name: ${{ github.ref_name }}
-          name: Nexus School OS ${{ github.ref_name }}
-          body: ${{ steps.release_notes.outputs.RELEASE_BODY }}
-          files: |
-            public_shell/electron/release/*.deb
-            public_shell/electron/release/*.AppImage
-            public_shell/electron/release/latest-linux.yml
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
       - name: Upload .deb artifact
         uses: actions/upload-artifact@v4
