@@ -42,13 +42,11 @@ const feeCalculator = require("./src/lib/fee-calculator");
 const paystackService = require("./paystack-service.js");
 const { toDisplayTier } = require("./src/tierDisplay.js");
 const receiptGenerator = require('./receipt-generator.js');
-// Load from source directory first — ensures live edits take effect without re-packing the engine.
-// Falls back to the installed @nexus/engine package if source is unavailable (e.g. production builds).
 const resultDispatcher = (() => {
   try {
-    return require("../../private_engine/src/result-dispatcher");
-  } catch (_) {
     return require("@nexus/engine/src/result-dispatcher");
+  } catch (_) {
+    try { return require("../../private_engine/src/result-dispatcher"); } catch (__) {}
   }
 })();
 
@@ -6249,9 +6247,6 @@ function createWindow() {
 
     const betterSqlite3 = require("better-sqlite3");
     database.init(dbPath, betterSqlite3);
-    try {
-      require("../../private_engine/src/database").init(dbPath, betterSqlite3);
-    } catch (_) {}
     
     // FINAL DEMO CHECK: Print the number of records found
     try {
