@@ -14,11 +14,12 @@ const active     = path.join(releaseDir, 'better_sqlite3.node');
 const abi125     = path.join(releaseDir, 'better_sqlite3_abi125.node');
 
 if (!fs.existsSync(abi125)) {
-  console.error('[sqlite-swap] ❌  better_sqlite3_abi125.node not found.');
-  console.error('[sqlite-swap]    Run: npx electron-rebuild -f -w better-sqlite3');
-  console.error('[sqlite-swap]    Then copy: cp ...better_sqlite3.node ...better_sqlite3_abi125.node');
-  process.exit(1);
+  if (fs.existsSync(active)) {
+    console.log('[sqlite-swap] ℹ️  better_sqlite3_abi125.node not present — keeping active system Node binary.');
+  } else {
+    console.warn('[sqlite-swap] ⚠️ better_sqlite3.node not found — skipping swap.');
+  }
+} else {
+  fs.copyFileSync(abi125, active);
+  console.log('[sqlite-swap] ✅  Activated Electron binary (ABI 125) for npm start.');
 }
-
-fs.copyFileSync(abi125, active);
-console.log('[sqlite-swap] ✅  Activated Electron binary (ABI 125) for npm start.');
