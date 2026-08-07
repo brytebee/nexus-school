@@ -53,7 +53,7 @@ jobs:
         working-directory: public_shell/electron
 
       - name: Build Windows NSIS installer
-        run: npm run dist:win
+        run: npm run dist:win -- --publish never
         working-directory: public_shell/electron
 
       - name: Force Overwrite & Publish Assets to GitHub Releases

@@ -51,7 +51,7 @@ jobs:
         working-directory: public_shell/electron
 
       - name: Build macOS DMG
-        run: npm run dist:mac
+        run: npm run dist:mac -- --publish never
         working-directory: public_shell/electron
 
       - name: Force Overwrite & Publish Assets to GitHub Releases
