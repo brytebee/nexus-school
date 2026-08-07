@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - 'v*'   # triggers on v1.0.2, v1.0.3-beta.1, etc.
+      - 'v*'   # triggers on v1.0.3, v1.0.4-beta.1, etc.
 
 jobs:
   build-win:
@@ -51,6 +51,17 @@ jobs:
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
           "
         working-directory: public_shell/electron
+
+      - name: Upsert GitHub Release with release notes
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: brytebee/nexus-school-releases
+          tag_name: ${{ github.ref_name }}
+          name: Nexus School OS ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: false
+          token: ${{ secrets.GH_TOKEN }}
 
       - name: Build & Publish Windows NSIS installer
         run: npm run publish:win
