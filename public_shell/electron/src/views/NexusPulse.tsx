@@ -35,6 +35,7 @@ export function NexusPulse() {
   const currentTier = license?.tier || 'Silver';
   const isGold = currentTier === 'Gold' || currentTier === 'Diamond';
   const isDiamond = currentTier === 'Diamond';
+  const isActivated = license?.is_activated ?? false;
 
   const Swal = (window as any).Swal;
 
@@ -215,6 +216,10 @@ export function NexusPulse() {
   };
 
   const handleStartBot = () => {
+    if (!isActivated) {
+      if (Swal) Swal.fire({ title: 'Activation Required', text: 'School activation is required to start Nexus Pulse.', icon: 'warning' });
+      return;
+    }
     if (!window.electronAPI?.pulse?.start) return;
     setLoadingAction(true);
     setBotStatusDesc('Starting WhatsApp connection...');
@@ -1047,12 +1052,25 @@ export function NexusPulse() {
                   BOT BEHAVIOUR
                 </span>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '12px', color: 'var(--text-main)', fontWeight: 500 }}>Auto-start bot on app launch</span>
+                  <span style={{ fontSize: '12px', color: isActivated ? 'var(--text-main)' : 'var(--text-dim)', fontWeight: 500 }}>
+                    Auto-start bot on app launch
+                    {!isActivated && (
+                      <span style={{ marginLeft: '8px', fontSize: '10px', color: 'var(--text-dim)', fontStyle: 'italic' }}>
+                        (requires activation)
+                      </span>
+                    )}
+                  </span>
                   <input
                     type="checkbox"
-                    checked={autostartBot}
+                    checked={isActivated ? autostartBot : false}
+                    disabled={!isActivated}
                     onChange={(e) => handleAutostartToggle(e.target.checked)}
-                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                    style={{
+                      width: '18px',
+                      height: '18px',
+                      cursor: isActivated ? 'pointer' : 'not-allowed',
+                      opacity: isActivated ? 1 : 0.4,
+                    }}
                   />
                 </div>
               </div>

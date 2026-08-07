@@ -25,7 +25,7 @@ const os = require("os");
 const dgram = require("dgram");
 const { database, server, reports } = require("@nexus/engine");
 const scholar = require("@nexus/engine").scholar || require("@nexus/engine/src/scholar");
-const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, logActivity,
+const { startServer, setSchoolConfig, setSchoolLicense, setActivationStatus, revokeDevice, logActivity,
         handleCSVUpload, handleGradesCSVUpload, handleAttendanceCSVUpload, handleClassesCSVUpload,
         handleFeeStructureCSVUpload, handleFeePaymentCSVUpload, handleFeeAdjustmentCSVUpload,
         validateCSVDryRun, clearData } = server;
@@ -111,6 +111,40 @@ const GATED_FEATURES = [
   'cbt:dispatch-pulse-notifications'
 ];
 
+const ACTIVATION_GATED = [
+  'generate-reports',
+  'results:dispatch',
+  'results:publish',
+  'pulse:start',
+  'pulse:send-message',
+  'pulse:broadcast',
+  'cbt:deploy-exam',
+  'cbt:create-batch',
+  'cbt:dispatch-pulse-notifications'
+];
+
+function assertActivated(channel) {
+  if (!ACTIVATION_GATED.includes(channel)) return null;
+  const s = licenseStatus;
+  if (!s || s.locked) return null;
+  if (s.is_activated) return null;
+  return {
+    ok: false,
+    error: 'NOT_ACTIVATED',
+    message: 'This feature is locked until your school is activated by Nexus. Visit nexusos.com.ng/portal/activate or contact support.',
+  };
+}
+
+function assertPaymentOpen(channel) {
+  if (channel !== 'fees:record-payment' && channel !== 'fees:upsert') return null;
+  if (!licenseStatus?.payment_hard_locked) return null;
+  return {
+    ok: false,
+    error: 'PAYMENT_LOCKED',
+    message: 'Payment recording is locked after your 30-day trial. Please activate your school account at nexusos.com.ng.',
+  };
+}
+
 function recheckQuota() {
   try {
     if (!licenseStatus || licenseStatus.locked) return;
@@ -167,6 +201,16 @@ function recheckQuota() {
       } catch (e) {}
       licenseStatus.overQuota = false;
       licenseStatus.quotaEnforced = false;
+    }
+
+    // Activation warning days countdown
+    if (licenseStatus && !licenseStatus.locked && !licenseStatus.is_activated) {
+      const elapsed = Date.now() - (licenseStatus.registration_ts || Date.now());
+      const THIRTY = 30 * 24 * 60 * 60 * 1000;
+      const daysLeft = Math.max(0, Math.ceil((THIRTY - elapsed) / (24 * 60 * 60 * 1000)));
+      licenseStatus.activation_days_left = daysLeft;
+      licenseStatus.show_activation_warning = [25, 21, 14, 7, 3, 1].includes(daysLeft);
+      licenseStatus.payment_hard_locked = elapsed > THIRTY;
     }
   } catch (e) {
     console.error('[Quota] recheckQuota failed:', e.message);
@@ -234,6 +278,12 @@ ipcMain.handle = function(channel, listener) {
     const wrapper = async (event, ...args) => {
         const quotaError = assertQuotaCompliant(channel);
         if (quotaError) return quotaError;
+
+        const activationError = assertActivated(channel);
+        if (activationError) return activationError;
+
+        const paymentError = assertPaymentOpen(channel);
+        if (paymentError) return paymentError;
 
         if (shouldGate && licenseStatus?.tier === 'Standalone') {
             return { ok: false, error: 'Feature locked. Migrate to a payment plan to enjoy the full features of Nexus School OS.' };
@@ -395,6 +445,11 @@ ipcMain.handle('read-guide-file', async (event, filename) => {
 // ── ALL ipcMain.handle registrations (ONCE at module scope) ──────────────────
 
 ipcMain.on("pulse:start", () => {
+    const actErr = assertActivated('pulse:start');
+    if (actErr) {
+        console.warn("[Pulse] Blocked: school not activated.");
+        return;
+    }
     if (licenseStatus?.tier === 'Gold' || licenseStatus?.tier === 'Diamond') {
         pulseBot.startPulse();
     } else {
@@ -7663,6 +7718,7 @@ function createWindow() {
                     };
                   } else {
                     _scheduleStandaloneCheckin(token, hardwareId, payload.school_id, sysConfPath, lastCheckin);
+                    _scheduleStandaloneActivation(token, hardwareId, payload.school_id, sysConfPath);
                   }
                 }
               } else {
@@ -7770,6 +7826,38 @@ function createWindow() {
 
   recheckQuota();
 
+  function _applyActivationFieldsToLicenseStatus() {
+    if (!licenseStatus || licenseStatus.locked) return;
+    try {
+      const db = database.getDb();
+      if (!db) return;
+      db.prepare("CREATE TABLE IF NOT EXISTS system_settings (key TEXT PRIMARY KEY, value TEXT)").run();
+
+      let regRow = db.prepare("SELECT value FROM system_settings WHERE key = '_sys_registration_ts'").get();
+      let regTs = regRow ? parseInt(regRow.value, 10) : 0;
+      if (!regTs) {
+        regTs = Date.now();
+        db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_registration_ts', ?)").run(String(regTs));
+      }
+
+      let actRow = db.prepare("SELECT value FROM system_settings WHERE key = '_sys_is_activated'").get();
+      const isActivated = actRow?.value === 'true';
+
+      licenseStatus.is_activated = isActivated;
+      licenseStatus.registration_ts = regTs;
+      const THIRTY = 30 * 24 * 60 * 60 * 1000;
+      licenseStatus.payment_hard_locked = !isActivated && (Date.now() - regTs) > THIRTY;
+
+      if (typeof setActivationStatus === 'function') {
+        setActivationStatus({ is_activated: isActivated, registration_ts: regTs });
+      }
+    } catch (e) {
+      console.error('[Activation] Error applying activation fields:', e.message);
+    }
+  }
+
+  _applyActivationFieldsToLicenseStatus();
+
   // ── Heartbeat helper (Gold/Diamond — sends weekly ping to nexus-api) ─────────
   function _scheduleHeartbeat(token, hwId, schoolId, sysConfPath) {
     const API_BASE = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
@@ -7789,6 +7877,25 @@ function createWindow() {
         
         sysConf.heartbeat_cache = { valid_until: data.heartbeat_valid_until || 0, term_status: data.term_status || 'active' };
         
+        if (data.is_activated && !licenseStatus.is_activated) {
+          try {
+            const db = database.getDb();
+            db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_is_activated', 'true')").run();
+            licenseStatus.is_activated = true;
+            licenseStatus.payment_hard_locked = false;
+            recheckQuota();
+            if (typeof setActivationStatus === 'function') {
+              setActivationStatus({ is_activated: true, registration_ts: licenseStatus.registration_ts });
+            }
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('license-status', licenseStatus);
+            }
+            console.log('[Activation] ✅ Gold/Diamond activation confirmed via OTA.');
+          } catch (e) {
+            console.error('[Activation] Persist failed:', e.message);
+          }
+        }
+
         if (!data.valid) {
           // If server returned invalid (revoked), initialize revocation timestamp if not present
           if (!sysConf.revoked_at) {
@@ -7840,15 +7947,27 @@ function createWindow() {
         });
         if (!res.ok) return;
         const data = await res.json();
-        if (data.ok && data.activation_token) {
+        if (data.ok && (data.activation_token || data.is_activated)) {
           let sysConf = {};
           if (fs.existsSync(sysConfPath)) { try { sysConf = JSON.parse(fs.readFileSync(sysConfPath,'utf-8')); } catch {} }
-          sysConf.silver_activation_token = data.activation_token;
+          if (data.activation_token) sysConf.silver_activation_token = data.activation_token;
           delete sysConf.silver_activation_pending_since;
           fs.writeFileSync(sysConfPath, JSON.stringify(sysConf, null, 2));
           try {
-            db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_activation_token', ?)").run(data.activation_token);
-            db.prepare("DELETE FROM system_settings WHERE key = '_sys_activation_pending_since'").run();
+            if (data.activation_token) {
+              db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_activation_token', ?)").run(data.activation_token);
+              db.prepare("DELETE FROM system_settings WHERE key = '_sys_activation_pending_since'").run();
+            }
+            db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_is_activated', 'true')").run();
+            licenseStatus.is_activated = true;
+            licenseStatus.payment_hard_locked = false;
+            recheckQuota();
+            if (typeof setActivationStatus === 'function') {
+              setActivationStatus({ is_activated: true, registration_ts: licenseStatus.registration_ts });
+            }
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('license-status', licenseStatus);
+            }
           } catch (_) {}
           console.log('[License] ✅ Silver license online activation successful.');
         }
@@ -7857,6 +7976,42 @@ function createWindow() {
       }
     }
     // Try after 1 minute
+    setTimeout(doActivate, 60 * 1000);
+  }
+
+  // ── Standalone Activation helper ──────────────────────────────────────────────
+  function _scheduleStandaloneActivation(token, hwId, schoolId, sysConfPath) {
+    const API_BASE = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
+    const db = database.getDb();
+    async function doActivate() {
+      try {
+        const res = await fetch(`${API_BASE}/api/license/activate-standalone`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, hardware_id: hwId, school_id: schoolId }),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.ok && data.is_activated) {
+          try {
+            db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_is_activated', 'true')").run();
+            licenseStatus.is_activated = true;
+            licenseStatus.payment_hard_locked = false;
+            recheckQuota();
+            if (typeof setActivationStatus === 'function') {
+              setActivationStatus({ is_activated: true, registration_ts: licenseStatus.registration_ts });
+            }
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('license-status', licenseStatus);
+            }
+            console.log('[Activation] ✅ Standalone activation confirmed via OTA.');
+          } catch (_) {}
+        }
+      } catch (e) {
+        console.warn('[Activation] Standalone activation check failed:', e.message);
+      }
+    }
     setTimeout(doActivate, 60 * 1000);
   }
 

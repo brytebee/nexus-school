@@ -361,6 +361,36 @@ function App() {
         </div>
       )}
 
+      {/* ── Unactivated School Warning Banner ── */}
+      {!license?.is_activated && !license?.needs_activation && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9000,
+          background: 'linear-gradient(90deg, #4a1525, #260a13)',
+          borderBottom: '1px solid rgba(255, 100, 100, 0.3)',
+          padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '12px',
+          height: '40px', boxSizing: 'border-box'
+        }}>
+          <span style={{ fontSize: '15px' }}>🔒</span>
+          <p style={{ color: '#ffb3b3', fontSize: '12px', margin: 0, flex: 1 }}>
+            <strong>School Activation Required</strong> — Value features (Results, Pulse, CBT) are locked. {license?.activation_days_left !== undefined ? `Payment locks in ${license.activation_days_left} days.` : ''}
+          </p>
+          <button
+            onClick={() => {
+              if (window.nexusAPI?.shell?.openExternal) {
+                window.nexusAPI.shell.openExternal('https://nexusos.com.ng/portal/activate');
+              }
+            }}
+            style={{
+              background: '#ff4d4d', color: '#ffffff', border: 'none',
+              borderRadius: '6px', padding: '4px 12px', cursor: 'pointer',
+              fontSize: '11px', fontWeight: 700, whiteSpace: 'nowrap'
+            }}
+          >
+            Activate School →
+          </button>
+        </div>
+      )}
+
       {/* ── Quota Warning Banner ── */}
       {quotaStatus && quotaStatus.overQuota && (
         <div style={{

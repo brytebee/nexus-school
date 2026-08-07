@@ -3,6 +3,11 @@ import { useState, useEffect, useRef } from 'react';
 export interface LicenseStatus {
   tier: 'Standalone' | 'Silver' | 'Gold' | 'Diamond' | 'INVALID';
   locked: boolean;
+  is_activated?: boolean;
+  registration_ts?: number;
+  payment_hard_locked?: boolean;
+  activation_days_left?: number;
+  show_activation_warning?: boolean;
   needs_activation?: boolean;
   in_grace?: boolean;
   server_revoked?: boolean;

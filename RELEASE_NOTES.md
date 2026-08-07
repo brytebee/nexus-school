@@ -1,4 +1,54 @@
+## What's New in v1.0.4
+
+This release delivers the **Phase 11 Activation Security Gate** — a server-authoritative activation layer that protects all value outputs across every license tier. PDF report generation, result dispatch, portal publishing, Nexus Pulse, and CBT are now hard-locked until a school's device is confirmed as activated in the central Nexus database. This update spans all four repositories.
+
+### 🔐 Activation Security Gate (All Tiers — Including Standalone)
+
+**nexus-api**
+- `License` model gains `activated_at DateTime?` column. `null` = unactivated. Set on hardware binding.
+- `POST /api/license/activate-silver` — sets `activated_at` on first Silver boot.
+- `POST /api/license/activate-standalone` — sets `activated_at` on first Standalone boot.
+- `POST /api/license/issue` — school self-service portal activation; sets `activated_at` on hardware bind.
+- `GET /api/license/validate` (heartbeat) — now returns `is_activated: true/false` in Gold/Diamond heartbeat responses.
+- `PATCH /api/sovereign/licenses` — accepts `activate: true/false` for back-office activation toggling.
+- `GET /api/license/list` — includes `activated_at` in returned records.
+
+**nexusos (Web Portal)**
+- Portal License page (`/portal/license`) shows three distinct states: *Not yet bound*, *Pending activation*, and ✅ *Activated*.
+- Sovereign Admin dashboard (`/sovereign/licenses`) gains an **Activated** column and Activate / Deactivate / Revoke action buttons via new `<LicenseActions />` Client Component.
+
+**nexus-school (Desktop App)**
+- IPC channels `generate-reports`, `results:dispatch`, `results:publish`, `pulse:*`, and `cbt:*` are blocked for unactivated schools via `assertActivated()`.
+- 30-day payment grace period from first boot (`_sys_registration_ts`). Fee recording hard-locks on day 31 (`PAYMENT_LOCKED`).
+- `_sys_is_activated` and `_sys_registration_ts` persisted to SQLite `system_settings`; updated reactively via OTA callbacks without app restart.
+- Red **Unactivated School Warning Banner** in the app header with a direct link to the activation portal.
+- **Result Studio**: Generate PDF, Dispatch, and Publish buttons disabled with lock tooltips when unactivated.
+- **Nexus Pulse**: Bot start toggle disabled; auto-start checkbox forced unchecked and greyed out with *(requires activation)* hint.
+- **Print Hub**: Navigation to result generation blocked when unactivated.
+- Defense-in-depth: `result-dispatcher.js` (`compileStudentPdf`, `dispatchResults`) also verifies `is_activated` at the LAN engine level.
+
+**nexus-school (Android Companion App)**
+- No changes in this release. Companion app remains at v1.0.3.
+
+### 🐛 Bug Fixes
+- **`query-results` crash on existing installs**: `COALESCE(status, 'active')` in the results query threw `no such column: status` on databases created before Phase 11. Fixed via `alterSafe` migration in `database.js` — applied automatically on first app restart.
+- **`setActivationStatus` silent bypass**: The function was exported from `server.js` but omitted from the `main.js` server destructure, causing the `typeof` guard to always evaluate `false` and leaving the LAN engine's gate uncalled. Fixed.
+
+### ⚠️ Deployment Checklist for This Release
+
+> Before pushing this release to clients, complete the following in order:
+
+1. **nexus-api**: Run `npx prisma db push` against production to add the `activated_at` column to the `License` table.
+2. **nexus-api**: Deploy the updated API to your hosting provider.
+3. **nexusos**: Deploy the updated portal. Confirm `LicenseActions` renders on `/sovereign/licenses`.
+4. **nexus-school**: Pack updated engine tarball (`npm pack` in `private_engine/`, copy to `public_shell/electron/`), bump version, and build installers.
+5. **Activate existing client licenses**: Log into the Sovereign Admin dashboard and activate all existing paid licenses. Client desktops will unlock on their next heartbeat (within a week) or on relaunch.
+
+---
+
 ## What's New in v1.0.3
+
+
 
 This is the **landmark Phase 1–10 release**, completing the full initial feature set for Nexus School OS — a sovereign desktop school management system for Nigerian private schools.
 

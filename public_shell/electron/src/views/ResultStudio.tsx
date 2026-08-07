@@ -48,6 +48,7 @@ export function ResultStudio() {
   const { fullList } = useClassArms();
   const { session: globalSession, term: globalTerm, termsList, sessionsList } = useTermConfig();
   const tier = license?.tier || "Silver";
+  const isActivated = license?.is_activated ?? false;
 
   const isTemplateLocked = (tpl: string) => {
     if (tpl === "clean_slate" || tpl === "class_photo") return false;
@@ -1389,9 +1390,10 @@ export function ResultStudio() {
                 }}
                 id="rs-generate-btn"
                 onClick={handleGenerate}
-                disabled={!queryResults.length || generating}
+                disabled={!queryResults.length || generating || !isActivated}
+                title={!isActivated ? "School activation required to generate reports." : ""}
               >
-                {generating ? "⏳ Generating…" : "📄 Generate & Save"}
+                {generating ? "⏳ Generating…" : !isActivated ? "🔒 Activation Required" : "📄 Generate & Save"}
               </button>
             </div>
 
@@ -2285,17 +2287,19 @@ export function ResultStudio() {
               </label>
               <button
                 onClick={handleDispatch}
-                disabled={dispatching || (!sendWA && !sendEmail)}
+                disabled={dispatching || (!sendWA && !sendEmail) || !isActivated}
+                title={!isActivated ? "School activation required to dispatch results." : ""}
                 className="secondary-btn"
-                style={{ padding: "6px 14px", fontSize: "12px", cursor: "pointer" }}
+                style={{ padding: "6px 14px", fontSize: "12px", cursor: isActivated ? "pointer" : "not-allowed" }}
               >
                 {dispatching ? "⚡ Sending…" : "⚡ Dispatch Results"}
               </button>
               <button
                 onClick={handlePublishToPortal}
-                disabled={publishingPortal}
+                disabled={publishingPortal || !isActivated}
+                title={!isActivated ? "School activation required to publish to portal." : ""}
                 className="secondary-btn"
-                style={{ padding: "6px 14px", fontSize: "12px", cursor: "pointer" }}
+                style={{ padding: "6px 14px", fontSize: "12px", cursor: isActivated ? "pointer" : "not-allowed" }}
               >
                 {publishingPortal ? "☁️ Publishing…" : "☁️ Publish to Portal"}
               </button>
@@ -2309,8 +2313,14 @@ export function ResultStudio() {
               <button onClick={() => setIsPreviewModalOpen(false)} className="secondary-btn" style={{ padding: "8px 16px" }}>
                 Close
               </button>
-              <button onClick={() => { setIsPreviewModalOpen(false); handleGenerate(); }} className="primary-btn" style={{ padding: "8px 20px" }}>
-                ⚡ Generate Reports PDF
+              <button
+                onClick={() => { setIsPreviewModalOpen(false); handleGenerate(); }}
+                disabled={!isActivated}
+                title={!isActivated ? "School activation required to generate reports." : ""}
+                className="primary-btn"
+                style={{ padding: "8px 20px", opacity: isActivated ? 1 : 0.5, cursor: isActivated ? "pointer" : "not-allowed" }}
+              >
+                {isActivated ? "⚡ Generate Reports PDF" : "🔒 Activation Required"}
               </button>
             </div>
           </div>
