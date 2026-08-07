@@ -4,7 +4,7 @@ on:
   workflow_dispatch:          # run manually from GitHub Actions tab
   push:
     tags:
-      - 'v*'                  # auto-trigger on version tags like v1.0.2
+      - 'v*'                  # auto-trigger on version tags like v1.0.3
 
 jobs:
   build-linux:
@@ -59,20 +59,31 @@ jobs:
           "
         working-directory: public_shell/electron
 
-      - name: Build & Publish Linux packages (.deb + AppImage)
+      - name: Upsert GitHub Release with release notes
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: brytebee/nexus-school-releases
+          tag_name: ${{ github.ref_name }}
+          name: Nexus School OS ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: false
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Build Linux packages (.deb + AppImage) and publish to Releases
         run: npm run dist:linux:native -- --publish always
         working-directory: public_shell/electron
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
-      - name: Upload .deb artifact
+      - name: Upload .deb artifact (backup)
         uses: actions/upload-artifact@v4
         with:
           name: nexusschoolos-deb
           path: public_shell/electron/release/*.deb
           retention-days: 30
 
-      - name: Upload AppImage artifact
+      - name: Upload AppImage artifact (backup)
         uses: actions/upload-artifact@v4
         with:
           name: nexusschoolos-appimage
