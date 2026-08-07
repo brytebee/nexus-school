@@ -59,6 +59,7 @@ jobs:
       - name: Force overwrite release assets on nexus-school-releases
         shell: bash
         run: |
+          gh release delete-asset ${{ github.ref_name }} "Nexus.School.OS.Setup.1.0.3.exe" --repo brytebee/nexus-school-releases --yes || true
           gh release upload ${{ github.ref_name }} release/*.exe --repo brytebee/nexus-school-releases --clobber
         working-directory: public_shell/electron
         env:

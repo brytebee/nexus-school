@@ -67,6 +67,7 @@
       }
     ],
     "mac": {
+      "artifactName": "Nexus-School-OS-${version}${dashArch}.${ext}",
       "target": [
         {
           "target": "dmg",
@@ -80,6 +81,7 @@
       "category": "public.app-category.education"
     },
     "win": {
+      "artifactName": "Nexus-School-OS-Setup-${version}.${ext}",
       "target": [
         {
           "target": "nsis",
@@ -91,6 +93,7 @@
       "icon": "assets/icon.ico"
     },
     "linux": {
+      "artifactName": "Nexus-School-OS-${version}.${ext}",
       "executableName": "nexus-school-os",
       "target": [
         {
