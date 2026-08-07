@@ -52,22 +52,23 @@ jobs:
           "
         working-directory: public_shell/electron
 
-      - name: Upsert GitHub Release with release notes
+      - name: Build Windows NSIS installer
+        run: npm run dist:win
+        working-directory: public_shell/electron
+
+      - name: Force Overwrite & Publish Assets to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           repository: brytebee/nexus-school-releases
           tag_name: ${{ github.ref_name }}
           name: Nexus School OS ${{ github.ref_name }}
           body_path: RELEASE_NOTES.md
+          files: |
+            public_shell/electron/release/*.exe
+          overwrite: true
           draft: false
           prerelease: false
           token: ${{ secrets.GH_TOKEN }}
-
-      - name: Build & Publish Windows NSIS installer
-        run: npm run publish:win
-        working-directory: public_shell/electron
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
       - name: Upload Windows artifact (backup)
         uses: actions/upload-artifact@v4
