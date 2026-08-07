@@ -23,9 +23,8 @@ const fs = require("fs");
 const crypto = require("crypto");
 const os = require("os");
 const dgram = require("dgram");
-const Handlebars = require("handlebars");
 const { database, server, reports } = require("@nexus/engine");
-const scholar = require("@nexus/engine/src/scholar");
+const scholar = require("@nexus/engine").scholar || require("@nexus/engine/src/scholar");
 const { startServer, setSchoolConfig, setSchoolLicense, revokeDevice, logActivity,
         handleCSVUpload, handleGradesCSVUpload, handleAttendanceCSVUpload, handleClassesCSVUpload,
         handleFeeStructureCSVUpload, handleFeePaymentCSVUpload, handleFeeAdjustmentCSVUpload,
