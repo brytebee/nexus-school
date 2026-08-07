@@ -59,6 +59,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
   const { license } = useLicense();
   const { termsList } = useTermConfig();
   const currentTier = license?.tier || "Silver";
+  const isActivated = license?.is_activated ?? false;
 
   const isTemplateLocked = (tpl: string) => {
     if (tpl === 'clean_slate' || tpl === 'class_photo') return false;
