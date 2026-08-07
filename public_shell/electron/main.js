@@ -3697,6 +3697,12 @@ ipcMain.handle('ils:insert-pac-score', (event, { studentId, subject, packNumber,
     }
     const db         = database.getDb();
     ensureIlsSchema(db);
+
+    const stuCheck = db.prepare("SELECT is_active, status, enrollment_status FROM students WHERE id = ?").get(studentId);
+    if (!stuCheck || stuCheck.is_active === 0 || stuCheck.status === 'overflow' || stuCheck.enrollment_status === 'inactive') {
+      return { ok: false, error: 'Cannot record PAC scores for inactive or overflow students.' };
+    }
+
     const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
     if (!termConfig) return { ok: false, error: 'School term not configured' };
     const { academic_session, term } = termConfig;
@@ -3720,6 +3726,11 @@ ipcMain.handle('ils:get-pac-scores', (event, studentId) => {
   try {
     const db         = database.getDb();
     ensureIlsSchema(db);
+
+    const stuCheck = db.prepare("SELECT is_active, status, enrollment_status FROM students WHERE id = ?").get(studentId);
+    if (!stuCheck || stuCheck.is_active === 0 || stuCheck.status === 'overflow' || stuCheck.enrollment_status === 'inactive') {
+      return { ok: false, error: 'Student is inactive or in overflow status', scores: [] };
+    }
     const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
     if (!termConfig) return { ok: false, error: 'School term not configured', scores: [] };
     const { academic_session, term } = termConfig;
@@ -4850,23 +4861,21 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
       return null;
     };
 
-    // Build student roster depending on scope
+    // Build student roster depending on scope (only active, non-overflow students included)
+    const _activeGuard = "COALESCE(is_active, 1) = 1 AND COALESCE(status, 'active') != 'overflow' AND COALESCE(enrollment_status, 'active') != 'inactive'";
     let students;
     if (scope === "student" && student_id) {
-      students = db.prepare("SELECT * FROM students WHERE id = ?").all(student_id);
+      students = db.prepare(`SELECT * FROM students WHERE id = ? AND ${_activeGuard}`).all(student_id);
     } else if (scope === "class" && class_name) {
-      students = db.prepare("SELECT * FROM students WHERE UPPER(replace(class_name || COALESCE(' ' || NULLIF(class_arm, ''), ''), ' ', '')) = ? ORDER BY name ASC").all(class_name.replace(/\s+/g, '').toUpperCase());
+      students = db.prepare(`SELECT * FROM students WHERE UPPER(replace(class_name || COALESCE(' ' || NULLIF(class_arm, ''), ''), ' ', '')) = ? AND ${_activeGuard} ORDER BY name ASC`).all(class_name.replace(/\s+/g, '').toUpperCase());
     } else if (scope === "teacher" && teacher_id) {
-      // Students who are enrolled in at least one of this teacher's allocated subjects.
-      // The LEFT JOIN + GROUP BY approach keeps students who have student_subjects rows
-      // that match; the HAVING clause filters to only those with ≥1 matching enrollment.
-      // Falls back gracefully: if a student has NO rows in student_subjects at all
-      // (e.g. imported via CSV before the subject fix), they are still included so
-      // report data is never silently suppressed for legacy records.
       students = db.prepare(`
         SELECT DISTINCT s.* FROM students s
         JOIN teacher_allocations a ON UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', '')) = UPPER(replace(a.class_name, ' ', ''))
         WHERE a.teacher_id = ?
+          AND COALESCE(s.is_active, 1) = 1
+          AND COALESCE(s.status, 'active') != 'overflow'
+          AND COALESCE(s.enrollment_status, 'active') != 'inactive'
           AND (
             -- Student has explicit subject enrollment that matches this teacher's subject
             EXISTS (
@@ -4887,11 +4896,14 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
         SELECT DISTINCT s.* FROM students s
         JOIN student_records r ON s.id = r.student_id
         WHERE r.subject = ? AND r.academic_session = ? AND r.term = ?
+          AND COALESCE(s.is_active, 1) = 1
+          AND COALESCE(s.status, 'active') != 'overflow'
+          AND COALESCE(s.enrollment_status, 'active') != 'inactive'
         ORDER BY s.class_name, s.name
       `).all(subject, session, term);
     } else {
       // All students
-      students = db.prepare("SELECT * FROM students ORDER BY class_name, name ASC").all();
+      students = db.prepare(`SELECT * FROM students WHERE ${_activeGuard} ORDER BY class_name, name ASC`).all();
     }
 
     // For each student, fetch their grade records for this session/term
