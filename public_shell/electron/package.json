@@ -67,7 +67,7 @@
       }
     ],
     "mac": {
-      "artifactName": "Nexus-School-OS-${version}${dashArch}.${ext}",
+      "artifactName": "Nexus-School-OS-${version}-${arch}.${ext}",
       "target": [
         {
           "target": "dmg",
