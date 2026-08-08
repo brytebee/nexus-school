@@ -16,8 +16,7 @@
     --accent-gold:   #FFD700;            /* Bright Gold — premium / billing */
     --text-main:     #FFFFFF;
     --text-dim:      rgba(255, 255, 255, 0.45);
-    --glass:         rgba(255, 255, 255, 0.04);
-    --glass-border:  rgba(255, 255, 255, 0.09);
+    --bg-card:       #0d1235;            /* Solid panel / card base */
     --success:       #10B981;
     --warning:       #F59E0B;
     --danger:        #EF4444;
@@ -738,6 +737,10 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
     border-color: var(--accent);
     background: rgba(0,0,0,0.3);
     box-shadow: 0 0 0 3px rgba(0,229,255,0.1);
+}
+select, select option {
+    background-color: #0d1235 !important;
+    color: #FFFFFF !important;
 }
 .modern-input::placeholder { color: rgba(255,255,255,0.25); }
 

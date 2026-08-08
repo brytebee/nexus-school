@@ -230,6 +230,8 @@ const nexusAPI = {
         delete:         (data)   => ipcRenderer.invoke('fee-extras:delete',           data),
         getSelections:  (params) => ipcRenderer.invoke('fee-extras:get-selections',   params),
         toggleSelection:(data)   => ipcRenderer.invoke('fee-extras:toggle-selection', data),
+        getOrders:      (params) => ipcRenderer.invoke('fee-extras:get-orders',       params),
+        markFulfilled:  (data)   => ipcRenderer.invoke('fee-extras:mark-fulfilled',   data),
     },
     // ── Message Queue (WhatsApp bulk send) ───────────────────────────
     queue: {
