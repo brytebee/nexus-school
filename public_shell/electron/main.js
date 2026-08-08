@@ -2000,6 +2000,16 @@ async function sendBrandedReceiptHelper(db, ref, session) {
     const caption = `🎓 *Branded PDF Receipt* for *${studentName}*\nTotal Paid: ₦${session.total_amount.toLocaleString('en-NG')}\nReference: ${ref}\nThank you!`;
     await pulseBot.sendReceiptPdf(session.parent_phone, `Receipt-${ref}.pdf`, pdfBuffer, caption);
     console.log(`[Payment Processor] PDF receipt sent successfully to ${session.parent_phone}`);
+
+    // Notify School Owner via WA
+    try {
+      const ownerRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_phone'").get();
+      if (ownerRow?.value) {
+        const ownerMsg = `💳 *Payment Alert*\nStudent: ${studentName} (${studentClass})\nAmount Paid: ₦${session.total_amount.toLocaleString('en-NG')}\nRef: ${ref}\nTerm: ${term} (${academicSession})\n_Nexus School OS_`;
+        db.prepare("INSERT INTO pending_pulse_messages (phone, message, type) VALUES (?, ?, 'general')").run(ownerRow.value, ownerMsg);
+      }
+    } catch (_) {}
+
     return true;
   } catch (err) {
     console.error(`[Payment Processor] PDF receipt sending failed, falling back to text:`, err.message);
@@ -4778,6 +4788,81 @@ ipcMain.handle('fee-extras:toggle-selection', (event, { student_id, extra_id, ac
   }
 });
 
+/**
+ * fee-extras:get-orders — Fetch optional fee payment orders for admin fulfillment tracking.
+ */
+ipcMain.handle('fee-extras:get-orders', (event, { term, session, class_name, search, is_fulfilled } = {}) => {
+  try {
+    const db = database.getDb();
+    let query = `
+      SELECT 
+        ses.id,
+        ses.student_id,
+        s.name AS student_name,
+        s.class_name,
+        s.parent_phone,
+        fe.item_name,
+        fe.amount,
+        ses.academic_session,
+        ses.term,
+        COALESCE(ses.is_fulfilled, 0) AS is_fulfilled,
+        ses.fulfilled_at,
+        ses.created_at
+      FROM student_extra_selections ses
+      JOIN students s ON s.id = ses.student_id
+      JOIN fee_extras fe ON fe.id = ses.extra_id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (term) {
+      query += ` AND ses.term = ?`;
+      params.push(term);
+    }
+    if (session) {
+      query += ` AND ses.academic_session = ?`;
+      params.push(session);
+    }
+    if (class_name && class_name !== 'All Classes') {
+      query += ` AND s.class_name = ?`;
+      params.push(class_name);
+    }
+    if (search) {
+      query += ` AND (s.name LIKE ? OR fe.item_name LIKE ?)`;
+      params.push(`%${search}%`, `%${search}%`);
+    }
+    if (is_fulfilled !== undefined && is_fulfilled !== null && is_fulfilled !== '') {
+      query += ` AND COALESCE(ses.is_fulfilled, 0) = ?`;
+      params.push(Number(is_fulfilled));
+    }
+
+    query += ` ORDER BY ses.is_fulfilled ASC, ses.created_at DESC`;
+    const orders = db.prepare(query).all(...params);
+    return { ok: true, orders };
+  } catch (err) {
+    console.error('[Fees] fee-extras:get-orders error:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+/**
+ * fee-extras:mark-fulfilled — Mark an optional extra payment order as fulfilled/done.
+ */
+ipcMain.handle('fee-extras:mark-fulfilled', (event, { id }) => {
+  try {
+    const db = database.getDb();
+    db.prepare(`
+      UPDATE student_extra_selections
+      SET is_fulfilled = 1, fulfilled_at = datetime('now')
+      WHERE id = ?
+    `).run(id);
+    return { ok: true };
+  } catch (err) {
+    console.error('[Fees] fee-extras:mark-fulfilled error:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
 // ── Phase 6: Attendance Desktop Engine ────────────────────────────────────────
 
 ipcMain.handle("get-daily-attendance", async (event, { class_name, date }) => {
@@ -7318,6 +7403,16 @@ function createWindow() {
           db.prepare(`INSERT INTO pending_pulse_messages (phone,message,type,student_id) VALUES (?,?,'general',?)`).run(stu.parent_phone, msg, receipt.student_id);
         }
       }
+
+      // Notify School Owner
+      try {
+        const ownerRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_phone'").get();
+        if (ownerRow?.value) {
+          const stu = db.prepare(`SELECT name, class_name FROM students WHERE id=?`).get(receipt.student_id);
+          const ownerMsg = `💳 *Manual Receipt Approved*\nStudent: ${stu?.name || 'Student'} (${stu?.class_name || '—'})\nAmount: ₦${Number(amount||0).toLocaleString('en-NG')}\nRef: ${reference || 'Receipt #' + receiptId}\nTerm: ${term} (${session})\nApproved by: ${reviewer}\n_Nexus School OS_`;
+          db.prepare(`INSERT INTO pending_pulse_messages (phone,message,type) VALUES (?,?,'general')`).run(ownerRow.value, ownerMsg);
+        }
+      } catch (_) {}
       if (currentAdminSession) db.prepare(`INSERT INTO audit_logs (admin_id,action,target,details) VALUES (?,'APPROVE_RECEIPT','payment_receipts',?)`).run(currentAdminSession.id, `Receipt #${receiptId}, ₦${amount}`);
       return { ok: true };
     } catch (err) { return { ok: false, error: err.message }; }

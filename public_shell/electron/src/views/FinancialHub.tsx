@@ -138,7 +138,7 @@ function PaystackBankSelect({ value, onChange }: { value: string; onChange: (nam
         }
       }}
       className="modern-input"
-      style={{ flex: 1.2, fontSize: '11px', padding: '6px 10px', background: 'var(--bg-card)' }}
+      style={{ width: '100%', fontSize: '11px', padding: '6px 10px' }}
     >
       <option value="">{loading ? "Loading..." : "Select Bank"}</option>
       {banks.map(b => (
@@ -315,6 +315,14 @@ export function FinancialHub() {
   const [expandedStudentId,  setExpandedStudentId]  = useState<string|null>(null);
   const [studentExtrasCache, setStudentExtrasCache] = useState<Record<string, any[]>>({});
   const [loadingStudentExtras, setLoadingStudentExtras] = useState(false);
+
+  // ── Optional Payment Order Fulfillment Tracking State ───────────────────────
+  const [optionalOrders,       setOptionalOrders]       = useState<any[]>([]);
+  const [loadingOrders,        setLoadingOrders]        = useState(false);
+  const [ordersClassFilter,    setOrdersClassFilter]    = useState('All Classes');
+  const [ordersFulfillFilter,  setOrdersFulfillFilter]  = useState<string>('all');
+  const [ordersSearch,         setOrdersSearch]         = useState('');
+  const [markingOrderId,       setMarkingOrderId]       = useState<number|null>(null);
 
   const handleFeeCSV = (type: 'structure' | 'payment' | 'adjustment') => {
     const api = (window as any).electronAPI;
@@ -1202,6 +1210,52 @@ export function FinancialHub() {
 
   useEffect(() => { if (activeTab === 'online-payments') loadPaymentSessions(); }, [activeTab]);
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // OPTIONAL PAYMENT ORDER FULFILLMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+  const loadOptionalOrders = async () => {
+    const api = (window as any).electronAPI;
+    if (!api?.feeExtras?.getOrders) return;
+    setLoadingOrders(true);
+    try {
+      const res = await api.feeExtras.getOrders({
+        term: termRef.current,
+        session: sessionRef.current,
+        class_name: ordersClassFilter,
+        search: ordersSearch,
+        is_fulfilled: ordersFulfillFilter === 'all' ? null : Number(ordersFulfillFilter)
+      });
+      if (res?.ok) setOptionalOrders(res.orders || []);
+    } catch (err) {
+      console.error('[FinancialHub] getOrders error:', err);
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'optional-orders') loadOptionalOrders();
+  }, [activeTab, ordersClassFilter, ordersFulfillFilter, ordersSearch]);
+
+  const handleMarkOrderFulfilled = async (orderId: number) => {
+    const api = (window as any).electronAPI;
+    if (!api?.feeExtras?.markFulfilled) return;
+    setMarkingOrderId(orderId);
+    try {
+      const res = await api.feeExtras.markFulfilled({ id: orderId });
+      if (res?.ok) {
+        showIndicator('✅ Order marked as fulfilled');
+        await loadOptionalOrders();
+      } else {
+        if (Swal) Swal.fire({ title: 'Error', text: res?.error || 'Failed to mark order fulfilled.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+      }
+    } catch (err: any) {
+      if (Swal) Swal.fire({ title: 'Error', text: err?.message || 'Unexpected error.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+    } finally {
+      setMarkingOrderId(null);
+    }
+  };
+
   const handleMarkSettled = async (sessionId: number) => {
     if (!window.electronAPI?.fees?.markSessionSettled) return;
     setMarkingSessionId(sessionId);
@@ -1978,6 +2032,13 @@ export function FinancialHub() {
           💳 Online Payments
         </button>
         <button
+          id="fees-tab-btn-optional-orders"
+          className={`fees-tab-btn${activeTab==='optional-orders'?' active':''}`}
+          onClick={() => setActiveTab('optional-orders')}
+        >
+          📦 Optional Orders
+        </button>
+        <button
           id="fees-tab-btn-import"
           className={`fees-tab-btn${activeTab==='import'?' active':''}`}
           onClick={() => setActiveTab('import')}
@@ -2728,6 +2789,122 @@ export function FinancialHub() {
           </div>
         )}
 
+        {/* ══ TAB: OPTIONAL ORDERS FULFILLMENT ══ */}
+        {activeTab === 'optional-orders' && (
+          <div id="fees-tab-optional-orders" style={{ display:'flex', flexDirection:'column', flex:1, overflow:'hidden' }}>
+            <div style={{ display:'flex', gap:'12px', alignItems:'center', padding:'16px 20px', borderBottom:'1px solid var(--glass-border)', flexShrink:0, flexWrap:'wrap' }}>
+              <div>
+                <div style={{ fontWeight:600, fontSize:'15px' }}>📦 Optional Fee Order Fulfillment</div>
+                <div style={{ fontSize:'12px', color:'var(--text-dim)', marginTop:'2px' }}>Track and mark fulfillment for uniforms, cardigans, books, and optional extras</div>
+              </div>
+              <div style={{ marginLeft:'auto', display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap' }}>
+                <input
+                  id="oo-search-input"
+                  type="text"
+                  placeholder="Search student or item..."
+                  value={ordersSearch}
+                  onChange={e => setOrdersSearch(e.target.value)}
+                  className="modern-input"
+                  style={{ fontSize:'12px', width:'180px' }}
+                />
+                <select
+                  id="oo-class-select"
+                  value={ordersClassFilter}
+                  onChange={e => setOrdersClassFilter(e.target.value)}
+                  className="modern-input"
+                  style={{ fontSize:'12px', width:'130px' }}
+                >
+                  <option value="All Classes">All Classes</option>
+                  {fullList.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <select
+                  id="oo-status-select"
+                  value={ordersFulfillFilter}
+                  onChange={e => setOrdersFulfillFilter(e.target.value)}
+                  className="modern-input"
+                  style={{ fontSize:'12px', width:'130px' }}
+                >
+                  <option value="all">All Orders</option>
+                  <option value="0">⏳ Pending</option>
+                  <option value="1">✅ Fulfilled</option>
+                </select>
+                <button
+                  id="btn-oo-refresh"
+                  onClick={loadOptionalOrders}
+                  disabled={loadingOrders}
+                  className="small-btn"
+                  style={{ fontSize:'12px' }}
+                >
+                  {loadingOrders ? '⌛' : '🔄 Refresh'}
+                </button>
+              </div>
+            </div>
+            <div className="table-container" style={{ flex:1, overflowY:'auto' }}>
+              <table className="data-table" id="oo-table">
+                <thead><tr>
+                  <th>Ordered Date</th>
+                  <th>Student Name</th>
+                  <th>Class</th>
+                  <th>Item Name</th>
+                  <th style={{ textAlign:'right' }}>Amount (₦)</th>
+                  <th style={{ textAlign:'center' }}>Status</th>
+                  <th style={{ textAlign:'center', width:'140px' }}>Fulfillment</th>
+                </tr></thead>
+                <tbody id="oo-tbody">
+                  {loadingOrders ? (
+                    <tr><td colSpan={7} style={{ textAlign:'center', padding:'40px', color:'var(--text-dim)' }}>Loading optional orders…</td></tr>
+                  ) : optionalOrders.length === 0 ? (
+                    <tr><td colSpan={7} style={{ textAlign:'center', padding:'50px', color:'var(--text-dim)' }}>
+                      No optional orders found matching the selected filters.
+                    </td></tr>
+                  ) : optionalOrders.map((ord: any) => {
+                    const isDone = ord.is_fulfilled === 1;
+                    return (
+                      <tr key={ord.id}>
+                        <td style={{ fontSize:'12px' }}>{ord.created_at ? new Date(ord.created_at).toLocaleDateString('en-NG') : '—'}</td>
+                        <td style={{ fontWeight:600 }}>{ord.student_name}</td>
+                        <td style={{ fontSize:'12px', color:'var(--text-dim)' }}>{ord.class_name}</td>
+                        <td style={{ fontWeight:500 }}>{ord.item_name}</td>
+                        <td style={{ textAlign:'right', fontFamily:'var(--font-mono)' }}>₦{fmt(ord.amount)}</td>
+                        <td style={{ textAlign:'center' }}>
+                          <span style={{
+                            display:'inline-block',
+                            padding:'2px 8px',
+                            borderRadius:'10px',
+                            fontSize:'11px',
+                            fontWeight:600,
+                            background: isDone ? 'rgba(76,175,80,0.15)' : 'rgba(255,152,0,0.15)',
+                            color: isDone ? '#4CAF50' : '#FF9800'
+                          }}>
+                            {isDone ? '✅ Done' : '⏳ Pending'}
+                          </span>
+                        </td>
+                        <td style={{ textAlign:'center' }}>
+                          {isDone ? (
+                            <span style={{ fontSize:'11px', color:'var(--text-dim)' }}>
+                              {ord.fulfilled_at ? new Date(ord.fulfilled_at).toLocaleDateString('en-NG') : 'Completed'}
+                            </span>
+                          ) : (
+                            <button
+                              id={`btn-oo-fulfill-${ord.id}`}
+                              onClick={() => handleMarkOrderFulfilled(ord.id)}
+                              disabled={markingOrderId === ord.id}
+                              className="small-btn"
+                              style={{ fontSize:'11px', padding:'4px 10px', background:'rgba(0,229,255,0.1)', color:'#00e5ff', borderColor:'rgba(0,229,255,0.3)' }}
+                            >
+                              {markingOrderId === ord.id ? '...' : '✓ Mark Done'}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
@@ -2855,7 +3032,7 @@ export function FinancialHub() {
                       </div>
 
                       {acc.paystack_verified ? (
-                        <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
+                        <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
                           <PaystackBankSelect 
                             value={acc.bank_code || ''} 
                             onChange={(bankName, bankCode) => {
@@ -2866,58 +3043,60 @@ export function FinancialHub() {
                               setBankAccounts(c);
                             }} 
                           />
-                          <input 
-                            type="text" 
-                            placeholder="Account No." 
-                            value={acc.number} 
-                            maxLength={10}
-                            onChange={async e => {
-                              const val = e.target.value.replace(/\D/g, '').slice(0, 10);
-                              const c = [...bankAccounts];
-                              c[i].number = val;
-                              setBankAccounts(c);
-                              
-                              if (val.length === 10 && c[i].bank_code) {
-                                c[i].name = 'Resolving...';
-                                setBankAccounts([...c]);
-                                try {
-                                  const res = await window.electronAPI.fees.resolveAccount({
-                                    accountNumber: val,
-                                    bankCode: c[i].bank_code
-                                  });
-                                  if (res && res.account_name) {
-                                    const updated = [...bankAccounts];
-                                    updated[i].name = res.account_name;
-                                    setBankAccounts(updated);
-                                  } else {
+                          <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
+                            <input 
+                              type="text" 
+                              placeholder="Account No." 
+                              value={acc.number} 
+                              maxLength={10}
+                              onChange={async e => {
+                                const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+                                const c = [...bankAccounts];
+                                c[i].number = val;
+                                setBankAccounts(c);
+                                
+                                if (val.length === 10 && c[i].bank_code) {
+                                  c[i].name = 'Resolving...';
+                                  setBankAccounts([...c]);
+                                  try {
+                                    const res = await window.electronAPI.fees.resolveAccount({
+                                      accountNumber: val,
+                                      bankCode: c[i].bank_code
+                                    });
+                                    if (res && res.account_name) {
+                                      const updated = [...bankAccounts];
+                                      updated[i].name = res.account_name;
+                                      setBankAccounts(updated);
+                                    } else {
+                                      const updated = [...bankAccounts];
+                                      updated[i].name = 'Verification failed';
+                                      setBankAccounts(updated);
+                                    }
+                                  } catch (err) {
                                     const updated = [...bankAccounts];
                                     updated[i].name = 'Verification failed';
                                     setBankAccounts(updated);
                                   }
-                                } catch (err) {
-                                  const updated = [...bankAccounts];
-                                  updated[i].name = 'Verification failed';
-                                  setBankAccounts(updated);
                                 }
-                              }
-                            }} 
-                            className="modern-input" 
-                            style={{ flex:1, fontSize:'11px', padding:'6px 10px' }} 
-                          />
-                          <input 
-                            type="text" 
-                            placeholder="Account Name" 
-                            value={acc.name} 
-                            disabled 
-                            className="modern-input" 
-                            style={{ flex:1, fontSize:'11px', padding:'6px 10px', background:'rgba(255,255,255,0.03)', color: acc.name === 'Verification failed' ? '#ff6b6b' : acc.name === 'Resolving...' ? 'var(--text-dim)' : '#4CAF50', fontWeight: 600 }} 
-                          />
+                              }} 
+                              className="modern-input" 
+                              style={{ flex:1, fontSize:'11px', padding:'6px 10px' }} 
+                            />
+                            <input 
+                              type="text" 
+                              placeholder="Account Name" 
+                              value={acc.name} 
+                              disabled 
+                              className="modern-input" 
+                              style={{ flex:1, fontSize:'11px', padding:'6px 10px', background:'rgba(255,255,255,0.03)', color: acc.name === 'Verification failed' ? '#ff6b6b' : acc.name === 'Resolving...' ? 'var(--text-dim)' : '#4CAF50', fontWeight: 600 }} 
+                            />
+                          </div>
                         </div>
                       ) : (
-                        <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
+                        <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
                           <input 
                             type="text" 
-                            placeholder="Bank Name" 
+                            placeholder="Bank Name (e.g. Access Bank)" 
                             value={acc.bank} 
                             onChange={e => {
                               const c = [...bankAccounts];
@@ -2927,32 +3106,34 @@ export function FinancialHub() {
                             className="modern-input" 
                             style={{ flex:1, fontSize:'11px', padding:'6px 10px' }} 
                           />
-                          <input 
-                            type="text" 
-                            placeholder="Account No." 
-                            value={acc.number} 
-                            maxLength={10}
-                            onChange={e => {
-                              const val = e.target.value.replace(/\D/g, '').slice(0, 10);
-                              const c = [...bankAccounts];
-                              c[i].number = val;
-                              setBankAccounts(c);
-                            }} 
-                            className="modern-input" 
-                            style={{ flex:1, fontSize:'11px', padding:'6px 10px' }} 
-                          />
-                          <input 
-                            type="text" 
-                            placeholder="Account Name" 
-                            value={acc.name} 
-                            onChange={e => {
-                              const c = [...bankAccounts];
-                              c[i].name = e.target.value;
-                              setBankAccounts(c);
-                            }} 
-                            className="modern-input" 
-                            style={{ flex:1, fontSize:'11px', padding:'6px 10px' }} 
-                          />
+                          <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
+                            <input 
+                              type="text" 
+                              placeholder="Account No." 
+                              value={acc.number} 
+                              maxLength={10}
+                              onChange={e => {
+                                const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+                                const c = [...bankAccounts];
+                                c[i].number = val;
+                                setBankAccounts(c);
+                              }} 
+                              className="modern-input" 
+                              style={{ flex:1, fontSize:'11px', padding:'6px 10px' }} 
+                            />
+                            <input 
+                              type="text" 
+                              placeholder="Account Name" 
+                              value={acc.name} 
+                              onChange={e => {
+                                const c = [...bankAccounts];
+                                c[i].name = e.target.value;
+                                setBankAccounts(c);
+                              }} 
+                              className="modern-input" 
+                              style={{ flex:1, fontSize:'11px', padding:'6px 10px' }} 
+                            />
+                          </div>
                         </div>
                       )}
                       

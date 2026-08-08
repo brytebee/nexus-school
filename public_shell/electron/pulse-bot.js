@@ -1315,12 +1315,14 @@ async function handleMessage(msg) {
         return;
       }
 
-      // Check if school has installment plans enabled
+      // Check if school has installment plans or custom payments enabled
       let installmentPlans = [];
+      let allowCustom = false;
       try {
         const settingsRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'fee_settings'`).get();
         const settings = settingsRow ? JSON.parse(settingsRow.value) : {};
         installmentPlans = settings.installment_plans || [];
+        allowCustom = settings.allow_custom_payments !== false;
       } catch (_) {}
 
       session.paymentContext = {
@@ -1328,13 +1330,18 @@ async function handleMessage(msg) {
         totalBalance: totalBalance
       };
 
-      if (installmentPlans.length > 0) {
+      if (installmentPlans.length > 0 || allowCustom) {
         let partMsg = `💳 *Pay Online via Paystack*\n\n`;
         partMsg += `Total Outstanding Balance: ₦${totalBalance.toLocaleString('en-NG')}\n\n`;
-        partMsg += `Choose a payment plan:\n`;
+        partMsg += `Choose a payment option:\n`;
         partMsg += `Reply *1* to Pay in Full\n`;
-        partMsg += `Reply *2* to Choose a Part Payment milestone\n\n`;
-        partMsg += `_Reply 0 to cancel and return to main menu_`;
+        if (installmentPlans.length > 0) {
+          partMsg += `Reply *2* to Choose a Part Payment milestone\n`;
+        }
+        if (allowCustom) {
+          partMsg += `Reply *9* for Custom Amount\n`;
+        }
+        partMsg += `\n_Reply 0 to cancel and return to main menu_`;
 
         session.state = STATE.AWAITING_ONLINE_OPTION;
         setSession(matchable, session);
@@ -1409,6 +1416,26 @@ async function handleMessage(msg) {
       return;
     }
 
+    if (numericInput === 9) {
+      const db = database.getDb();
+      let allowCustom = true;
+      try {
+        const settingsRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'fee_settings'`).get();
+        const settings = settingsRow ? JSON.parse(settingsRow.value) : {};
+        allowCustom = settings.allow_custom_payments !== false;
+      } catch (_) {}
+
+      if (!allowCustom) {
+        await msg.reply("⚠️ Custom payment amount is not enabled for this school.");
+        return;
+      }
+
+      session.state = STATE.AWAITING_CUSTOM_AMOUNT;
+      setSession(matchable, session);
+      await msg.reply(`💳 *Custom Payment Amount*\n\nEnter the amount you wish to pay in Naira (e.g. *15000*):\n\n_Reply 0 to return to main menu_`);
+      return;
+    }
+
     if (numericInput === 2) {
       const db = database.getDb();
       let installmentPlans = [];
@@ -1467,7 +1494,7 @@ async function handleMessage(msg) {
       return;
     }
 
-    await msg.reply("Please reply with *1* (Pay in Full), *2* (Milestone Payment), or *0* (Cancel).");
+    await msg.reply("Please reply with *1* (Pay in Full), *2* (Milestone Payment), *9* (Custom Amount), or *0* (Cancel).");
     return;
   }
 
@@ -1479,20 +1506,7 @@ async function handleMessage(msg) {
       return;
     }
 
-    const activePlans = session.paymentContext.activePlans || [];
-    const db = database.getDb();
-    let allowCustom = true;
-    try {
-      const settingsRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'fee_settings'`).get();
-      const settings = settingsRow ? JSON.parse(settingsRow.value) : {};
-      allowCustom = settings.allow_custom_payments !== false;
-    } catch (_) {}
-
     if (numericInput === 9) {
-      if (!allowCustom) {
-        await msg.reply("⚠️ Custom payment amounts are disabled. Please select one of the defined milestone plans.");
-        return;
-      }
       session.state = STATE.AWAITING_CUSTOM_AMOUNT;
       setSession(matchable, session);
       await msg.reply(`💳 *Custom Payment Amount*\n\nPlease enter the exact amount you wish to pay in Naira (e.g. *15000*):`);
