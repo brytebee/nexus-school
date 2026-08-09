@@ -71,6 +71,30 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
+      - name: Register release on nexus-api
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [ -n "${{ secrets.NEXUS_SOVEREIGN_SECRET }}" ] && [ -n "${{ secrets.NEXUS_API_URL }}" ]; then
+            echo "Registering Windows release for v${VERSION} on nexus-api..."
+            curl -s -X POST "${{ secrets.NEXUS_API_URL }}/api/sovereign/releases" \
+              -H "Content-Type: application/json" \
+              -H "x-sovereign-secret: ${{ secrets.NEXUS_SOVEREIGN_SECRET }}" \
+              -d "{
+                \"version\": \"${VERSION}\",
+                \"product\": \"sch\",
+                \"changelog\": \"Release v${VERSION} — real-time activation awareness, license file import relaunch, and financial bug fixes\",
+                \"platforms\": [
+                  {
+                    \"platform\": \"win\",
+                    \"download_url\": \"https://github.com/brytebee/nexus-school-releases/releases/download/v${VERSION}/Nexus-School-OS-Setup-${VERSION}.exe\",
+                    \"size_mb\": 179
+                  }
+                ]
+              }" || true
+          fi
+        working-directory: public_shell/electron
+
       - name: Upload Windows artifact (backup)
         uses: actions/upload-artifact@v4
         with:
