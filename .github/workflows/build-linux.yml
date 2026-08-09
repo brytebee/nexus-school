@@ -78,6 +78,30 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
+      - name: Register release on nexus-api
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [ -n "${{ secrets.NEXUS_SOVEREIGN_SECRET }}" ] && [ -n "${{ secrets.NEXUS_API_URL }}" ]; then
+            echo "Registering Linux release for v${VERSION} on nexus-api..."
+            curl -s -X POST "${{ secrets.NEXUS_API_URL }}/api/sovereign/releases" \
+              -H "Content-Type: application/json" \
+              -H "x-sovereign-secret: ${{ secrets.NEXUS_SOVEREIGN_SECRET }}" \
+              -d "{
+                \"version\": \"${VERSION}\",
+                \"product\": \"sch\",
+                \"changelog\": \"Release v${VERSION} — real-time activation awareness, license file import relaunch, and financial bug fixes\",
+                \"platforms\": [
+                  {
+                    \"platform\": \"linux\",
+                    \"download_url\": \"https://github.com/brytebee/nexus-school-releases/releases/download/v${VERSION}/Nexus-School-OS-${VERSION}.AppImage\",
+                    \"size_mb\": 209
+                  }
+                ]
+              }" || true
+          fi
+        working-directory: public_shell/electron
+
       - name: Upload .deb artifact (backup)
         uses: actions/upload-artifact@v4
         with:
