@@ -8029,46 +8029,62 @@ function createWindow() {
   }
 
   // ── Silver License Activation helper (One-time online handshake) ─────────────
-  function _scheduleSilverActivation(token, hwId, schoolId, sysConfPath) {
+  let _silverActivationCreds = null;
+  let _silverActivationPollHandle = null;
+
+  async function _doSilverActivationCheck(creds) {
+    if (!creds || !creds.token || !creds.hwId || !creds.schoolId) return false;
     const API_BASE = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
     const db = database.getDb();
-    async function doActivate() {
-      try {
-        const res = await fetch(`${API_BASE}/api/license/activate-silver`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token, hardware_id: hwId, school_id: schoolId }),
-          signal: AbortSignal.timeout(8000),
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data.ok && (data.activation_token || data.is_activated)) {
-          let sysConf = {};
-          if (fs.existsSync(sysConfPath)) { try { sysConf = JSON.parse(fs.readFileSync(sysConfPath,'utf-8')); } catch {} }
-          if (data.activation_token) sysConf.silver_activation_token = data.activation_token;
-          delete sysConf.silver_activation_pending_since;
-          fs.writeFileSync(sysConfPath, JSON.stringify(sysConf, null, 2));
-          try {
-            if (data.activation_token) {
-              db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_activation_token', ?)").run(data.activation_token);
-              db.prepare("DELETE FROM system_settings WHERE key = '_sys_activation_pending_since'").run();
-            }
-            db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_is_activated', 'true')").run();
-            licenseStatus.is_activated = true;
-            licenseStatus.payment_hard_locked = false;
-            recheckQuota();
-            if (typeof setActivationStatus === 'function') {
-              setActivationStatus({ is_activated: true, registration_ts: licenseStatus.registration_ts });
-            }
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('license-status', licenseStatus);
-            }
-          } catch (_) {}
-          console.log('[License] ✅ Silver license online activation successful.');
+    try {
+      const res = await fetch(`${API_BASE}/api/license/activate-silver`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: creds.token, hardware_id: creds.hwId, school_id: creds.schoolId }),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (data.ok && (data.activation_token || data.is_activated)) {
+        let sysConf = {};
+        if (creds.sysConfPath && fs.existsSync(creds.sysConfPath)) {
+          try { sysConf = JSON.parse(fs.readFileSync(creds.sysConfPath, 'utf-8')); } catch {}
         }
-      } catch (e) {
-        console.warn('[License] Silver activation check-in failed (retrying next boot):', e.message);
+        if (data.activation_token) sysConf.silver_activation_token = data.activation_token;
+        delete sysConf.silver_activation_pending_since;
+        if (creds.sysConfPath) {
+          try { fs.writeFileSync(creds.sysConfPath, JSON.stringify(sysConf, null, 2)); } catch (_) {}
+        }
+        try {
+          if (data.activation_token) {
+            db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_activation_token', ?)").run(data.activation_token);
+            db.prepare("DELETE FROM system_settings WHERE key = '_sys_activation_pending_since'").run();
+          }
+          db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_is_activated', 'true')").run();
+          licenseStatus.is_activated = true;
+          licenseStatus.payment_hard_locked = false;
+          licenseStatus.locked = false;
+          recheckQuota();
+          if (typeof setActivationStatus === 'function') {
+            setActivationStatus({ is_activated: true, registration_ts: licenseStatus.registration_ts });
+          }
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('license-status', licenseStatus);
+          }
+        } catch (_) {}
+        console.log('[License] ✅ Silver license online activation successful.');
+        return true;
       }
+    } catch (e) {
+      console.warn('[License] Silver activation check-in failed (retrying next boot):', e.message);
+    }
+    return false;
+  }
+
+  function _scheduleSilverActivation(token, hwId, schoolId, sysConfPath) {
+    _silverActivationCreds = { token, hwId, schoolId, sysConfPath };
+    async function doActivate() {
+      await _doSilverActivationCheck(_silverActivationCreds);
     }
     // Try after 1 minute
     setTimeout(doActivate, 60 * 1000);
@@ -8199,6 +8215,31 @@ function createWindow() {
     const { shell } = require('electron');
     const portalBase = process.env.NEXUSOS_PORTAL_URL || 'https://nexusos.com.ng/portal';
     shell.openExternal(`${portalBase}/activate?hwid=${encodeURIComponent(hardwareId)}`);
+
+    // Start background polling if we have activation credentials and are not yet activated
+    if (_silverActivationCreds && !licenseStatus.is_activated) {
+      if (_silverActivationPollHandle) {
+        clearInterval(_silverActivationPollHandle);
+        _silverActivationPollHandle = null;
+      }
+      let attempts = 0;
+      _silverActivationPollHandle = setInterval(async () => {
+        attempts++;
+        if (attempts > 40 || licenseStatus.is_activated) {
+          if (_silverActivationPollHandle) {
+            clearInterval(_silverActivationPollHandle);
+            _silverActivationPollHandle = null;
+          }
+          return;
+        }
+        const done = await _doSilverActivationCheck(_silverActivationCreds);
+        if (done && _silverActivationPollHandle) {
+          clearInterval(_silverActivationPollHandle);
+          _silverActivationPollHandle = null;
+        }
+      }, 30_000);
+    }
+
     return { ok: true };
   });
 

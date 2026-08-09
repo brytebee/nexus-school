@@ -766,6 +766,25 @@
       }
     }
 
+    function showActivationSuccess() {
+      const container = document.getElementById('lock-container');
+      if (!container) return;
+      container.innerHTML = `
+        <div style="text-align: center; padding: 40px 20px; color: #fff; font-family: Inter, system-ui, sans-serif;">
+          <div style="font-size: 54px; margin-bottom: 16px;">✅</div>
+          <h2 style="color: #00e576; font-size: 24px; margin: 0 0 12px; font-weight: 800;">License Activated!</h2>
+          <p style="color: #a0aec0; font-size: 14px; margin-bottom: 24px;">Your device is now bound and activated with Nexus School OS.</p>
+          <button id="lock-continue-btn" style="background: #00e576; color: #0b0f19; border: none; font-weight: 700; padding: 14px 28px; border-radius: 10px; font-size: 15px; cursor: pointer; transition: transform 0.15s ease;">
+            🚀 Continue to Application
+          </button>
+        </div>
+      `;
+      const btn = document.getElementById('lock-continue-btn');
+      if (btn) {
+        btn.onclick = () => api.invoke('app:relaunch');
+      }
+    }
+
     // ── Boot ──────────────────────────────────────────────────────
     const hash = window.location.hash.substring(1);
     if (hash) {
@@ -774,21 +793,22 @@
     } else {
       loadBranding();
       loadAdmins();
-      // Fallback listener: handles 'expired' and any locked state where Phase 4
-      // runs after loadFile() (e.g. valid license file exists but is expired —
-      // no early pre-check covers that case). Renders the correct screen on IPC.
-      api.onLicenseStatus((status) => {
-        if (status && status.locked && status.reason) {
-          const reasonMap = {
-            no_license: 'invalid', expired: 'expired', revoked: 'revoked',
-            trial_end: 'trial_end', tampered: 'tampered',
-            invalid_tier: 'tampered', hardware_mismatch: 'tampered', internal_error: 'tampered'
-          };
-          const mappedHash = reasonMap[status.reason];
-          if (mappedHash) { loadBranding(); renderLockScreen(mappedHash); }
-        }
-      });
     }
+
+    // Fallback & activation status listener: handles locked states and online activation success
+    api.onLicenseStatus((status) => {
+      if (status && status.locked && status.reason) {
+        const reasonMap = {
+          no_license: 'invalid', expired: 'expired', revoked: 'revoked',
+          trial_end: 'trial_end', tampered: 'tampered',
+          invalid_tier: 'tampered', hardware_mismatch: 'tampered', internal_error: 'tampered'
+        };
+        const mappedHash = reasonMap[status.reason];
+        if (mappedHash) { loadBranding(); renderLockScreen(mappedHash); }
+      } else if (status && !status.locked && status.is_activated) {
+        showActivationSuccess();
+      }
+    });
 
   </script>
 </body>
