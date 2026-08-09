@@ -6680,9 +6680,18 @@ function createWindow() {
     backgroundColor: "#0A0E2E",
   });
 
-  // Show the window only after the renderer has completed its first paint.
-  // This eliminates the lock-screen flash (PIN→Password) and post-unlock jump.
   mainWindow.once("ready-to-show", () => mainWindow.show());
+
+  // Immediately check activation state when app window receives focus
+  mainWindow.on("focus", async () => {
+    if (typeof _silverActivationCreds !== "undefined" && _silverActivationCreds && !licenseStatus.is_activated) {
+      const done = await _doSilverActivationCheck(_silverActivationCreds);
+      if (done && typeof _silverActivationPollHandle !== "undefined" && _silverActivationPollHandle) {
+        clearInterval(_silverActivationPollHandle);
+        _silverActivationPollHandle = null;
+      }
+    }
+  });
 
   // Fix YouTube Error 153 in Electron's file:// protocol context by spoofing referrer/origin headers
   mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
@@ -7729,6 +7738,7 @@ function createWindow() {
           try {
             const token   = fs.readFileSync(licensePath, 'utf-8').trim();
             const payload = verifyNexusToken(token);
+            _silverActivationCreds = { token, hwId: hardwareId, schoolId: payload.school_id, sysConfPath };
 
             // 2b. Tier allowlist — must be one of the four canonical values.
             const VALID_TIERS = ['standalone', 'silver', 'gold', 'diamond'];
@@ -8211,7 +8221,7 @@ function createWindow() {
   });
 
   // ── Activate online — opens browser with hardware ID pre-filled ───────────────
-  ipcMain.handle('license:activate-online', () => {
+  ipcMain.handle('license:activate-online', async () => {
     const { shell } = require('electron');
     const portalBase = process.env.NEXUSOS_PORTAL_URL || 'https://nexusos.com.ng/portal';
     shell.openExternal(`${portalBase}/activate?hwid=${encodeURIComponent(hardwareId)}`);
@@ -8222,10 +8232,14 @@ function createWindow() {
         clearInterval(_silverActivationPollHandle);
         _silverActivationPollHandle = null;
       }
+
+      // Perform an immediate check right after launching browser
+      _doSilverActivationCheck(_silverActivationCreds);
+
       let attempts = 0;
       _silverActivationPollHandle = setInterval(async () => {
         attempts++;
-        if (attempts > 40 || licenseStatus.is_activated) {
+        if (attempts > 60 || licenseStatus.is_activated) {
           if (_silverActivationPollHandle) {
             clearInterval(_silverActivationPollHandle);
             _silverActivationPollHandle = null;
@@ -8237,7 +8251,7 @@ function createWindow() {
           clearInterval(_silverActivationPollHandle);
           _silverActivationPollHandle = null;
         }
-      }, 30_000);
+      }, 5_000); // 5s interval for responsive detection
     }
 
     return { ok: true };
