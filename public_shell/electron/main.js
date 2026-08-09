@@ -8211,12 +8211,20 @@ function createWindow() {
     if (result.canceled || !result.filePaths[0]) return { ok: false, reason: 'cancelled' };
     try {
       const src = result.filePaths[0];
+      const tokenContent = fs.readFileSync(src, 'utf-8').trim();
+      const payload = verifyNexusToken(tokenContent);
+      if (!payload || !payload.school_id) {
+        return { ok: false, reason: 'Invalid or corrupt license file.' };
+      }
       const userDataPath = app.getPath('userData');
       const dest = path.join(userDataPath, 'license.nexus');
       fs.copyFileSync(src, dest);
-      return { ok: true };
+
+      const sysConfPath = path.join(userDataPath, 'sys.json');
+      _silverActivationCreds = { token: tokenContent, hwId: hardwareId, schoolId: payload.school_id, sysConfPath };
+      return { ok: true, relaunch_required: true };
     } catch (e) {
-      return { ok: false, reason: e.message };
+      return { ok: false, reason: e.message || 'Failed to import license file.' };
     }
   });
 
