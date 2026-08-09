@@ -73,8 +73,14 @@ jobs:
         shell: bash
         run: |
           VERSION=$(node -p "require('./package.json').version")
+          BASE_URL="https://github.com/brytebee/nexus-school-releases/releases/download/v${VERSION}"
           if [ -n "${{ secrets.NEXUS_SOVEREIGN_SECRET }}" ] && [ -n "${{ secrets.NEXUS_API_URL }}" ]; then
-            echo "Registering macOS release for v${VERSION} on nexus-api..."
+            echo "Registering macOS releases for v${VERSION} on nexus-api..."
+            # Compute file sizes from built artifacts (fall back to 0 if missing)
+            ARM64_MB=$(du -m release/Nexus\ School\ OS-${VERSION}-arm64.dmg 2>/dev/null | awk '{print $1}' || echo 0)
+            X64_MB=$(du -m release/Nexus\ School\ OS-${VERSION}.dmg 2>/dev/null | awk '{print $1}' || echo 0)
+            ARM64_HASH=$(shasum -a 256 release/Nexus\ School\ OS-${VERSION}-arm64.dmg 2>/dev/null | awk '{print $1}' || echo "pending")
+            X64_HASH=$(shasum -a 256 release/Nexus\ School\ OS-${VERSION}.dmg 2>/dev/null | awk '{print $1}' || echo "pending")
             curl -s -X POST "${{ secrets.NEXUS_API_URL }}/api/sovereign/releases" \
               -H "Content-Type: application/json" \
               -H "x-sovereign-secret: ${{ secrets.NEXUS_SOVEREIGN_SECRET }}" \
@@ -84,9 +90,16 @@ jobs:
                 \"changelog\": \"Release v${VERSION} — real-time activation awareness, license file import relaunch, and financial bug fixes\",
                 \"platforms\": [
                   {
-                    \"platform\": \"mac\",
-                    \"download_url\": \"https://github.com/brytebee/nexus-school-releases/releases/download/v${VERSION}/Nexus-School-OS-${VERSION}-x64.dmg\",
-                    \"size_mb\": 245
+                    \"platform\": \"mac_arm64\",
+                    \"download_url\": \"${BASE_URL}/Nexus%20School%20OS-${VERSION}-arm64.dmg\",
+                    \"checksum\": \"${ARM64_HASH}\",
+                    \"size_mb\": ${ARM64_MB}
+                  },
+                  {
+                    \"platform\": \"mac_x64\",
+                    \"download_url\": \"${BASE_URL}/Nexus%20School%20OS-${VERSION}.dmg\",
+                    \"checksum\": \"${X64_HASH}\",
+                    \"size_mb\": ${X64_MB}
                   }
                 ]
               }" || true

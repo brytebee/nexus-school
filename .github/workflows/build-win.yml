@@ -75,8 +75,13 @@ jobs:
         shell: bash
         run: |
           VERSION=$(node -p "require('./package.json').version")
+          BASE_URL="https://github.com/brytebee/nexus-school-releases/releases/download/v${VERSION}"
           if [ -n "${{ secrets.NEXUS_SOVEREIGN_SECRET }}" ] && [ -n "${{ secrets.NEXUS_API_URL }}" ]; then
             echo "Registering Windows release for v${VERSION} on nexus-api..."
+            WIN_EXE=$(ls release/*.exe 2>/dev/null | head -n1 || echo "")
+            WIN_MB=$([ -n "$WIN_EXE" ] && du -m "$WIN_EXE" | awk '{print $1}' || echo 0)
+            WIN_HASH=$([ -n "$WIN_EXE" ] && sha256sum "$WIN_EXE" 2>/dev/null | awk '{print $1}' || echo "pending")
+            WIN_FNAME=$(basename "$WIN_EXE")
             curl -s -X POST "${{ secrets.NEXUS_API_URL }}/api/sovereign/releases" \
               -H "Content-Type: application/json" \
               -H "x-sovereign-secret: ${{ secrets.NEXUS_SOVEREIGN_SECRET }}" \
@@ -87,8 +92,9 @@ jobs:
                 \"platforms\": [
                   {
                     \"platform\": \"win\",
-                    \"download_url\": \"https://github.com/brytebee/nexus-school-releases/releases/download/v${VERSION}/Nexus-School-OS-Setup-${VERSION}.exe\",
-                    \"size_mb\": 179
+                    \"download_url\": \"${BASE_URL}/${WIN_FNAME// /%20}\",
+                    \"checksum\": \"${WIN_HASH}\",
+                    \"size_mb\": ${WIN_MB}
                   }
                 ]
               }" || true
