@@ -355,8 +355,18 @@ export function About({ onTabChange }: AboutProps) {
                   const res = await importLicenseFile();
                   if (res?.ok) {
                     setLicenseActionStatus('success');
-                    setLicenseActionMsg('License imported. Reloading...');
-                    setTimeout(() => { refreshLicense(); setLicenseActionStatus('idle'); }, 1800);
+                    setLicenseActionMsg('License imported. Restarting application...');
+                    setTimeout(async () => {
+                      try {
+                        if ((window.electronAPI as any)?.license?.relaunch) {
+                          await (window.electronAPI as any).license.relaunch();
+                        } else if ((window.electronAPI as any)?.relaunch) {
+                          await (window.electronAPI as any).relaunch();
+                        } else if ((window.electronAPI as any)?.invoke) {
+                          await (window.electronAPI as any).invoke('app:relaunch');
+                        }
+                      } catch (_) {}
+                    }, 1200);
                   } else if (res?.reason === 'cancelled') {
                     setLicenseActionStatus('idle');
                   } else {

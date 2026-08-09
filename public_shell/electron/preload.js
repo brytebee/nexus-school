@@ -322,6 +322,7 @@ const nexusAPI = {
         activateOnline: ()     => ipcRenderer.invoke('license:activate-online'),
         getStatus:      ()     => ipcRenderer.invoke('license:get-status'),
         refresh:        ()     => ipcRenderer.invoke('license:refresh'),
+        relaunch:       ()     => ipcRenderer.invoke('app:relaunch'),
         onStatus:       (cb)   => ipcRenderer.on('license-status', (_e, v) => cb(v)),
     },
 
