@@ -1,0 +1,16 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Nexus School OS
+GenericName=School Management System
+Comment=Sovereign school management — results, fees, attendance & WhatsApp bot
+# Path to the launcher script — update if you move the scripts folder
+Exec=bash "%h/.nexus/launch-nexus.sh"
+# Uses the app icon extracted by install-launcher.sh; falls back to generic
+Icon=%h/.nexus/nexus-school.png
+Terminal=false
+StartupNotify=true
+StartupWMClass=nexus-school-os
+Categories=Education;Office;
+Keywords=school;fees;results;attendance;nexus;
+MimeType=
