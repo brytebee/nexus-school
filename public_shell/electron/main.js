@@ -6737,7 +6737,9 @@ function createWindow() {
       hash = 'revoked';
     } else if (licenseStatus.reason === 'trial_end') {
       hash = 'trial_end';
-    } else if (['tampered', 'invalid_tier', 'hardware_mismatch', 'internal_error'].includes(licenseStatus.reason)) {
+    } else if (licenseStatus.reason === 'hardware_mismatch') {
+      hash = 'hardware_mismatch';
+    } else if (['tampered', 'invalid_tier', 'internal_error'].includes(licenseStatus.reason)) {
       hash = 'tampered';
     }
     bootFile = 'lock.html';
@@ -7520,13 +7522,25 @@ function createWindow() {
 
   function getHardwareFingerprint() {
     const cpus = os.cpus();
-    const macs = Object.values(os.networkInterfaces())
-      .flat()
-      .filter(i => i.mac && i.mac !== '00:00:00:00:00:00')
-      .map(i => i.mac)
-      .sort()
-      .join('-');
-    return crypto.createHash('sha256').update((cpus[0]?.model || "") + macs).digest('hex');
+    const isVirtualName = name => /^(utun|tun|tap|veth|docker|br-|bridge|vbox|vmnet|e1000g|awdl|llw|p2p)/i.test(name);
+    const ifaces = os.networkInterfaces();
+    const macs = Object.entries(ifaces)
+      .filter(([name]) => !isVirtualName(name))
+      .flatMap(([, list]) => list || [])
+      .filter(i => i && !i.internal && i.mac && i.mac !== '00:00:00:00:00:00')
+      .map(i => i.mac.toLowerCase())
+      .sort();
+
+    // Fallback: if all interfaces were filtered out, accept internal/any non-zero mac
+    const finalMacs = macs.length > 0
+      ? macs
+      : Object.values(ifaces)
+          .flat()
+          .filter(i => i && i.mac && i.mac !== '00:00:00:00:00:00')
+          .map(i => i.mac.toLowerCase())
+          .sort();
+
+    return crypto.createHash('sha256').update((cpus[0]?.model || "") + finalMacs.join('-')).digest('hex');
   }
 
   const hardwareId = getHardwareFingerprint();
@@ -7536,8 +7550,11 @@ function createWindow() {
 
   // ── Ed25519 public key embedded at build time (matches NEXUS_LICENSE_SIGNING_KEY) ──
   // To rotate: regenerate keypair, update this hex, re-issue all licenses.
-  const NEXUS_PUBLIC_KEY_HEX = process.env.NEXUS_LICENSE_PUBLIC_KEY ||
-    '3a963a04b3da96bd402eb5d8a4ffd200e8c695f9fa4633c789649fa188db0daa'; // generated 2026-05-19
+  const CANONICAL_PUBLIC_KEY = '3a963a04b3da96bd402eb5d8a4ffd200e8c695f9fa4633c789649fa188db0daa';
+  const envKey = (process.env.NEXUS_LICENSE_PUBLIC_KEY || '').trim();
+  const NEXUS_PUBLIC_KEY_HEX = (envKey.length === 64 && /^[0-9a-fA-F]{64}$/.test(envKey))
+    ? envKey
+    : CANONICAL_PUBLIC_KEY;
   // ── Nigerian Secondary School Calendar ─────────────────────────────────────
   // ⚠️  MUST STAY IN SYNC WITH nexusos/src/lib/calendar.ts
   // When adding a new session here, add it there too (and vice versa).

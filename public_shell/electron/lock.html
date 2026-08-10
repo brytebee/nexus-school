@@ -666,10 +666,13 @@
       const lockReasons = {
         tampered: {
           title: "License Integrity Error",
-          message: "The license file on this device appears to be tampered with or corrupted.",
-          buttonText: "Contact Support",
-          buttonUrl: "mailto:sch-support@nexusos.com.ng?subject=License%20Integrity%20Error&body=Support%20Code:%20TAMPERED",
+          message: "The license file on this device appears to be corrupted or modified. Import a valid license file to restore access.",
           icon: "🚨", color: "#FF5C5C", bg: "rgba(255,92,92,0.1)", border: "rgba(255,92,92,0.3)"
+        },
+        hardware_mismatch: {
+          title: "Device Binding Changed",
+          message: "This license was bound to a different network or device profile. Import your license file or activate online to update this device.",
+          icon: "💻", color: "#F59E0B", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.3)"
         },
         expired: {
           title: "License Expired",
@@ -705,7 +708,7 @@
         icon: "🔒", color: "#00E5FF", bg: "rgba(0,229,255,0.1)", border: "rgba(0,229,255,0.3)"
       };
 
-      const isActivationScreen = (reasonCode === 'invalid' || reasonCode === 'expired');
+      const isActivationScreen = ['invalid', 'expired', 'tampered', 'hardware_mismatch', 'invalid_tier'].includes(reasonCode);
 
       const actionsHtml = isActivationScreen ? `
         <button id="lock-import-btn" class="key" style="width:100%;height:50px;background:${reason.bg};border:1px solid ${reason.border};color:${reason.color};font-weight:700;font-size:14px;margin-top:10px;gap:8px;display:flex;align-items:center;justify-content:center;">
@@ -801,7 +804,7 @@
         const reasonMap = {
           no_license: 'invalid', expired: 'expired', revoked: 'revoked',
           trial_end: 'trial_end', tampered: 'tampered',
-          invalid_tier: 'tampered', hardware_mismatch: 'tampered', internal_error: 'tampered'
+          invalid_tier: 'tampered', hardware_mismatch: 'hardware_mismatch', internal_error: 'tampered'
         };
         const mappedHash = reasonMap[status.reason];
         if (mappedHash) { loadBranding(); renderLockScreen(mappedHash); }
