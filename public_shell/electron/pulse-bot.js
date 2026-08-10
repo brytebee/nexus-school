@@ -389,8 +389,31 @@ function isLikelyPhone(value) {
  */
 function getMatchableDigits(phone) {
   if (!phone) return null;
-  const digits = String(phone).replace(/\D/g, "");
+  const digits = String(phone).replace(/\D/g, '');
   return digits.length >= 10 ? digits.slice(-10) : null;
+}
+
+/**
+ * Returns every student whose parent_phone normalises to the same last-10
+ * significant digits as `matchable`. Handles every real-world storage format:
+ *   +2348012345678  •  08012345678  •  8012345678
+ *   +234-801-234-5678  •  234 801 234 5678  (with spaces / dashes)
+ * i.e. any phone that, after stripping non-digits, ends with the same 10 digits.
+ *
+ * Two columns are fetched beyond the basics so a single call satisfies both
+ * the inbox-logging path (needs parent_name) and the session-creation path
+ * (needs class_name / class_arm).
+ */
+function findStudentsByPhone(db, matchable) {
+  if (!matchable) return [];
+  // Fetch all students that have a non-empty parent_phone.
+  // Typical school DB is ≤5 000 rows — JS-side filter is fast (<1 ms).
+  const candidates = db.prepare(
+    `SELECT id, name, class_name, class_arm, parent_name, parent_phone
+       FROM students
+      WHERE parent_phone IS NOT NULL AND parent_phone != ''`
+  ).all();
+  return candidates.filter(s => getMatchableDigits(s.parent_phone) === matchable);
 }
 
 // ─── Formatting Helpers ────────────────────────────────────────────────────────
@@ -1058,9 +1081,7 @@ async function handleMessage(msg) {
   // ── Log in the inbox ──
   try {
     const db = database.getDb();
-    const students = db
-      .prepare("SELECT id, name, parent_name FROM students WHERE parent_phone LIKE ?")
-      .all(`%${matchable}`);
+    const students = findStudentsByPhone(db, matchable);
 
     let senderName = "Unknown Parent";
     if (students.length > 0) {
@@ -1112,9 +1133,7 @@ async function handleMessage(msg) {
 
   if (!inFreeTextState && (!session || !numericInput)) {
     const db = database.getDb();
-    const students = db
-      .prepare("SELECT id, name, class_name, class_arm FROM students WHERE parent_phone LIKE ?")
-      .all(`%${matchable}`);
+    const students = findStudentsByPhone(db, matchable);
 
     if (!students?.length) {
       return;
@@ -1136,6 +1155,11 @@ async function handleMessage(msg) {
 
     if (!session) {
       session = createSession(students, termConfig, schoolName);
+      setSession(matchable, session);
+    } else if (students.length > 0 && students.length !== (session.students || []).length) {
+      // Refresh the student list if siblings were added/removed or a previous
+      // session was created before the phone-normalisation fix.
+      session.students = students;
       setSession(matchable, session);
     }
 
@@ -2070,5 +2094,9 @@ module.exports = {
   sendNewsAnnouncements,
   sendPoliciesAndFaq,
   sendOptionalExtras,
+
+  // ── Phone Normalisation Exports (for unit testing) ────────────────────────────
+  getMatchableDigits,
+  findStudentsByPhone,
 };
 
