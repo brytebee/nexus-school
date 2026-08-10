@@ -7684,6 +7684,11 @@ function createWindow() {
   // Heartbeat cache (Gold/Diamond) — stored in nexus_sys.json
   let heartbeatCache = { valid_until: 0, term_status: 'active' };
 
+  // Silver/Gold/Diamond activation creds — declared here (before Phase 4 try block)
+  // to avoid Temporal Dead Zone: both used at ~L7759 and declared at ~L8060 in same scope.
+  let _silverActivationCreds    = null;
+  let _silverActivationPollHandle = null;
+
   try {
     const userDataPath = app.getPath('userData');
     const licensePath  = path.join(userDataPath, 'license.nexus');
@@ -8057,8 +8062,8 @@ function createWindow() {
   }
 
   // ── Silver License Activation helper (One-time online handshake) ─────────────
-  let _silverActivationCreds = null;
-  let _silverActivationPollHandle = null;
+  // Note: _silverActivationCreds and _silverActivationPollHandle are declared
+  // above (before Phase 4) to prevent TDZ errors. Do not re-declare here.
 
   // Universal activation poller — works for Silver, Gold, Diamond, Standalone.
   // Replaces the old Silver-only activate-silver endpoint call which tier-gated
