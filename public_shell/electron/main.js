@@ -7930,42 +7930,20 @@ function createWindow() {
         db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_registration_ts', ?)").run(String(regTs));
       }
 
-      let actRow = db.prepare("SELECT value FROM system_settings WHERE key = '_sys_is_activated'").get();
-      let isActivated = actRow?.value === 'true';
+      // ── Activation enforcement suspended (v1.0.78) ────────────────────────────
+      // All non-locked licenses are treated as fully activated. The DB flag is
+      // written so the renderer and all component-level is_activated checks
+      // (NexusPulse, ResultStudio, PrintHub) see true immediately.
+      // Re-enable conditional logic when server-side verify endpoint is ready.
+      const isActivated = true;
+      licenseStatus.needs_activation = false;
+      try {
+        db.prepare("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('_sys_is_activated', 'true')").run();
+      } catch (_) {}
 
-      // ── Case A: DB says activated but disk still has provisional token ─────────
-      // Happens when the hardware-bound token was confirmed by the poll server but
-      // was never written to license.nexus (licensePath scope bug in v1.0.72-v1.0.75).
-      // The DB flag is authoritative — server already confirmed this device.
-      // Override the provisional state and silently refresh the disk token.
-      if (isActivated && licenseStatus.needs_activation) {
-        licenseStatus.needs_activation = false;
-        console.log('[Activation] ✅ DB flag confirms activation — overriding stale provisional token on disk.');
-        // Background poll to refresh license.nexus with the hardware-bound token
-        setImmediate(() => {
-          try {
-            const _udp = app.getPath('userData');
-            const _pollCreds = _silverActivationCreds
-              || { hwId: hardwareId, sysConfPath: path.join(_udp, 'nexus_sys.json') };
-            _doActivationPoll(_pollCreds).catch(() => {});
-          } catch (_) {}
-        });
-      }
-
-      // ── Case B: Hardware-bound token on disk but DB flag missing ──────────────
-      // Handles portal activation, TDZ regression (v1.0.72-v1.0.74), token renewal.
-      if (!isActivated && !licenseStatus.needs_activation) {
-        isActivated = true;
-        try {
-          db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_is_activated', 'true')").run();
-          console.log('[Activation] ✅ Hardware-bound token confirmed — auto-marking device as activated.');
-        } catch (_) {}
-      }
-
-      licenseStatus.is_activated = isActivated;
+      licenseStatus.is_activated = true;
       licenseStatus.registration_ts = regTs;
-      const THIRTY = 30 * 24 * 60 * 60 * 1000;
-      licenseStatus.payment_hard_locked = !isActivated && (Date.now() - regTs) > THIRTY;
+      licenseStatus.payment_hard_locked = false;
 
       if (typeof setActivationStatus === 'function') {
         setActivationStatus({ is_activated: isActivated, registration_ts: regTs });
