@@ -66,34 +66,67 @@ ok "Launcher script installed to $NEXUS_DIR/launch-nexus.sh"
 echo ""
 echo "Step 4: Extracting app icon..."
 ICON_PATH="$NEXUS_DIR/nexus-school.png"
-
-# AppImages support --appimage-extract-and-run and expose their icon
-# Try to extract icon via squashfs (most reliable method)
 EXTRACTED=false
-if command -v 7z &>/dev/null; then
-  TMP_EXTRACT=$(mktemp -d)
-  if 7z e "$APPIMAGE" "*.png" -o"$TMP_EXTRACT" -r &>/dev/null; then
-    PNG=$(find "$TMP_EXTRACT" -name "*.png" | head -1)
-    if [[ -n "$PNG" ]]; then
-      cp "$PNG" "$ICON_PATH"
-      EXTRACTED=true
-    fi
-  fi
-  rm -rf "$TMP_EXTRACT"
-fi
 
-# Fallback: use AppImage's built-in icon extraction
-if [[ "$EXTRACTED" == false ]]; then
+# Helper: pick the best PNG from an extracted squashfs-root tree.
+# Prefers 512x512 or 256x256 hicolor icons; falls back to any .png found.
+pick_best_png() {
+  local root="$1"
+  # Priority 1 — hicolor icons (standard Linux icon theme locations)
+  local best
+  best=$(find "$root/usr/share/icons" -name "*.png" 2>/dev/null \
+    | sort -t/ -k8 -rn | head -1)
+  [[ -n "$best" ]] && { echo "$best"; return; }
+  # Priority 2 — top-level icon (common Electron AppImage convention)
+  best=$(find "$root" -maxdepth 1 -name "*.png" 2>/dev/null | head -1)
+  [[ -n "$best" ]] && { echo "$best"; return; }
+  # Priority 3 — any PNG, excluding node_modules
+  find "$root" -name "*.png" -not -path "*/node_modules/*" \
+    -not -path "*/.tmp/*" 2>/dev/null | head -1
+}
+
+# Strategy 1 — unsquashfs (fastest: extracts only icon directories)
+if command -v unsquashfs &>/dev/null && [[ "$EXTRACTED" == false ]]; then
   TMP_DIR=$(mktemp -d)
-  cd "$TMP_DIR"
-  "$APPIMAGE" --appimage-extract '*.png' &>/dev/null || true
-  PNG=$(find squashfs-root -name "*.png" -not -path "*/node_modules/*" 2>/dev/null | head -1)
-  if [[ -n "$PNG" ]]; then
+  # Extract only known icon paths — much faster than full extract
+  unsquashfs -quiet -dest "$TMP_DIR/sq" "$APPIMAGE" \
+    "*.png" "usr/share/icons/*" 2>/dev/null || true
+  PNG=$(pick_best_png "$TMP_DIR/sq")
+  if [[ -n "$PNG" && -f "$PNG" ]]; then
     cp "$PNG" "$ICON_PATH"
     EXTRACTED=true
-    ok "Icon extracted via AppImage"
+    ok "Icon extracted via unsquashfs"
   fi
-  cd - &>/dev/null
+  rm -rf "$TMP_DIR"
+fi
+
+# Strategy 2 — AppImage built-in full extract (no glob argument!)
+# NOTE: do NOT pass a filename pattern here — the AppImage runtime treats the
+# argument as a literal path, not a shell glob. Omit it to extract everything.
+if [[ "$EXTRACTED" == false ]]; then
+  TMP_DIR=$(mktemp -d)
+  pushd "$TMP_DIR" &>/dev/null
+  "$APPIMAGE" --appimage-extract &>/dev/null || true
+  PNG=$(pick_best_png "$TMP_DIR/squashfs-root")
+  if [[ -n "$PNG" && -f "$PNG" ]]; then
+    cp "$PNG" "$ICON_PATH"
+    EXTRACTED=true
+    ok "Icon extracted via AppImage --appimage-extract"
+  fi
+  popd &>/dev/null
+  rm -rf "$TMP_DIR"
+fi
+
+# Strategy 3 — 7z (if available and above strategies failed)
+if command -v 7z &>/dev/null && [[ "$EXTRACTED" == false ]]; then
+  TMP_DIR=$(mktemp -d)
+  7z e "$APPIMAGE" "*.png" -o"$TMP_DIR" -r &>/dev/null || true
+  PNG=$(find "$TMP_DIR" -name "*.png" | sort -rn | head -1)
+  if [[ -n "$PNG" && -f "$PNG" ]]; then
+    cp "$PNG" "$ICON_PATH"
+    EXTRACTED=true
+    ok "Icon extracted via 7z"
+  fi
   rm -rf "$TMP_DIR"
 fi
 
