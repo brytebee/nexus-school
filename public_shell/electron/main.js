@@ -7937,7 +7937,22 @@ function createWindow() {
       }
 
       let actRow = db.prepare("SELECT value FROM system_settings WHERE key = '_sys_is_activated'").get();
-      const isActivated = actRow?.value === 'true';
+      let isActivated = actRow?.value === 'true';
+
+      // ── Auto-confirm activation for hardware-bound tokens ─────────────────────
+      // If the license is unlocked AND not a provisional token (needs_activation=false),
+      // the JWT already has hardware_id bound to THIS device — activation IS complete.
+      // This handles three failure modes:
+      //   1. Portal activation (hardware_id bound on server) without in-app poll completing.
+      //   2. TDZ regression in v1.0.72-v1.0.74 that prevented _sys_is_activated write.
+      //   3. Token renewal where the new token arrived but the local flag was lost.
+      if (!isActivated && !licenseStatus.needs_activation) {
+        isActivated = true;
+        try {
+          db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_is_activated', 'true')").run();
+          console.log('[Activation] ✅ Hardware-bound token confirmed — auto-marking device as activated.');
+        } catch (_) {}
+      }
 
       licenseStatus.is_activated = isActivated;
       licenseStatus.registration_ts = regTs;
@@ -8055,8 +8070,12 @@ function createWindow() {
       const data = await res.json();
       if (!data.ok || !data.token) return false;
 
-      // Write the new hardware-bound token to disk so Phase 4 picks it up on relaunch
-      try { fs.writeFileSync(licensePath, data.token, 'utf-8'); } catch (_) {}
+      // Write the new hardware-bound token to disk so Phase 4 picks it up on relaunch.
+      // NOTE: licensePath is block-scoped inside the Phase 4 try{}; compute inline here.
+      try {
+        const _lp = path.join(app.getPath('userData'), 'license.nexus');
+        fs.writeFileSync(_lp, data.token, 'utf-8');
+      } catch (_) {}
 
       // Update sysConf — clear pending-since, record activation
       let sysConf = {};
@@ -8077,6 +8096,7 @@ function createWindow() {
 
       licenseStatus.is_activated        = true;
       licenseStatus.payment_hard_locked = false;
+      licenseStatus.needs_activation    = false;  // dismiss all activation banners in the UI
       licenseStatus.locked              = false;
       recheckQuota();
       if (typeof setActivationStatus === 'function') {
@@ -8240,15 +8260,24 @@ function createWindow() {
     const portalBase = process.env.NEXUSOS_PORTAL_URL || 'https://nexusos.com.ng/portal';
     shell.openExternal(`${portalBase}/activate?hwid=${encodeURIComponent(hardwareId)}`);
 
-    // Start background polling if we have activation credentials and are not yet activated
-    if (_silverActivationCreds && !licenseStatus.is_activated) {
+    // Poll regardless of whether _silverActivationCreds is set.
+    // Previously, polling was gated on _silverActivationCreds (only set for provisional/unbound
+    // tokens). Hardware-bound tokens (needs_activation=false, is_activated=false) from portal
+    // activations never polled → _sys_is_activated was never written → banners never cleared.
+    if (!licenseStatus.is_activated) {
+      // Compute paths inline — licensePath/sysConfPath from Phase 4 are block-scoped and
+      // not accessible here. app.getPath('userData') always returns the same stable path.
+      const _udp = app.getPath('userData');
+      const _pollCreds = _silverActivationCreds
+        || { hwId: hardwareId, sysConfPath: path.join(_udp, 'nexus_sys.json') };
+
       if (_silverActivationPollHandle) {
         clearInterval(_silverActivationPollHandle);
         _silverActivationPollHandle = null;
       }
 
-      // Perform an immediate check right after launching browser
-      _doSilverActivationCheck(_silverActivationCreds);
+      // Immediate attempt right after launching browser
+      _doActivationPoll(_pollCreds);
 
       let attempts = 0;
       _silverActivationPollHandle = setInterval(async () => {
@@ -8260,7 +8289,7 @@ function createWindow() {
           }
           return;
         }
-        const done = await _doSilverActivationCheck(_silverActivationCreds);
+        const done = await _doActivationPoll(_pollCreds);
         if (done && _silverActivationPollHandle) {
           clearInterval(_silverActivationPollHandle);
           _silverActivationPollHandle = null;
