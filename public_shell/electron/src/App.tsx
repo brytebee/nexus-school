@@ -273,50 +273,14 @@ function App() {
     );
   }
 
-  const showBanner = (license?.needs_activation && showActivationBanner) ||
-                     (((license?.in_grace || license?.server_revoked) && !license?.needs_activation) && showGraceBanner);
+  const showBanner = ((license?.in_grace || license?.server_revoked) && showGraceBanner);
 
   // 3. Valid license — full app
   return (
     <>
       <div className="background-glow"></div>
 
-      {/* ── Provisional Activation Banner ── */}
-      {license?.needs_activation && showActivationBanner && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9000,
-          background: 'linear-gradient(90deg, #1a3a5c, #0d2137)',
-          borderBottom: '1px solid rgba(0, 180, 216, 0.3)',
-          padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '12px',
-          height: '40px', boxSizing: 'border-box'
-        }}>
-          <span style={{ fontSize: '15px' }}>⚡</span>
-          <p style={{ color: '#ccd6f6', fontSize: '12px', margin: 0, flex: 1 }}>
-            <strong style={{ color: '#00b4d8' }}>Activate your license</strong> — bind it to this device to complete setup.
-          </p>
-          <button
-            onClick={async () => {
-              const res = await window.nexusAPI?.license?.activateOnline?.();
-              if (res && res.ok) {
-                window.location.reload();
-              }
-            }}
-            style={{
-              background: '#00b4d8', color: '#0a0e2e', border: 'none',
-              borderRadius: '6px', padding: '4px 12px', cursor: 'pointer',
-              fontSize: '11px', fontWeight: 700, whiteSpace: 'nowrap'
-            }}
-          >
-            Activate Now →
-          </button>
-          <button
-            onClick={() => setShowActivationBanner(false)}
-            style={{ background: 'transparent', border: 'none', color: 'rgba(255, 255, 255, 0.4)', cursor: 'pointer', fontSize: '18px', padding: '0 4px', lineHeight: 1 }}
-          >
-            ×
-          </button>
-        </div>
-      )}
+      {/* Activation Banner removed — enforcement suspended in v1.0.78 */}
 
       {/* ── Grace Period / Revocation Warning Banner ── */}
       {!license?.needs_activation && (license?.in_grace || license?.server_revoked) && showGraceBanner && (
@@ -361,35 +325,7 @@ function App() {
         </div>
       )}
 
-      {/* ── Unactivated School Warning Banner ── */}
-      {!license?.is_activated && !license?.needs_activation && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9000,
-          background: 'linear-gradient(90deg, #4a1525, #260a13)',
-          borderBottom: '1px solid rgba(255, 100, 100, 0.3)',
-          padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '12px',
-          height: '40px', boxSizing: 'border-box'
-        }}>
-          <span style={{ fontSize: '15px' }}>🔒</span>
-          <p style={{ color: '#ffb3b3', fontSize: '12px', margin: 0, flex: 1 }}>
-            <strong>School Activation Required</strong> — Value features (Results, Pulse, CBT) are locked. {license?.activation_days_left !== undefined ? `Payment locks in ${license.activation_days_left} days.` : ''}
-          </p>
-          <button
-            onClick={() => {
-              if (window.nexusAPI?.shell?.openExternal) {
-                window.nexusAPI.shell.openExternal('https://nexusos.com.ng/portal/activate');
-              }
-            }}
-            style={{
-              background: '#ff4d4d', color: '#ffffff', border: 'none',
-              borderRadius: '6px', padding: '4px 12px', cursor: 'pointer',
-              fontSize: '11px', fontWeight: 700, whiteSpace: 'nowrap'
-            }}
-          >
-            Activate School →
-          </button>
-        </div>
-      )}
+      {/* Unactivated Warning Banner removed — enforcement suspended in v1.0.78 */}
 
       {/* ── Quota Warning Banner ── */}
       {quotaStatus && quotaStatus.overQuota && (
