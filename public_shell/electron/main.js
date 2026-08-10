@@ -123,16 +123,10 @@ const ACTIVATION_GATED = [
   'cbt:dispatch-pulse-notifications'
 ];
 
-function assertActivated(channel) {
-  if (!ACTIVATION_GATED.includes(channel)) return null;
-  const s = licenseStatus;
-  if (!s || s.locked) return null;
-  if (s.is_activated) return null;
-  return {
-    ok: false,
-    error: 'NOT_ACTIVATED',
-    message: 'This feature is locked until your school is activated by Nexus. Visit nexusos.com.ng/portal/activate or contact support.',
-  };
+function assertActivated(_channel) {
+  // Activation enforcement temporarily suspended — all channels open.
+  // Re-enable when server-side activation verification is in place.
+  return null;
 }
 
 function assertPaymentOpen(channel) {
