@@ -3551,42 +3551,9 @@ ipcMain.handle("delete-teacher", (event, { id }) => {
 });
 
 // ── Phase 10: ILS (Individualized Learning System) Schema Migrations ──────────
-// Safe additive migrations — wrapped in try/catch so they no-op on existing DBs.
-(() => {
-  try {
-    const db = database.getDb();
-    // Add curriculum_type to classes table (DEFAULT keeps all existing classes standard)
-    try { db.exec("ALTER TABLE class_configs ADD COLUMN curriculum_type TEXT DEFAULT 'STANDARD_NIGERIAN'"); } catch (_) {}
-    // PAC score records — completely separate from student_records
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS ils_records (
-        id               INTEGER PRIMARY KEY AUTOINCREMENT,
-        student_id       TEXT    NOT NULL,
-        academic_session TEXT    NOT NULL,
-        term             TEXT    NOT NULL,
-        subject          TEXT    NOT NULL,
-        pack_number      INTEGER NOT NULL CHECK(pack_number BETWEEN 1 AND 12),
-        score            REAL    NOT NULL DEFAULT 0,
-        passed           INTEGER NOT NULL DEFAULT 0,
-        created_at       TEXT    DEFAULT (datetime('now')),
-        UNIQUE(student_id, academic_session, term, subject, pack_number)
-      )
-    `);
-    // Bible verse memory count per student per term
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS ils_verse_memory (
-        student_id       TEXT NOT NULL,
-        academic_session TEXT NOT NULL,
-        term             TEXT NOT NULL,
-        verse_count      INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (student_id, academic_session, term)
-      )
-    `);
-    console.log('[Phase 10] ILS schema ready.');
-  } catch (err) {
-    console.error('[Phase 10] ILS schema migration error:', err.message);
-  }
-})();
+// Schema initialization function ensureIlsSchema(db) is defined below and invoked
+// safely after database.init() in createWindow().
+
 
 function ensureIlsSchema(db) {
   if (!db) return;
@@ -6398,6 +6365,7 @@ function createWindow() {
 
     const betterSqlite3 = require("better-sqlite3");
     database.init(dbPath, betterSqlite3);
+    ensureIlsSchema(database.getDb());
     
     // FINAL DEMO CHECK: Print the number of records found
     try {
