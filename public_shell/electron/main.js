@@ -8060,62 +8060,77 @@ function createWindow() {
   let _silverActivationCreds = null;
   let _silverActivationPollHandle = null;
 
-  async function _doSilverActivationCheck(creds) {
-    if (!creds || !creds.token || !creds.hwId || !creds.schoolId) return false;
-    const API_BASE = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
+  // Universal activation poller — works for Silver, Gold, Diamond, Standalone.
+  // Replaces the old Silver-only activate-silver endpoint call which tier-gated
+  // Diamond/Gold and caused polling to silently fail for non-Silver accounts.
+  async function _doActivationPoll(creds) {
+    if (!creds || !creds.hwId || !creds.sysConfPath) return false;
+    const API_BASE   = process.env.NEXUS_API_URL   || 'https://api.nexusos.com.ng';
+    const API_SECRET = process.env.NEXUS_API_SECRET || '';
     const db = database.getDb();
     try {
-      const res = await fetch(`${API_BASE}/api/license/activate-silver`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: creds.token, hardware_id: creds.hwId, school_id: creds.schoolId }),
+      const res = await fetch(`${API_BASE}/api/license/poll-activation`, {
+        method:  'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${API_SECRET}`,
+        },
+        body:   JSON.stringify({ hardware_id: creds.hwId }),
         signal: AbortSignal.timeout(8000),
       });
       if (!res.ok) return false;
       const data = await res.json();
-      if (data.ok && (data.activation_token || data.is_activated)) {
-        let sysConf = {};
-        if (creds.sysConfPath && fs.existsSync(creds.sysConfPath)) {
-          try { sysConf = JSON.parse(fs.readFileSync(creds.sysConfPath, 'utf-8')); } catch {}
-        }
-        if (data.activation_token) sysConf.silver_activation_token = data.activation_token;
-        delete sysConf.silver_activation_pending_since;
-        if (creds.sysConfPath) {
-          try { fs.writeFileSync(creds.sysConfPath, JSON.stringify(sysConf, null, 2)); } catch (_) {}
-        }
-        try {
-          if (data.activation_token) {
-            db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_activation_token', ?)").run(data.activation_token);
-            db.prepare("DELETE FROM system_settings WHERE key = '_sys_activation_pending_since'").run();
-          }
-          db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_is_activated', 'true')").run();
-          licenseStatus.is_activated = true;
-          licenseStatus.payment_hard_locked = false;
-          licenseStatus.locked = false;
-          recheckQuota();
-          if (typeof setActivationStatus === 'function') {
-            setActivationStatus({ is_activated: true, registration_ts: licenseStatus.registration_ts });
-          }
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('license-status', licenseStatus);
-          }
-        } catch (_) {}
-        console.log('[License] ✅ Silver license online activation successful.');
-        return true;
+      if (!data.ok || !data.token) return false;
+
+      // Write the new hardware-bound token to disk so Phase 4 picks it up on relaunch
+      try { fs.writeFileSync(licensePath, data.token, 'utf-8'); } catch (_) {}
+
+      // Update sysConf — clear pending-since, record activation
+      let sysConf = {};
+      if (fs.existsSync(creds.sysConfPath)) {
+        try { sysConf = JSON.parse(fs.readFileSync(creds.sysConfPath, 'utf-8')); } catch {}
       }
+      sysConf.silver_activation_token       = data.token;
+      sysConf.is_activated                  = true;
+      delete sysConf.silver_activation_pending_since;
+      try { fs.writeFileSync(creds.sysConfPath, JSON.stringify(sysConf, null, 2)); } catch (_) {}
+
+      // Persist in SQLite
+      try {
+        db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_activation_token', ?)").run(data.token);
+        db.prepare("DELETE FROM system_settings WHERE key = '_sys_activation_pending_since'").run();
+        db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_is_activated', 'true')").run();
+      } catch (_) {}
+
+      licenseStatus.is_activated        = true;
+      licenseStatus.payment_hard_locked = false;
+      licenseStatus.locked              = false;
+      recheckQuota();
+      if (typeof setActivationStatus === 'function') {
+        setActivationStatus({ is_activated: true, registration_ts: licenseStatus.registration_ts });
+      }
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('license-status', licenseStatus);
+        // Pull window to front — user is likely looking at the portal in a browser
+        mainWindow.show();
+        mainWindow.focus();
+        try { app.focus({ steal: true }); } catch (_) {}
+      }
+      console.log(`[License] ✅ Online activation confirmed for ${data.tier} tier.`);
+      return true;
     } catch (e) {
-      console.warn('[License] Silver activation check-in failed (retrying next boot):', e.message);
+      console.warn('[License] Activation poll failed (will retry):', e.message);
     }
     return false;
   }
 
+  // Keep _doSilverActivationCheck as an alias so _scheduleSilverActivation still works
+  const _doSilverActivationCheck = _doActivationPoll;
+
   function _scheduleSilverActivation(token, hwId, schoolId, sysConfPath) {
     _silverActivationCreds = { token, hwId, schoolId, sysConfPath };
-    async function doActivate() {
-      await _doSilverActivationCheck(_silverActivationCreds);
-    }
     // Try after 1 minute
-    setTimeout(doActivate, 60 * 1000);
+    setTimeout(() => _doActivationPoll(_silverActivationCreds), 60 * 1000);
   }
 
   // ── Standalone Activation helper ──────────────────────────────────────────────
