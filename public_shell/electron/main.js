@@ -7939,13 +7939,27 @@ function createWindow() {
       let actRow = db.prepare("SELECT value FROM system_settings WHERE key = '_sys_is_activated'").get();
       let isActivated = actRow?.value === 'true';
 
-      // ── Auto-confirm activation for hardware-bound tokens ─────────────────────
-      // If the license is unlocked AND not a provisional token (needs_activation=false),
-      // the JWT already has hardware_id bound to THIS device — activation IS complete.
-      // This handles three failure modes:
-      //   1. Portal activation (hardware_id bound on server) without in-app poll completing.
-      //   2. TDZ regression in v1.0.72-v1.0.74 that prevented _sys_is_activated write.
-      //   3. Token renewal where the new token arrived but the local flag was lost.
+      // ── Case A: DB says activated but disk still has provisional token ─────────
+      // Happens when the hardware-bound token was confirmed by the poll server but
+      // was never written to license.nexus (licensePath scope bug in v1.0.72-v1.0.75).
+      // The DB flag is authoritative — server already confirmed this device.
+      // Override the provisional state and silently refresh the disk token.
+      if (isActivated && licenseStatus.needs_activation) {
+        licenseStatus.needs_activation = false;
+        console.log('[Activation] ✅ DB flag confirms activation — overriding stale provisional token on disk.');
+        // Background poll to refresh license.nexus with the hardware-bound token
+        setImmediate(() => {
+          try {
+            const _udp = app.getPath('userData');
+            const _pollCreds = _silverActivationCreds
+              || { hwId: hardwareId, sysConfPath: path.join(_udp, 'nexus_sys.json') };
+            _doActivationPoll(_pollCreds).catch(() => {});
+          } catch (_) {}
+        });
+      }
+
+      // ── Case B: Hardware-bound token on disk but DB flag missing ──────────────
+      // Handles portal activation, TDZ regression (v1.0.72-v1.0.74), token renewal.
       if (!isActivated && !licenseStatus.needs_activation) {
         isActivated = true;
         try {
