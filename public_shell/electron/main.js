@@ -8238,7 +8238,7 @@ function createWindow() {
       const dest = path.join(userDataPath, 'license.nexus');
       fs.copyFileSync(src, dest);
 
-      const sysConfPath = path.join(userDataPath, 'sys.json');
+      const sysConfPath = path.join(userDataPath, 'nexus_sys.json');
       _silverActivationCreds = { token: tokenContent, hwId: hardwareId, schoolId: payload.school_id, sysConfPath };
       return { ok: true, relaunch_required: true };
     } catch (e) {
