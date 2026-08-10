@@ -7548,13 +7548,14 @@ function createWindow() {
 
   ipcMain.handle("get-hardware-id", () => hardwareId);
 
-  // ── Ed25519 public key embedded at build time (matches NEXUS_LICENSE_SIGNING_KEY) ──
-  // To rotate: regenerate keypair, update this hex, re-issue all licenses.
-  const CANONICAL_PUBLIC_KEY = '3a963a04b3da96bd402eb5d8a4ffd200e8c695f9fa4633c789649fa188db0daa';
-  const envKey = (process.env.NEXUS_LICENSE_PUBLIC_KEY || '').trim();
-  const NEXUS_PUBLIC_KEY_HEX = (envKey.length === 64 && /^[0-9a-fA-F]{64}$/.test(envKey))
-    ? envKey
-    : CANONICAL_PUBLIC_KEY;
+  // ── Ed25519 public key — compile-time constant, never overridden at runtime ──
+  // The public key is NOT a secret. It belongs in code only.
+  // To rotate: update this hex + NEXUS_LICENSE_SIGNING_KEY in nexus-api, re-issue all licenses.
+  const NEXUS_PUBLIC_KEY_HEX = '3a963a04b3da96bd402eb5d8a4ffd200e8c695f9fa4633c789649fa188db0daa';
+  const _envKeyOverride = (process.env.NEXUS_LICENSE_PUBLIC_KEY || '').trim();
+  if (_envKeyOverride && _envKeyOverride !== NEXUS_PUBLIC_KEY_HEX) {
+    console.warn('[Security] NEXUS_LICENSE_PUBLIC_KEY env var does not match canonical key — env var ignored. Update the hardcoded key in main.js if you have rotated the signing keypair.');
+  }
   // ── Nigerian Secondary School Calendar ─────────────────────────────────────
   // ⚠️  MUST STAY IN SYNC WITH nexusos/src/lib/calendar.ts
   // When adding a new session here, add it there too (and vice versa).
