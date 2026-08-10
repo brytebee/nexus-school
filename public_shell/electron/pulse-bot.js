@@ -955,6 +955,7 @@ async function sendOptionalExtras(msg, session, matchable) {
     selectableExtras.forEach((ex, idx) => {
       text += `Reply *${idx + 1}* to Pay Online for *${ex.item_name}* (${fmt(ex.amount)})\n`;
     });
+    text += `\n_You can also select multiple items at once — e.g. reply *1,2,3*_\n`;
     text += `\n_Reply 0 to return to the main menu_`;
 
     session.state = STATE.AWAITING_EXTRAS_SELECTION;
@@ -975,7 +976,9 @@ async function handleMessage(msg) {
   if (msg.from.includes("@g.us") || msg.from === "status@broadcast") return;
 
   const text = (msg.body || '').trim();
-  const numericInput = /^[1-6]$/.test(text) ? parseInt(text, 10) : null;
+  // Match any positive integer (1-9, 10, 100…) so "9" (custom amount) and
+  // multi-digit plan indices are captured. "0" stays null — cancel paths use text === '0'.
+  const numericInput = /^[1-9]\d*$/.test(text) ? parseInt(text, 10) : null;
 
   // ── Resolve phone ────────────────────────────────────────────────────────────
   const rawPhone = await resolvePhoneNumber(msg);
@@ -1042,6 +1045,10 @@ async function handleMessage(msg) {
       isBotHandled = true;
     } else if (session.state === STATE.AWAITING_EMAIL_INPUT) {
       isBotHandled = true;
+    } else if (session.state === STATE.AWAITING_EXTRAS_SELECTION &&
+               (text === '0' || numericInput !== null || /^\d[\d,\s]*$/.test(text))) {
+      // Covers single "1", numeric "9", and comma-separated "1,2,3"
+      isBotHandled = true;
     }
   }
 
@@ -1093,7 +1100,14 @@ async function handleMessage(msg) {
   // ── Any non-numeric input OR new session → evaluate intent or show main menu ─
   // Exception: states that expect free-text input must bypass this gate so the
   // parent's typed email / custom amount reaches the correct handler below.
-  const FREE_TEXT_STATES = [STATE.AWAITING_EMAIL_INPUT, STATE.AWAITING_CUSTOM_AMOUNT, STATE.AWAITING_RECEIPT];
+  // AWAITING_EXTRAS_SELECTION included so comma-separated input ("1,2,3") isn't
+  // intercepted by the !numericInput main-menu gate.
+  const FREE_TEXT_STATES = [
+    STATE.AWAITING_EMAIL_INPUT,
+    STATE.AWAITING_CUSTOM_AMOUNT,
+    STATE.AWAITING_RECEIPT,
+    STATE.AWAITING_EXTRAS_SELECTION,
+  ];
   const inFreeTextState  = session && FREE_TEXT_STATES.includes(session.state);
 
   if (!inFreeTextState && (!session || !numericInput)) {
@@ -1514,6 +1528,7 @@ async function handleMessage(msg) {
     }
 
     const selectedIndex = numericInput - 1;
+    const activePlans = session.paymentContext.activePlans || [];
     const plan = activePlans[selectedIndex];
 
     if (!plan) {
@@ -1536,35 +1551,62 @@ async function handleMessage(msg) {
     }
 
     const selectableExtras = session.selectableExtras || [];
-    const selectedIndex = numericInput != null ? numericInput - 1 : -1;
-    const selectedExtra = selectableExtras[selectedIndex];
 
-    if (!selectedExtra) {
-      await msg.reply(`⚠️ Invalid selection. Please reply with a number between *1* and *${selectableExtras.length}* to pay for an optional extra, or reply *0* for Main Menu.`);
+    // ── Parse selection — supports single ("2") or comma-separated ("1,2,3") ──
+    const rawParts = text.split(',').map(p => p.trim()).filter(Boolean);
+    const selectedIndices = rawParts
+      .map(p => parseInt(p, 10) - 1)            // convert 1-based to 0-based
+      .filter(i => !isNaN(i) && i >= 0 && i < selectableExtras.length);
+
+    if (selectedIndices.length === 0) {
+      const range = selectableExtras.length === 1
+        ? '*1*'
+        : `*1* to *${selectableExtras.length}*`;
+      await msg.reply(
+        `⚠️ Invalid selection.\n` +
+        `Reply with a number ${range} to select an item, or comma-separated (e.g. *1,2,3*) for multiple.\n` +
+        `Reply *0* for Main Menu.`
+      );
       return;
     }
 
-    // Auto opt-in the extra selection for all students in this session
+    // Deduplicate (in case user sends "1,1,2")
+    const uniqueIndices = [...new Set(selectedIndices)];
+    const chosenExtras = uniqueIndices.map(i => selectableExtras[i]);
+
+    // Auto opt-in each chosen extra for every student in this session
     const db = database.getDb();
     const termConfig = session.termConfig;
     for (const stu of session.students) {
-      try {
-        db.prepare(`
-          INSERT OR IGNORE INTO student_extra_selections (student_id, extra_id, academic_session, term)
-          VALUES (?, ?, ?, ?)
-        `).run(stu.id, selectedExtra.id, termConfig.academic_session, termConfig.term);
-      } catch (_) {}
+      for (const ex of chosenExtras) {
+        try {
+          db.prepare(`
+            INSERT OR IGNORE INTO student_extra_selections (student_id, extra_id, academic_session, term)
+            VALUES (?, ?, ?, ?)
+          `).run(stu.id, ex.id, termConfig.academic_session, termConfig.term);
+        } catch (_) {}
+      }
     }
 
-    const totalAmount = selectedExtra.amount * session.students.length;
+    // Build combined label and total
+    const itemNames = chosenExtras.map(e => e.item_name).join(', ');
+    const perStudentTotal = chosenExtras.reduce((sum, e) => sum + Number(e.amount), 0);
+    const totalAmount = perStudentTotal * session.students.length;
+
     session.paymentContext = {
-      studentDetails: session.students.map(s => ({ id: s.id, name: s.name, balance: selectedExtra.amount })),
+      studentDetails: session.students.map(s => ({
+        id: s.id, name: s.name, balance: perStudentTotal,
+      })),
       totalBalance: totalAmount,
-      extraId: selectedExtra.id,
-      extraItemName: selectedExtra.item_name,
+      extraIds: chosenExtras.map(e => e.id),
+      extraItemName: itemNames,
     };
 
-    await checkOrPromptEmail(msg, session, matchable, totalAmount, `Optional Extra: ${selectedExtra.item_name}`);
+    const paymentLabel = chosenExtras.length === 1
+      ? `Optional Extra: ${itemNames}`
+      : `Optional Extras (${chosenExtras.length} items): ${itemNames}`;
+
+    await checkOrPromptEmail(msg, session, matchable, totalAmount, paymentLabel);
     return;
   }
 
