@@ -811,6 +811,38 @@ select, select option {
 .secondary-btn:active { transform: translateY(0); }
 .secondary-btn:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
 
+/* Danger Outlined Button — Used for deactivations and destructive actions */
+.danger-outline-btn {
+    background: rgba(239, 68, 68, 0.05);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+.danger-outline-btn:hover {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: #ef4444;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.15);
+}
+.danger-outline-btn:active {
+    transform: translateY(0);
+}
+.danger-outline-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+    pointer-events: none;
+}
+
 /* ════════════════════════════════════════════════════════════
    Gold Action Button — Financial / Premium tier CTAs
    ════════════════════════════════════════════════════════════ */

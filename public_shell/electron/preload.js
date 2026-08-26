@@ -152,6 +152,15 @@ const nexusAPI = {
         onSyncError: (callback) => ipcRenderer.on('pulse:sync-error', (_event, value) => callback(value)),
         setAutostart: (enabled) => ipcRenderer.send('pulse:set-autostart', enabled),
         getAutostart: () => ipcRenderer.invoke('pulse:get-autostart'),
+        // Cloud 2-Way Delta Sync
+        syncPush: () => ipcRenderer.invoke('sync:push'),
+        syncPull: () => ipcRenderer.invoke('sync:pull'),
+        syncTrigger: () => ipcRenderer.invoke('sync:trigger'),
+        syncStatus: () => ipcRenderer.invoke('sync:status'),
+        onSyncStatus: (callback) => ipcRenderer.on('sync:status', (_event, value) => callback(value)),
+        activateCloud: (options) => ipcRenderer.invoke('sync:activate-cloud', options),
+        deactivateCloud: () => ipcRenderer.invoke('sync:deactivate-cloud'),
+        getCloudConfig: () => ipcRenderer.invoke('sync:get-cloud-config'),
     },
     // Phase 5: Fee Management
     fees: {

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import { useLicense } from '../hooks/useLicense';
 import { useIdentity } from '../hooks/useIdentity';
-import { MessageSquare, Send, Reply } from 'lucide-react';
+import { MessageSquare, Send, Reply, Globe, ShieldCheck, RefreshCw, CheckCircle, AlertTriangle, X, Check } from 'lucide-react';
 import {
   buildThreads,
   filterUnread,
@@ -59,7 +60,7 @@ export function NexusPulse() {
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
   const [loadingAction, setLoadingAction] = useState(false);
 
-  // Cloud Bridge State (Diamond)
+  // Cloud Bridge State (Diamond Legacy)
   const [showCloudConfig, setShowCloudConfig] = useState(false);
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
@@ -71,6 +72,38 @@ export function NexusPulse() {
   });
   const [syncingCloud, setSyncingCloud] = useState(false);
   const [copiedKey, setCopiedKey] = useState<'security' | 'refresh' | null>(null);
+
+  // ── Always-On Cloud Pulse (Multi-Tenant 2-Way Delta Sync) ──────────────────
+  const [cloudPulseEnabled, setCloudPulseEnabled] = useState(false);
+  const [schoolCloudId, setSchoolCloudId] = useState('');
+  const [cloudLastSync, setCloudLastSync] = useState<string | null>(null);
+  const [cloudSyncError, setCloudSyncError] = useState<string | null>(null);
+  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [termsChecks, setTermsChecks] = useState({
+    auth: false,
+    scope: false,
+    risk: false,
+    permission: false,
+    controller: false,
+    processor: false,
+    dpa: false,
+  });
+
+  const allConsented = Object.values(termsChecks).every(Boolean);
+
+  const hydrateCloudSyncStatus = async () => {
+    try {
+      const cfg = await window.electronAPI?.pulse?.getCloudConfig?.();
+      if (cfg) {
+        setCloudPulseEnabled(!!cfg.isEnabled);
+        setSchoolCloudId(cfg.schoolCloudId || '');
+        setCloudLastSync(cfg.lastSyncSuccess || null);
+        setCloudSyncError(cfg.lastSyncError || null);
+        setIsCloudSyncing(!!cfg.isSyncing);
+      }
+    } catch (_) {}
+  };
 
   // Load configuration & identity phone
   useEffect(() => {
@@ -98,8 +131,26 @@ export function NexusPulse() {
     };
     syncBotState();
 
-    // Cloud Bridge details sync
+    // Cloud Bridge details sync & 2-way delta sync status
     hydrateCloudStatus();
+    hydrateCloudSyncStatus();
+
+    // Listen to real-time sync status events
+    if (window.electronAPI?.pulse?.onSyncStatus) {
+      window.electronAPI.pulse.onSyncStatus((data: any) => {
+        if (data?.status === 'disabled') {
+          setCloudPulseEnabled(false);
+          setIsCloudSyncing(false);
+        } else if (data?.status === 'idle') {
+          setCloudLastSync(data.lastSync || new Date().toISOString());
+          setCloudSyncError(null);
+          setIsCloudSyncing(false);
+        } else if (data?.status === 'error') {
+          setCloudSyncError(data.error || 'Sync error occurred');
+          setIsCloudSyncing(false);
+        }
+      });
+    }
   }, [identity]);
 
   const fetchInboxMessages = async () => {
@@ -261,6 +312,109 @@ export function NexusPulse() {
     setSyncingCloud(true);
     window.electronAPI.pulse.triggerSync();
     setTimeout(() => setSyncingCloud(false), 5000);
+  };
+
+  // ── Always-On Cloud Pulse Handlers ──────────────────────────────────────────
+  const handleActivateCloudPulse = async () => {
+    try {
+      setIsCloudSyncing(true);
+      const res = await window.electronAPI?.pulse?.activateCloud?.({
+        schoolCloudId: schoolCloudId.trim() || undefined
+      });
+      if (res?.ok) {
+        setCloudPulseEnabled(true);
+        setShowTermsModal(false);
+        if (Swal) {
+          Swal.fire({
+            icon: 'success',
+            title: 'Cloud Pulse Activated!',
+            text: '2-Way Delta Sync is now live. Parents can interact with your school 24/7.',
+            background: '#0d1235',
+            color: '#fff',
+            confirmButtonColor: '#10B981'
+          });
+        }
+        hydrateCloudSyncStatus();
+      }
+    } catch (err: any) {
+      if (Swal) {
+        Swal.fire({
+          icon: 'error',
+          title: 'Activation Failed',
+          text: err.message || 'Could not activate Cloud Pulse.',
+          background: '#0d1235',
+          color: '#fff'
+        });
+      }
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
+  const handleDeactivateCloudPulse = async () => {
+    if (Swal) {
+      const result = await Swal.fire({
+        title: 'Deactivate Cloud Pulse?',
+        text: 'Parents will no longer receive 24/7 automated replies while this laptop is offline.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Yes, Deactivate',
+        cancelButtonText: 'Cancel',
+        confirmButtonColor: '#EF4444',
+        cancelButtonColor: '#374151',
+        background: '#0d1235',
+        color: '#fff'
+      });
+      if (!result.isConfirmed) return;
+    }
+
+    try {
+      await window.electronAPI?.pulse?.deactivateCloud?.();
+      setCloudPulseEnabled(false);
+      if (Swal) {
+        Swal.fire({
+          icon: 'info',
+          title: 'Cloud Pulse Deactivated',
+          text: 'The background sync worker has stopped.',
+          background: '#0d1235',
+          color: '#fff',
+          timer: 3000,
+          showConfirmButton: false
+        });
+      }
+      hydrateCloudSyncStatus();
+    } catch (err: any) {
+      console.error('Deactivation error:', err);
+    }
+  };
+
+  const handleTriggerCloudSync = async () => {
+    try {
+      setIsCloudSyncing(true);
+      const res = await window.electronAPI?.pulse?.syncTrigger?.();
+      if (res?.ok) {
+        setCloudLastSync(new Date().toISOString());
+        setCloudSyncError(null);
+        if (Swal) {
+          Swal.fire({
+            toast: true,
+            position: 'top-end',
+            icon: 'success',
+            title: 'Sync completed successfully!',
+            showConfirmButton: false,
+            timer: 3000,
+            background: '#0d1235',
+            color: '#fff'
+          });
+        }
+      } else {
+        setCloudSyncError(res?.error || 'Sync failed');
+      }
+    } catch (err: any) {
+      setCloudSyncError(err.message || 'Sync error');
+    } finally {
+      setIsCloudSyncing(false);
+    }
   };
 
   const handleSavePhone = async () => {
@@ -667,6 +821,86 @@ export function NexusPulse() {
                         alt="WhatsApp Authentication QR Code"
                         style={{ width: '200px', height: '200px', borderRadius: 'var(--radius-sm)', display: 'block' }}
                       />
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Always-On Nexus Pulse Cloud (2-Way Delta Sync) Panel ── */}
+                <div style={{ background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-lg)', padding: '22px', maxWidth: '576px', width: '100%', alignSelf: 'center', display: 'flex', flexDirection: 'column', gap: '18px', flexShrink: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--glass-border)', paddingBottom: '12px' }}>
+                    <div>
+                      <h4 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '6px', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>
+                        <Globe size={16} /> Nexus Pulse Cloud (Always-On 24/7)
+                      </h4>
+                      <p style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px', margin: 0 }}>
+                        Enable 2-way delta sync so parents get instant WhatsApp replies even when your laptop is turned off.
+                      </p>
+                    </div>
+                    <span style={{
+                      fontSize: '9px',
+                      fontWeight: 900,
+                      color: cloudPulseEnabled ? 'var(--accent-green)' : 'var(--text-dim)',
+                      background: cloudPulseEnabled ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255, 255, 255, 0.05)',
+                      padding: '2px 8px',
+                      borderRadius: '9999px',
+                      border: `1px solid ${cloudPulseEnabled ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255, 255, 255, 0.1)'}`,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.08em'
+                    }}>
+                      {cloudPulseEnabled ? '● Active' : '○ Inactive'}
+                    </span>
+                  </div>
+
+                  {cloudPulseEnabled ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: 'var(--radius-md)', padding: '14px' }}>
+                        <div>
+                          <span style={{ fontSize: '11px', color: 'var(--text-dim)', display: 'block' }}>2-Way Delta Sync Engine</span>
+                          <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-green)' }}>
+                            {isCloudSyncing ? '🔄 Syncing with nexus-api...' : cloudSyncError ? `⚠️ Error: ${cloudSyncError}` : '🟢 Connected & Synchronised'}
+                          </span>
+                          {cloudLastSync && (
+                            <span style={{ fontSize: '10px', color: 'var(--text-dim)', display: 'block', marginTop: '2px' }}>
+                              Last synchronised: {new Date(cloudLastSync).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          onClick={handleTriggerCloudSync}
+                          disabled={isCloudSyncing}
+                          className="secondary-btn"
+                          style={{ padding: '6px 12px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          <RefreshCw size={12} className={isCloudSyncing ? 'spin' : ''} />
+                          {isCloudSyncing ? 'Syncing...' : 'Sync Now'}
+                        </button>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '4px' }}>
+                        <button
+                          onClick={handleDeactivateCloudPulse}
+                          className="danger-outline-btn"
+                          style={{ fontSize: '11px', padding: '6px 14px' }}
+                        >
+                          Deactivate Cloud Pulse
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                      <div style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px dashed var(--glass-border)', borderRadius: 'var(--radius-md)', padding: '16px', fontSize: '11px', color: 'var(--text-dim)', lineHeight: '1.6' }}>
+                        <p style={{ margin: 0 }}>
+                          When activated, published student results, attendance records, fee balances, and school announcements are securely replicated to the Nexus Cloud Gateway. Parents can make fee payments via Paystack and receive instant stamped receipts 24 hours a day.
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={() => setShowTermsModal(true)}
+                        className="primary-btn"
+                        style={{ width: '100%', justifyContent: 'center', padding: '10px 16px', fontSize: '12px' }}
+                      >
+                        🚀 Activate Cloud Pulse (Always-On)
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1078,6 +1312,140 @@ export function NexusPulse() {
             </div>
           </div>
         </>
+      )}
+
+      {/* ── Terms of Activation & Legal Consent Modal ── */}
+      {showTermsModal && ReactDOM.createPortal(
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(8px)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '20px'
+        }}>
+          <div style={{
+            background: '#0d1235',
+            border: '1px solid var(--glass-border)',
+            borderRadius: 'var(--radius-lg)',
+            maxWidth: '620px',
+            width: '100%',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            padding: '24px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '18px',
+            boxShadow: '0 20px 50px rgba(0, 0, 0, 0.5)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--glass-border)', paddingBottom: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ShieldCheck size={20} color="var(--accent)" />
+                <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: 'var(--text-main)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Terms of Cloud Activation & Legal Consent
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowTermsModal(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: '4px' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ background: 'rgba(0, 229, 255, 0.05)', border: '1px solid rgba(0, 229, 255, 0.15)', borderRadius: 'var(--radius-md)', padding: '12px', fontSize: '11px', color: 'var(--text-dim)', lineHeight: '1.5' }}>
+              <p style={{ margin: 0 }}>
+                Under the <strong>Nigeria Data Protection Act (NDPA 2023)</strong>, activating automated 24/7 online parent communications transfers published student records to a secured cloud vault. Please review and confirm each required item below to proceed:
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {(
+                [
+                  { id: 'auth',       label: 'I am the authorised administrator or owner of this school and have authority to make this decision.' },
+                  { id: 'scope',      label: 'I have read and understood what data goes online (student names, classes, attendance, fee balances, published results, news, policies).' },
+                  { id: 'risk',       label: 'I have read and understood the data protection considerations and internet connectivity requirements.' },
+                  { id: 'permission', label: 'I confirm that our school is permitted by its proprietor/board to store and communicate student data online.' },
+                  { id: 'controller', label: 'I accept full responsibility as the Data Controller under Nigerian law for my school\u2019s use of Nexus Pulse Cloud.' },
+                  { id: 'processor',  label: 'I understand that Nexus Infrastructure Ltd. acts as a technology processor only and does not bear liability for school data usage.' },
+                  {
+                    id: 'dpa',
+                    label: (
+                      <>
+                        I accept the{' '}
+                        <a
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            window.electronAPI?.send?.('shell:openExternal', 'https://nexusos.com.ng/legal/dpa');
+                          }}
+                          style={{ color: 'var(--accent)', textDecoration: 'underline', cursor: 'pointer' }}
+                        >
+                          Nexus Data Processing Agreement (DPA)
+                        </a>
+                        {' '}governing automated parent messaging.
+                      </>
+                    ),
+                  },
+                ] as Array<{ id: string; label: React.ReactNode }>
+              ).map((item) => (
+                <label
+                  key={item.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '10px',
+                    fontSize: '11px',
+                    color: 'var(--text-main)',
+                    lineHeight: '1.5',
+                    cursor: 'pointer',
+                    background: 'rgba(255, 255, 255, 0.02)',
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `1px solid ${(termsChecks as any)[item.id] ? 'rgba(16, 185, 129, 0.3)' : 'var(--glass-border)'}`
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={(termsChecks as any)[item.id]}
+                    onChange={(e) => setTermsChecks(prev => ({ ...prev, [item.id]: e.target.checked }))}
+                    style={{ marginTop: '2px', accentColor: 'var(--accent-green)' }}
+                  />
+                  <span>{item.label}</span>
+                </label>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--glass-border)', paddingTop: '16px' }}>
+              <button
+                onClick={() => setShowTermsModal(false)}
+                className="secondary-btn"
+                style={{ fontSize: '11px' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleActivateCloudPulse}
+                disabled={!allConsented || isCloudSyncing}
+                className="primary-btn"
+                style={{
+                  fontSize: '11px',
+                  padding: '8px 18px',
+                  background: allConsented ? 'var(--accent-green)' : undefined,
+                  opacity: allConsented ? 1 : 0.5,
+                  cursor: allConsented ? 'pointer' : 'not-allowed'
+                }}
+              >
+                {isCloudSyncing ? 'Activating...' : 'I Understand, Activate Cloud Pulse'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
     </div>

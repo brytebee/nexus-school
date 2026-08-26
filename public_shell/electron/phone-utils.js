@@ -22,4 +22,11 @@ function normalizePhone(phone) {
   return clean;
 }
 
-module.exports = { normalizePhone };
+function getMatchableDigits(phone) {
+  if (!phone) return "";
+  const cleaned = String(phone).replace(/\D/g, "");
+  if (cleaned.length < 10) return cleaned;
+  return cleaned.slice(-10);
+}
+
+module.exports = { normalizePhone, getMatchableDigits };

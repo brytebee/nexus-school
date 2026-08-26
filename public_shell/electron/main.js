@@ -32,6 +32,7 @@ const { startServer, setSchoolConfig, setSchoolLicense, setActivationStatus, rev
 const address = require("address");
 const pulseBot     = require('./pulse-bot.js');
 const pulseExporter = require('./pulse-exporter.js');
+const syncWorker   = require('./sync-worker.js');
 let receiptAnalysis = null;
 try { receiptAnalysis = require('./receipt-analysis.js'); } catch (e) { console.warn('[receipt-analysis] Failed to load (canvas/pdf-parse unavailable):', e.message); }
 const express = require('express');
@@ -471,6 +472,15 @@ ipcMain.handle("pulse:get-autostart", () => {
     }
 });
 ipcMain.handle("pulse:status", () => pulseBot.getPulseStatus());
+
+// ── Pulse Cloud 2-Way Delta Sync IPC Channels ──────────────────────────────
+ipcMain.handle("sync:push", async () => syncWorker.pushSchoolDelta());
+ipcMain.handle("sync:pull", async () => syncWorker.pullPendingSyncEvents());
+ipcMain.handle("sync:trigger", async () => syncWorker.performSyncCycle());
+ipcMain.handle("sync:status", () => syncWorker.getSyncStatus());
+ipcMain.handle("sync:get-cloud-config", () => syncWorker.getCloudConfig());
+ipcMain.handle("sync:activate-cloud", async (_event, options) => syncWorker.activateCloud(options));
+ipcMain.handle("sync:deactivate-cloud", async () => syncWorker.deactivateCloud());
 
 // ── ui-ready: fired by App.tsx once React has mounted and licenseLoading=false ──
 // Registered HERE at module scope so it is in place before mainWindow.loadFile()
@@ -6751,6 +6761,8 @@ function createWindow() {
   // is populated (licenseStatus.tier is still undefined here). The tier gate
   // belongs around startPulse() only, not around the window-ref init.
   pulseBot.initPulseBot(mainWindow);
+  syncWorker.initSyncWorker(mainWindow);
+  syncWorker.startSyncSchedule();
 
   // Message queue worker is a tier-gated feature — start it once tier is known.
   // licenseStatus.tier is set in the license block below (~line 4903).
