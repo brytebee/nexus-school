@@ -28,6 +28,18 @@ jobs:
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_B64 }}" | base64 -d > public_shell/android/nexus-release.jks
 
+      - name: Write gradle.properties
+        # gradle.properties was removed from git tracking during a security scrub
+        # (it previously contained plaintext signing credentials). CI runners start
+        # without it, so we recreate the non-secret properties here. Signing
+        # credentials are injected separately via -P flags on the gradlew command.
+        run: |
+          cat > public_shell/android/gradle.properties << 'EOF'
+          android.useAndroidX=true
+          android.enableJetifier=true
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          EOF
+
       - name: Make gradlew executable
         run: chmod +x public_shell/android/gradlew
 
