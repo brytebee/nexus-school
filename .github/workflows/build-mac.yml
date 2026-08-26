@@ -49,6 +49,28 @@ jobs:
           "
         working-directory: public_shell/electron
 
+      - name: Sync package.json version from git tag
+        # electron-builder names artifacts from package.json "version".
+        # The committed value may be stale — overwrite it with the pushed tag
+        # so built files are always named Nexus-School-OS-<tag-version>.dmg.
+        # No-op when triggered from workflow_dispatch on a branch (not a v* tag).
+        shell: bash
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [[ "$TAG" == v* ]]; then
+            VERSION="${TAG#v}"
+            node -e "
+              const fs = require('fs');
+              const pkg = JSON.parse(fs.readFileSync('package.json'));
+              pkg.version = '${VERSION}';
+              fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            "
+            echo "package.json version set to ${VERSION}"
+          else
+            echo "Not a v* tag — keeping package.json version unchanged"
+          fi
+        working-directory: public_shell/electron
+
       - name: Build macOS DMG
         run: npm run dist:mac -- --publish never
         working-directory: public_shell/electron
