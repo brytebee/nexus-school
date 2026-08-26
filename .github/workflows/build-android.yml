@@ -2,6 +2,11 @@ name: Build & Publish Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      target_tag:
+        description: 'Release tag to attach the APK to (e.g. v1.0.82). Leave blank to use versionName from build.gradle.kts.'
+        required: false
+        default: ''
   push:
     tags:
       - 'v*'   # triggers on v1.0.4, v1.0.5-beta.1, etc.
@@ -75,8 +80,12 @@ jobs:
       - name: Force overwrite release assets on nexus-school-releases
         shell: bash
         run: |
-          TAG_NAME="${{ github.ref_name }}"
-          if [[ "$TAG_NAME" != v* ]]; then
+          # Priority: explicit input > git tag > versionName from build.gradle.kts
+          if [ -n "${{ github.event.inputs.target_tag }}" ]; then
+            TAG_NAME="${{ github.event.inputs.target_tag }}"
+          elif [[ "${{ github.ref_name }}" == v* ]]; then
+            TAG_NAME="${{ github.ref_name }}"
+          else
             TAG_NAME="v${{ env.VERSION }}"
           fi
           echo "Targeting release tag: $TAG_NAME"

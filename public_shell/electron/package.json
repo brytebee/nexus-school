@@ -112,7 +112,14 @@
       "icon": "assets/icons",
       "category": "Education",
       "maintainer": "Nexus Infrastructure Ltd <support@nexusos.com.ng>",
-      "synopsis": "High-End School Management System"
+      "synopsis": "High-End School Management System",
+      "desktop": {
+        "Name": "Nexus School OS",
+        "Comment": "Sovereign school management system",
+        "Categories": "Education;Office;",
+        "StartupWMClass": "nexus-school-os",
+        "StartupNotify": "true"
+      }
     },
     "deb": {
       "depends": [
