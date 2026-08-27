@@ -113,9 +113,9 @@
       "category": "Education",
       "maintainer": "Nexus Infrastructure Ltd <support@nexusos.com.ng>",
       "synopsis": "High-End School Management System",
+      "executableArgs": ["--no-sandbox"],
       "desktop": {
         "Name": "Nexus School OS",
-        "Exec": "\"/opt/Nexus School OS/nexus-school-os\" --no-sandbox %U",
         "Comment": "Sovereign school management system",
         "Categories": "Education;Office;",
         "StartupWMClass": "nexus-school-os",
