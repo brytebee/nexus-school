@@ -62,12 +62,32 @@ function getSchoolId(db) {
 
 function getSyncToken(db) {
   try {
+    // 1. Explicit sync token stored in app_settings
     const syncTokenRow = db.prepare("SELECT value FROM app_settings WHERE key = 'nexus_sync_token'").get();
     if (syncTokenRow?.value) return syncTokenRow.value;
 
+    // 2. hardware_id directly in app_settings
     const hwRow = db.prepare("SELECT value FROM app_settings WHERE key = 'hardware_id'").get();
     if (hwRow?.value) return hwRow.value;
 
+    // 3. Read hardware_id from license.nexus on disk — same source as getSchoolId.
+    //    For hardware-bound licenses this is the value that verifySyncAuth checks against.
+    try {
+      const { app } = require('electron');
+      const fs = require('fs');
+      const path = require('path');
+      const licensePath = path.join(app.getPath('userData'), 'license.nexus');
+      if (fs.existsSync(licensePath)) {
+        const raw = fs.readFileSync(licensePath, 'utf8').trim();
+        const header = raw.split('.')[0];
+        const payload = JSON.parse(Buffer.from(header, 'base64url').toString('utf8'));
+        if (payload.hardware_id) return payload.hardware_id;
+        // Non-hardware-bound: use school_id as token (verifySyncAuth accepts any token for these)
+        if (payload.school_id) return payload.school_id;
+      }
+    } catch (_) {}
+
+    // 4. Legacy DB fallback — license_payload key (kept for forward-compat)
     const licenseRow = db.prepare("SELECT value FROM app_settings WHERE key = 'license_payload'").get();
     if (licenseRow?.value) {
       const payload = JSON.parse(licenseRow.value);
