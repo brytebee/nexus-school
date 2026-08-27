@@ -25,15 +25,21 @@ function isCloudEnabled(db) {
 
 function getSchoolId(db) {
   try {
+    // 1. Explicit cloud ID set after first successful activation
     const row = db.prepare("SELECT value FROM app_settings WHERE key = 'school_cloud_id'").get();
     if (row && row.value) return row.value;
 
-    // Fallback: use school_id from license_payload or system_settings
+    // 2. school_id or hardware_id embedded in the license payload
     const licenseRow = db.prepare("SELECT value FROM app_settings WHERE key = 'license_payload'").get();
     if (licenseRow && licenseRow.value) {
       const payload = JSON.parse(licenseRow.value);
       if (payload.school_id) return payload.school_id;
+      if (payload.hardware_id) return payload.hardware_id;
     }
+
+    // 3. Device hardware_id from app_settings — present on virtually all installs
+    const hwRow = db.prepare("SELECT value FROM app_settings WHERE key = 'hardware_id'").get();
+    if (hwRow && hwRow.value) return hwRow.value;
   } catch (_) {}
   return null;
 }

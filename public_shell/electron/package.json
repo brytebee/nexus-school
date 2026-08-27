@@ -115,6 +115,7 @@
       "synopsis": "High-End School Management System",
       "desktop": {
         "Name": "Nexus School OS",
+        "Exec": "\"/opt/Nexus School OS/nexus-school-os\" --no-sandbox %U",
         "Comment": "Sovereign school management system",
         "Categories": "Education;Office;",
         "StartupWMClass": "nexus-school-os",
