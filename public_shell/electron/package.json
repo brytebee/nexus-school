@@ -1,7 +1,7 @@
 {
   "name": "nexus-school-os",
   "productName": "Nexus School OS",
-  "version": "1.0.81",
+  "version": "1.0.85",
   "description": "Nexus School OS - sovereign desktop engine",
   "author": "Nexus Infrastructure",
   "repository": {
@@ -132,8 +132,12 @@
         "libgbm1",
         "libasound2"
       ],
-      "conflicts": ["nexusschoolos"],
-      "replaces": ["nexusschoolos"]
+      "conflicts": [
+        "nexusschoolos"
+      ],
+      "replaces": [
+        "nexusschoolos"
+      ]
     },
     "nsis": {
       "oneClick": false,
