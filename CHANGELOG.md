@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.85] - 2026-08-27
+
+### Added
+- **Always-On Cloud Pulse (2-Way Delta Sync)**: Multi-tenant background synchronization worker periodically pushing student fee balances, result summaries, attendance statistics, portal news, and policies to the central cloud vault, and reconciling inbound settlement events from Paystack.
+- **Nigeria Data Protection Act (NDPA 2023) Legal Consent Modal**: Mandatory 7-point consent gate with deep link to full published Data Processing Agreement (`/legal/dpa`) before cloud communication sync can be activated.
+- **Dynamic CI Release Notes**: Automated GitHub release notes generation directly from commit history and pull requests for Linux (.deb/AppImage), macOS, Windows, and Android CI pipelines.
+
+### Fixed
+- **Linux .deb Desktop Launcher & Ubuntu 23.10+ / 26.04 AppArmor Compatibility**: Injected `--no-sandbox` via `linux.executableArgs` into the generated `.desktop` launch file, resolving the silent launch failure caused by unprivileged user namespace restrictions on modern Linux kernels.
+- **Debian Package Conflict Resolution**: Configured `deb.fpm` passthrough `--conflicts` and `--replaces` flags for legacy `nexusschoolos` package upgrades.
+- **Cloud Pulse School ID Resolution**: Rewrote `getSchoolId` and `getSyncToken` to decode `license.nexus` on disk directly as the authoritative source, unblocking older and hardware-bound license activations.
+
+---
+
 ## [2.5.0] - 2026-07-06
 
 ### Added

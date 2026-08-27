@@ -88,11 +88,10 @@ jobs:
           else
             TAG_NAME="v${{ env.VERSION }}"
           fi
-          echo "Targeting release tag: $TAG_NAME"
           gh release create "$TAG_NAME" \
             --repo brytebee/nexus-school-releases \
             --title "$TAG_NAME" \
-            --notes-file RELEASE_NOTES.md || true
+            --generate-notes || true
           gh release upload "$TAG_NAME" \
             "${{ env.APK_PATH }}" \
             --repo brytebee/nexus-school-releases \
