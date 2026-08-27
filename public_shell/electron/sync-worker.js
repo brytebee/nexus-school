@@ -29,7 +29,23 @@ function getSchoolId(db) {
     const row = db.prepare("SELECT value FROM app_settings WHERE key = 'school_cloud_id'").get();
     if (row && row.value) return row.value;
 
-    // 2. school_id or hardware_id embedded in the license payload
+    // 2. Read school_id directly from the license.nexus file on disk
+    //    (license_payload is NOT stored in the DB — the file is the source of truth)
+    try {
+      const { app } = require('electron');
+      const fs = require('fs');
+      const path = require('path');
+      const licensePath = path.join(app.getPath('userData'), 'license.nexus');
+      if (fs.existsSync(licensePath)) {
+        const raw = fs.readFileSync(licensePath, 'utf8').trim();
+        const header = raw.split('.')[0];
+        const payload = JSON.parse(Buffer.from(header, 'base64url').toString('utf8'));
+        if (payload.school_id) return payload.school_id;
+        if (payload.hardware_id) return payload.hardware_id;
+      }
+    } catch (_) {}
+
+    // 3. DB fallback — legacy installs that stored license_payload in app_settings
     const licenseRow = db.prepare("SELECT value FROM app_settings WHERE key = 'license_payload'").get();
     if (licenseRow && licenseRow.value) {
       const payload = JSON.parse(licenseRow.value);
@@ -37,7 +53,7 @@ function getSchoolId(db) {
       if (payload.hardware_id) return payload.hardware_id;
     }
 
-    // 3. Device hardware_id from app_settings — present on virtually all installs
+    // 4. Final fallback: hardware_id stored in app_settings
     const hwRow = db.prepare("SELECT value FROM app_settings WHERE key = 'hardware_id'").get();
     if (hwRow && hwRow.value) return hwRow.value;
   } catch (_) {}
