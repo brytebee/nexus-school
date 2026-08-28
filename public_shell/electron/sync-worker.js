@@ -70,8 +70,10 @@ function getSyncToken(db) {
     const hwRow = db.prepare("SELECT value FROM app_settings WHERE key = 'hardware_id'").get();
     if (hwRow?.value) return hwRow.value;
 
-    // 3. Read hardware_id from license.nexus on disk — same source as getSchoolId.
-    //    For hardware-bound licenses this is the value that verifySyncAuth checks against.
+    // 3. Return the full signed token from license.nexus — this is the exact
+    //    435-char string stored in License.token in PostgreSQL.
+    //    verifySyncAuth's (l.token === syncToken) check matches it directly,
+    //    requiring no server-side changes.
     try {
       const { app } = require('electron');
       const fs = require('fs');
@@ -79,11 +81,7 @@ function getSyncToken(db) {
       const licensePath = path.join(app.getPath('userData'), 'license.nexus');
       if (fs.existsSync(licensePath)) {
         const raw = fs.readFileSync(licensePath, 'utf8').trim();
-        const header = raw.split('.')[0];
-        const payload = JSON.parse(Buffer.from(header, 'base64url').toString('utf8'));
-        if (payload.hardware_id) return payload.hardware_id;
-        // Non-hardware-bound: use school_id as token (verifySyncAuth accepts any token for these)
-        if (payload.school_id) return payload.school_id;
+        if (raw) return raw;
       }
     } catch (_) {}
 
