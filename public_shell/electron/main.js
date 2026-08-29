@@ -8246,6 +8246,59 @@ function createWindow() {
 
       const sysConfPath = path.join(userDataPath, 'nexus_sys.json');
       _silverActivationCreds = { token: tokenContent, hwId: hardwareId, schoolId: payload.school_id, sysConfPath };
+
+      // ── Sanitise nexus_sys.json so the anti-rollback guard cannot block
+      // a freshly imported valid license on the next boot.
+      // Two situations cause trouble:
+      //   1. last_run_timestamp is in the future (clock was wound forward in a
+      //      previous session) — the guard fires BEFORE the license is read.
+      //   2. revoked_at is set — a new import should supersede a prior revocation.
+      try {
+        const now = Date.now();
+        let sysConf = {};
+        if (fs.existsSync(sysConfPath)) {
+          try { sysConf = JSON.parse(fs.readFileSync(sysConfPath, 'utf-8')); } catch (_) {}
+        }
+
+        let sysConfDirty = false;
+
+        // Reset a future last_run_timestamp so the anti-rollback guard passes.
+        if (typeof sysConf.last_run_timestamp === 'number' && sysConf.last_run_timestamp > now + 60_000) {
+          console.log(`[License] import: resetting future last_run_timestamp (${sysConf.last_run_timestamp}) → ${now}`);
+          sysConf.last_run_timestamp = now;
+          sysConfDirty = true;
+        }
+
+        // Clear a stale revocation — a new license import supersedes it.
+        if (sysConf.revoked_at) {
+          console.log('[License] import: clearing stale revoked_at from nexus_sys.json');
+          delete sysConf.revoked_at;
+          sysConfDirty = true;
+        }
+
+        if (sysConfDirty) {
+          fs.writeFileSync(sysConfPath, JSON.stringify(sysConf, null, 2));
+        }
+
+        // Mirror the reset into SQLite so the dual-store check (Math.max) also
+        // sees a safe value — only when we actually changed the timestamp.
+        if (sysConfDirty && typeof sysConf.last_run_timestamp === 'number') {
+          try {
+            const db = database.getDb();
+            if (db) {
+              db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_last_run', ?)").run(String(sysConf.last_run_timestamp));
+              console.log('[License] import: _sys_last_run synced in SQLite');
+            }
+          } catch (dbErr) {
+            console.warn('[License] import: could not update _sys_last_run in SQLite:', dbErr.message);
+          }
+        }
+      } catch (sysErr) {
+        // Non-fatal — log and continue. The relaunch will still happen; the
+        // anti-rollback guard may or may not fire depending on the stored value.
+        console.warn('[License] import: failed to sanitise nexus_sys.json:', sysErr.message);
+      }
+
       return { ok: true, relaunch_required: true };
     } catch (e) {
       return { ok: false, reason: e.message || 'Failed to import license file.' };
