@@ -11,7 +11,20 @@ let lastSyncSuccess = null;
 let lastSyncError = null;
 
 function getApiBase() {
-  return process.env.NEXUS_API_URL || "https://api.nexusos.com.ng";
+  const override = process.env.NEXUS_API_URL;
+  if (override) {
+    // In packaged (production) builds, silently ignore any non-HTTPS override
+    // (e.g. http://localhost:3001 from a misconfigured GitHub Secret).
+    // Dev builds (app.isPackaged === false) still honour any override for local testing.
+    try {
+      const { app } = require('electron');
+      if (app.isPackaged && !override.startsWith('https://')) {
+        return 'https://api.nexusos.com.ng';
+      }
+    } catch (_) {}
+    return override;
+  }
+  return 'https://api.nexusos.com.ng';
 }
 
 function isCloudEnabled(db) {
