@@ -102,7 +102,11 @@ export function botStatusReducer(val) {
       botStatusDesc = 'Parents can now WhatsApp the school number to check results, attendance & fees.';
       break;
     case 'error':
-      botStatusDesc = data ? `Error: ${data}` : 'Bot encountered an initialization error.';
+      // __CHROMIUM_MISSING__ is handled by a dedicated modal in NexusPulse.tsx —
+      // leave botStatusDesc empty so the generic error paragraph doesn't render.
+      botStatusDesc = (data === '__CHROMIUM_MISSING__')
+        ? ''
+        : data ? `Error: ${data}` : 'Bot encountered an initialization error.';
       break;
     case 'disconnected':
     default:
@@ -110,7 +114,8 @@ export function botStatusReducer(val) {
       break;
   }
 
-  return { botStatus: status, botStatusDesc, qrCodeDataUrl, loadingAction };
+  // Expose raw data so JSX can branch on sentinel values (e.g. __CHROMIUM_MISSING__)
+  return { botStatus: status, botStatusDesc, qrCodeDataUrl, loadingAction, botStatusData: data };
 }
 
 /**

@@ -57,6 +57,7 @@ export function NexusPulse() {
   // Bot Status State
   const [botStatus, setBotStatus] = useState<'starting' | 'qr' | 'authenticated' | 'ready' | 'disconnected' | 'error'>('disconnected');
   const [botStatusDesc, setBotStatusDesc] = useState('Click "Start Bot" to initialise the WhatsApp engine.');
+  const [botStatusData, setBotStatusData] = useState<string | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
   const [loadingAction, setLoadingAction] = useState(false);
 
@@ -226,6 +227,7 @@ export function NexusPulse() {
     setBotStatusDesc(next.botStatusDesc);
     setQrCodeDataUrl(next.qrCodeDataUrl);
     setLoadingAction(next.loadingAction);
+    setBotStatusData(next.botStatusData ?? null);
   };
 
   // Register WhatsApp status listeners
@@ -1441,6 +1443,85 @@ export function NexusPulse() {
                 }}
               >
                 {isCloudSyncing ? 'Activating...' : 'I Understand, Activate Cloud Pulse'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ── Chromium-Not-Found Modal ──────────────────────────────────────────
+          Shown only when pulse-bot.js emits status='error', data='__CHROMIUM_MISSING__'.
+          Uses the identical portal + glassmorphism pattern as showTermsModal above.
+          AlertTriangle and X are already imported at line 5 — no new imports needed. */}
+      {botStatus === 'error' && botStatusData === '__CHROMIUM_MISSING__' && ReactDOM.createPortal(
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(8px)', zIndex: 9999, display: 'flex',
+          alignItems: 'center', justifyContent: 'center', padding: '20px'
+        }}>
+          <div style={{
+            background: '#0d1235', border: '1px solid var(--glass-border)',
+            borderRadius: 'var(--radius-lg)', maxWidth: '480px', width: '100%',
+            padding: '28px', display: 'flex', flexDirection: 'column', gap: '18px',
+            boxShadow: '0 20px 50px rgba(0, 0, 0, 0.5)'
+          }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--glass-border)', paddingBottom: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertTriangle size={20} color="#f59e0b" />
+                <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: 'var(--text-main)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Chromium Browser Not Found
+                </h3>
+              </div>
+              <button
+                onClick={() => { setBotStatus('disconnected'); setBotStatusData(null); }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: '4px' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <p style={{ fontSize: '13px', color: 'var(--text-dim)', margin: 0, lineHeight: 1.6 }}>
+              The WhatsApp bot requires a Chromium-based browser to run. None was found on this machine.
+            </p>
+            <p style={{ fontSize: '13px', color: 'var(--text-dim)', margin: 0, lineHeight: 1.6 }}>
+              Open a terminal and run:
+            </p>
+            <div style={{
+              background: 'rgba(0, 229, 255, 0.06)', border: '1px solid rgba(0, 229, 255, 0.15)',
+              borderRadius: 'var(--radius-md)', padding: '12px 16px',
+              fontFamily: 'monospace', fontSize: '13px', color: 'var(--text-main)',
+              userSelect: 'all'
+            }}>
+              sudo apt install -y chromium-browser
+            </div>
+            <p style={{ fontSize: '11px', color: 'var(--text-dim)', margin: 0 }}>
+              After installing, click <strong style={{ color: 'var(--text-main)' }}>Start Bot</strong> again.
+            </p>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '4px' }}>
+              <button
+                onClick={() => navigator.clipboard.writeText('sudo apt install -y chromium-browser')}
+                style={{
+                  fontSize: '12px', padding: '8px 16px', borderRadius: 'var(--radius-md)',
+                  background: 'rgba(0, 229, 255, 0.1)', border: '1px solid rgba(0, 229, 255, 0.3)',
+                  color: 'var(--accent)', cursor: 'pointer', fontWeight: 600
+                }}
+              >
+                Copy Command
+              </button>
+              <button
+                onClick={() => { setBotStatus('disconnected'); setBotStatusData(null); }}
+                style={{
+                  fontSize: '12px', padding: '8px 16px', borderRadius: 'var(--radius-md)',
+                  background: 'transparent', border: '1px solid var(--glass-border)',
+                  color: 'var(--text-dim)', cursor: 'pointer'
+                }}
+              >
+                Dismiss
               </button>
             </div>
           </div>

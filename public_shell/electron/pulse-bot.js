@@ -114,37 +114,75 @@ async function startPulse() {
   }, 900);
 
   // ── Resolve Chromium path for packaged Electron app ───────────────────────
-  // Puppeteer's bundled Chromium path changes when asar-packed.
-  // Priority: system Chrome → Puppeteer bundled → let Puppeteer auto-detect.
+  // Strategy (in priority order):
+  //   1. Dynamic `which` lookup — finds any PATH-visible install (apt, brew, .deb)
+  //   2. Static snap paths — Electron's restricted PATH excludes /snap/bin on Linux
+  //   3. Mac static paths — `which` covers most cases but static is a reliable fallback
+  //   4. Windows static paths — `which` not available on win32
+  //   5. Puppeteer bundled Chromium — dev only; unreliable inside asar
   function resolveChromiumPath() {
-    const { app } = require("electron");
+    const { execSync } = require("child_process");
 
-    // System Chrome paths by platform
-    const systemPaths = {
-      darwin: [
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        "/Applications/Chromium.app/Contents/MacOS/Chromium",
-      ],
-      win32: [
-        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-      ],
-      linux: [
-        "/usr/bin/google-chrome",
-        "/usr/bin/chromium-browser",
-        "/usr/bin/chromium",
-      ],
-    };
+    // Stage 1 — dynamic `which` lookup (covers PATH-visible installs on Linux + Mac)
+    const whichCandidates = {
+      linux:  ["google-chrome-stable", "google-chrome", "chromium-browser", "chromium"],
+      darwin: ["google-chrome", "chromium"],
+      win32:  [],
+    }[process.platform] ?? [];
 
-    const candidates = systemPaths[process.platform] ?? [];
-    for (const p of candidates) {
-      if (fs.existsSync(p)) {
-        console.log(`[Pulse Bot] Using system Chrome: ${p}`);
-        return p;
+    for (const bin of whichCandidates) {
+      try {
+        const p = execSync(`which ${bin} 2>/dev/null`, { encoding: "utf8" }).trim();
+        if (p && fs.existsSync(p)) {
+          console.log(`[Pulse Bot] Using system Chrome (which): ${p}`);
+          return p;
+        }
+      } catch (_) {}
+    }
+
+    // Stage 2 — static snap paths (excluded from Electron's restricted PATH on Linux)
+    if (process.platform === "linux") {
+      const snapPaths = [
+        "/snap/bin/chromium",
+        "/var/lib/snapd/snap/bin/chromium",
+      ];
+      for (const p of snapPaths) {
+        if (fs.existsSync(p)) {
+          console.log(`[Pulse Bot] Using snap Chromium: ${p}`);
+          return p;
+        }
       }
     }
 
-    // Puppeteer bundled Chromium — path differs between dev and packaged
+    // Stage 3 — Mac static fallback (for cases where `which` yields nothing)
+    if (process.platform === "darwin") {
+      const macPaths = [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+      ];
+      for (const p of macPaths) {
+        if (fs.existsSync(p)) {
+          console.log(`[Pulse Bot] Using system Chrome (static): ${p}`);
+          return p;
+        }
+      }
+    }
+
+    // Stage 4 — Windows static paths
+    if (process.platform === "win32") {
+      const winPaths = [
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+      ];
+      for (const p of winPaths) {
+        if (fs.existsSync(p)) {
+          console.log(`[Pulse Bot] Using system Chrome (static): ${p}`);
+          return p;
+        }
+      }
+    }
+
+    // Stage 5 — Puppeteer bundled Chromium (dev only; unreliable in packaged asar)
     try {
       const puppeteer = require("puppeteer");
       const chromePath = puppeteer.executablePath();
@@ -154,7 +192,7 @@ async function startPulse() {
       }
     } catch (_) {}
 
-    console.warn("[Pulse Bot] No Chromium found — Puppeteer will auto-detect (may fail if packaged).");
+    console.warn("[Pulse Bot] No Chromium found on this machine.");
     return undefined;
   }
 
@@ -259,6 +297,15 @@ async function startPulse() {
     }
   } catch (err) {
     _initInProgress = false;
+    // Chromium not installed — surface a specific actionable modal in the UI
+    const isChromiumMissing =
+      err?.message?.includes("Could not find Chrome") ||
+      err?.message?.includes("Failed to launch the browser process");
+    if (isChromiumMissing) {
+      console.warn("[Pulse Bot] Chromium not found — prompting user to install.");
+      sendStatus("error", "__CHROMIUM_MISSING__");
+      return; // nothing to destroy — client never fully initialised
+    }
     // Suppress context-destroyed noise from LOGOUT — handled by disconnected event
     if (!err?.message?.includes("Execution context was destroyed") &&
         !err?.message?.includes("Session closed")) {
