@@ -304,7 +304,12 @@ async function startPulse() {
     if (isChromiumMissing) {
       console.warn("[Pulse Bot] Chromium not found — prompting user to install.");
       sendStatus("error", "__CHROMIUM_MISSING__");
-      return; // nothing to destroy — client never fully initialised
+      // Null out the partially-constructed client so the 900ms deferred
+      // sendStatus("starting") timeout does not fire (condition: client && !isReady).
+      // Also ensures getPulseStatus() returns "disconnected" so the next
+      // "Start Bot" click can re-enter startPulse() cleanly.
+      client = null;
+      return;
     }
     // Suppress context-destroyed noise from LOGOUT — handled by disconnected event
     if (!err?.message?.includes("Execution context was destroyed") &&
