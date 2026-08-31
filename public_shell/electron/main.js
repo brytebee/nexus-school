@@ -482,6 +482,12 @@ ipcMain.handle("sync:get-cloud-config", () => syncWorker.getCloudConfig());
 ipcMain.handle("sync:activate-cloud", async (_event, options) => syncWorker.activateCloud(options));
 ipcMain.handle("sync:deactivate-cloud", async () => syncWorker.deactivateCloud());
 
+// Allow the renderer to manually request a fresh cloud bot QR (e.g. after 2-min expiry)
+ipcMain.on("cloud-pulse:request-qr", () => {
+  const db = database.getDb();
+  if (db) syncWorker.startCloudQrPoll(db);
+});
+
 // ── ui-ready: fired by App.tsx once React has mounted and licenseLoading=false ──
 // Registered HERE at module scope so it is in place before mainWindow.loadFile()
 // is called inside createWindow(). If registered later (inside createWindow()),

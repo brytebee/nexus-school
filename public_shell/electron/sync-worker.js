@@ -350,6 +350,96 @@ function stopSyncSchedule() {
   }
 }
 
+// ── Cloud Bot QR Poll ─────────────────────────────────────────────────────
+// After init-bot triggers the VPS, the VPS calls POST /api/pulse/qr-relay to
+// store a 2-minute QR. We poll GET /api/pulse/qr-relay every 3 seconds and
+// forward the QR to the renderer so the admin can scan without leaving the app.
+
+let _qrPollTimer = null;
+let _statusPollTimer = null;
+
+function stopCloudPolls() {
+  if (_qrPollTimer)     { clearInterval(_qrPollTimer);     _qrPollTimer = null; }
+  if (_statusPollTimer) { clearInterval(_statusPollTimer); _statusPollTimer = null; }
+}
+
+function startCloudStatusPoll(schoolId, apiBase, token) {
+  let attempts = 0;
+  const MAX = 10; // 10 × 3s = 30s
+
+  _statusPollTimer = setInterval(async () => {
+    attempts++;
+    if (attempts > MAX) {
+      clearInterval(_statusPollTimer);
+      _statusPollTimer = null;
+      return;
+    }
+    try {
+      const r    = await fetch(`${apiBase}/api/pulse/bot-status?school_id=${schoolId}`,
+        { headers: { 'x-nexus-sync-token': token } });
+      const json = await r.json();
+      if (json.status === 'connected' || json.status === 'CONNECTED') {
+        clearInterval(_statusPollTimer);
+        _statusPollTimer = null;
+        if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+          mainWindowRef.webContents.send('cloud-pulse:connected');
+          console.log('[Sync Worker] Cloud bot connected — sent cloud-pulse:connected to renderer.');
+        }
+      }
+    } catch (_) {}
+  }, 3000);
+}
+
+function startCloudQrPoll(db) {
+  stopCloudPolls(); // cancel any previous poll cycle
+
+  const schoolId = getSchoolId(db);
+  const apiBase  = getApiBase();
+  const token    = getSyncToken(db);
+
+  if (!schoolId || !apiBase) {
+    console.warn('[Sync Worker] Cannot start QR poll — missing school_id or apiBase.');
+    return;
+  }
+
+  let attempts      = 0;
+  let hadQr         = false; // true once we have seen at least one AWAITING_QR_SCAN
+  const MAX_ATTEMPTS = 50;   // 50 × 3s ≈ 150s (slightly beyond 2-min QR TTL)
+
+  console.log('[Sync Worker] Starting cloud QR poll for', schoolId);
+
+  _qrPollTimer = setInterval(async () => {
+    attempts++;
+    if (attempts > MAX_ATTEMPTS) {
+      clearInterval(_qrPollTimer);
+      _qrPollTimer = null;
+      console.log('[Sync Worker] QR poll timed out — QR was not scanned in time.');
+      return;
+    }
+    try {
+      const r    = await fetch(`${apiBase}/api/pulse/qr-relay?school_id=${schoolId}`,
+        { headers: { 'x-nexus-sync-token': token } });
+      const json = await r.json();
+
+      if (json.status === 'AWAITING_QR_SCAN' && json.qr) {
+        hadQr = true;
+        if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+          mainWindowRef.webContents.send('cloud-pulse:qr', json.qr);
+        }
+      }
+
+      // QR TTL expired — either scanned or timed out on the VPS side
+      if (json.status === 'EXPIRED_OR_NONE' && hadQr) {
+        // QR was previously present but is now gone → likely scanned → check status
+        clearInterval(_qrPollTimer);
+        _qrPollTimer = null;
+        console.log('[Sync Worker] QR consumed — starting bot-status poll.');
+        startCloudStatusPoll(schoolId, apiBase, token);
+      }
+    } catch (_) {}
+  }, 3000);
+}
+
 async function activateCloud(options = {}) {
   const db = database.getDb();
   const schoolCloudId = options.schoolCloudId || getSchoolId(db);
@@ -373,10 +463,34 @@ async function activateCloud(options = {}) {
   // Start sync timer
   startSyncSchedule();
 
+  // Trigger VPS bot initialisation (fire-and-forget — failures don't block sync activation)
+  try {
+    const token = getSyncToken(db);
+    const apiBase = getApiBase();
+    const res = await fetch(`${apiBase}/api/pulse/init-bot`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-nexus-sync-token': token,
+      },
+      body: JSON.stringify({ school_id: schoolCloudId }),
+    });
+    if (res.ok) {
+      console.log('[Sync Worker] Cloud bot init triggered — starting QR poll.');
+      startCloudQrPoll(db);
+    } else {
+      const text = await res.text().catch(() => '');
+      console.warn(`[Sync Worker] init-bot returned ${res.status}: ${text}`);
+    }
+  } catch (err) {
+    console.warn('[Sync Worker] Bot init call failed (non-blocking):', err.message);
+  }
+
   // Run immediate sync cycle
   const result = await performSyncCycle();
   return { ok: true, syncResult: result };
 }
+
 
 async function deactivateCloud() {
   const db = database.getDb();
@@ -427,5 +541,6 @@ module.exports = {
   activateCloud,
   deactivateCloud,
   getCloudConfig,
-  getSyncStatus
+  getSyncStatus,
+  startCloudQrPoll,
 };
