@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { useLicense } from '../hooks/useLicense';
 import { useIdentity } from '../hooks/useIdentity';
-import { MessageSquare, Send, Reply, Globe, ShieldCheck, RefreshCw, CheckCircle, AlertTriangle, X, Check, Wifi } from 'lucide-react';
+import { MessageSquare, Send, Reply, Globe, ShieldCheck, RefreshCw, CheckCircle, AlertTriangle, X, Check, Wifi, QrCode } from 'lucide-react';
 import {
   buildThreads,
   filterUnread,
@@ -63,6 +63,7 @@ export function NexusPulse() {
   // Cloud Bot QR Pairing State — populated via IPC from sync-worker.js poll loop
   const [cloudQr, setCloudQr] = useState<string | null>(null);
   const [cloudBotConnected, setCloudBotConnected] = useState(false);
+  const [cloudBotLoading, setCloudBotLoading] = useState(false);
   const [copiedChromiumCmd, setCopiedChromiumCmd] = useState<string | null>(null);
 
   const copyChromiumCmd = (text: string, id: string) => {
@@ -286,13 +287,51 @@ export function NexusPulse() {
       window.electronAPI.on('cloud-pulse:qr', (qrDataUrl: string) => {
         setCloudQr(qrDataUrl);
         setCloudBotConnected(false);
+        setCloudBotLoading(false);
       });
       window.electronAPI.on('cloud-pulse:connected', () => {
         setCloudQr(null);
         setCloudBotConnected(true);
+        setCloudBotLoading(false);
       });
     }
+
+    // Check if cloud bot is already connected on startup
+    if (window.electronAPI?.invoke) {
+      window.electronAPI.invoke('cloud-pulse:get-status').then((res: any) => {
+        if (res?.status === 'connected' || res?.status === 'CONNECTED') {
+          setCloudBotConnected(true);
+          setCloudQr(null);
+        }
+      }).catch(() => {});
+    }
   }, []);
+
+  const handleRequestCloudQr = async () => {
+    setCloudBotLoading(true);
+    setCloudQr(null);
+    try {
+      if (window.electronAPI?.invoke) {
+        const res = await window.electronAPI.invoke('cloud-pulse:init-bot');
+        if (!res?.ok && res?.error) {
+          if (Swal) {
+            Swal.fire({
+              icon: 'error',
+              title: 'Cloud Bot Initialization',
+              text: res.error,
+              background: '#0d1235',
+              color: '#fff'
+            });
+          }
+          setCloudBotLoading(false);
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to init cloud bot:', err);
+      setCloudBotLoading(false);
+    }
+  };
+
 
   const addCloudLog = (statusMsg: string) => {
     const statusEl = document.getElementById('react-cloud-sync-status');
@@ -875,36 +914,57 @@ export function NexusPulse() {
                 </div>
 
                 {/* ── Cloud Bot WhatsApp Pairing Panel ──────────────────────────────────
-                    Visible only when Cloud Pulse is enabled and either:
-                    - cloudQr is set   → show QR for admin to scan with school phone
-                    - cloudBotConnected → show green connected badge
+                    Always visible when Cloud Pulse is enabled.
+                    Shows 3 states: Connected, Awaiting QR Scan, or Standby.
                     Populated via cloud-pulse:qr / cloud-pulse:connected IPC from sync-worker.js */}
-                {cloudPulseEnabled && (cloudQr || cloudBotConnected) && (
+                {cloudPulseEnabled && (
                   <div style={{ background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-lg)', padding: '22px', maxWidth: '576px', width: '100%', alignSelf: 'center', display: 'flex', flexDirection: 'column', gap: '16px', flexShrink: 0 }}>
                     {/* Header */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--glass-border)', paddingBottom: '12px' }}>
-                      <Wifi size={16} color="var(--accent)" />
-                      <h4 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>
-                        Cloud Bot — WhatsApp Pairing
-                      </h4>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--glass-border)', paddingBottom: '12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Wifi size={16} color="var(--accent)" />
+                        <h4 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>
+                          Cloud Bot — WhatsApp Pairing
+                        </h4>
+                      </div>
+                      <span style={{
+                        fontSize: '9px',
+                        fontWeight: 900,
+                        color: cloudBotConnected ? 'var(--accent-green)' : (cloudQr ? '#f59e0b' : 'var(--text-dim)'),
+                        background: cloudBotConnected ? 'rgba(16, 185, 129, 0.1)' : (cloudQr ? 'rgba(245, 158, 11, 0.1)' : 'rgba(255, 255, 255, 0.05)'),
+                        padding: '2px 8px',
+                        borderRadius: '9999px',
+                        border: `1px solid ${cloudBotConnected ? 'rgba(16, 185, 129, 0.3)' : (cloudQr ? 'rgba(245, 158, 11, 0.3)' : 'rgba(255, 255, 255, 0.1)')}`,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.08em'
+                      }}>
+                        {cloudBotConnected ? '● Connected' : (cloudQr ? '● Awaiting Scan' : '○ Standby')}
+                      </span>
                     </div>
 
                     {cloudBotConnected ? (
                       /* Connected state */
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '16px 0', textAlign: 'center' }}>
-                        <div style={{ fontSize: '40px' }}>✅</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '12px 0', textAlign: 'center' }}>
+                        <div style={{ fontSize: '36px' }}>✅</div>
                         <p style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent-green)', margin: 0 }}>
-                          Cloud Bot Connected
+                          Cloud Bot Connected & Active
                         </p>
-                        <p style={{ fontSize: '11px', color: 'var(--text-dim)', margin: 0, lineHeight: 1.6 }}>
-                          Your WhatsApp bot is live 24/7 on the Nexus cloud. Parents will receive instant replies even when your laptop is off.
+                        <p style={{ fontSize: '11px', color: 'var(--text-dim)', margin: 0, lineHeight: 1.6, maxWidth: '420px' }}>
+                          Your WhatsApp bot is live 24/7 on the Nexus Cloud. Parents will receive automated fee checks, attendance digests, and result alerts even when your laptop is turned off.
                         </p>
+                        <button
+                          onClick={handleRequestCloudQr}
+                          disabled={cloudBotLoading}
+                          style={{ marginTop: '6px', fontSize: '11px', padding: '6px 14px', borderRadius: 'var(--radius-md)', background: 'transparent', border: '1px solid var(--glass-border)', color: 'var(--text-dim)', cursor: 'pointer' }}
+                        >
+                          {cloudBotLoading ? 'Reconnecting...' : '🔄 Re-pair WhatsApp Number'}
+                        </button>
                       </div>
                     ) : cloudQr ? (
                       /* QR scan state */
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px', textAlign: 'center' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', textAlign: 'center' }}>
                         <p style={{ fontSize: '12px', color: 'var(--text-dim)', margin: 0, lineHeight: 1.6 }}>
-                          Open WhatsApp on the <strong style={{ color: 'var(--text-main)' }}>school phone</strong> → Linked Devices → Link a Device → Scan the code below.
+                          Open WhatsApp on the <strong style={{ color: 'var(--text-main)' }}>school phone</strong> → Linked Devices → Link a Device → Scan this QR code.
                         </p>
                         <div className="pulse-bot-qr-wrapper">
                           <img
@@ -914,18 +974,46 @@ export function NexusPulse() {
                           />
                         </div>
                         <p style={{ fontSize: '10px', color: 'var(--text-dim)', margin: 0 }}>
-                          Valid for 2 minutes · Auto-refreshing
+                          Valid for 2 minutes · Auto-polling server
                         </p>
                         <button
-                          onClick={() => window.electronAPI?.send?.('cloud-pulse:request-qr')}
+                          onClick={handleRequestCloudQr}
+                          disabled={cloudBotLoading}
                           style={{ fontSize: '11px', padding: '6px 14px', borderRadius: 'var(--radius-md)', background: 'transparent', border: '1px solid var(--glass-border)', color: 'var(--text-dim)', cursor: 'pointer' }}
                         >
-                          ↻ Request New QR
+                          {cloudBotLoading ? 'Requesting...' : '↻ Request Fresh QR'}
                         </button>
                       </div>
-                    ) : null}
+                    ) : (
+                      /* Standby state — not yet paired */
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', padding: '10px 0', textAlign: 'center' }}>
+                        <p style={{ fontSize: '12px', color: 'var(--text-dim)', margin: 0, lineHeight: 1.6, maxWidth: '440px' }}>
+                          Pair the school's WhatsApp account to the 24/7 Cloud Bot so parents can query fees and results anytime.
+                        </p>
+                        <button
+                          onClick={handleRequestCloudQr}
+                          disabled={cloudBotLoading}
+                          style={{
+                            fontSize: '12px', padding: '10px 20px', borderRadius: 'var(--radius-md)',
+                            background: 'rgba(0, 229, 255, 0.12)', border: '1px solid rgba(0, 229, 255, 0.3)',
+                            color: 'var(--accent)', cursor: 'pointer', fontWeight: 700,
+                            display: 'flex', alignItems: 'center', gap: '8px'
+                          }}
+                        >
+                          {cloudBotLoading ? (
+                            <span>Initialising Cloud Session...</span>
+                          ) : (
+                            <>
+                              <QrCode size={16} />
+                              <span>Generate Cloud Pairing QR</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
+
 
                 {/* ── Always-On Nexus Pulse Cloud (2-Way Delta Sync) Panel ── */}
                 <div style={{ background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-lg)', padding: '22px', maxWidth: '576px', width: '100%', alignSelf: 'center', display: 'flex', flexDirection: 'column', gap: '18px', flexShrink: 0 }}>

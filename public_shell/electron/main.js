@@ -482,11 +482,25 @@ ipcMain.handle("sync:get-cloud-config", () => syncWorker.getCloudConfig());
 ipcMain.handle("sync:activate-cloud", async (_event, options) => syncWorker.activateCloud(options));
 ipcMain.handle("sync:deactivate-cloud", async () => syncWorker.deactivateCloud());
 
-// Allow the renderer to manually request a fresh cloud bot QR (e.g. after 2-min expiry)
-ipcMain.on("cloud-pulse:request-qr", () => {
+// Cloud Bot Management IPC Handlers
+ipcMain.handle("cloud-pulse:init-bot", async () => {
   const db = database.getDb();
-  if (db) syncWorker.startCloudQrPoll(db);
+  if (db) return syncWorker.requestCloudBotInit(db);
+  return { ok: false, error: 'Database uninitialized' };
 });
+
+ipcMain.handle("cloud-pulse:get-status", async () => {
+  const db = database.getDb();
+  if (db) return syncWorker.checkCloudBotStatus(db);
+  return { status: 'offline' };
+});
+
+// Allow the renderer to manually request a fresh cloud bot QR (e.g. after 2-min expiry)
+ipcMain.on("cloud-pulse:request-qr", async () => {
+  const db = database.getDb();
+  if (db) await syncWorker.requestCloudBotInit(db);
+});
+
 
 // ── ui-ready: fired by App.tsx once React has mounted and licenseLoading=false ──
 // Registered HERE at module scope so it is in place before mainWindow.loadFile()

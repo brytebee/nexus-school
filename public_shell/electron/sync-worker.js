@@ -417,20 +417,45 @@ function startCloudQrPoll(db) {
       return;
     }
     try {
+      // 1. Check if bot is already connected
+      try {
+        const sRes = await fetch(`${apiBase}/api/pulse/bot-status?school_id=${schoolId}`,
+          { headers: { 'x-nexus-sync-token': token } });
+        const sJson = await sRes.json();
+        if (sJson.status === 'connected' || sJson.status === 'CONNECTED') {
+          clearInterval(_qrPollTimer);
+          _qrPollTimer = null;
+          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+            mainWindowRef.webContents.send('cloud-pulse:connected');
+            console.log('[Sync Worker] Cloud bot already connected!');
+          }
+          return;
+        }
+      } catch (_) {}
+
+      // 2. Poll QR relay
       const r    = await fetch(`${apiBase}/api/pulse/qr-relay?school_id=${schoolId}`,
         { headers: { 'x-nexus-sync-token': token } });
       const json = await r.json();
 
       if (json.status === 'AWAITING_QR_SCAN' && json.qr) {
         hadQr = true;
+        let qrDataUrl = json.qr;
+        if (!qrDataUrl.startsWith('data:image/')) {
+          try {
+            const QRCode = require('qrcode');
+            qrDataUrl = await QRCode.toDataURL(json.qr);
+          } catch (qrErr) {
+            console.error('[Sync Worker] Failed to convert QR string to data URL:', qrErr);
+          }
+        }
         if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-          mainWindowRef.webContents.send('cloud-pulse:qr', json.qr);
+          mainWindowRef.webContents.send('cloud-pulse:qr', qrDataUrl);
         }
       }
 
       // QR TTL expired — either scanned or timed out on the VPS side
       if (json.status === 'EXPIRED_OR_NONE' && hadQr) {
-        // QR was previously present but is now gone → likely scanned → check status
         clearInterval(_qrPollTimer);
         _qrPollTimer = null;
         console.log('[Sync Worker] QR consumed — starting bot-status poll.');
@@ -438,6 +463,55 @@ function startCloudQrPoll(db) {
       }
     } catch (_) {}
   }, 3000);
+}
+
+async function requestCloudBotInit(db) {
+  const schoolId = getSchoolId(db);
+  const apiBase  = getApiBase();
+  const token    = getSyncToken(db);
+
+  if (!schoolId || !apiBase) {
+    console.warn('[Sync Worker] Cannot init cloud bot — missing school_id or apiBase.');
+    return { ok: false, error: 'Missing School Cloud ID or API Base URL' };
+  }
+
+  console.log('[Sync Worker] Triggering POST /api/pulse/init-bot for', schoolId);
+  try {
+    const res = await fetch(`${apiBase}/api/pulse/init-bot`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-nexus-sync-token': token,
+      },
+      body: JSON.stringify({ school_id: schoolId }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok && json.ok) {
+      console.log('[Sync Worker] Cloud bot init triggered successfully — starting QR poll.');
+      startCloudQrPoll(db);
+      return { ok: true };
+    } else {
+      console.warn(`[Sync Worker] init-bot returned ${res.status}:`, json);
+      return { ok: false, error: json.error || `HTTP ${res.status}` };
+    }
+  } catch (err) {
+    console.warn('[Sync Worker] Bot init call failed:', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+async function checkCloudBotStatus(db) {
+  const schoolId = getSchoolId(db);
+  const apiBase  = getApiBase();
+  const token    = getSyncToken(db);
+  if (!schoolId || !apiBase) return { status: 'offline' };
+  try {
+    const res = await fetch(`${apiBase}/api/pulse/bot-status?school_id=${schoolId}`,
+      { headers: { 'x-nexus-sync-token': token } });
+    return await res.json();
+  } catch (_) {
+    return { status: 'offline' };
+  }
 }
 
 async function activateCloud(options = {}) {
@@ -464,33 +538,12 @@ async function activateCloud(options = {}) {
   startSyncSchedule();
 
   // Trigger VPS bot initialisation (fire-and-forget — failures don't block sync activation)
-  try {
-    const token = getSyncToken(db);
-    const apiBase = getApiBase();
-    const res = await fetch(`${apiBase}/api/pulse/init-bot`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-nexus-sync-token': token,
-      },
-      body: JSON.stringify({ school_id: schoolCloudId }),
-    });
-    if (res.ok) {
-      console.log('[Sync Worker] Cloud bot init triggered — starting QR poll.');
-      startCloudQrPoll(db);
-    } else {
-      const text = await res.text().catch(() => '');
-      console.warn(`[Sync Worker] init-bot returned ${res.status}: ${text}`);
-    }
-  } catch (err) {
-    console.warn('[Sync Worker] Bot init call failed (non-blocking):', err.message);
-  }
+  requestCloudBotInit(db).catch((e) => console.warn('[Sync Worker] Auto-init bot warning:', e));
 
   // Run immediate sync cycle
   const result = await performSyncCycle();
   return { ok: true, syncResult: result };
 }
-
 
 async function deactivateCloud() {
   const db = database.getDb();
@@ -543,4 +596,7 @@ module.exports = {
   getCloudConfig,
   getSyncStatus,
   startCloudQrPoll,
+  requestCloudBotInit,
+  checkCloudBotStatus,
 };
+
