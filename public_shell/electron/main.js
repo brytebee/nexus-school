@@ -51,8 +51,14 @@ const resultDispatcher = (() => {
 })();
 
 
-// Set app name BEFORE createWindow so Menu.buildFromTemplate picks it up correctly
-app.setName("NexusSchoolOS");
+// Set app name BEFORE createWindow so Menu.buildFromTemplate picks it up correctly.
+// On Linux, this value must match StartupWMClass in the .desktop file ("nexus-school-os")
+// so GNOME/KDE can link the running window to the launcher icon in the taskbar.
+if (process.platform === "linux") {
+  app.setName("nexus-school-os");
+} else {
+  app.setName("NexusSchoolOS");
+}
 
 // ── Single-instance lock: prevents duplicate processes fighting over ports ──
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
