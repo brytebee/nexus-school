@@ -6478,17 +6478,33 @@ function createWindow() {
 
     autoUpdater.on('error', (err) => {
       // Ignore macOS unsigned-app errors gracefully — expected without Developer ID
-      const msg = err.message || '';
+      const msg  = err.message || '';
+      const code = err.code   || '';
       if (process.platform === 'darwin' && (msg.includes('Could not get code signature') || msg.includes('no identity found'))) {
         console.warn('[Updater] macOS: unsigned build — OTA not available until Apple Developer ID is added');
+        return;
+      }
+      // On .deb Linux builds there is no latest-linux.yml in the release assets —
+      // electron-updater throws ERR_UPDATER_CHANNEL_FILE_NOT_FOUND.
+      // Suppress silently; OTA is intentionally disabled for .deb (use the package manager).
+      if (process.platform === 'linux' && !process.env.APPIMAGE &&
+          (code === 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND' || msg.includes('latest-linux.yml'))) {
+        console.log('[Updater] .deb build — no channel file in release (expected). OTA skipped.');
         return;
       }
       mainWindow?.webContents.send('update-error', msg);
       console.error('[Updater] Error:', msg);
     });
 
-    // Check 30s after launch so it doesn't compete with app startup
-    setTimeout(() => { try { autoUpdater.checkForUpdatesAndNotify(); } catch {} }, 30_000);
+    // Check 30s after launch so it doesn't compete with app startup.
+    // Skip entirely for non-AppImage Linux — electron-updater would throw
+    // ERR_UPDATER_CHANNEL_FILE_NOT_FOUND because .deb releases don't ship latest-linux.yml.
+    if (process.platform !== 'linux' || process.env.APPIMAGE) {
+      setTimeout(() => { try { autoUpdater.checkForUpdatesAndNotify(); } catch {} }, 30_000);
+    } else {
+      console.log('[Updater] .deb build — OTA check skipped. Install updates via: sudo apt upgrade');
+    }
+
 
     ipcMain.handle('updater:check',   () => autoUpdater.checkForUpdatesAndNotify());
     ipcMain.handle('updater:install', () => { autoUpdater.quitAndInstall(false, true); });

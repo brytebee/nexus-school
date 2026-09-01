@@ -1562,7 +1562,7 @@ export function NexusPulse() {
               fontFamily: 'monospace', fontSize: '13px', color: 'var(--text-main)',
               userSelect: 'all'
             }}>
-              sudo apt install -y chromium-browser
+              sudo snap install chromium
             </div>
             <p style={{ fontSize: '11px', color: 'var(--text-dim)', margin: 0 }}>
               After installing, click <strong style={{ color: 'var(--text-main)' }}>Start Bot</strong> again.
@@ -1571,7 +1571,7 @@ export function NexusPulse() {
             {/* Actions */}
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '4px' }}>
               <button
-                onClick={() => navigator.clipboard.writeText('sudo apt install -y chromium-browser')}
+                onClick={() => navigator.clipboard.writeText('sudo snap install chromium')}
                 style={{
                   fontSize: '12px', padding: '8px 16px', borderRadius: 'var(--radius-md)',
                   background: 'rgba(0, 229, 255, 0.1)', border: '1px solid rgba(0, 229, 255, 0.3)',
