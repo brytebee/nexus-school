@@ -140,15 +140,19 @@ async function startPulse() {
       } catch (_) {}
     }
 
-    // Stage 2 — static snap paths (excluded from Electron's restricted PATH on Linux)
+    // Stage 2 — static Linux paths (native deb/apt first, then snap fallbacks)
     if (process.platform === "linux") {
-      const snapPaths = [
+      const linuxPaths = [
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/chromium",
         "/snap/bin/chromium",
         "/var/lib/snapd/snap/bin/chromium",
       ];
-      for (const p of snapPaths) {
+      for (const p of linuxPaths) {
         if (fs.existsSync(p)) {
-          console.log(`[Pulse Bot] Using snap Chromium: ${p}`);
+          console.log(`[Pulse Bot] Using system Chrome (static): ${p}`);
           return p;
         }
       }

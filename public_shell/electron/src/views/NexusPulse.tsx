@@ -63,6 +63,39 @@ export function NexusPulse() {
   // Cloud Bot QR Pairing State — populated via IPC from sync-worker.js poll loop
   const [cloudQr, setCloudQr] = useState<string | null>(null);
   const [cloudBotConnected, setCloudBotConnected] = useState(false);
+  const [copiedChromiumCmd, setCopiedChromiumCmd] = useState<string | null>(null);
+
+  const copyChromiumCmd = (text: string, id: string) => {
+    if (!text) return;
+    const fallbackCopy = () => {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        setCopiedChromiumCmd(id);
+        setTimeout(() => setCopiedChromiumCmd(null), 2000);
+      } catch (e) {
+        console.error('Fallback copy failed', e);
+      }
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        setCopiedChromiumCmd(id);
+        setTimeout(() => setCopiedChromiumCmd(null), 2000);
+      }).catch(() => {
+        fallbackCopy();
+      });
+    } else {
+      fallbackCopy();
+    }
+  };
 
   // Cloud Bridge State (Diamond Legacy)
   const [showCloudConfig, setShowCloudConfig] = useState(false);
@@ -1517,10 +1550,10 @@ export function NexusPulse() {
         document.body
       )}
 
-      {/* ── Chromium-Not-Found Modal ──────────────────────────────────────────
+      {/* ── Chromium / Google Chrome Not Found Modal ──────────────────────────
           Shown only when pulse-bot.js emits status='error', data='__CHROMIUM_MISSING__'.
-          Uses the identical portal + glassmorphism pattern as showTermsModal above.
-          AlertTriangle and X are already imported at line 5 — no new imports needed. */}
+          Uses portal + glassmorphism. Individual step copy buttons and one-liner.
+      */}
       {botStatus === 'error' && botStatusData === '__CHROMIUM_MISSING__' && ReactDOM.createPortal(
         <div style={{
           position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.75)',
@@ -1529,16 +1562,16 @@ export function NexusPulse() {
         }}>
           <div style={{
             background: '#0d1235', border: '1px solid var(--glass-border)',
-            borderRadius: 'var(--radius-lg)', maxWidth: '480px', width: '100%',
-            padding: '28px', display: 'flex', flexDirection: 'column', gap: '18px',
+            borderRadius: 'var(--radius-lg)', maxWidth: '560px', width: '100%',
+            padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px',
             boxShadow: '0 20px 50px rgba(0, 0, 0, 0.5)'
           }}>
             {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--glass-border)', paddingBottom: '14px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--glass-border)', paddingBottom: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <AlertTriangle size={20} color="#f59e0b" />
                 <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: 'var(--text-main)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Chromium Browser Not Found
+                  Google Chrome Required for WhatsApp Bot
                 </h3>
               </div>
               <button
@@ -1550,35 +1583,88 @@ export function NexusPulse() {
             </div>
 
             {/* Body */}
-            <p style={{ fontSize: '13px', color: 'var(--text-dim)', margin: 0, lineHeight: 1.6 }}>
-              The WhatsApp bot requires a Chromium-based browser to run. None was found on this machine.
+            <p style={{ fontSize: '13px', color: 'var(--text-dim)', margin: 0, lineHeight: 1.5 }}>
+              The WhatsApp bot requires a native browser package (<strong style={{ color: 'var(--text-main)' }}>Google Chrome</strong>). Snap packages cannot be automated due to Linux AppArmor sandboxing.
             </p>
-            <p style={{ fontSize: '13px', color: 'var(--text-dim)', margin: 0, lineHeight: 1.6 }}>
-              Open a terminal and run:
+            <p style={{ fontSize: '12px', color: 'var(--text-dim)', margin: 0 }}>
+              Run these commands in your Ubuntu terminal:
             </p>
-            <div style={{
-              background: 'rgba(0, 229, 255, 0.06)', border: '1px solid rgba(0, 229, 255, 0.15)',
-              borderRadius: 'var(--radius-md)', padding: '12px 16px',
-              fontFamily: 'monospace', fontSize: '13px', color: 'var(--text-main)',
-              userSelect: 'all'
-            }}>
-              sudo snap install chromium
+
+            {/* Step 1 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--accent)' }}>
+                  Step 1 — Download official Google Chrome:
+                </span>
+                <button
+                  onClick={() => copyChromiumCmd('wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb', 'step1')}
+                  style={{
+                    fontSize: '11px', padding: '3px 8px', borderRadius: 'var(--radius-sm)',
+                    background: copiedChromiumCmd === 'step1' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(0, 229, 255, 0.1)',
+                    border: copiedChromiumCmd === 'step1' ? '1px solid #10b981' : '1px solid rgba(0, 229, 255, 0.3)',
+                    color: copiedChromiumCmd === 'step1' ? '#10b981' : 'var(--accent)',
+                    cursor: 'pointer', fontWeight: 600
+                  }}
+                >
+                  {copiedChromiumCmd === 'step1' ? '✓ Copied!' : 'Copy Step 1'}
+                </button>
+              </div>
+              <div style={{
+                background: 'rgba(0, 229, 255, 0.04)', border: '1px solid rgba(0, 229, 255, 0.12)',
+                borderRadius: 'var(--radius-sm)', padding: '6px 10px',
+                fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-main)',
+                userSelect: 'all', overflowX: 'auto', whiteSpace: 'nowrap'
+              }}>
+                wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+              </div>
             </div>
+
+            {/* Step 2 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--accent)' }}>
+                  Step 2 — Install package with dependencies:
+                </span>
+                <button
+                  onClick={() => copyChromiumCmd('sudo apt install -y ./google-chrome-stable_current_amd64.deb', 'step2')}
+                  style={{
+                    fontSize: '11px', padding: '3px 8px', borderRadius: 'var(--radius-sm)',
+                    background: copiedChromiumCmd === 'step2' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(0, 229, 255, 0.1)',
+                    border: copiedChromiumCmd === 'step2' ? '1px solid #10b981' : '1px solid rgba(0, 229, 255, 0.3)',
+                    color: copiedChromiumCmd === 'step2' ? '#10b981' : 'var(--accent)',
+                    cursor: 'pointer', fontWeight: 600
+                  }}
+                >
+                  {copiedChromiumCmd === 'step2' ? '✓ Copied!' : 'Copy Step 2'}
+                </button>
+              </div>
+              <div style={{
+                background: 'rgba(0, 229, 255, 0.04)', border: '1px solid rgba(0, 229, 255, 0.12)',
+                borderRadius: 'var(--radius-sm)', padding: '6px 10px',
+                fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-main)',
+                userSelect: 'all', overflowX: 'auto', whiteSpace: 'nowrap'
+              }}>
+                sudo apt install -y ./google-chrome-stable_current_amd64.deb
+              </div>
+            </div>
+
             <p style={{ fontSize: '11px', color: 'var(--text-dim)', margin: 0 }}>
               After installing, click <strong style={{ color: 'var(--text-main)' }}>Start Bot</strong> again.
             </p>
 
             {/* Actions */}
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '4px' }}>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
               <button
-                onClick={() => navigator.clipboard.writeText('sudo snap install chromium')}
+                onClick={() => copyChromiumCmd('wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && sudo apt install -y ./google-chrome-stable_current_amd64.deb && rm -f google-chrome-stable_current_amd64.deb', 'all')}
                 style={{
                   fontSize: '12px', padding: '8px 16px', borderRadius: 'var(--radius-md)',
-                  background: 'rgba(0, 229, 255, 0.1)', border: '1px solid rgba(0, 229, 255, 0.3)',
-                  color: 'var(--accent)', cursor: 'pointer', fontWeight: 600
+                  background: copiedChromiumCmd === 'all' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(0, 229, 255, 0.1)',
+                  border: copiedChromiumCmd === 'all' ? '1px solid #10b981' : '1px solid rgba(0, 229, 255, 0.3)',
+                  color: copiedChromiumCmd === 'all' ? '#10b981' : 'var(--accent)',
+                  cursor: 'pointer', fontWeight: 600
                 }}
               >
-                Copy Command
+                {copiedChromiumCmd === 'all' ? '✓ Copied All-in-One Command!' : '📋 Copy All Steps (One-Liner)'}
               </button>
               <button
                 onClick={() => { setBotStatus('disconnected'); setBotStatusData(null); }}
@@ -1601,3 +1687,4 @@ export function NexusPulse() {
 }
 
 export default NexusPulse;
+
