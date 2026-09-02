@@ -405,6 +405,12 @@ function startCloudQrPoll(db) {
   let attempts      = 0;
   let hadQr         = false; // true once we have seen at least one AWAITING_QR_SCAN
   const MAX_ATTEMPTS = 50;   // 50 × 3s ≈ 150s (slightly beyond 2-min QR TTL)
+  // Skip the bot-status short-circuit for the first GRACE_TICKS ticks.
+  // Chrome takes 5-15s to load WhatsApp Web and generate a QR after a fresh
+  // session wipe. Without this grace period the poll can see a briefly-stale
+  // CONNECTED status from the previous session during the destroy/recreate
+  // window and stop before the QR is ever generated.
+  const GRACE_TICKS = 5; // 5 × 3s = 15s
 
   console.log('[Sync Worker] Starting cloud QR poll for', schoolId);
 
@@ -417,21 +423,25 @@ function startCloudQrPoll(db) {
       return;
     }
     try {
-      // 1. Check if bot is already connected
-      try {
-        const sRes = await fetch(`${apiBase}/api/pulse/bot-status?school_id=${schoolId}`,
-          { headers: { 'x-nexus-sync-token': token } });
-        const sJson = await sRes.json();
-        if (sJson.status === 'connected' || sJson.status === 'CONNECTED') {
-          clearInterval(_qrPollTimer);
-          _qrPollTimer = null;
-          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-            mainWindowRef.webContents.send('cloud-pulse:connected');
-            console.log('[Sync Worker] Cloud bot already connected!');
+      // 1. Check if bot is already connected — but only AFTER the grace period.
+      //    During grace we go straight to the QR relay check so a stale
+      //    CONNECTED status cannot prematurely stop the poll.
+      if (attempts > GRACE_TICKS) {
+        try {
+          const sRes = await fetch(`${apiBase}/api/pulse/bot-status?school_id=${schoolId}`,
+            { headers: { 'x-nexus-sync-token': token } });
+          const sJson = await sRes.json();
+          if (sJson.status === 'connected' || sJson.status === 'CONNECTED') {
+            clearInterval(_qrPollTimer);
+            _qrPollTimer = null;
+            if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+              mainWindowRef.webContents.send('cloud-pulse:connected');
+              console.log('[Sync Worker] Cloud bot already connected!');
+            }
+            return;
           }
-          return;
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
 
       // 2. Poll QR relay
       const r    = await fetch(`${apiBase}/api/pulse/qr-relay?school_id=${schoolId}`,
