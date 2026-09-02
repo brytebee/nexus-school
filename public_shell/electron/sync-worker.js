@@ -514,6 +514,44 @@ async function checkCloudBotStatus(db) {
   }
 }
 
+/**
+ * Resets the cloud bot session (wipes VPS WhatsApp credentials) then
+ * immediately triggers a fresh init so a new QR code is generated.
+ * Called by the "Re-pair WhatsApp Number" button in the desktop app.
+ */
+async function requestCloudBotReset(db) {
+  const schoolId = getSchoolId(db);
+  const apiBase  = getApiBase();
+  const token    = getSyncToken(db);
+
+  if (!schoolId || !apiBase) {
+    console.warn('[Sync Worker] Cannot reset cloud bot — missing school_id or apiBase.');
+    return { ok: false, error: 'Missing School Cloud ID or API Base URL' };
+  }
+
+  console.log('[Sync Worker] Triggering POST /api/pulse/reset-session for', schoolId);
+  try {
+    const res = await fetch(`${apiBase}/api/pulse/reset-session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-nexus-sync-token': token },
+      body: JSON.stringify({ school_id: schoolId }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json.ok) {
+      const msg = json.error || `HTTP ${res.status}`;
+      console.warn('[Sync Worker] reset-session failed:', msg);
+      return { ok: false, error: msg };
+    }
+    console.log('[Sync Worker] Session reset OK — triggering fresh init + QR poll.');
+    // Give the VPS 1 s to finish cleanup before launching the new session
+    await new Promise(r => setTimeout(r, 1000));
+    return requestCloudBotInit(db);
+  } catch (err) {
+    console.warn('[Sync Worker] Bot reset call failed:', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
 async function activateCloud(options = {}) {
   const db = database.getDb();
   const schoolCloudId = options.schoolCloudId || getSchoolId(db);
@@ -597,6 +635,7 @@ module.exports = {
   getSyncStatus,
   startCloudQrPoll,
   requestCloudBotInit,
+  requestCloudBotReset,
   checkCloudBotStatus,
 };
 

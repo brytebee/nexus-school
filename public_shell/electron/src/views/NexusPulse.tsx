@@ -332,6 +332,51 @@ export function NexusPulse() {
     }
   };
 
+  /**
+   * Re-pair: wipes the VPS WhatsApp session then triggers a fresh init so a
+   * brand-new QR code is generated. This is distinct from handleRequestCloudQr
+   * which only re-inits and reuses existing credentials (no QR shown).
+   */
+  const handleRepairCloudBot = async () => {
+    const confirmed = await (Swal as any)?.fire({
+      icon: 'warning',
+      title: 'Re-pair WhatsApp?',
+      html: 'This will <strong>disconnect the current WhatsApp session</strong> and generate a new QR code.<br/><br/>The school phone must scan the QR to reconnect.',
+      showCancelButton: true,
+      confirmButtonText: '🔄 Yes, Re-pair',
+      cancelButtonText: 'Cancel',
+      background: '#0d1235',
+      color: '#fff',
+      confirmButtonColor: '#e74c3c',
+    });
+    if (!confirmed?.isConfirmed) return;
+
+    setCloudBotLoading(true);
+    setCloudBotConnected(false);
+    setCloudQr(null);
+    try {
+      if (window.electronAPI?.invoke) {
+        const res = await window.electronAPI.invoke('cloud-pulse:reset-bot');
+        if (!res?.ok && res?.error) {
+          if (Swal) {
+            (Swal as any).fire({
+              icon: 'error',
+              title: 'Re-pair Failed',
+              text: res.error,
+              background: '#0d1235',
+              color: '#fff',
+            });
+          }
+          setCloudBotLoading(false);
+        }
+        // On success the QR poll (started inside reset-bot) fires cloud-pulse:qr
+        // which sets cloudQr state — the scan screen appears automatically.
+      }
+    } catch (err: any) {
+      console.error('[Pulse] Failed to reset cloud bot:', err);
+      setCloudBotLoading(false);
+    }
+  };
 
   const addCloudLog = (statusMsg: string) => {
     const statusEl = document.getElementById('react-cloud-sync-status');
@@ -953,11 +998,11 @@ export function NexusPulse() {
                           Your WhatsApp bot is live 24/7 on the Nexus Cloud. Parents will receive automated fee checks, attendance digests, and result alerts even when your laptop is turned off.
                         </p>
                         <button
-                          onClick={handleRequestCloudQr}
+                          onClick={handleRepairCloudBot}
                           disabled={cloudBotLoading}
                           style={{ marginTop: '6px', fontSize: '11px', padding: '6px 14px', borderRadius: 'var(--radius-md)', background: 'transparent', border: '1px solid var(--glass-border)', color: 'var(--text-dim)', cursor: 'pointer' }}
                         >
-                          {cloudBotLoading ? 'Reconnecting...' : '🔄 Re-pair WhatsApp Number'}
+                          {cloudBotLoading ? 'Resetting Session...' : '🔄 Re-pair WhatsApp Number'}
                         </button>
                       </div>
                     ) : cloudQr ? (

@@ -507,6 +507,13 @@ ipcMain.on("cloud-pulse:request-qr", async () => {
   if (db) await syncWorker.requestCloudBotInit(db);
 });
 
+// Wipe the VPS session so the next init generates a fresh QR — "Re-pair WhatsApp Number"
+ipcMain.handle("cloud-pulse:reset-bot", async () => {
+  const db = database.getDb();
+  if (!db) return { ok: false, error: 'Database uninitialized' };
+  return syncWorker.requestCloudBotReset(db);
+});
+
 
 // ── ui-ready: fired by App.tsx once React has mounted and licenseLoading=false ──
 // Registered HERE at module scope so it is in place before mainWindow.loadFile()
