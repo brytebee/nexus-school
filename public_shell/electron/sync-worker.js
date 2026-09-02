@@ -385,6 +385,13 @@ function startCloudStatusPoll(schoolId, apiBase, token) {
           mainWindowRef.webContents.send('cloud-pulse:connected');
           console.log('[Sync Worker] Cloud bot connected — sent cloud-pulse:connected to renderer.');
         }
+      } else if (json.status === 'error' || json.status === 'ERROR' || json.status === 'disconnected' || json.status === 'DISCONNECTED') {
+        clearInterval(_statusPollTimer);
+        _statusPollTimer = null;
+        if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+          mainWindowRef.webContents.send('cloud-pulse:error', json.status);
+          console.log('[Sync Worker] Cloud bot entered error/disconnected state:', json.status);
+        }
       }
     } catch (_) {}
   }, 3000);
@@ -423,9 +430,9 @@ function startCloudQrPoll(db) {
       return;
     }
     try {
-      // 1. Check if bot is already connected — but only AFTER the grace period.
+      // 1. Check if bot is already connected or errored — but only AFTER the grace period.
       //    During grace we go straight to the QR relay check so a stale
-      //    CONNECTED status cannot prematurely stop the poll.
+      //    status cannot prematurely stop the poll.
       if (attempts > GRACE_TICKS) {
         try {
           const sRes = await fetch(`${apiBase}/api/pulse/bot-status?school_id=${schoolId}`,
@@ -437,6 +444,15 @@ function startCloudQrPoll(db) {
             if (mainWindowRef && !mainWindowRef.isDestroyed()) {
               mainWindowRef.webContents.send('cloud-pulse:connected');
               console.log('[Sync Worker] Cloud bot already connected!');
+            }
+            return;
+          }
+          if (sJson.status === 'error' || sJson.status === 'ERROR' || sJson.status === 'disconnected' || sJson.status === 'DISCONNECTED') {
+            clearInterval(_qrPollTimer);
+            _qrPollTimer = null;
+            if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+              mainWindowRef.webContents.send('cloud-pulse:error', sJson.status);
+              console.log('[Sync Worker] Cloud bot error during QR poll:', sJson.status);
             }
             return;
           }

@@ -64,6 +64,7 @@ export function NexusPulse() {
   const [cloudQr, setCloudQr] = useState<string | null>(null);
   const [cloudBotConnected, setCloudBotConnected] = useState(false);
   const [cloudBotLoading, setCloudBotLoading] = useState(false);
+  const [cloudBotError, setCloudBotError] = useState<string | null>(null);
   const [copiedChromiumCmd, setCopiedChromiumCmd] = useState<string | null>(null);
 
   const copyChromiumCmd = (text: string, id: string) => {
@@ -288,11 +289,19 @@ export function NexusPulse() {
         setCloudQr(qrDataUrl);
         setCloudBotConnected(false);
         setCloudBotLoading(false);
+        setCloudBotError(null);
       });
       window.electronAPI.on('cloud-pulse:connected', () => {
         setCloudQr(null);
         setCloudBotConnected(true);
         setCloudBotLoading(false);
+        setCloudBotError(null);
+      });
+      window.electronAPI.on('cloud-pulse:error', (status: string) => {
+        setCloudQr(null);
+        setCloudBotConnected(false);
+        setCloudBotLoading(false);
+        setCloudBotError(status || 'Session error');
       });
     }
 
@@ -302,6 +311,9 @@ export function NexusPulse() {
         if (res?.status === 'connected' || res?.status === 'CONNECTED') {
           setCloudBotConnected(true);
           setCloudQr(null);
+          setCloudBotError(null);
+        } else if (res?.status === 'error' || res?.status === 'ERROR') {
+          setCloudBotError('ERROR');
         }
       }).catch(() => {});
     }
@@ -310,6 +322,7 @@ export function NexusPulse() {
   const handleRequestCloudQr = async () => {
     setCloudBotLoading(true);
     setCloudQr(null);
+    setCloudBotError(null);
     try {
       if (window.electronAPI?.invoke) {
         const res = await window.electronAPI.invoke('cloud-pulse:init-bot');
@@ -324,11 +337,13 @@ export function NexusPulse() {
             });
           }
           setCloudBotLoading(false);
+          setCloudBotError(res.error);
         }
       }
     } catch (err: any) {
       console.error('Failed to init cloud bot:', err);
       setCloudBotLoading(false);
+      setCloudBotError(err.message || 'Initialization failed');
     }
   };
 
@@ -354,6 +369,7 @@ export function NexusPulse() {
     setCloudBotLoading(true);
     setCloudBotConnected(false);
     setCloudQr(null);
+    setCloudBotError(null);
     try {
       if (window.electronAPI?.invoke) {
         const res = await window.electronAPI.invoke('cloud-pulse:reset-bot');
@@ -975,15 +991,15 @@ export function NexusPulse() {
                       <span style={{
                         fontSize: '9px',
                         fontWeight: 900,
-                        color: cloudBotConnected ? 'var(--accent-green)' : (cloudQr ? '#f59e0b' : 'var(--text-dim)'),
-                        background: cloudBotConnected ? 'rgba(16, 185, 129, 0.1)' : (cloudQr ? 'rgba(245, 158, 11, 0.1)' : 'rgba(255, 255, 255, 0.05)'),
+                        color: cloudBotConnected ? 'var(--accent-green)' : (cloudQr ? '#f59e0b' : (cloudBotError ? '#ef4444' : 'var(--text-dim)')),
+                        background: cloudBotConnected ? 'rgba(16, 185, 129, 0.1)' : (cloudQr ? 'rgba(245, 158, 11, 0.1)' : (cloudBotError ? 'rgba(239, 68, 68, 0.1)' : 'rgba(255, 255, 255, 0.05)')),
                         padding: '2px 8px',
                         borderRadius: '9999px',
-                        border: `1px solid ${cloudBotConnected ? 'rgba(16, 185, 129, 0.3)' : (cloudQr ? 'rgba(245, 158, 11, 0.3)' : 'rgba(255, 255, 255, 0.1)')}`,
+                        border: `1px solid ${cloudBotConnected ? 'rgba(16, 185, 129, 0.3)' : (cloudQr ? 'rgba(245, 158, 11, 0.3)' : (cloudBotError ? 'rgba(239, 68, 68, 0.3)' : 'rgba(255, 255, 255, 0.1)'))}`,
                         textTransform: 'uppercase',
                         letterSpacing: '0.08em'
                       }}>
-                        {cloudBotConnected ? '● Connected' : (cloudQr ? '● Awaiting Scan' : '○ Standby')}
+                        {cloudBotConnected ? '● Connected' : (cloudQr ? '● Awaiting Scan' : (cloudBotError ? '● Error' : '○ Standby'))}
                       </span>
                     </div>
 
@@ -1030,30 +1046,59 @@ export function NexusPulse() {
                         </button>
                       </div>
                     ) : (
-                      /* Standby state — not yet paired */
+                      /* Standby / Error state */
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', padding: '10px 0', textAlign: 'center' }}>
+                        {cloudBotError && (
+                          <div style={{
+                            padding: '8px 14px',
+                            background: 'rgba(239, 68, 68, 0.12)',
+                            border: '1px solid rgba(239, 68, 68, 0.3)',
+                            borderRadius: 'var(--radius-md)',
+                            color: '#ef4444',
+                            fontSize: '11px',
+                            maxWidth: '440px',
+                            lineHeight: 1.5
+                          }}>
+                            ⚠️ Cloud bot disconnected or failed ({cloudBotError}). Click below to generate a new QR code or re-pair.
+                          </div>
+                        )}
                         <p style={{ fontSize: '12px', color: 'var(--text-dim)', margin: 0, lineHeight: 1.6, maxWidth: '440px' }}>
                           Pair the school's WhatsApp account to the 24/7 Cloud Bot so parents can query fees and results anytime.
                         </p>
-                        <button
-                          onClick={handleRequestCloudQr}
-                          disabled={cloudBotLoading}
-                          style={{
-                            fontSize: '12px', padding: '10px 20px', borderRadius: 'var(--radius-md)',
-                            background: 'rgba(0, 229, 255, 0.12)', border: '1px solid rgba(0, 229, 255, 0.3)',
-                            color: 'var(--accent)', cursor: 'pointer', fontWeight: 700,
-                            display: 'flex', alignItems: 'center', gap: '8px'
-                          }}
-                        >
-                          {cloudBotLoading ? (
-                            <span>Initialising Cloud Session...</span>
-                          ) : (
-                            <>
-                              <QrCode size={16} />
-                              <span>Generate Cloud Pairing QR</span>
-                            </>
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                          <button
+                            onClick={handleRequestCloudQr}
+                            disabled={cloudBotLoading}
+                            style={{
+                              fontSize: '12px', padding: '10px 20px', borderRadius: 'var(--radius-md)',
+                              background: 'rgba(0, 229, 255, 0.12)', border: '1px solid rgba(0, 229, 255, 0.3)',
+                              color: 'var(--accent)', cursor: 'pointer', fontWeight: 700,
+                              display: 'flex', alignItems: 'center', gap: '8px'
+                            }}
+                          >
+                            {cloudBotLoading ? (
+                              <span>Initialising Cloud Session...</span>
+                            ) : (
+                              <>
+                                <QrCode size={16} />
+                                <span>Generate Cloud Pairing QR</span>
+                              </>
+                            )}
+                          </button>
+                          {cloudBotError && (
+                            <button
+                              onClick={handleRepairCloudBot}
+                              disabled={cloudBotLoading}
+                              style={{
+                                fontSize: '12px', padding: '10px 16px', borderRadius: 'var(--radius-md)',
+                                background: 'transparent', border: '1px solid var(--glass-border)',
+                                color: 'var(--text-dim)', cursor: 'pointer', fontWeight: 600
+                              }}
+                            >
+                              🔄 Re-pair
+                            </button>
                           )}
-                        </button>
+                        </div>
                       </div>
                     )}
                   </div>
