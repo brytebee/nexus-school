@@ -1,6 +1,6 @@
 {
   "name": "nexus-school-root",
-  "version": "1.0.89",
+  "version": "1.0.90",
   "private": true,
   "description": "Nexus School OS - Root Workspace Launcher",
   "scripts": {

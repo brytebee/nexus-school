@@ -480,13 +480,12 @@ function startCloudQrPoll(db) {
         }
       }
 
-      // QR TTL expired — either scanned or timed out on the VPS side
-      if (json.status === 'EXPIRED_OR_NONE' && hadQr) {
-        clearInterval(_qrPollTimer);
-        _qrPollTimer = null;
-        console.log('[Sync Worker] QR consumed — starting bot-status poll.');
-        startCloudStatusPoll(schoolId, apiBase, token);
-      }
+
+      // Note: EXPIRED_OR_NONE alone does NOT mean the QR was scanned.
+      // WhatsApp rotates QR codes every ~20s; the bot relays each new one with a
+      // fresh 2-min TTL. Keep polling — the status check above (after GRACE_TICKS)
+      // detects a real scan via 'connected' state, and MAX_ATTEMPTS caps the loop.
+
     } catch (_) {}
   }, 3000);
 }
