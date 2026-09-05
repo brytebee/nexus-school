@@ -617,6 +617,37 @@ async function deactivateCloud() {
 
   stopSyncSchedule();
 
+  // Tell the VPS to wipe the WhatsApp session — mirrors removing a linked device.
+  // Does NOT call requestCloudBotInit() afterwards; the admin must scan a fresh QR
+  // to reactivate, same as re-linking a device on WhatsApp.
+  // Local deactivation always completes even if the VPS call fails.
+  const schoolId = getSchoolId(db);
+  const apiBase  = getApiBase();
+  const token    = getSyncToken(db);
+
+  if (schoolId && apiBase) {
+    try {
+      const res = await fetch(`${apiBase}/api/pulse/reset-session`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-nexus-sync-token': token
+        },
+        body: JSON.stringify({ school_id: schoolId }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) {
+        console.warn('[Sync Worker] deactivateCloud: reset-session failed —', json.error || `HTTP ${res.status}`);
+      } else {
+        console.log('[Sync Worker] deactivateCloud: VPS session wiped for', schoolId);
+      }
+    } catch (err) {
+      console.warn('[Sync Worker] deactivateCloud: reset-session call threw —', err.message);
+    }
+  } else {
+    console.warn('[Sync Worker] deactivateCloud: no schoolId/apiBase — skipping VPS reset');
+  }
+
   if (mainWindowRef && !mainWindowRef.isDestroyed()) {
     mainWindowRef.webContents.send("sync:status", {
       status: "disabled",

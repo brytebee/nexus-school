@@ -524,10 +524,10 @@ export function NexusPulse() {
         Swal.fire({
           icon: 'info',
           title: 'Cloud Pulse Deactivated',
-          text: 'The background sync worker has stopped.',
+          text: 'WhatsApp session unlinked. Scan a new QR code to reactivate Cloud Pulse.',
           background: '#0d1235',
           color: '#fff',
-          timer: 3000,
+          timer: 4000,
           showConfirmButton: false
         });
       }
