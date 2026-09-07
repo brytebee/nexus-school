@@ -1709,53 +1709,29 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
             )}
           </div>
 
-          {/* ── Seat Capacity Card ── */}
+
+          {/* ── Enrolled Students Card ── */}
           {(() => {
-            const cap = license?.student_count;
-            const hasCap = typeof cap === 'number' && isFinite(cap) && cap < 999999;
             const enrolled = (license as any)?.enrolledCount ?? null;
-            const overQuota = (license as any)?.overQuota ?? false;
-            const overflowCount = overQuota && hasCap && enrolled != null ? Math.max(0, enrolled - cap!) : 0;
             return (
               <div style={{
                 marginTop: '4px',
                 padding: '14px 16px',
-                background: overQuota ? 'rgba(239,68,68,0.06)' : 'rgba(0,229,255,0.04)',
-                border: `1px solid ${overQuota ? 'rgba(239,68,68,0.25)' : 'rgba(0,229,255,0.15)'}`,
+                background: 'rgba(0,229,255,0.04)',
+                border: '1px solid rgba(0,229,255,0.15)',
                 borderRadius: '8px',
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 700, color: overQuota ? '#ef4444' : '#00e5ff' }}>
-                    🎓 Student Seat Capacity
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#00e5ff' }}>
+                    🎓 Enrolled Students
                   </span>
                   <span style={{
-                    fontSize: '10px',
-                    fontWeight: 700,
-                    padding: '2px 8px',
-                    borderRadius: '4px',
-                    background: overQuota ? 'rgba(239,68,68,0.15)' : 'rgba(0,229,255,0.1)',
-                    color: overQuota ? '#ef4444' : '#00e5ff'
+                    fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '4px',
+                    background: 'rgba(0,229,255,0.1)', color: '#00e5ff',
                   }}>
-                    {enrolled != null ? enrolled : '—'} / {hasCap ? cap : '∞'} seats used
+                    {enrolled != null ? enrolled : '—'} students
                   </span>
                 </div>
-                {overQuota && overflowCount > 0 && (
-                  <p style={{ fontSize: '10.5px', color: '#fbbf24', margin: '0 0 8px', lineHeight: 1.5 }}>
-                    ⚠️ <strong>{overflowCount} student{overflowCount !== 1 ? 's' : ''}</strong> registered beyond capacity (marked as overflow).
-                    Expand your seat plan or archive inactive students to activate them.
-                  </p>
-                )}
-                {!overQuota && hasCap && enrolled != null && (
-                  <div style={{ height: '4px', borderRadius: '3px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden', marginBottom: '8px' }}>
-                    <div style={{
-                      height: '100%',
-                      borderRadius: '3px',
-                      width: `${Math.min(100, Math.round((enrolled / cap!) * 100))}%`,
-                      background: enrolled / cap! > 0.85 ? '#f97316' : '#00e5ff',
-                      transition: 'width 0.4s ease'
-                    }} />
-                  </div>
-                )}
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
                   <button
                     onClick={async () => {
@@ -1763,27 +1739,27 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
                       setQuotaRefreshMsg('');
                       const res = await refreshQuota();
                       setQuotaRefreshing(false);
-                      setQuotaRefreshMsg(res?.ok ? '✅ Quota refreshed' : '⚠️ Could not refresh');
+                      setQuotaRefreshMsg(res?.ok ? '✅ License refreshed' : '⚠️ Could not refresh');
                       setTimeout(() => setQuotaRefreshMsg(''), 3000);
                     }}
                     disabled={quotaRefreshing}
                     style={{
                       fontSize: '10.5px', padding: '5px 10px', borderRadius: '5px', cursor: 'pointer',
                       background: 'rgba(0,229,255,0.08)', border: '1px solid rgba(0,229,255,0.25)',
-                      color: '#00e5ff', fontWeight: 600
+                      color: '#00e5ff', fontWeight: 600,
                     }}
                   >
-                    {quotaRefreshing ? '⌛ Refreshing…' : '↻ Refresh & Activate Overflow'}
+                    {quotaRefreshing ? '⌛ Refreshing…' : '↻ Refresh License'}
                   </button>
                   <button
                     onClick={() => (window as any).electronAPI?.shell?.openExternal?.('https://nexusos.com.ng/portal/billing')}
                     style={{
                       fontSize: '10.5px', padding: '5px 10px', borderRadius: '5px', cursor: 'pointer',
                       background: 'rgba(255,193,7,0.1)', border: '1px solid rgba(255,193,7,0.3)',
-                      color: '#fbbf24', fontWeight: 600
+                      color: '#fbbf24', fontWeight: 600,
                     }}
                   >
-                    ↗ Upgrade Seat Capacity
+                    ↗ Manage Subscription
                   </button>
                   {quotaRefreshMsg && (
                     <span style={{ fontSize: '10px', color: quotaRefreshMsg.startsWith('✅') ? '#22c55e' : '#fbbf24' }}>{quotaRefreshMsg}</span>
@@ -3223,82 +3199,47 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
             {/* Panel body */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
               {(() => {
-                const cap      = license?.student_count;
-                const hasCap   = typeof cap === 'number' && isFinite(cap) && cap < 999999;
                 const enrolled = (license as any)?.enrolledCount ?? null;
-                const overQuota= (license as any)?.overQuota ?? false;
-                const overflowCount = overQuota && hasCap && enrolled != null ? Math.max(0, enrolled - cap!) : 0;
-                const fillPct  = hasCap && enrolled != null ? Math.min(100, Math.round((enrolled / cap!) * 100)) : 0;
-                const isWarning= hasCap && enrolled != null && enrolled / cap! > 0.85;
 
                 return (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
-                    {/* Usage summary */}
+                    {/* Enrolled count card */}
                     <div style={{
                       padding: '18px 20px',
-                      background: overQuota ? 'rgba(239,68,68,0.07)' : 'rgba(0,229,255,0.05)',
-                      border: `1px solid ${overQuota ? 'rgba(239,68,68,0.3)' : 'rgba(0,229,255,0.18)'}`,
+                      background: 'rgba(0,229,255,0.05)',
+                      border: '1px solid rgba(0,229,255,0.18)',
                       borderRadius: '12px',
                     }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '14px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '4px' }}>
                         <div>
                           <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>Enrolled Students</p>
-                          <p style={{ margin: '4px 0 0', fontSize: '32px', fontWeight: 800, color: overQuota ? '#ef4444' : '#00e5ff', lineHeight: 1 }}>
+                          <p style={{ margin: '4px 0 0', fontSize: '32px', fontWeight: 800, color: '#00e5ff', lineHeight: 1 }}>
                             {enrolled != null ? enrolled : '—'}
                           </p>
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                          <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>License Limit</p>
+                          <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>Student Limit</p>
                           <p style={{ margin: '4px 0 0', fontSize: '32px', fontWeight: 800, color: 'var(--text-dim)', lineHeight: 1 }}>
-                            {hasCap ? cap : '∞'}
+                            ∞
                           </p>
                         </div>
                       </div>
-
-                      {hasCap && enrolled != null && (
-                        <>
-                          <div style={{ height: '6px', borderRadius: '4px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden', marginBottom: '8px' }}>
-                            <div style={{
-                              height: '100%', borderRadius: '4px',
-                              width: `${fillPct}%`,
-                              background: overQuota ? '#ef4444' : isWarning ? '#f97316' : '#00e5ff',
-                              transition: 'width 0.4s ease',
-                            }} />
-                          </div>
-                          <p style={{ margin: 0, fontSize: '11px', color: isWarning || overQuota ? (overQuota ? '#ef4444' : '#f97316') : 'var(--text-dim)' }}>
-                            {fillPct}% capacity used
-                            {overQuota && ` · ${overflowCount} student${overflowCount !== 1 ? 's' : ''} in overflow`}
-                          </p>
-                        </>
-                      )}
+                      <p style={{ margin: '10px 0 0', fontSize: '11px', color: 'var(--text-dim)' }}>
+                        Unlimited students — your subscription tier sets the price, not a student cap.
+                      </p>
                     </div>
-
-                    {/* Overflow warning */}
-                    {overQuota && overflowCount > 0 && (
-                      <div style={{
-                        padding: '14px 16px',
-                        background: 'rgba(239,68,68,0.07)',
-                        border: '1px solid rgba(239,68,68,0.25)',
-                        borderRadius: '10px',
-                        fontSize: '12.5px',
-                        color: '#fca5a5',
-                        lineHeight: 1.6,
-                      }}>
-                        ⚠️ <strong>{overflowCount} student{overflowCount !== 1 ? 's' : ''}</strong> registered beyond capacity and marked <em>overflow</em>. Expand your seat plan or use Refresh to auto-promote them when slots open.
-                      </div>
-                    )}
 
                     {/* Actions */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       <button
-                        id="seat-cap-refresh-btn"
+                        id="license-refresh-btn"
                         onClick={async () => {
                           setQuotaRefreshing(true);
                           setQuotaRefreshMsg('');
                           const res = await refreshQuota();
                           setQuotaRefreshing(false);
-                          setQuotaRefreshMsg(res?.ok ? '✅ Quota refreshed & overflow promoted' : '⚠️ Could not refresh');
+                          setQuotaRefreshMsg(res?.ok ? '✅ License refreshed' : '⚠️ Could not refresh');
                           setTimeout(() => setQuotaRefreshMsg(''), 4000);
                         }}
                         disabled={quotaRefreshing}
@@ -3311,11 +3252,11 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
                         onMouseEnter={(e) => { if (!quotaRefreshing) { e.currentTarget.style.background = 'rgba(0,229,255,0.15)'; e.currentTarget.style.borderColor = 'rgba(0,229,255,0.6)'; } }}
                         onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,229,255,0.08)'; e.currentTarget.style.borderColor = 'rgba(0,229,255,0.3)'; }}
                       >
-                        {quotaRefreshing ? '⌛ Refreshing…' : '↻ Refresh & Activate Overflow'}
+                        {quotaRefreshing ? '⌛ Refreshing…' : '↻ Refresh License'}
                       </button>
 
                       <button
-                        id="seat-cap-upgrade-btn"
+                        id="manage-subscription-btn"
                         onClick={() => (window as any).electronAPI?.shell?.openExternal?.('https://nexusos.com.ng/portal/billing')}
                         style={{
                           width: '100%', padding: '12px', borderRadius: '8px', cursor: 'pointer',
@@ -3326,7 +3267,7 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
                         onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,193,7,0.15)'; e.currentTarget.style.borderColor = 'rgba(255,193,7,0.6)'; }}
                         onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,193,7,0.08)'; e.currentTarget.style.borderColor = 'rgba(255,193,7,0.3)'; }}
                       >
-                        ↗ Upgrade Seat Capacity
+                        ↗ Manage Subscription
                       </button>
 
                       {quotaRefreshMsg && (
@@ -3338,7 +3279,7 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
 
                     {/* Info note */}
                     <div style={{ padding: '12px 14px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '8px', fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.7 }}>
-                      💡 <strong style={{ color: '#fff' }}>How it works:</strong> Students added beyond the license cap are tagged <em>overflow</em>. Clicking Refresh promotes the oldest overflow students to active status as slots become available (FIFO order).
+                      💡 <strong style={{ color: '#fff' }}>How it works:</strong> Your active subscription gives your school unlimited students. Tiers (Silver, Gold, Diamond) determine your flat subscription price. Expiry is enforced — keep your subscription active to retain access.
                     </div>
 
                   </div>

@@ -35,7 +35,6 @@ export function About({ onTabChange }: AboutProps) {
   }, []);
 
   const currentTier = license?.tier || 'Silver';
-  const studentCount = license?.student_count || 0;
   const expiresAt = license?.expires_at;
   const hasExplicitExpiry = !!expiresAt;
 
@@ -238,26 +237,11 @@ export function About({ onTabChange }: AboutProps) {
                     paddingBottom: '12px',
                   }}
                 >
-                  <span>Student Quota</span>
+                  <span>Enrolled Students</span>
                   <span style={{ color: '#fff', fontWeight: 'bold' }}>
-                    {enrolledCount !== null ? `${enrolledCount} / ${studentCount}` : `Up to ${studentCount}`} enrolled
+                    {enrolledCount !== null ? enrolledCount : '—'}
                   </span>
                 </div>
-                {/* Quota progress bar */}
-                {studentCount > 0 && enrolledCount !== null && (() => {
-                  const pct = Math.min(100, Math.round((enrolledCount / studentCount) * 100));
-                  const barColor = pct >= 100 ? '#ff4444' : pct >= 85 ? '#ffaa00' : '#00e676';
-                  return (
-                    <div style={{ marginBottom: '12px', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '12px' }}>
-                      <div style={{ background: 'rgba(255,255,255,0.08)', borderRadius: '6px', height: '6px', overflow: 'hidden' }}>
-                        <div style={{ width: `${pct}%`, height: '100%', background: barColor, borderRadius: '6px', transition: 'width 0.4s ease' }} />
-                      </div>
-                      <div style={{ fontSize: '10px', color: barColor, marginTop: '4px', textAlign: 'right' }}>
-                        {pct}% of seat quota used
-                      </div>
-                    </div>
-                  );
-                })()}
                 <div
                   style={{
                     display: 'flex',
@@ -279,25 +263,6 @@ export function About({ onTabChange }: AboutProps) {
                   <div style={{ color: '#ff4444', marginTop: '8px', fontWeight: 'bold' }}>
                     ⚠️ License Expired
                   </div>
-                )}
-                {/* Buy Seats CTA — shown when at or near the cap */}
-                {enrolledCount !== null && studentCount > 0 && enrolledCount >= Math.floor(studentCount * 0.85) && (
-                  <button
-                    onClick={() => (window.electronAPI as any)?.license?.activateOnline?.()}
-                    className="primary-btn"
-                    style={{
-                      marginTop: '10px',
-                      background: enrolledCount >= studentCount
-                        ? 'linear-gradient(135deg, #c62828, #ff5252)'
-                        : 'linear-gradient(135deg, #e65100, #ff9800)',
-                      color: '#fff',
-                      boxShadow: 'none',
-                      justifyContent: 'center',
-                      fontSize: '12px',
-                    }}
-                  >
-                    {enrolledCount >= studentCount ? '🚫 Cap Reached — Buy More Seats' : '⚠️ Nearing Limit — Buy Seats'}
-                  </button>
                 )}
               </>
             )}
