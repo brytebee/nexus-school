@@ -123,6 +123,7 @@ async function pushSchoolDelta() {
   // 1. Gather Students + Fees + Results Summaries + Attendance Stats
   const students = db.prepare(`
     SELECT s.id, s.name, s.class_name, s.class_arm, s.parent_phone,
+           COALESCE(s.parent_phone_2, NULL) as parent_phone_2,
            COALESCE(sf.total_billed, 0) as total_billed,
            COALESCE(sf.total_paid, 0) as total_paid,
            COALESCE(sf.total_billed - sf.total_paid, 0) as fee_balance
@@ -168,6 +169,7 @@ async function pushSchoolDelta() {
       class_name: st.class_name,
       class_arm: st.class_arm,
       parent_phone: st.parent_phone,
+      parent_phone_2: st.parent_phone_2 || null,
       total_billed: st.total_billed,
       total_paid: st.total_paid,
       fee_balance: st.fee_balance,

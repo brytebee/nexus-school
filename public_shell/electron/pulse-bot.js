@@ -450,8 +450,9 @@ function getMatchableDigits(phone) {
 }
 
 /**
- * Returns every student whose parent_phone normalises to the same last-10
- * significant digits as `matchable`. Handles every real-world storage format:
+ * Returns every student whose parent_phone OR parent_phone_2 normalises to
+ * the same last-10 significant digits as `matchable`. Handles every real-world
+ * storage format:
  *   +2348012345678  •  08012345678  •  8012345678
  *   +234-801-234-5678  •  234 801 234 5678  (with spaces / dashes)
  * i.e. any phone that, after stripping non-digits, ends with the same 10 digits.
@@ -462,14 +463,19 @@ function getMatchableDigits(phone) {
  */
 function findStudentsByPhone(db, matchable) {
   if (!matchable) return [];
-  // Fetch all students that have a non-empty parent_phone.
+  // Fetch all students that have at least a primary parent_phone.
+  // parent_phone_2 may be NULL on older rows — COALESCE to '' so the filter is safe.
   // Typical school DB is ≤5 000 rows — JS-side filter is fast (<1 ms).
   const candidates = db.prepare(
-    `SELECT id, name, class_name, class_arm, parent_name, parent_phone
+    `SELECT id, name, class_name, class_arm, parent_name, parent_phone,
+            COALESCE(parent_phone_2, '') AS parent_phone_2
        FROM students
       WHERE parent_phone IS NOT NULL AND parent_phone != ''`
   ).all();
-  return candidates.filter(s => getMatchableDigits(s.parent_phone) === matchable);
+  return candidates.filter(s =>
+    getMatchableDigits(s.parent_phone) === matchable ||
+    (s.parent_phone_2 && getMatchableDigits(s.parent_phone_2) === matchable)
+  );
 }
 
 // ─── Formatting Helpers ────────────────────────────────────────────────────────
