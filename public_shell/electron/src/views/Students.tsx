@@ -91,6 +91,7 @@ export function Students() {
   // Subject Picker State
   const [activePresetTab, setActivePresetTab] = useState<'pri_lower' | 'pri_upper' | 'jss' | 'sss'>('jss');
   const [customSubjects, setCustomSubjects] = useState<string[]>([]);
+  const [persistedCustomSubjects, setPersistedCustomSubjects] = useState<string[]>([]); // F1: school-wide saved subjects
   const [customSubjectInput, setCustomSubjectInput] = useState('');
   const [formLog, setFormLog] = useState<{ text: string; isError: boolean } | null>(null);
 
@@ -198,6 +199,13 @@ export function Students() {
         if (subRes?.ok) {
           const unique = Array.from(new Set((subRes.data || []).map((r: any) => r.subject).filter(Boolean))).sort() as string[];
           setFilterSubjects(unique);
+        }
+
+        // F1: load school-wide custom subjects so the picker is pre-populated
+        const custRes = await (window.electronAPI?.subjects as any)?.getCustomList?.();
+        if (custRes?.ok && Array.isArray(custRes.data)) {
+          setPersistedCustomSubjects(custRes.data);
+          setCustomSubjects(custRes.data); // seed picker for the current session too
         }
       } catch (err) {
         console.error('Failed to load filter metadata:', err);
@@ -1172,7 +1180,7 @@ export function Students() {
     setParentName('');
     setFeeStatus('owing');
     setStagedSubjects([]);
-    setCustomSubjects([]);
+    setCustomSubjects(persistedCustomSubjects); // F1: keep school-wide customs visible
     setCustomSubjectInput('');
     setPhoto(null);
     setFormLog(null);
@@ -1202,10 +1210,12 @@ export function Students() {
     const presetsFlat = Object.values(CurriculumPresets)
       .flat()
       .flatMap(g => g.subjects || []);
-    
-    const customs = currentSubjects.filter(sub => !presetsFlat.includes(sub));
-    setCustomSubjects(customs);
-    
+
+    const studentCustoms = currentSubjects.filter(sub => !presetsFlat.includes(sub));
+    // F1: merge student's own customs with the school-wide saved list
+    const mergedCustoms = Array.from(new Set([...persistedCustomSubjects, ...studentCustoms])).sort();
+    setCustomSubjects(mergedCustoms);
+
     setCustomSubjectInput('');
     setFormLog(null);
     setIsDrawerOpen(true);
@@ -1218,6 +1228,25 @@ export function Students() {
     );
   };
 
+  // F1: Class subject caching — auto-select subjects for the class when adding a new student.
+  // Only fires in add mode (editStudentId === null) so it doesn't clobber edits.
+  useEffect(() => {
+    if (editStudentId !== null) return; // edit mode — respect the student's own subjects
+    if (!className) return;
+
+    const [cls, arm] = className.includes(' ')
+      ? [className.split(' ')[0], className.split(' ').slice(1).join(' ')]
+      : [className, ''];
+
+    (window.electronAPI?.subjects as any)?.getClassSubjects?.({ class_name: cls, class_arm: arm })
+      .then((res: any) => {
+        if (res?.ok && Array.isArray(res.data) && res.data.length > 0) {
+          setStagedSubjects(res.data);
+        }
+      })
+      .catch(() => {}); // non-fatal — picker stays empty
+  }, [className, editStudentId]);
+
   // Add custom subject
   const handleAddCustomSubject = () => {
     const val = customSubjectInput.trim();
@@ -1225,6 +1254,14 @@ export function Students() {
     if (!customSubjects.includes(val)) {
       setCustomSubjects(prev => [...prev, val]);
       setStagedSubjects(prev => [...prev, val]);
+      // F1: persist so it reappears for the next student
+      (window.electronAPI?.subjects as any)?.addToCanonical?.({ name: val })
+        .then(() => {
+          setPersistedCustomSubjects(prev =>
+            prev.includes(val) ? prev : [...prev, val].sort()
+          );
+        })
+        .catch(() => {}); // non-fatal — UI already has the subject
     }
     setCustomSubjectInput('');
   };

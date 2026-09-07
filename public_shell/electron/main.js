@@ -3648,6 +3648,68 @@ ipcMain.handle("subjects:get-canonical-list", () => {
   }
 });
 
+// ── F1: Custom Subject Persistence ───────────────────────────────────────────
+// Stores school-specific subjects that admins type in manually, so they don't
+// have to retype them for every subsequent student.
+
+ipcMain.handle("subjects:get-custom-list", () => {
+  try {
+    const db = database.getDb();
+    // Lazy-create the table on first call (no migration file needed)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS custom_subjects (
+        name TEXT PRIMARY KEY COLLATE NOCASE,
+        created_at TEXT DEFAULT (datetime('now'))
+      )
+    `);
+    const rows = db.prepare("SELECT name FROM custom_subjects ORDER BY name ASC").all();
+    return { ok: true, data: rows.map(r => r.name) };
+  } catch (err) {
+    return { ok: false, error: err.message, data: [] };
+  }
+});
+
+ipcMain.handle("subjects:add-to-canonical", (event, { name }) => {
+  try {
+    if (!name || typeof name !== 'string' || !name.trim()) return { ok: false, error: 'Subject name required' };
+    const db = database.getDb();
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS custom_subjects (
+        name TEXT PRIMARY KEY COLLATE NOCASE,
+        created_at TEXT DEFAULT (datetime('now'))
+      )
+    `);
+    db.prepare(
+      "INSERT INTO custom_subjects (name) VALUES (?) ON CONFLICT(name) DO NOTHING"
+    ).run(name.trim());
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// ── F1: Class Subject Caching ─────────────────────────────────────────────────
+// Returns the distinct subjects already enrolled for any active student in a
+// given class, so the form can pre-select them for the next enrolment.
+ipcMain.handle("subjects:get-class-subjects", (event, { class_name, class_arm }) => {
+  try {
+    if (!class_name) return { ok: true, data: [] };
+    const db = database.getDb();
+    const fullClass = class_name.trim() + (class_arm ? ' ' + class_arm.trim() : '');
+    const rows = db.prepare(`
+      SELECT DISTINCT ss.subject
+      FROM student_subjects ss
+      JOIN students s ON ss.student_id = s.id
+      WHERE (s.class_name = ? OR (s.class_name || ' ' || COALESCE(s.class_arm, '')) = ?)
+        AND s.is_active = 1
+      ORDER BY ss.subject ASC
+    `).all(class_name.trim(), fullClass);
+    return { ok: true, data: rows.map(r => r.subject) };
+  } catch (err) {
+    return { ok: false, error: err.message, data: [] };
+  }
+});
+
 ipcMain.handle("subjects:get-sync-warnings", () => {
   try {
     const db = database.getDb();
@@ -8645,6 +8707,30 @@ function createWindow() {
       }
 
       handleCSVUpload(filePath, (count, err, result) => {
+        // F1: CSV write-back — persist all imported subjects into custom_subjects so they
+        // appear in the manual-registration picker for subsequent students.
+        if (!err && !dryRun && count > 0) {
+          try {
+            const wbDb = database.getDb();
+            wbDb.exec(`
+              CREATE TABLE IF NOT EXISTS custom_subjects (
+                name TEXT PRIMARY KEY COLLATE NOCASE,
+                created_at TEXT DEFAULT (datetime('now'))
+              )
+            `);
+            const insertStmt = wbDb.prepare(
+              "INSERT INTO custom_subjects (name) VALUES (?) ON CONFLICT(name) DO NOTHING"
+            );
+            const allSubjects = wbDb.prepare(
+              "SELECT DISTINCT subject FROM student_subjects WHERE subject IS NOT NULL AND subject != ''"
+            ).all();
+            const writeBack = wbDb.transaction(() => {
+              for (const row of allSubjects) insertStmt.run(row.subject);
+            });
+            writeBack();
+          } catch (_) {} // non-fatal — subjects just won't auto-appear in picker
+        }
+
         const res = {
           count,
           error: err || null,
