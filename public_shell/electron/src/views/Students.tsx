@@ -1238,33 +1238,6 @@ export function Students() {
             setIsDrawerOpen(false);
             fetchStudents();
           }, 1000);
-        } else if (res.error === 'STUDENT_CAP_REACHED') {
-          // Seat cap hit — show Buy Seats prompt
-          const Swal = (window as any).Swal;
-          if (Swal) {
-            const result = await Swal.fire({
-              title: '🚫 Seat Quota Full',
-              html: `
-                <p style="color:#fff; font-size:14px; line-height:1.6; margin-bottom:10px;">
-                  You have reached the maximum of <strong style="color:#ffaa00">${res.cap}</strong> enrolled students allowed on your current plan.
-                </p>
-                <p style="color:#aaa; font-size:12px;">Purchase additional seats to continue registering new students.</p>
-              `,
-              icon: 'error',
-              background: '#0b0f19',
-              color: '#fff',
-              showCancelButton: true,
-              confirmButtonColor: '#0288d1',
-              cancelButtonColor: '#444',
-              confirmButtonText: '💳 Buy More Seats',
-              cancelButtonText: 'Later',
-            });
-            if (result.isConfirmed) {
-              (window.electronAPI as any)?.license?.activateOnline?.();
-            }
-          } else {
-            setFormLog({ text: `❌ Seat quota full (${res.cap} students max). Buy more seats to continue.`, isError: true });
-          }
         } else {
           setFormLog({ text: `❌ ${res.error}`, isError: true });
         }
