@@ -142,7 +142,6 @@ export function Students() {
   const [filterSubject, setFilterSubject] = useState('');
   const [filterTeacherId, setFilterTeacherId] = useState('');
   const [filterNoArm, setFilterNoArm] = useState(false);
-  const [filterOverflow, setFilterOverflow] = useState(false);
   const [showDeactivated, setShowDeactivated] = useState(false); // Phase 7: show archived students
 
   // Filter metadata — teachers list and all known subjects
@@ -245,9 +244,7 @@ export function Students() {
         subject: filterSubject,
         teacher_id: filterTeacherId,
         no_arm: filterNoArm,
-        include_overflow: true,
-        enrollment_status_filter: filterOverflow ? 'overflow' : undefined,
-        include_inactive: showDeactivated, // Phase 7: allow admins to view archived students
+        include_inactive: showDeactivated,
       });
       if (res && res.ok) {
         setStudents(res.data || []);
@@ -271,7 +268,7 @@ export function Students() {
 
   useEffect(() => {
     fetchStudents();
-  }, [page, search, limit, filterClass, filterSubject, filterTeacherId, filterNoArm, filterOverflow, showDeactivated]);
+  }, [page, search, limit, filterClass, filterSubject, filterTeacherId, filterNoArm, showDeactivated]);
 
 
   // Load student directory settings on mount
@@ -487,74 +484,10 @@ export function Students() {
       console.warn('Dry-run validation skipped:', err);
     }
 
-    // ── Step 2: Pre-validate seat cap before any write ─────────────────────
-    const validation = await (window.electronAPI as any)?.students?.validateCSV?.({ filePath: file.path });
-
-    if (validation?.ok && validation.willExceed) {
-      // Cap will be exceeded — show the pre-import modal
-      if (!Swal) {
-        // Fallback if Swal not loaded: proceed without cap
-        setCsvStatus('⏳ Ingesting and verifying student CSV data...');
-        const res = await window.electronAPI?.processCSV?.(file.path);
-        if (res) handleCSVLoadedPayload(res);
-        return;
-      }
-
-      const result = await Swal.fire({
-        title: '⚠️ Seat Quota Exceeded',
-        html: `
-          <div style="text-align:left; font-family:'Inter',sans-serif; padding: 4px 0;">
-            <p style="color:#fff; font-size:14px; margin-bottom:14px; line-height:1.6;">
-              Your CSV contains <strong style="color:#ffaa00">${validation.newStudents} new student${validation.newStudents !== 1 ? 's' : ''}</strong>, 
-              but only <strong style="color:#00e676">${validation.available} seat${validation.available !== 1 ? 's' : ''}</strong> remain on your 
-              <strong>${validation.cap}-seat</strong> plan.
-            </p>
-            <div style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:12px 16px; margin-bottom:14px;">
-              <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:12px; color:#aaa;"><span>Already enrolled</span><span style="color:#fff;font-weight:700">${validation.totalEnrolled}</span></div>
-              <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:12px; color:#aaa;"><span>New in CSV</span><span style="color:#ffaa00;font-weight:700">${validation.newStudents}</span></div>
-              <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:12px; color:#aaa;"><span>Tagged as Overflow</span><span style="color:#ffaa00;font-weight:700">${validation.skippedCount}</span></div>
-              <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:12px; color:#aaa;"><span>Updates (existing)</span><span style="color:#00e676;font-weight:700">${validation.existingStudents}</span></div>
-              <div style="display:flex; justify-content:space-between; font-size:12px; color:#aaa;"><span>Licensed cap</span><span style="color:#00e5ff;font-weight:700">${validation.cap}</span></div>
-            </div>
-            <p style="color:#aaa; font-size:12px; margin:0; line-height:1.5;">
-              Select an option below to handle the extra students.
-            </p>
-          </div>
-        `,
-        icon: 'warning',
-        background: '#0b0f19',
-        color: '#fff',
-        showCancelButton: true,
-        showDenyButton: true,
-        confirmButtonColor: '#00e5ff',
-        denyButtonColor: '#ffaa00',
-        cancelButtonColor: 'rgba(255,255,255,0.15)',
-        confirmButtonText: '🚀 Upgrade Seats Now',
-        denyButtonText: `Import ${validation.available} Seats Only`,
-        cancelButtonText: 'Cancel Import',
-        customClass: { popup: 'swal2-dark-custom' }
-      });
-
-      if (result.isConfirmed) {
-        // Redirect to billing portal
-        (window.electronAPI as any)?.license?.activateOnline?.();
-        return;
-      } else if (result.isDenied) {
-        // Import with cap — only admit up to available slots
-        setCsvStatus(`⏳ Importing ${validation.available} of ${validation.newStudents} new students (capped)...`);
-        const res = await window.electronAPI?.processCSV?.({ filePath: file.path, limit: (validation.totalEnrolled ?? 0) + (validation.available ?? 0) } as any);
-        if (res) handleCSVLoadedPayload(res);
-      } else {
-        // Cancelled
-        setCsvStatus(null);
-        return;
-      }
-    } else {
-      // No cap issue — proceed normally
-      setCsvStatus('⏳ Ingesting and verifying student CSV data...');
-      const res = await window.electronAPI?.processCSV?.(file.path);
-      if (res) handleCSVLoadedPayload(res);
-    }
+    // F3: Seat cap removed — proceed directly to import.
+    setCsvStatus('⏳ Ingesting and verifying student CSV data...');
+    const res = await window.electronAPI?.processCSV?.(file.path);
+    if (res) handleCSVLoadedPayload(res);
   };
 
   // Called when admin clicks "Accept & Import" in the CSVReviewModal
@@ -568,8 +501,9 @@ export function Students() {
       setCsvStatus('⏳ Ingesting student CSV data...');
       const res = await window.electronAPI?.processCSV?.(file.path);
       if (res) handleCSVLoadedPayload(res);
+      return;
     }
-    
+
     const api = (window as any).electronAPI;
     if (pendingCsvType === 'grades') {
       setCsvStatus('⏳ Ingesting and verifying Grades CSV data...');
@@ -582,41 +516,9 @@ export function Students() {
       return;
     }
 
-    // Continue from Step 2 — cap check → processCSV
-    const Swal = (window as any).Swal;
-    const validation = await (window.electronAPI as any)?.students?.validateCSV?.({ filePath: file.path });
-
-    if (validation?.ok && validation.willExceed && Swal) {
-      const result = await Swal.fire({
-        title: '⚠️ Seat Quota Exceeded',
-        html: `<p style="color:#fff;font-size:14px;">Your plan allows <strong style="color:#ffaa00">${validation.cap}</strong> seats. Only <strong style="color:#00e676">${validation.available}</strong> remain.</p>`,
-        icon: 'warning',
-        background: '#0b0f19',
-        color: '#fff',
-        showDenyButton: true,
-        showCancelButton: true,
-        confirmButtonColor: '#0288d1',
-        denyButtonColor: '#2e7d32',
-        cancelButtonColor: '#444',
-        confirmButtonText: '💳 Buy More Seats',
-        denyButtonText: `📥 Import All (tag overflow)`,
-        cancelButtonText: '✖ Cancel',
-        reverseButtons: true,
-      });
-
-      if (result.isConfirmed) {
-        (window.electronAPI as any)?.license?.activateOnline?.();
-        return;
-      } else if (result.isDenied) {
-        setCsvStatus(`⏳ Importing students with overflow tagging...`);
-        window.electronAPI?.processCSV?.({ filePath: file.path, limit: (validation.totalEnrolled ?? 0) + (validation.available ?? 0) } as any);
-      } else {
-        setCsvStatus(null);
-      }
-    } else {
-      setCsvStatus('⏳ Ingesting and verifying student CSV data...');
-      window.electronAPI?.processCSV?.(file.path);
-    }
+    // F3: Cap check removed — always proceed to import.
+    setCsvStatus('⏳ Ingesting and verifying student CSV data...');
+    window.electronAPI?.processCSV?.(file.path);
   };
 
   const handleGradesCSVUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1234,11 +1136,8 @@ export function Students() {
     if (editStudentId !== null) return; // edit mode — respect the student's own subjects
     if (!className) return;
 
-    const [cls, arm] = className.includes(' ')
-      ? [className.split(' ')[0], className.split(' ').slice(1).join(' ')]
-      : [className, ''];
-
-    (window.electronAPI?.subjects as any)?.getClassSubjects?.({ class_name: cls, class_arm: arm })
+    // Pass the full combined className string; backend normalises it for matching.
+    (window.electronAPI?.subjects as any)?.getClassSubjects?.({ class_name: className, class_arm: '' })
       .then((res: any) => {
         if (res?.ok && Array.isArray(res.data) && res.data.length > 0) {
           setStagedSubjects(res.data);
@@ -1509,21 +1408,6 @@ export function Students() {
             </div>
           )}
           <span style={{ fontWeight: 'bold', color: s.is_active === 0 ? 'var(--text-dim)' : 'var(--text-main)', fontSize: '13px', opacity: s.is_active === 0 ? 0.6 : 1 }}>{s.name}</span>
-          {s.enrollment_status === 'overflow' && (
-            <span style={{
-              background: 'rgba(239, 68, 68, 0.1)',
-              color: '#ef4444',
-              border: '1px solid rgba(239, 68, 68, 0.2)',
-              fontSize: '10px',
-              borderRadius: '4px',
-              padding: '1px 5px',
-              fontWeight: 700,
-              marginLeft: '6px',
-              flexShrink: 0
-            }}>
-              OVERFLOW
-            </span>
-          )}
           {s.is_active === 0 && (
             <span style={{
               background: 'rgba(251,191,36,0.12)',
@@ -1734,40 +1618,6 @@ export function Students() {
             onChange={handleCSVUpload}
             style={{ display: 'none' }}
           />
-
-          {/* 🚫 Overflow Filter Shortcut */}
-          <button
-            id="btn-students-overflow-filter"
-            onClick={() => { setFilterOverflow(v => !v); setPage(0); }}
-            title={filterOverflow ? 'Overflow Filter Active (Click to show all students)' : 'Filter Overflow Students (Students beyond license cap)'}
-            style={{
-              background: filterOverflow ? 'rgba(239,68,68,0.25)' : 'rgba(239,68,68,0.06)',
-              border: `1px solid ${filterOverflow ? 'rgba(239,68,68,0.7)' : 'rgba(239,68,68,0.25)'}`,
-              borderRadius: '50%',
-              width: '34px',
-              height: '34px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              fontSize: '15px',
-              color: filterOverflow ? '#ef4444' : 'rgba(239,68,68,0.7)',
-              transition: 'all 0.2s',
-              boxShadow: filterOverflow ? '0 0 12px rgba(239,68,68,0.4)' : '0 0 10px rgba(0,0,0,0.2)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(239,68,68,0.8)';
-              e.currentTarget.style.background = 'rgba(239,68,68,0.3)';
-              e.currentTarget.style.boxShadow = '0 0 14px rgba(239,68,68,0.5)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = filterOverflow ? 'rgba(239,68,68,0.25)' : 'rgba(239,68,68,0.06)';
-              e.currentTarget.style.borderColor = filterOverflow ? 'rgba(239,68,68,0.7)' : 'rgba(239,68,68,0.25)';
-              e.currentTarget.style.boxShadow = filterOverflow ? '0 0 12px rgba(239,68,68,0.4)' : '0 0 10px rgba(0,0,0,0.2)';
-            }}
-          >
-            🚫
-          </button>
 
           {/* 👁 Show Deactivated Toggle — Phase 7 */}
           <button
@@ -1984,7 +1834,7 @@ export function Students() {
         const classOptions  = teacherClasses ? [...teacherClasses].sort() : [...fullList].sort();
         const subjectOptions = teacherSubjects || filterSubjects;
 
-        const hasAnyFilter = filterClass || filterSubject || filterTeacherId || filterNoArm || filterOverflow;
+        const hasAnyFilter = filterClass || filterSubject || filterTeacherId || filterNoArm;
 
         const clearAll = () => {
           setFilterClass('');
@@ -2091,25 +1941,6 @@ export function Students() {
                 ⚠️ No Arm
               </button>
 
-              {/* Overflow filter toggle */}
-              <button
-                onClick={() => { setFilterOverflow(v => !v); setPage(0); }}
-                title="Show only students beyond license capacity (overflow)"
-                style={{
-                  background: filterOverflow ? 'rgba(239,68,68,0.2)' : 'rgba(239,68,68,0.06)',
-                  border: `1px solid ${filterOverflow ? 'rgba(239,68,68,0.6)' : 'rgba(239,68,68,0.25)'}`,
-                  color: '#ef4444',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '7px 12px',
-                  fontSize: '12px',
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  fontWeight: filterOverflow ? 700 : 400,
-                  transition: 'all 0.2s',
-                }}
-              >
-                🚫 Overflow
-              </button>
             </div>
 
             {hasAnyFilter && (
@@ -2118,12 +1949,6 @@ export function Students() {
                   <span style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', color: '#f59e0b', borderRadius: '20px', padding: '2px 10px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     ⚠️ No arm assigned
                     <button onClick={() => { setFilterNoArm(false); setPage(0); }} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: '12px' }}>×</button>
-                  </span>
-                )}
-                {filterOverflow && (
-                  <span style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: '#ef4444', borderRadius: '20px', padding: '2px 10px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    🚫 Overflow only
-                    <button onClick={() => { setFilterOverflow(false); setPage(0); }} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: '12px' }}>×</button>
                   </span>
                 )}
                 {filterTeacherId && (
@@ -3275,65 +3100,6 @@ export function Students() {
                 /* ────── Details View ────── */
                 <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
-                  {detailStudent.enrollment_status === 'overflow' && (
-                    <div style={{
-                      background: 'rgba(239, 68, 68, 0.1)',
-                      border: '1px solid rgba(239, 68, 68, 0.2)',
-                      borderRadius: 'var(--radius-md)',
-                      padding: '12px 16px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '16px' }}>⚠️</span>
-                        <strong style={{ color: '#ef4444', fontSize: '13px' }}>Seat Quota Overflow</strong>
-                      </div>
-                      <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-dim)', lineHeight: '1.4' }}>
-                        This student was imported after your active seat limit was reached. Most features are locked for this student.
-                      </p>
-                      <button
-                        onClick={async () => {
-                          const Swal = (window as any).Swal;
-                          try {
-                            const res = await (window as any).nexusAPI.promoteStudentOverflow({ id: detailStudent.id });
-                            if (res?.ok) {
-                              if (Swal) {
-                                Swal.fire({
-                                  title: 'Promoted!',
-                                  text: `Successfully promoted ${detailStudent.name} to Active status.`,
-                                  icon: 'success',
-                                  background: '#0b0f19',
-                                  color: '#fff',
-                                  confirmButtonColor: '#00E5FF'
-                                });
-                              }
-                              const updatedStudent = { ...detailStudent, enrollment_status: 'active' };
-                              setDetailStudent(updatedStudent);
-                              fetchStudents();
-                            } else {
-                              if (Swal) {
-                                Swal.fire({
-                                  title: 'Promotion Failed',
-                                  text: res?.message || res?.error || 'Failed to promote student.',
-                                  icon: 'error',
-                                  background: '#0b0f19',
-                                  color: '#fff',
-                                  confirmButtonColor: '#ef4444'
-                                });
-                              }
-                            }
-                          } catch (err: any) {
-                            console.error(err);
-                          }
-                        }}
-                        className="primary-btn"
-                        style={{ alignSelf: 'flex-start', padding: '6px 12px', fontSize: '11px', height: 'auto', background: '#00E5FF', color: '#000' }}
-                      >
-                        Promote to Active
-                      </button>
-                    </div>
-                  )}
 
                   {/* Identity Row */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>

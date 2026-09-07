@@ -106,7 +106,9 @@ let qrPayload = null;
 let licenseStatus = { locked: false, message: "" };
 pulseExporter.getLicenseTier = () => licenseStatus?.tier || "Silver";
 
-// ── Quota Gating (Two-Phase Seat Cap Enforcement) ──────────────────────────
+ // ── Quota Gating (Two-Phase Seat Cap Enforcement) ──────────────────────────
+// F3: Per-student cap and overflow tagging removed. Tiers now only determine
+// subscription price; no feature gating on enrolled count.
 const GATED_FEATURES = [
   'generate-reports',
   'results:dispatch',
@@ -132,7 +134,6 @@ const ACTIVATION_GATED = [
 
 function assertActivated(_channel) {
   // Activation enforcement temporarily suspended — all channels open.
-  // Re-enable when server-side activation verification is in place.
   return null;
 }
 
@@ -149,62 +150,12 @@ function assertPaymentOpen(channel) {
 function recheckQuota() {
   try {
     if (!licenseStatus || licenseStatus.locked) return;
-    const db = database.getDb();
-    if (!db) return; // DB not initialized yet
-    
-    // Check if students table exists to prevent crash on fresh DB
-    const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='students'").get();
-    if (!tableExists) return;
 
-    const totalEnrolled = db.prepare('SELECT COUNT(id) AS c FROM students').get().c;
-    const cap = licenseStatus.student_count;
-    const hasCap = typeof cap === 'number' && isFinite(cap) && cap < 999999;
-    
-    if (hasCap && totalEnrolled > cap) {
-      let graceStartStr = null;
-      try {
-        db.prepare("CREATE TABLE IF NOT EXISTS system_settings (key TEXT PRIMARY KEY, value TEXT)").run();
-        const row = db.prepare("SELECT value FROM system_settings WHERE key = '_sys_quota_grace_start'").get();
-        if (row && row.value) graceStartStr = row.value;
-      } catch (e) {}
-      
-      if (!graceStartStr) {
-        graceStartStr = new Date().toISOString();
-        try {
-          db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_quota_grace_start', ?)").run(graceStartStr);
-          const adminId = typeof currentAdminSession !== 'undefined' && currentAdminSession ? currentAdminSession.id : null;
-          db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'QUOTA_MISMATCH_DETECTED', 'license', ?)").run(
-            adminId,
-            `Enrolled: ${totalEnrolled}, Cap: ${cap}. Grace period started.`
-          );
-        } catch (e) {}
-      }
-      
-      const graceStart = new Date(graceStartStr).getTime();
-      const daysSinceGrace = Math.floor((Date.now() - graceStart) / (24 * 60 * 60 * 1000));
-      
-      licenseStatus.overQuota = true;
-      licenseStatus.enrolledCount = totalEnrolled;
-      licenseStatus.daysSinceGrace = daysSinceGrace;
-      licenseStatus.quotaEnforced = daysSinceGrace > 7;
-    } else {
-      // Quota is compliant
-      try {
-        const row = db.prepare("SELECT value FROM system_settings WHERE key = '_sys_quota_grace_start'").get();
-        if (row) {
-          db.prepare("DELETE FROM system_settings WHERE key = '_sys_quota_grace_start'").run();
-          const adminId = typeof currentAdminSession !== 'undefined' && currentAdminSession ? currentAdminSession.id : null;
-          db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'QUOTA_RESOLVED', 'license', ?)").run(
-            adminId,
-            `Enrolled: ${totalEnrolled}, Cap: ${cap || 'N/A'}. Quota is now compliant.`
-          );
-        }
-      } catch (e) {}
-      licenseStatus.overQuota = false;
-      licenseStatus.quotaEnforced = false;
-    }
+    // F3: Seat cap removed — always compliant.
+    licenseStatus.overQuota = false;
+    licenseStatus.quotaEnforced = false;
 
-    // Activation warning days countdown
+    // Activation warning days countdown (unchanged)
     if (licenseStatus && !licenseStatus.locked && !licenseStatus.is_activated) {
       const elapsed = Date.now() - (licenseStatus.registration_ts || Date.now());
       const THIRTY = 30 * 24 * 60 * 60 * 1000;
@@ -218,19 +169,8 @@ function recheckQuota() {
   }
 }
 
-function assertQuotaCompliant(channel) {
-  if (GATED_FEATURES.includes(channel)) {
-    recheckQuota();
-    if (licenseStatus?.quotaEnforced) {
-      return {
-        ok: false,
-        error: 'QUOTA_ENFORCEMENT_ACTIVE',
-        enrolled: licenseStatus.enrolledCount || 0,
-        cap: licenseStatus.student_count || 0,
-        daysSinceGrace: licenseStatus.daysSinceGrace || 0
-      };
-    }
-  }
+function assertQuotaCompliant(_channel) {
+  // F3: Quota enforcement removed. All channels always open.
   return null;
 }
 
@@ -341,24 +281,14 @@ ipcMain.handle('license:get-status', () => {
     return licenseStatus;
 });
 
-ipcMain.handle('license:refresh', () => {
+ ipcMain.handle('license:refresh', () => {
     try {
         const db = database.getDb();
-        const cap = licenseStatus?.student_count;
-        const hasCap = typeof cap === 'number' && isFinite(cap) && cap < 999999;
-        const activeCount = db.prepare("SELECT COUNT(id) AS c FROM students WHERE enrollment_status = 'active' OR enrollment_status IS NULL OR enrollment_status = ''").get().c;
-        const slotsAvailable = hasCap ? Math.max(0, cap - activeCount) : 999999;
-        if (slotsAvailable > 0) {
-            const overflowStudents = db.prepare("SELECT id FROM students WHERE enrollment_status = 'overflow' ORDER BY COALESCE(created_at, rowid) ASC LIMIT ?").all(slotsAvailable);
-            if (overflowStudents.length > 0) {
-                const stmt = db.prepare("UPDATE students SET enrollment_status = 'active' WHERE id = ?");
-                for (const s of overflowStudents) {
-                    stmt.run(s.id);
-                }
-            }
-        }
+        // F3: One-shot migration — promote any previously overflow-tagged students to active.
+        // Safe to run every refresh; ON CONFLICT / no-op when already promoted.
+        db.prepare("UPDATE students SET enrollment_status = 'active' WHERE enrollment_status = 'overflow'").run();
     } catch (e) {
-        console.error('[License] Error auto-promoting overflow students:', e);
+        console.error('[License] refresh migration failed:', e);
     }
     recheckQuota();
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -3098,75 +3028,12 @@ ipcMain.handle("update-teacher-full", (event, { id, name, phone, email, signatur
   }
 });
 
-// ── Form-based Student Entry (mobile adds/edits; this is a DB stub) ───────────
-// ── Seat Cap: validate a student CSV before any write ────────────────────────
-// Returns: { ok, total, newStudents, existingStudents, cap, available, willExceed, skippedCount }
-ipcMain.handle('students:validate-csv', async (_, { filePath }) => {
-  return new Promise((resolve) => {
-    try {
-      const db = database.getDb();
-      const fs = require('fs');
-      const csv = require('csv-parser');
-
-      const rows = [];
-      const stream = fs.createReadStream(filePath)
-        .pipe(csv())
-        .on('data', (row) => rows.push(row))
-        .on('error', (err) => resolve({ ok: false, error: err.message }))
-        .on('end', () => {
-          try {
-            // Count new vs existing students in the CSV
-            let newStudents = 0;
-            let existingStudents = 0;
-
-            for (const row of rows) {
-              const studentId = (row['Student_ID'] || row['ID'] || '').trim();
-              const firstName = (row['First_Name'] || '').trim();
-              const lastName  = (row['Last_Name']  || '').trim();
-              const className = (row['Class']       || '').trim();
-              if (!studentId || (!firstName && !lastName) || !className) continue;
-
-              const exists = db.prepare('SELECT 1 FROM students WHERE id = ? LIMIT 1').get(studentId);
-              if (exists) existingStudents++;
-              else newStudents++;
-            }
-
-            const totalEnrolled = db.prepare('SELECT COUNT(id) AS c FROM students').get().c;
-            const cap = licenseStatus?.student_count;
-            const hasCap = typeof cap === 'number' && isFinite(cap) && cap < 999999;
-            const available = hasCap ? Math.max(0, cap - totalEnrolled) : Infinity;
-            const willExceed = hasCap && newStudents > available;
-            const skippedCount = hasCap ? Math.max(0, newStudents - available) : 0;
-
-            resolve({
-              ok: true,
-              total: rows.length,
-              newStudents,
-              existingStudents,
-              totalEnrolled,
-              cap: hasCap ? cap : null,
-              available: hasCap ? available : null,
-              willExceed,
-              skippedCount,
-            });
-          } catch (innerErr) {
-            resolve({ ok: false, error: innerErr.message });
-          }
-        });
-    } catch (err) {
-      resolve({ ok: false, error: err.message });
-    }
-  });
-});
-
-// ── Seat Cap: get current enrolled student count ──────────────────────────────
+// ── Student count (stats display only — no cap enforcement) ──────────────────
 ipcMain.handle('students:get-count', () => {
   try {
     const db = database.getDb();
-    const row = db.prepare('SELECT COUNT(id) AS c FROM students').get();
-    const cap = licenseStatus?.student_count;
-    const hasCap = typeof cap === 'number' && isFinite(cap) && cap < 999999;
-    return { ok: true, count: row.c, cap: hasCap ? cap : null };
+    const row = db.prepare('SELECT COUNT(id) AS c FROM students WHERE COALESCE(is_active, 1) = 1').get();
+    return { ok: true, count: row.c };
   } catch (err) {
     return { ok: false, error: err.message };
   }
@@ -3186,23 +3053,10 @@ ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, su
     const db = database.getDb();
     // Lazy migration — runs inside the handler so the DB is guaranteed open.
     // SQLite throws "duplicate column name" on subsequent calls; the catch silences it.
-    try { db.exec("ALTER TABLE students ADD COLUMN parent_phone_2 TEXT DEFAULT NULL"); } catch (_) {}
+     try { db.exec("ALTER TABLE students ADD COLUMN parent_phone_2 TEXT DEFAULT NULL"); } catch (_) {}
 
-    // ── Seat Cap Check ───────────────────────────────────────────
-    const cap = licenseStatus?.student_count;
-    const hasCap = typeof cap === 'number' && isFinite(cap) && cap < 999999;
-    let status = 'active';
-    if (hasCap) {
-      // Only enforce the cap if this is a NEW student (not an update/edit)
-      const isExisting = db.prepare('SELECT 1 FROM students WHERE id = ? LIMIT 1').get(id);
-      if (!isExisting) {
-        const currentCount = db.prepare("SELECT COUNT(id) AS c FROM students WHERE enrollment_status = 'active'").get().c;
-        if (currentCount >= cap) {
-          status = 'overflow';
-        }
-      }
-    }
-    // ───────────────────────────────────────────────────────
+    // F3: Seat cap removed — all students enrol as 'active' unconditionally.
+    const status = 'active';
 
     db.transaction(() => {
       db.prepare(`
@@ -3401,24 +3255,6 @@ ipcMain.handle("update-student", (event, { id, name, class_name, class_arm, subj
   }
 });
 
-ipcMain.handle("promote-student-overflow", (event, { id }) => {
-  try {
-    const db = database.getDb();
-    const cap = licenseStatus?.student_count;
-    const hasCap = typeof cap === 'number' && isFinite(cap) && cap < 999999;
-    if (hasCap) {
-      const currentCount = db.prepare("SELECT COUNT(id) AS c FROM students WHERE enrollment_status = 'active'").get().c;
-      if (currentCount >= cap) {
-        return { ok: false, error: 'LIMIT_REACHED', message: `Cannot promote student. You have reached your quota limit of ${cap} active students.` };
-      }
-    }
-    db.prepare("UPDATE students SET enrollment_status = 'active' WHERE id = ?").run(id);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
-});
-
 // ── Student Directory Settings (mobile registration, grade, attendance locks) ─────────────
 ipcMain.handle('students:get-settings', () => {
   try {
@@ -3523,16 +3359,13 @@ ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = ""
     // Base WHERE clause (always present)
     let conditions = "(s.name LIKE ? OR s.id LIKE ? OR s.reg_no LIKE ?)";
     const params = [query, query, query];
-    // Phase 7: Exclude deactivated students from all operational views (grade entry, attendance, fees, results)
-    // Callers that explicitly need archived students must pass includeInactive = true
-    if (!include_overflow) {
-      conditions += " AND (s.enrollment_status = 'active' OR s.enrollment_status IS NULL OR s.enrollment_status = '')";
-    }
+    // F3: overflow removed — include all active enrollment statuses (active, null, or empty).
+    // include_overflow param retained for API compatibility but no longer changes query.
     if (!include_inactive) {
       conditions += " AND COALESCE(s.is_active, 1) = 1";
     }
-    // Explicit enrollment_status filter (e.g. 'overflow' for the Overflow roster tab)
-    if (enrollment_status_filter) {
+    // enrollment_status_filter still supported for future use (e.g. 'inactive')
+    if (enrollment_status_filter && enrollment_status_filter !== 'overflow') {
       conditions += " AND s.enrollment_status = ?";
       params.push(enrollment_status_filter);
     }
@@ -3695,15 +3528,17 @@ ipcMain.handle("subjects:get-class-subjects", (event, { class_name, class_arm })
   try {
     if (!class_name) return { ok: true, data: [] };
     const db = database.getDb();
-    const fullClass = class_name.trim() + (class_arm ? ' ' + class_arm.trim() : '');
+    // class_name from the UI is the full combined string (e.g. "JSS 2" or "JSS 2 A").
+    // Normalise by stripping spaces and uppercasing so "JSS2", "jss 2" etc. all match.
+    const combined = (class_name.trim() + (class_arm ? ' ' + class_arm.trim() : '')).replace(/\s+/g, '').toUpperCase();
     const rows = db.prepare(`
       SELECT DISTINCT ss.subject
       FROM student_subjects ss
       JOIN students s ON ss.student_id = s.id
-      WHERE (s.class_name = ? OR (s.class_name || ' ' || COALESCE(s.class_arm, '')) = ?)
-        AND s.is_active = 1
+      WHERE UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', '')) = ?
+        AND COALESCE(s.is_active, 1) = 1
       ORDER BY ss.subject ASC
-    `).all(class_name.trim(), fullClass);
+    `).all(combined);
     return { ok: true, data: rows.map(r => r.subject) };
   } catch (err) {
     return { ok: false, error: err.message, data: [] };
