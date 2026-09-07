@@ -3226,6 +3226,50 @@ ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, su
       }
     })();
     console.log(`[Form] Student added: ${name} with ${subjects?.length || 0} subjects. Status: ${status}`);
+
+    // ── Fee Inheritance ──────────────────────────────────────────────────────
+    // If apply-to-class was already run for this class, auto-create a student_fees
+    // row for the new student so they appear in Financial Hub without manual re-billing.
+    // Guard: only fires if classmates already have a student_fees row (confirming
+    // apply-to-class was run) AND fee_structures total > 0 for this class+term.
+    try {
+      const termConfig = db.prepare('SELECT academic_session, term FROM school_term_config WHERE id = 1').get();
+      if (termConfig && termConfig.academic_session && termConfig.term) {
+        const fullClassName = class_name + (class_arm ? ' ' + class_arm : '');
+        const normClass = fullClassName.replace(/\s+/g, '').toUpperCase();
+
+        const feeRow = db.prepare(`
+          SELECT COALESCE(SUM(amount), 0) as total FROM fee_structures
+          WHERE class_name = ? AND (LOWER(TRIM(term)) IN ('all terms', 'all term') OR term = ?)
+        `).get(fullClassName, termConfig.term);
+
+        if (feeRow && feeRow.total > 0) {
+          const classAlreadyBilled = db.prepare(`
+            SELECT 1 FROM student_fees sf
+            JOIN students s ON sf.student_id = s.id
+            WHERE UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', '')) = ?
+              AND sf.academic_session = ?
+              AND sf.term = ?
+              AND sf.student_id != ?
+            LIMIT 1
+          `).get(normClass, termConfig.academic_session, termConfig.term, id);
+
+          if (classAlreadyBilled) {
+            db.prepare(`
+              INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status)
+              VALUES (?, ?, ?, ?, 0, 'unpaid')
+              ON CONFLICT(student_id, academic_session, term) DO NOTHING
+            `).run(id, termConfig.academic_session, termConfig.term, feeRow.total);
+            console.log(`[Form] Auto-inherited ₦${feeRow.total.toLocaleString()} fee for ${name} in ${fullClassName}`);
+          }
+        }
+      }
+    } catch (feeErr) {
+      // Non-fatal — student is saved, fee inheritance is best-effort
+      console.warn('[Form] Fee inheritance check failed (non-fatal):', feeErr.message);
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     return { ok: true, overflow: status === 'overflow' };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -3275,6 +3319,47 @@ ipcMain.handle("update-student", (event, { id, name, class_name, class_arm, subj
       }
     })();
     console.log(`[Form] Student ${id} updated: ${name}, ${subjects?.length || 0} subjects.`);
+
+    // ── Fee Inheritance on Class Change ──────────────────────────────────────
+    // If the student was moved to a class that already has fees applied, ensure
+    // they have a student_fees row for the current term.
+    try {
+      const termConfig = db.prepare('SELECT academic_session, term FROM school_term_config WHERE id = 1').get();
+      if (termConfig && termConfig.academic_session && termConfig.term) {
+        const fullClassName = class_name + (class_arm ? ' ' + class_arm : '');
+        const normClass = fullClassName.replace(/\s+/g, '').toUpperCase();
+
+        const feeRow = db.prepare(`
+          SELECT COALESCE(SUM(amount), 0) as total FROM fee_structures
+          WHERE class_name = ? AND (LOWER(TRIM(term)) IN ('all terms', 'all term') OR term = ?)
+        `).get(fullClassName, termConfig.term);
+
+        if (feeRow && feeRow.total > 0) {
+          const classAlreadyBilled = db.prepare(`
+            SELECT 1 FROM student_fees sf
+            JOIN students s ON sf.student_id = s.id
+            WHERE UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', '')) = ?
+              AND sf.academic_session = ?
+              AND sf.term = ?
+              AND sf.student_id != ?
+            LIMIT 1
+          `).get(normClass, termConfig.academic_session, termConfig.term, id);
+
+          if (classAlreadyBilled) {
+            db.prepare(`
+              INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status)
+              VALUES (?, ?, ?, ?, 0, 'unpaid')
+              ON CONFLICT(student_id, academic_session, term) DO NOTHING
+            `).run(id, termConfig.academic_session, termConfig.term, feeRow.total);
+            console.log(`[Form] Auto-inherited fee on class change for student ${id} in ${fullClassName}`);
+          }
+        }
+      }
+    } catch (feeErr) {
+      console.warn('[Form] Fee inheritance (update) check failed (non-fatal):', feeErr.message);
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     return { ok: true };
   } catch (err) {
     console.error('[Form] update-student failed:', err);

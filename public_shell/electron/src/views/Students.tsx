@@ -82,7 +82,7 @@ export function Students() {
   const [parentEmail, setParentEmail] = useState('');
   const [parentPhone, setParentPhone] = useState('');
   const [parentName, setParentName] = useState('');
-  const [feeStatus, setFeeStatus] = useState('cleared');
+  const [feeStatus, setFeeStatus] = useState('owing');
   const [stagedSubjects, setStagedSubjects] = useState<string[]>([]);
   const [photo, setPhoto] = useState<string | null>(null);
 
@@ -1167,7 +1167,7 @@ export function Students() {
     setParentEmail('');
     setParentPhone('');
     setParentName('');
-    setFeeStatus('cleared');
+    setFeeStatus('owing');
     setStagedSubjects([]);
     setCustomSubjects([]);
     setCustomSubjectInput('');
