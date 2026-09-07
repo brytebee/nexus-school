@@ -3528,16 +3528,23 @@ ipcMain.handle("subjects:get-class-subjects", (event, { class_name, class_arm })
   try {
     if (!class_name) return { ok: true, data: [] };
     const db = database.getDb();
-    // class_name from the UI is the full combined string (e.g. "JSS 2" or "JSS 2 A").
-    // Normalise by stripping spaces and uppercasing so "JSS2", "jss 2" etc. all match.
+    // Normalise class name: strip spaces + uppercase so "JSS2", "jss 2", "JSS 2" all match.
     const combined = (class_name.trim() + (class_arm ? ' ' + class_arm.trim() : '')).replace(/\s+/g, '').toUpperCase();
+    // Return subjects of the MOST RECENTLY ADDED student in this class (last-used set),
+    // not the union of all students.  This way unselecting English & Islamic Studies and
+    // adding Literal Arts for Student 1 is exactly what Student 2 starts with — not a
+    // growing union of every subject ever touched in the class.
     const rows = db.prepare(`
-      SELECT DISTINCT ss.subject
+      SELECT ss.subject
       FROM student_subjects ss
-      JOIN students s ON ss.student_id = s.id
-      WHERE UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', '')) = ?
-        AND COALESCE(s.is_active, 1) = 1
-      ORDER BY ss.subject ASC
+      WHERE ss.student_id = (
+        SELECT s.id FROM students s
+        WHERE UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', '')) = ?
+          AND COALESCE(s.is_active, 1) = 1
+        ORDER BY s.rowid DESC
+        LIMIT 1
+      )
+      ORDER BY ss.rowid
     `).all(combined);
     return { ok: true, data: rows.map(r => r.subject) };
   } catch (err) {
