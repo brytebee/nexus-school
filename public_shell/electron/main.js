@@ -3172,9 +3172,6 @@ ipcMain.handle('students:get-count', () => {
   }
 });
 
-// Lazy migration: adds parent_phone_2 for dual-contact support on DBs created before this change.
-try { database.getDb().exec("ALTER TABLE students ADD COLUMN parent_phone_2 TEXT DEFAULT NULL"); } catch (_) {}
-
 ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, subjects, reg_no, admission_no, gender, dob, photo, parent_email, parent_phone, parent_phone_2, parent_name, fee_status }) => {
   try {
     if (!isValidName(name)) {
@@ -3187,6 +3184,9 @@ ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, su
       return { ok: false, error: "Invalid parent email address format." };
     }
     const db = database.getDb();
+    // Lazy migration — runs inside the handler so the DB is guaranteed open.
+    // SQLite throws "duplicate column name" on subsequent calls; the catch silences it.
+    try { db.exec("ALTER TABLE students ADD COLUMN parent_phone_2 TEXT DEFAULT NULL"); } catch (_) {}
 
     // ── Seat Cap Check ───────────────────────────────────────────
     const cap = licenseStatus?.student_count;
@@ -3320,6 +3320,7 @@ ipcMain.handle("update-student", (event, { id, name, class_name, class_arm, subj
       return { ok: false, error: "Invalid parent email address format." };
     }
     const db = database.getDb();
+    try { db.exec("ALTER TABLE students ADD COLUMN parent_phone_2 TEXT DEFAULT NULL"); } catch (_) {}
     db.transaction(() => {
       if (photo !== undefined) {
         db.prepare(`
