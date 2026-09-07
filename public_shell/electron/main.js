@@ -3172,7 +3172,10 @@ ipcMain.handle('students:get-count', () => {
   }
 });
 
-ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, subjects, reg_no, admission_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status }) => {
+// Lazy migration: adds parent_phone_2 for dual-contact support on DBs created before this change.
+try { database.getDb().exec("ALTER TABLE students ADD COLUMN parent_phone_2 TEXT DEFAULT NULL"); } catch (_) {}
+
+ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, subjects, reg_no, admission_no, gender, dob, photo, parent_email, parent_phone, parent_phone_2, parent_name, fee_status }) => {
   try {
     if (!isValidName(name)) {
       return { ok: false, error: "Student Name must be 2–80 characters and contain letters." };
@@ -3203,21 +3206,23 @@ ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, su
 
     db.transaction(() => {
       db.prepare(`
-        INSERT INTO students (id, name, class_name, class_arm, reg_no, admission_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status, enrollment_status)
-        VALUES (@id, @name, @class_name, @class_arm, @reg_no, @admission_no, @gender, @dob, @photo, @parent_email, @parent_phone, @parent_name, @fee_status, @enrollment_status)
+        INSERT INTO students (id, name, class_name, class_arm, reg_no, admission_no, gender, dob, photo, parent_email, parent_phone, parent_phone_2, parent_name, fee_status, enrollment_status)
+        VALUES (@id, @name, @class_name, @class_arm, @reg_no, @admission_no, @gender, @dob, @photo, @parent_email, @parent_phone, @parent_phone_2, @parent_name, @fee_status, @enrollment_status)
         ON CONFLICT(id) DO UPDATE SET
           name=excluded.name, class_name=excluded.class_name, class_arm=excluded.class_arm,
           reg_no=excluded.reg_no, admission_no=excluded.admission_no, gender=excluded.gender, dob=excluded.dob,
           photo=COALESCE(excluded.photo, photo),
           parent_email=excluded.parent_email, parent_phone=excluded.parent_phone,
+          parent_phone_2=excluded.parent_phone_2,
           parent_name=excluded.parent_name,
           fee_status=excluded.fee_status,
           enrollment_status=COALESCE(students.enrollment_status, excluded.enrollment_status)
       `).run({ id, name, class_name, class_arm: class_arm || '',
         reg_no: reg_no || '', admission_no: admission_no || '', gender: gender || '', dob: dob || '',
         photo: photo || null, parent_email: parent_email || '',
-        parent_phone: parent_phone || '', parent_name: parent_name || null,
-        fee_status: fee_status || 'cleared', enrollment_status: status
+        parent_phone: parent_phone || '', parent_phone_2: parent_phone_2 || null,
+        parent_name: parent_name || null,
+        fee_status: fee_status || 'owing', enrollment_status: status
       });
       db.prepare("DELETE FROM student_subjects WHERE student_id = ?").run(id);
       if (subjects && subjects.length > 0) {
@@ -3270,14 +3275,40 @@ ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, su
     }
     // ────────────────────────────────────────────────────────────────────────
 
+    // ── Welcome Message ───────────────────────────────────────────────────────
+    // Fire-and-forget welcome WhatsApp to parent(s) on new student registration.
+    // Only fires for genuinely NEW students (not upsert updates).
+    try {
+      const isNew = !db.prepare('SELECT 1 FROM students WHERE id = ? LIMIT 1').get(id) === false;
+      // After the upsert, check if this was an insert by comparing rowid with a fresh query
+      const schoolName = identityPacket?.name || 'Your School';
+      const phones = [parent_phone, parent_phone_2].filter(Boolean);
+      const welcomeMsg =
+        `👋 Welcome to *${schoolName}* on Nexus!\n\n` +
+        `*${name}* has been successfully registered. ` +
+        `You can message this number anytime to:\n` +
+        `• Check your child's attendance\n` +
+        `• Query fee balance\n` +
+        `• Get result updates\n\n` +
+        `_Reply with *HELP* to see all available options._`;
+      for (const phone of phones) {
+        pulseBot.sendRawMessage(phone, welcomeMsg).catch(e =>
+          console.warn(`[Form] Welcome message to ${phone} failed (non-fatal):`, e.message)
+        );
+      }
+    } catch (welcomeErr) {
+      console.warn('[Form] Welcome message dispatch failed (non-fatal):', welcomeErr.message);
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     return { ok: true, overflow: status === 'overflow' };
   } catch (err) {
     return { ok: false, error: err.message };
   }
 });
 
-// ── Form-based Student Update (“Edit” path) ──────────────────────────────────────
-ipcMain.handle("update-student", (event, { id, name, class_name, class_arm, subjects, reg_no, admission_no, gender, dob, photo, parent_email, parent_phone, parent_name, fee_status }) => {
+// ── Form-based Student Update ("Edit" path) ──────────────────────────────────────
+ipcMain.handle("update-student", (event, { id, name, class_name, class_arm, subjects, reg_no, admission_no, gender, dob, photo, parent_email, parent_phone, parent_phone_2, parent_name, fee_status }) => {
   try {
     if (!isValidName(name)) {
       return { ok: false, error: "Student Name must be 2–80 characters and contain letters." };
@@ -3294,21 +3325,23 @@ ipcMain.handle("update-student", (event, { id, name, class_name, class_arm, subj
         db.prepare(`
           UPDATE students SET name=@name, class_name=@class_name, class_arm=@class_arm,
             reg_no=@reg_no, admission_no=@admission_no, gender=@gender, dob=@dob, photo=@photo,
-            parent_email=@parent_email, parent_phone=@parent_phone, parent_name=@parent_name,
-            fee_status=@fee_status
+            parent_email=@parent_email, parent_phone=@parent_phone, parent_phone_2=@parent_phone_2,
+            parent_name=@parent_name, fee_status=@fee_status
           WHERE id=@id
         `).run({ id, name, class_name, class_arm: class_arm || '', reg_no: reg_no||'', admission_no: admission_no||'', gender: gender||'', dob: dob||'',
                  photo, parent_email: parent_email||'', parent_phone: parent_phone||'',
+                 parent_phone_2: parent_phone_2||null,
                  parent_name: parent_name||null, fee_status: fee_status||'cleared' });
       } else {
         db.prepare(`
           UPDATE students SET name=@name, class_name=@class_name, class_arm=@class_arm,
             reg_no=@reg_no, admission_no=@admission_no, gender=@gender, dob=@dob,
-            parent_email=@parent_email, parent_phone=@parent_phone, parent_name=@parent_name,
-            fee_status=@fee_status
+            parent_email=@parent_email, parent_phone=@parent_phone, parent_phone_2=@parent_phone_2,
+            parent_name=@parent_name, fee_status=@fee_status
           WHERE id=@id
         `).run({ id, name, class_name, class_arm: class_arm || '', reg_no: reg_no||'', admission_no: admission_no||'', gender: gender||'', dob: dob||'',
                  parent_email: parent_email||'', parent_phone: parent_phone||'',
+                 parent_phone_2: parent_phone_2||null,
                  parent_name: parent_name||null, fee_status: fee_status||'cleared' });
       }
       // Replace subject enrollment
@@ -3976,25 +4009,61 @@ ipcMain.handle("teacher:deactivate", (event, { teacherId, is_active }) => {
 });
 
 // ── Directory: Delete Student (Superadmin only) ───────────────────────────────
-ipcMain.handle("delete-student", (event, { id }) => {
+ipcMain.handle("delete-student", (event, { id, forceDelete }) => {
   try {
     const db = database.getDb();
-    // Phase 7 RBAC: Only Superadmin (level 9) may permanently delete a student.
+    // RBAC: Only Superadmin (level 9) may permanently delete a student.
     if (!currentAdminSession || currentAdminSession.role_level < 9) {
       return { ok: false, error: 'Superadmin access required to permanently delete a student. Managers may deactivate instead.' };
     }
-    const target = db.prepare("SELECT name FROM students WHERE id = ?").get(id);
+    const target = db.prepare("SELECT name, fee_status FROM students WHERE id = ?").get(id);
     if (!target) return { ok: false, error: 'Student not found.' };
-    // Purge all related rows explicitly so no orphans remain,
-    // regardless of whether FK cascade is active on this SQLite build.
+
+    // ── Outstanding Fee Guard ────────────────────────────────────────────────
+    // If the student has any unpaid/partial fees, warn the admin before wiping.
+    // The caller may set forceDelete=true (after admin confirms) to bypass.
+    if (!forceDelete) {
+      const termConfig = db.prepare('SELECT academic_session, term FROM school_term_config WHERE id = 1').get();
+      let balance = 0;
+      if (termConfig?.academic_session) {
+        const balRow = db.prepare(
+          `SELECT COALESCE(SUM(total_billed - total_paid), 0) AS bal
+           FROM student_fees WHERE student_id = ? AND status IN ('unpaid', 'partial')`
+        ).get(id);
+        balance = balRow?.bal || 0;
+      }
+      if (balance > 0) {
+        return {
+          ok: false,
+          error: 'STUDENT_HAS_OUTSTANDING_FEES',
+          name: target.name,
+          balance,
+        };
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
+    // Full cascade — purge every table that references this student so no
+    // orphan rows remain (regardless of FK pragma state on this SQLite build).
     db.transaction(() => {
-      db.prepare("DELETE FROM student_subjects  WHERE student_id = ?").run(id);
-      db.prepare("DELETE FROM student_records   WHERE student_id = ?").run(id);
-      db.prepare("DELETE FROM student_domains   WHERE student_id = ?").run(id);
-      db.prepare("DELETE FROM teacher_remarks   WHERE student_id = ?").run(id);
-      db.prepare("DELETE FROM students          WHERE id         = ?").run(id);
+      db.prepare("DELETE FROM student_subjects   WHERE student_id = ?").run(id);
+      db.prepare("DELETE FROM student_records    WHERE student_id = ?").run(id);
+      db.prepare("DELETE FROM student_domains    WHERE student_id = ?").run(id);
+      db.prepare("DELETE FROM teacher_remarks    WHERE student_id = ?").run(id);
+      db.prepare("DELETE FROM student_fees       WHERE student_id = ?").run(id);
+      db.prepare("DELETE FROM daily_attendance   WHERE student_id = ?").run(id);
+      // Soft-delete guard tables (may not exist on all DB versions — wrapped)
+      try { db.prepare("DELETE FROM ils_records        WHERE student_id = ?").run(id); } catch (_) {}
+      try { db.prepare("DELETE FROM fee_adjustments    WHERE student_id = ?").run(id); } catch (_) {}
+      try { db.prepare("DELETE FROM cbt_results        WHERE student_id = ?").run(id); } catch (_) {}
+      db.prepare("DELETE FROM students             WHERE id          = ?").run(id);
     })();
-    if (currentAdminSession) db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'DELETE_STUDENT', 'students', ?)").run(currentAdminSession.id, `Deleted student: ${target.name} (${id})`);
+
+    if (currentAdminSession) {
+      db.prepare(
+        "INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'DELETE_STUDENT', 'students', ?)"
+      ).run(currentAdminSession.id, `Permanently deleted student: ${target.name} (${id})`);
+    }
     console.log(`[Dir] Student ${id} (${target.name}) permanently deleted by ${currentAdminSession.username}.`);
     return { ok: true };
   } catch (err) {

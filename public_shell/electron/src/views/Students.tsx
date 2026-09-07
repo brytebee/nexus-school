@@ -18,6 +18,7 @@ interface Student {
   dob?: string;
   parent_email?: string;
   parent_phone?: string;
+  parent_phone_2?: string;
   parent_name?: string;
   fee_status?: string;
   subjects?: string[];
@@ -81,6 +82,7 @@ export function Students() {
   const [dob, setDob] = useState('');
   const [parentEmail, setParentEmail] = useState('');
   const [parentPhone, setParentPhone] = useState('');
+  const [parentPhone2, setParentPhone2] = useState('');
   const [parentName, setParentName] = useState('');
   const [feeStatus, setFeeStatus] = useState('owing');
   const [stagedSubjects, setStagedSubjects] = useState<string[]>([]);
@@ -1166,6 +1168,7 @@ export function Students() {
     setDob('');
     setParentEmail('');
     setParentPhone('');
+    setParentPhone2('');
     setParentName('');
     setFeeStatus('owing');
     setStagedSubjects([]);
@@ -1186,6 +1189,7 @@ export function Students() {
     setDob(student.dob || '');
     setParentEmail(student.parent_email || '');
     setParentPhone(student.parent_phone || '');
+    setParentPhone2(student.parent_phone_2 || '');
     setParentName(student.parent_name || '');
     setFeeStatus(student.fee_status || 'cleared');
     setPhoto(student.photo || null);
@@ -1265,6 +1269,7 @@ export function Students() {
         dob,
         parent_email: parentEmail,
         parent_phone: parentPhone,
+        parent_phone_2: parentPhone2 || undefined,
         parent_name: parentName,
         fee_status: feeStatus,
         subjects: stagedSubjects,
@@ -1339,9 +1344,54 @@ export function Students() {
       async () => {
         if (!window.electronAPI?.deleteStudent) return;
         try {
+          // First attempt — backend will guard if there are outstanding fees
           const res = await window.electronAPI.deleteStudent({ id: student.id });
-          if (res.ok) fetchStudents();
-          else alert(`Error: ${res.error}`);
+
+          if (res.ok) {
+            fetchStudents();
+            return;
+          }
+
+          if (res.error === 'STUDENT_HAS_OUTSTANDING_FEES') {
+            const Swal = (window as any).Swal;
+            if (!Swal) { alert(`Cannot delete: ${student.name} has an outstanding balance of ₦${res.balance?.toLocaleString()}.`); return; }
+
+            const choice = await Swal.fire({
+              title: '⚠️ Outstanding Balance',
+              html: `
+                <p style="color:#fff;font-size:14px;line-height:1.6;margin-bottom:10px;">
+                  <strong>${res.name}</strong> has an unpaid balance of
+                  <strong style="color:#ffaa00">₦${res.balance?.toLocaleString()}</strong>.
+                </p>
+                <p style="color:#aaa;font-size:12px;">
+                  Permanently deleting this student will erase all fee records. The school will lose this debt trail.
+                  Consider <em>deactivating</em> the student instead to preserve the record while removing them from active rosters.
+                </p>`,
+              showDenyButton: true,
+              showCancelButton: true,
+              confirmButtonText: '🗑 Delete Anyway',
+              denyButtonText: '🔒 Deactivate Instead',
+              cancelButtonText: 'Cancel',
+              background: '#1a1a2e',
+              confirmButtonColor: '#c0392b',
+              denyButtonColor: '#2980b9',
+            });
+
+            if (choice.isConfirmed) {
+              // Force-delete — bypass fee guard
+              const force = await window.electronAPI.deleteStudent({ id: student.id, forceDelete: true });
+              if (force.ok) fetchStudents();
+              else alert(`Error: ${force.error}`);
+            } else if (choice.isDenied) {
+              // Soft-deactivate instead
+              const deact = await (window.electronAPI as any).students?.deactivate({ studentId: student.id, is_active: false });
+              if (deact?.ok) fetchStudents();
+              else alert(`Deactivation error: ${deact?.error}`);
+            }
+            return;
+          }
+
+          alert(`Error: ${res.error}`);
         } catch (err: any) {
           alert(`Error removing student: ${err.message}`);
         }
@@ -2438,6 +2488,23 @@ export function Students() {
                   </div>
                 </div>
 
+                {/* 2nd Contact Phone (optional) */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block' }}>
+                      2nd Contact Phone <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>(optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={parentPhone2}
+                      onChange={(e) => setParentPhone2(e.target.value)}
+                      placeholder="e.g. 2348099998888"
+                      id="stu-add-pphone2"
+                      className="modern-input"
+                    />
+                  </div>
+                </div>
+
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <label style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block' }}>
@@ -3263,9 +3330,12 @@ export function Students() {
                     <p style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '12px' }}>Parent / Guardian</p>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                       {([
-                        { label: 'Guardian Name',  value: detailStudent.parent_name  || '—' },
-                        { label: 'Phone',          value: detailStudent.parent_phone || '—' },
-                        { label: 'Email',          value: detailStudent.parent_email || '—' },
+                        { label: 'Guardian Name',    value: detailStudent.parent_name    || '—' },
+                        { label: 'Phone',            value: detailStudent.parent_phone   || '—' },
+                        ...(detailStudent.parent_phone_2
+                          ? [{ label: '2nd Phone', value: detailStudent.parent_phone_2 }]
+                          : []),
+                        { label: 'Email',            value: detailStudent.parent_email   || '—' },
                       ] as { label: string; value: string }[]).map(({ label, value }) => (
                         <div key={label}>
                           <p style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>{label}</p>
