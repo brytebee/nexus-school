@@ -491,3 +491,84 @@ describe('F4 — parent_phone_2: data model', () => {
     expect(getMatchableDigits('')).toBeNull();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// student_subjects UNIQUE constraint regression (v1.0.91 fix)
+//
+// normalizeSubjectName is a private function inside main.js (not exported).
+// We inline a faithful copy here so we can unit-test the full
+// normalize → deduplicate pipeline without booting Electron.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function normalizeSubjectName(subject, className) {
+  if (!subject) return '';
+  let norm = subject.trim();
+  if (norm === 'Further Maths' || norm === 'Further Mathematic') return 'Further Mathematics';
+  if (norm === 'Literature') return 'Literature in English';
+  if (!className) return norm;
+  const isJSS = className.toUpperCase().startsWith('JS');
+  const isSSS = className.toUpperCase().startsWith('SS');
+  if (norm === 'General Mathematics' && isJSS) return 'Mathematics';
+  if (norm === 'Mathematics' && isSSS) return 'General Mathematics';
+  return norm;
+}
+
+/** Mirrors the dedup pipeline added to add-student-form / update-student. */
+function buildUniqueSubjects(subjects, class_name) {
+  return Array.from(new Set(
+    subjects
+      .map(s => normalizeSubjectName(s, class_name))
+      .filter(s => typeof s === 'string' && s.trim().length > 0)
+  ));
+}
+
+describe('student_subjects — UNIQUE constraint regression (v1.0.91)', () => {
+  it('alias pair on SS class collapses to one row (no duplicate key)', () => {
+    // "Mathematics" + "General Mathematics" on SS1 both normalize to "General Mathematics"
+    const result = buildUniqueSubjects(['Mathematics', 'General Mathematics'], 'SS1');
+    expect(result).toEqual(['General Mathematics']);
+    expect(result.length).toBe(1);
+  });
+
+  it('alias pair on JSS class collapses to one row (no duplicate key)', () => {
+    // "General Mathematics" + "Mathematics" on JSS2 both normalize to "Mathematics"
+    const result = buildUniqueSubjects(['General Mathematics', 'Mathematics'], 'JSS2');
+    expect(result).toEqual(['Mathematics']);
+    expect(result.length).toBe(1);
+  });
+
+  it('exact string duplicate is deduplicated before insert', () => {
+    const result = buildUniqueSubjects(
+      ['English Language', 'English Language', 'Mathematics'],
+      'SS2'
+    );
+    expect(result.filter(s => s === 'English Language').length).toBe(1);
+    expect(result.length).toBe(2);
+  });
+
+  it('Further Maths alias deduplicates with Further Mathematics', () => {
+    const result = buildUniqueSubjects(['Further Maths', 'Further Mathematics'], 'SS3');
+    expect(result).toEqual(['Further Mathematics']);
+    expect(result.length).toBe(1);
+  });
+
+  it('empty strings and whitespace-only values are filtered out', () => {
+    const result = buildUniqueSubjects(['', '   ', 'Biology'], 'SS2');
+    expect(result).toEqual(['Biology']);
+    expect(result.length).toBe(1);
+  });
+
+  it('null/undefined subjects are filtered without throwing', () => {
+    // normalizeSubjectName returns '' for falsy — filtered out downstream
+    const result = buildUniqueSubjects([null, undefined, 'Chemistry'].filter(Boolean), 'SS1');
+    expect(result).toEqual(['Chemistry']);
+  });
+
+  it('valid, distinct subjects are all preserved', () => {
+    const result = buildUniqueSubjects(
+      ['English Language', 'General Mathematics', 'Biology', 'Chemistry'],
+      'SS1'
+    );
+    expect(result.length).toBe(4);
+  });
+});

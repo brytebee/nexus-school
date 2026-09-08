@@ -3080,8 +3080,16 @@ ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, su
       });
       db.prepare("DELETE FROM student_subjects WHERE student_id = ?").run(id);
       if (subjects && subjects.length > 0) {
-        const stmt = db.prepare("INSERT INTO student_subjects (student_id, subject) VALUES (?, ?)");
-        for (const subj of subjects) stmt.run(id, normalizeSubjectName(subj, class_name));
+        const stmt = db.prepare("INSERT OR IGNORE INTO student_subjects (student_id, subject) VALUES (?, ?)");
+        // Normalize first, then deduplicate — prevents alias pairs (e.g. "Mathematics" +
+        // "General Mathematics" on an SS class both normalizing to "General Mathematics")
+        // from triggering a UNIQUE constraint failure on the second insertion.
+        const uniqueSubjects = Array.from(new Set(
+          subjects
+            .map(s => normalizeSubjectName(s, class_name))
+            .filter(s => typeof s === 'string' && s.trim().length > 0)
+        ));
+        for (const subj of uniqueSubjects) stmt.run(id, subj);
       }
     })();
     console.log(`[Form] Student added: ${name} with ${subjects?.length || 0} subjects. Status: ${status}`);
@@ -3202,8 +3210,13 @@ ipcMain.handle("update-student", (event, { id, name, class_name, class_arm, subj
       // Replace subject enrollment
       db.prepare("DELETE FROM student_subjects WHERE student_id = ?").run(id);
       if (subjects && subjects.length > 0) {
-        const stmt = db.prepare("INSERT INTO student_subjects (student_id, subject) VALUES (?, ?)");
-        for (const subj of subjects) stmt.run(id, normalizeSubjectName(subj, class_name));
+        const stmt = db.prepare("INSERT OR IGNORE INTO student_subjects (student_id, subject) VALUES (?, ?)");
+        const uniqueSubjects = Array.from(new Set(
+          subjects
+            .map(s => normalizeSubjectName(s, class_name))
+            .filter(s => typeof s === 'string' && s.trim().length > 0)
+        ));
+        for (const subj of uniqueSubjects) stmt.run(id, subj);
       }
     })();
     console.log(`[Form] Student ${id} updated: ${name}, ${subjects?.length || 0} subjects.`);

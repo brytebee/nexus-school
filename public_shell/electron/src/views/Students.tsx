@@ -1208,7 +1208,7 @@ export function Students() {
         parent_phone_2: parentPhone2 || undefined,
         parent_name: parentName,
         fee_status: feeStatus,
-        subjects: stagedSubjects,
+        subjects: Array.from(new Set(stagedSubjects)),
         photo,
       };
 
