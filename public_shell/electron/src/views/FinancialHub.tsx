@@ -310,6 +310,7 @@ export function FinancialHub() {
   const [newExtraAmount,   setNewExtraAmount]   = useState('');
   const [newExtraTerm,     setNewExtraTerm]     = useState('All Terms');
   const [newExtraBankId,   setNewExtraBankId]   = useState<number|null>(null);
+  const [newExtraClass,    setNewExtraClass]    = useState<string>('All Classes');
   const [addingExtra,      setAddingExtra]      = useState(false);
   // ── Phase 8: Roster row expand (student extras) ───────────────────────────
   const [expandedStudentId,  setExpandedStudentId]  = useState<string|null>(null);
@@ -1406,11 +1407,11 @@ export function FinancialHub() {
   }, [structClass, structTerm]);
 
   const handleAddExtra = async () => {
-    if (!newExtraName.trim() || !newExtraAmount || !structClass) return;
+    if (!newExtraName.trim() || !newExtraAmount) return;
     setAddingExtra(true);
     try {
       const res = await window.electronAPI.feeExtras.upsert({
-        class_name: structClass,
+        class_name: newExtraClass,
         item_name: newExtraName.trim(),
         amount: Number(newExtraAmount) || 0,
         term: newExtraTerm,
@@ -1420,6 +1421,7 @@ export function FinancialHub() {
         setNewExtraName('');
         setNewExtraAmount('');
         setNewExtraBankId(null);
+        setNewExtraClass('All Classes');
         showIndicator('✅ Extra item added');
         await loadExtras();
       } else {
@@ -2414,12 +2416,22 @@ export function FinancialHub() {
                   {loadingExtras ? (
                     <p style={{ fontSize:'12px', color:'var(--text-dim)' }}>Loading extras...</p>
                   ) : extras.length === 0 ? (
-                    <p style={{ fontSize:'12px', color:'var(--text-dim)', margin:0 }}>No optional extras for {structClass}.</p>
+                    <p style={{ fontSize:'12px', color:'var(--text-dim)', margin:0 }}>No optional extras for {structClass} or All Classes.</p>
                   ) : extras.map((ex: any) => (
                     <div key={ex.id} style={{ display:'flex', alignItems:'center', gap:'10px', background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'8px', padding:'8px 12px' }}>
                       <span style={{ flex:1, fontSize:'13px', fontWeight:500 }}>{ex.item_name}</span>
                       <span style={{ fontSize:'12px', fontFamily:'var(--font-mono)', color:'#00e5ff' }}>₦{fmt(ex.amount)}</span>
                       <span style={{ fontSize:'11px', color:'var(--text-dim)' }}>{ex.term}</span>
+                      {/* Scope badge — shows whether this extra is school-wide or class-specific */}
+                      <span style={{
+                        fontSize:'10px', fontWeight:600, padding:'1px 7px', borderRadius:'10px',
+                        background: ex.class_name === 'All Classes' ? 'rgba(0,229,255,0.12)' : 'rgba(255,255,255,0.07)',
+                        color: ex.class_name === 'All Classes' ? '#00e5ff' : 'var(--text-dim)',
+                        border: ex.class_name === 'All Classes' ? '1px solid rgba(0,229,255,0.3)' : '1px solid rgba(255,255,255,0.1)',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {ex.class_name === 'All Classes' ? '🌐 All Classes' : ex.class_name}
+                      </span>
                       <span style={{ fontSize:'11px', color: ex.bank_account_id ? '#4CAF50' : 'var(--text-dim)' }}>
                         {ex.bank_name ? `🏦 ${ex.bank_name}` : '💵 Cash'}
                       </span>
@@ -2451,6 +2463,17 @@ export function FinancialHub() {
                       className="modern-input"
                       style={{ width:'110px', fontSize:'12px', textAlign:'right' }}
                     />
+                    {/* Class scope — "All Classes" makes the extra visible to all students school-wide */}
+                    <select
+                      id="extras-new-class"
+                      value={newExtraClass}
+                      onChange={e => setNewExtraClass(e.target.value)}
+                      className="modern-input"
+                      style={{ width:'145px', fontSize:'12px' }}
+                    >
+                      <option value="All Classes">🌐 All Classes</option>
+                      {fullList.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
                     <select
                       id="extras-new-term"
                       value={newExtraTerm}
