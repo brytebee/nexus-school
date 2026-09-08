@@ -121,6 +121,11 @@ async function pushSchoolDelta() {
   }
 
   // 1. Gather Students + Fees + Results Summaries + Attendance Stats
+  // Belt-and-suspenders: ensure parent_phone_2 column exists before the query.
+  // database.init() runs this via alterSafe at every boot, but this guard
+  // protects against any future boot-order reordering or direct sync-worker use.
+  try { db.exec(`ALTER TABLE students ADD COLUMN parent_phone_2 TEXT DEFAULT NULL`); } catch (_) {}
+
   const students = db.prepare(`
     SELECT s.id, s.name, s.class_name, s.class_arm, s.parent_phone,
            COALESCE(s.parent_phone_2, NULL) as parent_phone_2,
