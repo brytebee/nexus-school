@@ -1853,6 +1853,105 @@ async function processSuccessfulPayment(ref, amountInKobo, transactionId = null)
   return true;
 }
 
+/**
+ * uploadReceiptToCloudinary — builds an HTML receipt from receiptData and
+ * uploads it to Cloudinary as a permanent raw file.
+ * Returns the secure_url string, or null on failure.
+ *
+ * Folder convention: nexus/receipts/{schoolId}/{ref}
+ * No signed-URL expiry — the URL is permanent; access is gated by nexus-api.
+ */
+async function uploadReceiptToCloudinary(receiptData, ref, schoolId) {
+  const cloud  = process.env.CLOUDINARY_CLOUD_NAME;
+  const key    = process.env.CLOUDINARY_API_KEY;
+  const secret = process.env.CLOUDINARY_API_SECRET;
+  if (!cloud || !key || !secret) return null;
+
+  const folder    = `nexus/receipts/${schoolId}`;
+  const publicId  = ref;
+  const timestamp = String(Math.floor(Date.now() / 1000));
+
+  // SHA-1 HMAC: sorted params + secret (no SDK, mirrors nexus-api/lib/cloudinary.ts)
+  const signMsg = `folder=${folder}&public_id=${publicId}&timestamp=${timestamp}${secret}`;
+  const signature = crypto.createHash('sha1').update(signMsg).digest('hex');
+
+  const { schoolName, schoolAddress, schoolPhone, studentName, studentClass,
+          academicSession, term, reference, amountPaid, paymentMethod,
+          paymentDate, allocations = [], feeItems = [] } = receiptData;
+
+  const allocationRows = allocations.map(a =>
+    `<tr><td>${a.name}</td><td>₦${Number(a.amount).toLocaleString('en-NG')}</td><td>₦${Number(a.balance).toLocaleString('en-NG')}</td></tr>`
+  ).join('');
+
+  const feeRows = feeItems.map(f =>
+    `<tr><td>${f.name}</td><td style="text-align:right">₦${Number(f.amount).toLocaleString('en-NG')}</td></tr>`
+  ).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Receipt — ${reference}</title>
+<style>
+  body{font-family:Arial,sans-serif;color:#111;padding:32px;max-width:680px;margin:0 auto}
+  h1{color:#003366;margin-bottom:4px}
+  .meta{font-size:12px;color:#555;margin-bottom:24px}
+  table{width:100%;border-collapse:collapse;margin-top:12px}
+  th{background:#003366;color:#fff;padding:8px;text-align:left;font-size:13px}
+  td{padding:8px;border-bottom:1px solid #eee;font-size:13px}
+  .badge{display:inline-block;padding:4px 10px;border-radius:6px;background:#e6f0e6;color:#226622;font-size:11px;font-weight:700;margin-top:4px}
+  .footer{margin-top:32px;font-size:11px;color:#888;border-top:1px solid #eee;padding-top:12px}
+</style></head>
+<body>
+  <h1>🏫 ${schoolName}</h1>
+  <div class="meta">${schoolAddress || ''}${schoolPhone ? ' · Tel: ' + schoolPhone : ''}</div>
+  <h2 style="color:#444;font-size:16px;margin:0 0 4px">Payment Receipt</h2>
+  <p style="font-size:12px;color:#666;margin:0 0 16px">Ref: <strong>${reference}</strong></p>
+
+  <table><tr>
+    <td><strong>Student</strong></td><td>${studentName} (${studentClass})</td>
+    <td><strong>Term</strong></td><td>${term} — ${academicSession}</td>
+  </tr><tr>
+    <td><strong>Amount Paid</strong></td><td>₦${Number(amountPaid).toLocaleString('en-NG')}</td>
+    <td><strong>Method</strong></td><td>${paymentMethod}</td>
+  </tr><tr>
+    <td><strong>Date</strong></td><td>${paymentDate}</td>
+    <td></td><td><span class="badge">✅ PAID</span></td>
+  </tr></table>
+
+  ${allocationRows ? `<h3 style="margin-top:24px;font-size:14px">Allocation</h3>
+  <table><thead><tr><th>Student</th><th>Allocated</th><th>Remaining Balance</th></tr></thead>
+  <tbody>${allocationRows}</tbody></table>` : ''}
+
+  ${feeRows ? `<h3 style="margin-top:24px;font-size:14px">Fee Breakdown</h3>
+  <table><thead><tr><th>Item</th><th style="text-align:right">Amount</th></tr></thead>
+  <tbody>${feeRows}</tbody></table>` : ''}
+
+  <div class="footer">This is an official payment receipt issued by ${schoolName}.<br>
+  Powered by <strong>Nexus School OS</strong></div>
+</body></html>`;
+
+  try {
+    const b64 = Buffer.from(html, 'utf-8').toString('base64');
+    const dataUri = `data:text/html;base64,${b64}`;
+
+    const form = new FormData();
+    form.append('file',      dataUri);
+    form.append('public_id', publicId);
+    form.append('folder',    folder);
+    form.append('timestamp', timestamp);
+    form.append('api_key',   key);
+    form.append('signature', signature);
+
+    const res  = await fetch(`https://api.cloudinary.com/v1_1/${cloud}/raw/upload`, { method: 'POST', body: form });
+    const json = await res.json();
+    if (!res.ok || json.error) throw new Error(json.error?.message || res.statusText);
+    console.log(`[Cloudinary] Receipt uploaded: ${json.secure_url}`);
+    return json.secure_url;
+  } catch (err) {
+    console.error('[Cloudinary] Receipt upload failed:', err.message);
+    return null;
+  }
+}
+
 async function sendBrandedReceiptHelper(db, ref, session) {
   const studentIds = session.student_ids.split(",");
   const termConfig = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get();
@@ -1967,6 +2066,19 @@ async function sendBrandedReceiptHelper(db, ref, session) {
     const caption = `🎓 *Branded PDF Receipt* for *${studentName}*\nTotal Paid: ₦${session.total_amount.toLocaleString('en-NG')}\nReference: ${ref}\nThank you!`;
     await pulseBot.sendReceiptPdf(session.parent_phone, `Receipt-${ref}.pdf`, pdfBuffer, caption);
     console.log(`[Payment Processor] PDF receipt sent successfully to ${session.parent_phone}`);
+
+    // Upload HTML receipt to Cloudinary for parent portal access (non-blocking)
+    try {
+      const schoolIdRow = db.prepare("SELECT value FROM app_settings WHERE key = 'cloud_school_id'").get();
+      if (schoolIdRow?.value) {
+        const receiptUrl = await uploadReceiptToCloudinary(receiptData, ref, schoolIdRow.value);
+        if (receiptUrl) {
+          try {
+            db.prepare("UPDATE fee_payment_sessions SET receipt_url = ? WHERE paystack_ref = ?").run(receiptUrl, ref);
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
 
     // Notify School Owner via WA
     try {
