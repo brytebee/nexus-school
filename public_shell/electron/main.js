@@ -2194,6 +2194,21 @@ async function sendManualReceiptHelper(db, { student_id, academic_session, term,
     const caption = `🧾 *${schoolName} Receipt*\n${sRow.name} — ₦${amount.toLocaleString("en-NG")} (${methodLabel})\nRef: ${ref}\nThank you!`;
     await pulseBot.sendReceiptPdf(sRow.parent_phone, `Receipt-${ref}.pdf`, pdfBuffer, caption);
 
+    // Cloudinary upload for parent receipt portal
+    try {
+      const schoolIdRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_cloud_id'").get();
+      if (schoolIdRow?.value) {
+        const receiptUrl = await uploadReceiptToCloudinary(receiptData, ref, schoolIdRow.value);
+        if (receiptUrl) {
+          try {
+            db.prepare("UPDATE fee_transactions SET receipt_url = ? WHERE reference_number = ?").run(receiptUrl, ref);
+          } catch (_) {}
+        }
+      }
+    } catch (cErr) {
+      console.warn('[Manual Receipt] Cloudinary upload skipped:', cErr.message);
+    }
+
     // Notify school owner
     try {
       const ownerRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_phone'").get();
@@ -8927,6 +8942,32 @@ function createWindow() {
         cleanCount: result?.cleanCount || count,
         dry_run: result?.dry_run || false
       });
+
+      // Part D: Trigger receipt generation, Cloudinary upload & WhatsApp delivery
+      if (!dryRun && !err && result?.inserted?.length > 0) {
+        setImmediate(async () => {
+          let totalImportedAmount = 0;
+          for (const tx of result.inserted) {
+            totalImportedAmount += Number(tx.amount || 0);
+            try {
+              await sendManualReceiptHelper(db, tx);
+              // Stagger slightly (400ms) to respect WhatsApp anti-spam
+              await new Promise(r => setTimeout(r, 400));
+            } catch (rErr) {
+              console.warn('[Bulk Fee Receipt] Failed for tx ref', tx.reference_number, rErr.message);
+            }
+          }
+
+          // Consolidated alert to school owner
+          try {
+            const ownerRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_phone'").get();
+            if (ownerRow?.value) {
+              const ownerMsg = `📥 *Bulk Payment Import Complete*\nRecorded: ${result.inserted.length} payments\nTotal Amount: ₦${totalImportedAmount.toLocaleString("en-NG")}\n_Nexus School OS_`;
+              db.prepare("INSERT INTO pending_pulse_messages (phone, message, type) VALUES (?, ?, 'general')").run(ownerRow.value, ownerMsg);
+            }
+          } catch (_) {}
+        });
+      }
     }, dryRun);
   });
 

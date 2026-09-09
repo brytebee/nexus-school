@@ -687,6 +687,35 @@ function _isPulseFeeGated(db, studentId, session, termOrNull) {
   return { gated: cfg.threshold === 0 ? balance > 0 : balance >= cfg.threshold, balance };
 }
 
+// ─── Engine Report Helpers for PDF Delivery ──────────────────────────────────
+const _resultDispatcher = (() => {
+  try { return require("@nexus/engine/src/result-dispatcher"); }
+  catch (_) {
+    try { return require("../../private_engine/src/result-dispatcher"); } catch (__) {}
+    return null;
+  }
+})();
+
+const _reportAssembler = (() => {
+  try { return require("@nexus/engine/src/report-assembler"); }
+  catch (_) {
+    try { return require("../../private_engine/src/report-assembler"); } catch (__) {}
+    return null;
+  }
+})();
+
+function _resolveEngineBaseDir() {
+  const candidates = [
+    path.join(__dirname, "../../private_engine"),
+    path.join(__dirname, "node_modules/@nexus/engine"),
+    path.join(process.resourcesPath || "", "app.asar.unpacked/private_engine"),
+  ];
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) return c;
+  }
+  return __dirname;
+}
+
 // ─── Response Builders ─────────────────────────────────────────────────────────
 async function sendResults(msg, session, termOverride = null) {
   const db = database.getDb();
@@ -695,8 +724,6 @@ async function sendResults(msg, session, termOverride = null) {
   const periodLabel = scope === "year"
     ? `Full Year ${termConfig.academic_session}`
     : `${activeTerm}, ${termConfig.academic_session}`;
-
-  let text = `📊 *Academic Results*\n_Period: ${periodLabel}_\n${DIV}\n\n`;
 
   for (const student of students) {
     // ── Fee Gate (Gold / Diamond only — Silver is exempt) ──────────────────
@@ -707,61 +734,94 @@ async function sendResults(msg, session, termOverride = null) {
     } catch(e) {}
     if (tier !== 'Silver') {
       try {
-        // year scope = check ALL terms; otherwise check active term only
         const termForGate = scope === 'year' ? null : activeTerm;
         const gate = _isPulseFeeGated(db, student.id, termConfig.academic_session, termForGate);
         if (gate.gated) {
           const fmt = (n) => Number(n||0).toLocaleString('en-NG', {minimumFractionDigits:0});
-          text += `👤 *${student.name}* — ${student.class_name}\n`;
-          text += `🔒 *Results Withheld — Outstanding Fee Balance*\n`;
-          text += `   Balance: *\u20a6${fmt(gate.balance)}*\n`;
-          text += `Please contact the school bursar to clear fees and unlock your results.\n\n`;
+          const feeMsg = `👤 *${student.name}* — ${student.class_name}\n` +
+            `🔒 *Results Withheld — Outstanding Fee Balance*\n` +
+            `   Balance: *₦${fmt(gate.balance)}*\n` +
+            `Please contact the school bursar to clear fees and unlock your results.\n\n` +
+            `Reply *0* for Main Menu.`;
+          await msg.reply(feeMsg);
           continue;
         }
       } catch(feeErr) {
         console.warn('[Pulse] Fee gate check failed (non-fatal):', feeErr.message);
       }
     }
+
     const records = queryResults(db, student.id, termConfig.academic_session, scope === "year" ? null : activeTerm);
-
-    text += `👤 *${student.name}*\n🏫 ${student.class_name}\n`;
-
     if (records.length === 0) {
-      text += `_No results available for this period._\n\n`;
+      await msg.reply(`👤 *${student.name}* (${student.class_name})\n_No results available for ${periodLabel}._\n\nReply *0* for Main Menu.`);
       continue;
     }
 
-    if (scope === "year") {
-      // Group by term
-      const byTerm = records.reduce((acc, r) => {
-        (acc[r.term] = acc[r.term] || []).push(r);
-        return acc;
-      }, {});
-      for (const [term, recs] of Object.entries(byTerm)) {
-        text += `\n_${term}_\n`;
-        let total = 0;
-        for (const r of recs) {
-          text += `${gradeColor(r.score)} ${r.subject}: *${r.score}%*\n`;
-          total += r.score;
+    // Attempt official PDF compilation and document dispatch
+    let pdfSent = false;
+    if (_resultDispatcher?.compileStudentPdf && _reportAssembler?.assembleStudentsForReport) {
+      try {
+        const assembled = _reportAssembler.assembleStudentsForReport(
+          db,
+          [student.id],
+          activeTerm,
+          termConfig.academic_session
+        );
+        const profile = assembled?.students?.[0];
+        if (profile && (profile.subjects?.length > 0 || profile.il_subjects?.length > 0)) {
+          const baseDir = _resolveEngineBaseDir();
+          const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nexus-pulse-report-"));
+          try {
+            const rawBuf = await _resultDispatcher.compileStudentPdf(
+              profile,
+              termConfig,
+              baseDir,
+              tempDir,
+              'clean_slate'
+            );
+            if (rawBuf && rawBuf.length > 0) {
+              const pdfBuffer = Buffer.isBuffer(rawBuf) ? rawBuf : Buffer.from(rawBuf);
+              const pdfFileName = `${student.name.replace(/\s+/g, '_')}_${activeTerm.replace(/\s+/g, '_')}_Report_Card.pdf`;
+              const caption = `🎓 *Official Terminal Report Card*\n\n` +
+                `👤 *${student.name}* (${student.class_name})\n` +
+                `📅 *Period:* ${periodLabel}\n` +
+                `🏫 ${session.schoolName || "Nexus School"}\n\n` +
+                `_Powered by Nexus Pulse_ 🎓`;
+              const media = new MessageMedia("application/pdf", pdfBuffer.toString("base64"), pdfFileName);
+              await client.sendMessage(msg.from, media, { caption, sendMediaAsDocument: true });
+              pdfSent = true;
+            }
+          } finally {
+            try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
+          }
         }
-        const avg = total / recs.length;
-        text += `📈 *Avg: ${avg.toFixed(1)}%* — Grade *${gradeLetter(avg)}*\n`;
+      } catch (pdfErr) {
+        console.warn(`[Pulse Bot] PDF generation for ${student.name} failed, falling back to link:`, pdfErr.message);
       }
-    } else {
-      let total = 0;
-      for (const r of records) {
-        text += `${gradeColor(r.score)} ${r.subject}: *${r.score}%*\n`;
-        total += r.score;
-      }
-      const avg = total / records.length;
-      text += `\n📈 *Average: ${avg.toFixed(1)}%* — Grade *${gradeLetter(avg)}*\n`;
     }
 
-    text += `\n`;
-  }
+    // If PDF was not dispatched (e.g. printToPDF unavailable), send executive summary + portal link
+    if (!pdfSent) {
+      let total = 0;
+      for (const r of records) total += Number(r.score || 0);
+      const avg = records.length > 0 ? (total / records.length) : 0;
+      const schoolSlug = (() => {
+        try { return db.prepare("SELECT value FROM app_settings WHERE key='school_cloud_id'").get()?.value; } catch(_) { return null; }
+      })() || "portal";
 
-  text += `${DIV}\n💡 *Quick Menu:* 1=Results · 2=Attendance · 3=Fees · 4=Extras · 5=News · 6=Policies · 0=Menu\n\n_Powered by Nexus Pulse_ 🎓`;
-  await msg.reply(text);
+      const summaryText =
+        `📊 *Academic Result — ${student.name}*\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `👤 *Class:* ${student.class_name}\n` +
+        `📅 *Period:* ${periodLabel}\n` +
+        `📈 *Average:* ${avg.toFixed(1)}% (Grade ${gradeLetter(avg)})\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `👉 *View & Download Full Official Terminal Report Card (HTML & PDF):*\n` +
+        `🔗 https://sch.nexusos.com.ng/${schoolSlug}/parent?tab=results\n\n` +
+        `Reply *0* for Main Menu.`;
+      await msg.reply(summaryText);
+    }
+  }
 }
 
 async function sendAttendance(msg, session, termOverride = null) {
