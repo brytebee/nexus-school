@@ -6549,7 +6549,7 @@ ipcMain.handle("results:dispatch", async (event, payload) => {
 });
 
 // ── S8-5: Publish results to the parent portal (nexus-api) ─────────────────
-ipcMain.handle("results:publish", async (event, { term, academicSession }) => {
+ipcMain.handle("results:publish", async (event, { term, academicSession, studentIds }) => {
   try {
     // ── Standalone scope lock: Portal publish requires Gold+ (Portal is not part of Standalone pack) ──
     const _rpTier = licenseStatus?.tier || 'Standalone';
@@ -6578,7 +6578,7 @@ ipcMain.handle("results:publish", async (event, { term, academicSession }) => {
     event.sender.send("publish:progress", { stage: "generating", message: "Generating result PDFs…" });
 
     const { results, parentMap, skipped, total } =
-      await resultDispatcher.compileBatchAndUpload(db, term, academicSession, baseDir);
+      await resultDispatcher.compileBatchAndUpload(db, term, academicSession, baseDir, studentIds);
 
     if (results.length === 0 && total === 0) {
       return { ok: false, error: `No students with results found for ${term} ${academicSession}. Ensure scores have been entered for this term.` };

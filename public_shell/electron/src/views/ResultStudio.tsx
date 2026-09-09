@@ -393,6 +393,125 @@ export function ResultStudio() {
     return null;
   };
 
+  // Result PIN Policy: Block direct offline generation and un-gated messaging dispatch
+  const handleActionRestrictedByPolicy = (actionName: string = "This action") => {
+    const Swal = (window as any).Swal;
+    if (Swal) {
+      Swal.fire({
+        title: 'Action Restricted',
+        html: `
+          <div style="text-align:center;font-size:13.5px;line-height:1.6">
+            <p style="margin:0 0 10px;color:#fca5a5;font-weight:600">
+              This action cannot be completed! Contact Support.
+            </p>
+            <p style="margin:0;font-size:12px;color:#94a3b8">
+              Direct report card generation and un-gated messaging dispatch have been restricted by administrative policy.
+              Result distribution and downloads are managed exclusively through official <strong>Result Checker PINs</strong> on the school web portal.
+            </p>
+          </div>
+        `,
+        icon: 'warning',
+        background: '#0b0f19',
+        color: '#fff',
+        confirmButtonColor: '#00E5FF',
+        confirmButtonText: 'Understood'
+      });
+    } else {
+      alert('This action cannot be completed! Contact Support.');
+    }
+  };
+
+  // S8-5: Detailed Pre-Publish Audit & Dry Run (Grading completeness + Fee clearance)
+  const auditPrePublishDryRun = async (students: any[], actionLabel: string): Promise<any[] | null> => {
+    // 1. Fee Clearance
+    const cleared = students.filter((s: any) =>
+      s.fee_status === 'cleared' || s.feeStatus === 'cleared'
+    );
+    const owing = students.filter((s: any) =>
+      s.fee_status !== 'cleared' && s.feeStatus !== 'cleared'
+    );
+
+    // 2. Grading Completeness
+    const graded = students.filter((s: any) => (s.average ?? 0) > 0);
+    const ungraded = students.filter((s: any) => (s.average ?? 0) <= 0);
+
+    // Eligible to publish: cleared fees AND graded
+    const publishable = cleared.filter((s: any) => (s.average ?? 0) > 0);
+
+    const Swal = (window as any).Swal;
+    if (!Swal) {
+      const proceed = window.confirm(
+        `Pre-Publish Dry Run — ${actionLabel}\n\n` +
+        `📊 Grading: ${graded.length} graded, ${ungraded.length} incomplete\n` +
+        `🛡️ Fees: ${cleared.length} cleared, ${owing.length} outstanding\n\n` +
+        `Proceed to publish ${publishable.length} eligible student(s)?`
+      );
+      return (proceed && publishable.length > 0) ? publishable : null;
+    }
+
+    const owingNames = owing.slice(0, 6).map((s: any) => `• ${s.name} (${s.class_name || ''})`).join('<br/>');
+    const moreOwing = owing.length > 6 ? `<br/><em style="color:#94a3b8">… and ${owing.length - 6} more</em>` : '';
+
+    const ungradedNames = ungraded.slice(0, 6).map((s: any) => `• ${s.name} (${s.class_name || ''})`).join('<br/>');
+    const moreUngraded = ungraded.length > 6 ? `<br/><em style="color:#94a3b8">… and ${ungraded.length - 6} more</em>` : '';
+
+    const result = await Swal.fire({
+      title: '🌐 Pre-Publish Audit & Dry Run',
+      html: `
+        <div style="text-align:left;font-size:12.5px;line-height:1.55">
+          <p style="margin:0 0 10px;color:#94a3b8">
+            Pre-flight dry run audit for <strong>${students.length} target student(s)</strong>:
+          </p>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+            <div style="background:rgba(0,229,255,0.06);border:1px solid rgba(0,229,255,0.2);padding:8px 12px;border-radius:6px">
+              <strong style="color:#00E5FF">📊 Grading Status:</strong><br/>
+              ✅ Fully Graded: <strong>${graded.length}</strong><br/>
+              ${ungraded.length > 0 ? `<span style="color:#fca5a5">⚠️ Ungraded: <strong>${ungraded.length}</strong></span>` : '<span style="color:#34d399">All graded</span>'}
+            </div>
+            <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.2);padding:8px 12px;border-radius:6px">
+              <strong style="color:#34d399">🛡️ Fee Clearance:</strong><br/>
+              ✅ Fee Cleared: <strong>${cleared.length}</strong><br/>
+              ${owing.length > 0 ? `<span style="color:#fca5a5">⛔ Outstanding: <strong>${owing.length}</strong></span>` : '<span style="color:#34d399">All cleared</span>'}
+            </div>
+          </div>
+
+          ${ungraded.length > 0 ? `
+            <div style="background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.25);padding:8px 12px;border-radius:6px;color:#fde047;margin-bottom:8px;max-height:100px;overflow-y:auto">
+              <strong>⚠️ Ungraded / Missing Scores (${ungraded.length}):</strong><br/>${ungradedNames}${moreUngraded}
+            </div>
+          ` : ''}
+
+          ${owing.length > 0 ? `
+            <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);padding:8px 12px;border-radius:6px;color:#fca5a5;margin-bottom:10px;max-height:100px;overflow-y:auto">
+              <strong>⛔ Outstanding Fee Balances (${owing.length}):</strong><br/>${owingNames}${moreOwing}
+            </div>
+          ` : ''}
+
+          <div style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);padding:8px 12px;border-radius:6px;color:#a5b4fc">
+            🚀 <strong>Ready to Publish:</strong> ${publishable.length} student(s) with completed grades &amp; cleared fees
+          </div>
+          ${publishable.length === 0 ? '<p style="margin:10px 0 0;font-size:12px;color:#f87171">⚠️ No students qualify for publishing. Ensure grades are entered and fee balances cleared.</p>' : ''}
+        </div>
+      `,
+      icon: publishable.length > 0 ? (owing.length > 0 || ungraded.length > 0 ? 'warning' : 'info') : 'error',
+      background: '#0b0f19',
+      color: '#fff',
+      showCancelButton: true,
+      confirmButtonColor: publishable.length > 0 ? '#00E5FF' : '#ef4444',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: publishable.length > 0
+        ? `✅ Publish ${publishable.length} Student${publishable.length !== 1 ? 's' : ''}`
+        : '❌ Cannot Proceed',
+      cancelButtonText: 'Cancel',
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+    });
+
+    if (result.isConfirmed && publishable.length > 0) return publishable;
+    return null;
+  };
+
   // S8-4: Dispatch Results via WhatsApp/Email (Gold/Diamond)
   const handleDispatch = async () => {
     if (!queryResults.length || !(window as any).electronAPI?.results?.dispatch) return;
@@ -463,7 +582,7 @@ export function ResultStudio() {
       return;
     }
 
-    const audited = await auditFeeClearanceAndConfirm(targetStudents, "Publishing to Portal");
+    const audited = await auditPrePublishDryRun(targetStudents, "Publishing to Portal");
     if (!audited || !audited.length) return;
     targetStudents = audited;
 
@@ -1389,11 +1508,11 @@ export function ResultStudio() {
                   animation: "none",
                 }}
                 id="rs-generate-btn"
-                onClick={handleGenerate}
-                disabled={!queryResults.length || generating || !isActivated}
-                title={!isActivated ? "School activation required to generate reports." : ""}
+                onClick={() => handleActionRestrictedByPolicy("Generate & Save")}
+                disabled={!queryResults.length}
+                title="Direct report card generation is restricted. Results are accessed via Result PIN on the web portal."
               >
-                {generating ? "⏳ Generating…" : !isActivated ? "🔒 Activation Required" : "📄 Generate & Save"}
+                📄 Generate & Save
               </button>
             </div>
 
@@ -1651,11 +1770,11 @@ export function ResultStudio() {
 
                     <button
                       className="primary-btn"
-                      onClick={handleDispatch}
-                      disabled={dispatching || (!sendWA && !sendEmail)}
+                      onClick={() => handleActionRestrictedByPolicy("Dispatch Results")}
                       style={{ padding: "6px 14px", fontSize: "12px", background: "var(--accent)", color: "#000", border: "none", animation: "none", boxShadow: "none" }}
+                      title="Direct result dispatch via WhatsApp/Email is restricted. Results are accessible via official PIN on the portal."
                     >
-                      {dispatching ? "⚡ Sending…" : "⚡ Dispatch Results"}
+                      ⚡ Dispatch Results
                     </button>
                     {dispatchStatus && (
                       <span style={{ fontSize: "12px", color: "var(--text-dim)" }}>{dispatchStatus}</span>
@@ -2286,13 +2405,12 @@ export function ResultStudio() {
                 📧 Email
               </label>
               <button
-                onClick={handleDispatch}
-                disabled={dispatching || (!sendWA && !sendEmail) || !isActivated}
-                title={!isActivated ? "School activation required to dispatch results." : ""}
+                onClick={() => handleActionRestrictedByPolicy("Dispatch Results")}
+                title="Direct result dispatch via WhatsApp/Email is restricted. Results are accessible via official PIN on the portal."
                 className="secondary-btn"
-                style={{ padding: "6px 14px", fontSize: "12px", cursor: isActivated ? "pointer" : "not-allowed" }}
+                style={{ padding: "6px 14px", fontSize: "12px", cursor: "pointer" }}
               >
-                {dispatching ? "⚡ Sending…" : "⚡ Dispatch Results"}
+                ⚡ Dispatch Results
               </button>
               <button
                 onClick={handlePublishToPortal}
@@ -2314,13 +2432,12 @@ export function ResultStudio() {
                 Close
               </button>
               <button
-                onClick={() => { setIsPreviewModalOpen(false); handleGenerate(); }}
-                disabled={!isActivated}
-                title={!isActivated ? "School activation required to generate reports." : ""}
+                onClick={() => handleActionRestrictedByPolicy("Generate Report PDF")}
+                title="Direct report card generation is restricted. Results are accessed via Result PIN on the web portal."
                 className="primary-btn"
-                style={{ padding: "8px 20px", opacity: isActivated ? 1 : 0.5, cursor: isActivated ? "pointer" : "not-allowed" }}
+                style={{ padding: "8px 20px", cursor: "pointer" }}
               >
-                {isActivated ? "⚡ Generate Reports PDF" : "🔒 Activation Required"}
+                ⚡ Generate Reports PDF
               </button>
             </div>
           </div>
