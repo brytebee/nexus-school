@@ -131,6 +131,7 @@ async function pushSchoolDelta() {
   const students = db.prepare(`
     SELECT s.id, s.name, s.class_name, s.class_arm, s.parent_phone,
            COALESCE(s.parent_phone_2, NULL) as parent_phone_2,
+           s.parent_email,
            COALESCE(sf.total_billed, 0) as total_billed,
            COALESCE(sf.total_paid, 0) as total_paid,
            COALESCE(sf.total_billed - sf.total_paid, 0) as fee_balance
@@ -177,6 +178,7 @@ async function pushSchoolDelta() {
       class_arm: st.class_arm,
       parent_phone: st.parent_phone,
       parent_phone_2: st.parent_phone_2 || null,
+      parent_email: st.parent_email || null,
       total_billed: st.total_billed,
       total_paid: st.total_paid,
       fee_balance: st.fee_balance,
@@ -216,6 +218,45 @@ async function pushSchoolDelta() {
     }
   } catch (_) {}
 
+  // 5. Gather Active Paystack Verified Subaccount Code
+  let subaccountCode = null;
+  try {
+    if (feeSettingsPayload?.active_bank_account_id) {
+      const acc = db.prepare("SELECT subaccount_code FROM bank_accounts WHERE id = ? AND paystack_verified = 1").get(feeSettingsPayload.active_bank_account_id);
+      if (acc?.subaccount_code) subaccountCode = acc.subaccount_code;
+    }
+    if (!subaccountCode) {
+      const acc = db.prepare("SELECT subaccount_code FROM bank_accounts WHERE is_active = 1 AND paystack_verified = 1 AND subaccount_code IS NOT NULL LIMIT 1").get();
+      if (acc?.subaccount_code) subaccountCode = acc.subaccount_code;
+    }
+  } catch (_) {}
+
+  // 6. Gather School Portal Slug and Name
+  let portalSlug = null;
+  let schoolName = null;
+  try {
+    const identRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_identity'").get();
+    if (identRow?.value) {
+      const parsed = JSON.parse(identRow.value);
+      if (parsed.portalSlug) portalSlug = parsed.portalSlug;
+      if (parsed.name) schoolName = parsed.name;
+    }
+  } catch (_) {}
+
+  if (!portalSlug) {
+    try {
+      const { app } = require('electron');
+      const fs = require('fs');
+      const path = require('path');
+      const idPath = path.join(app.getPath('userData'), 'identity.json');
+      if (fs.existsSync(idPath)) {
+        const parsed = JSON.parse(fs.readFileSync(idPath, 'utf8'));
+        if (parsed.portalSlug) portalSlug = parsed.portalSlug;
+        if (parsed.name && !schoolName) schoolName = parsed.name;
+      }
+    } catch (_) {}
+  }
+
   const syncToken = getSyncToken(db);
   const url = `${getApiBase()}/api/sync/push`;
   const response = await fetch(url, {
@@ -230,7 +271,10 @@ async function pushSchoolDelta() {
         students: studentPayload,
         news: newsPayload,
         policies: policiesPayload,
-        fee_settings: feeSettingsPayload
+        fee_settings: feeSettingsPayload,
+        paystack_subaccount_code: subaccountCode,
+        portal_slug: portalSlug,
+        school_name: schoolName
       }
     })
   });
