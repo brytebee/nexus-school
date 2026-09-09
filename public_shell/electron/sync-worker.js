@@ -257,6 +257,13 @@ async function pushSchoolDelta() {
     } catch (_) {}
   }
 
+  if (!schoolName) {
+    try {
+      const nameRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_name'").get();
+      if (nameRow?.value) schoolName = nameRow.value;
+    } catch (_) {}
+  }
+
   const syncToken = getSyncToken(db);
   const url = `${getApiBase()}/api/sync/push`;
   const response = await fetch(url, {
@@ -282,6 +289,17 @@ async function pushSchoolDelta() {
   const json = await response.json();
   if (!response.ok || !json.ok) {
     throw new Error(json.error || `Sync push failed with HTTP ${response.status}`);
+  }
+
+  if (json.slug_warning) {
+    console.warn(`[Sync Worker] ${json.slug_warning}`);
+    try {
+      db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('portal_slug_clash_warning', ?)").run(json.slug_warning);
+    } catch (_) {}
+  } else {
+    try {
+      db.prepare("DELETE FROM app_settings WHERE key = 'portal_slug_clash_warning'").run();
+    } catch (_) {}
   }
 
   return { ok: true, count: studentPayload.length, synced_at: json.synced_at };

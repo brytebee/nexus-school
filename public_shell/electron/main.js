@@ -326,12 +326,24 @@ ipcMain.handle('slug:check-availability', async (event, slug) => {
         ? [primaryBase, 'http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3001']
         : [primaryBase];
 
+    let schoolId = '';
+    try {
+        const db = database.getDb();
+        const row = db.prepare("SELECT value FROM app_settings WHERE key = 'school_cloud_id'").get();
+        if (row?.value) schoolId = row.value;
+        if (!schoolId) {
+            const hwRow = db.prepare("SELECT value FROM app_settings WHERE key = 'hardware_id'").get();
+            if (hwRow?.value) schoolId = hwRow.value;
+        }
+    } catch (_) {}
+
     for (const baseUrl of candidateBases) {
         try {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 2000);
+            const schoolParam = schoolId ? `&school_id=${encodeURIComponent(schoolId)}` : '';
             const res = await fetch(
-                `${baseUrl}/api/schools/slug-available?slug=${encodeURIComponent(cleanSlug)}`,
+                `${baseUrl}/api/schools/slug-available?slug=${encodeURIComponent(cleanSlug)}${schoolParam}`,
                 { signal: controller.signal } // public endpoint — no auth header needed
             );
             clearTimeout(timeoutId);
