@@ -566,6 +566,55 @@ function buildTermMenu() {
   );
 }
 
+// ─── Result PIN Gate ───────────────────────────────────────────────────────────
+
+function _getBotApiBase() {
+  const override = process.env.NEXUS_API_URL;
+  if (override) {
+    try {
+      const { app } = require("electron");
+      if (app.isPackaged && !override.startsWith("https://")) return "https://api.nexusos.com.ng";
+    } catch (_) {}
+    return override;
+  }
+  return "https://api.nexusos.com.ng";
+}
+
+/**
+ * Checks nexus-api to see if the parent has a valid unconsumed ResultPin.
+ * If consume=true and valid, the PIN use_count is incremented atomically on the server.
+ * Returns { valid: boolean, uses_left?: number }.
+ * Never throws — if the network call fails, defaults to { valid: false, offline: true }.
+ */
+async function hasValidResultPin(db, phone, consume = false, pinCode = null) {
+  try {
+    const schoolCloudId = (() => {
+      try {
+        const row = db.prepare("SELECT value FROM app_settings WHERE key='school_cloud_id'").get();
+        return row?.value ?? null;
+      } catch (_) { return null; }
+    })();
+
+    if (!schoolCloudId) return { valid: false, reason: "no_cloud_id" };
+
+    const nexusSecret = process.env.NEXUS_API_SECRET ?? "";
+    let url = `${_getBotApiBase()}/api/result-pins?school_id=${encodeURIComponent(schoolCloudId)}&phone=${encodeURIComponent(phone)}&consume=${consume}`;
+    if (pinCode) {
+      url += `&pin_code=${encodeURIComponent(pinCode)}`;
+    }
+
+    const res = await fetch(url, {
+      headers: { "x-nexus-secret": nexusSecret },
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!res.ok) return { valid: false, reason: "api_error" };
+    return await res.json();
+  } catch (_) {
+    return { valid: false, offline: true };
+  }
+}
+
 // ─── Data Fetchers ─────────────────────────────────────────────────────────────
 function queryResults(db, studentId, academicSession, term) {
   if (term) {
@@ -1226,7 +1275,10 @@ async function handleMessage(msg) {
     }
 
     // Smart Intent Engine: check natural language query before defaulting to Main Menu
-    const detected = detectIntent(text);
+    const trimmedText = (text || "").trim().toUpperCase();
+    const looksLikePin = /^(PIN|PRN)-[A-Z0-9-]+$/i.test(trimmedText) || (/^[A-Z0-9]{8,16}$/i.test(trimmedText) && !/^(MENU|HOME|HELP)$/i.test(trimmedText));
+
+    const detected = looksLikePin ? "RESULTS" : detectIntent(text);
     const intentChoiceMap = {
       FEES: "fees",
       EXTRAS: "extras",
@@ -1262,7 +1314,22 @@ async function handleMessage(msg) {
         setSession(matchable, session);
         return;
       }
-      if (inferredChoice === "result" || inferredChoice === "attendance") {
+      if (inferredChoice === "result") {
+        const db2 = database.getDb();
+        const pinCheck = await hasValidResultPin(db2, matchable, true, looksLikePin ? trimmedText : null);
+        if (!pinCheck.valid) {
+          const pinMsg = pinCheck.offline
+            ? "⚠️ Could not verify your result access PIN (network unavailable). Please try again shortly."
+            : `🔒 *Result Check Requires a PIN*\n\nPurchase a Result Checker PIN to view academic results.\n\n👉 Visit your school's website and tap *Generate PIN → Result Checker PIN*.\n\nReply *0* to return to the main menu.`;
+          await msg.reply(pinMsg);
+          return;
+        }
+        session.state = STATE.SCOPE;
+        setSession(matchable, session);
+        await msg.reply(buildScopeMenu(inferredChoice, session.termConfig));
+        return;
+      }
+      if (inferredChoice === "attendance") {
         session.state = STATE.SCOPE;
         setSession(matchable, session);
         await msg.reply(buildScopeMenu(inferredChoice, session.termConfig));
@@ -1336,6 +1403,25 @@ async function handleMessage(msg) {
       await sendPoliciesAndFaq(msg, session);
       session.state = STATE.MENU;
       setSession(matchable, session);
+      return;
+    }
+
+    if (choice === "result") {
+      const dbPin = database.getDb();
+      const pinCheck = await hasValidResultPin(dbPin, matchable, true);
+      if (!pinCheck.valid) {
+        const pinMsg = pinCheck.offline
+          ? "⚠️ Could not verify your result access PIN (network unavailable). Please try again shortly."
+          : `🔒 *Result Check Requires a PIN*\n\nPurchase a Result Checker PIN to view academic results.\n\n👉 Visit your school's website and tap *Generate PIN → Result Checker PIN*.\n\nReply *0* to return to the main menu.`;
+        await msg.reply(pinMsg);
+        session.menuChoice = null;
+        session.state = STATE.MENU;
+        setSession(matchable, session);
+        return;
+      }
+      session.state = STATE.SCOPE;
+      setSession(matchable, session);
+      await msg.reply(buildScopeMenu(choice, session.termConfig));
       return;
     }
 
