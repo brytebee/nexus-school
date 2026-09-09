@@ -9,6 +9,8 @@ let isSyncing = false;
 let mainWindowRef = null;
 let lastSyncSuccess = null;
 let lastSyncError = null;
+// Registered by main.js — called for full settlement (writes fee_transactions + student_fees)
+let _onPaymentSettled = null;
 
 function getApiBase() {
   const override = process.env.NEXUS_API_URL;
@@ -258,13 +260,34 @@ async function pullPendingSyncEvents() {
 
   for (const ev of events) {
     if (ev.event_type === "PAYMENT_SETTLED") {
-      const { paystack_ref, amount, settled_at } = ev.payload;
+      const { paystack_ref, amount, receipt_url, settled_at } = ev.payload;
       try {
-        db.prepare(`
-          UPDATE fee_payment_sessions
-          SET status = 'settled', settled_at = ?
-          WHERE paystack_ref = ?
-        `).run(settled_at || new Date().toISOString(), paystack_ref);
+        if (_onPaymentSettled) {
+          // Full path: processSuccessfulPayment() writes fee_transactions,
+          // student_fees, marks session 'settled', and sends the WhatsApp receipt.
+          // It MUST run while the local session is still 'pending' — if the
+          // UPDATE ran first the guard inside processSuccessfulPayment would
+          // return early and nothing would be written.
+          await _onPaymentSettled(paystack_ref, Math.round((amount || 0) * 100), null);
+
+          // Store the Cloudinary receipt URL if the cloud webhook generated one
+          if (receipt_url) {
+            try {
+              db.prepare(
+                `UPDATE fee_payment_sessions SET receipt_url = ? WHERE paystack_ref = ?`
+              ).run(receipt_url, paystack_ref);
+            } catch (_) {}
+          }
+        } else {
+          // Fallback (no callback — test context or pre-registration race):
+          // status flag only.  The 'AND status = 'pending'' guard is critical —
+          // without it a duplicate pull would overwrite an already-settled session.
+          db.prepare(`
+            UPDATE fee_payment_sessions
+            SET status = 'settled', settled_at = ?
+            WHERE paystack_ref = ? AND status = 'pending'
+          `).run(settled_at || new Date().toISOString(), paystack_ref);
+        }
         console.log(`[Sync Worker] Reconciled settled payment session: ${paystack_ref}`);
       } catch (err) {
         console.warn(`[Sync Worker] Failed to reconcile payment ${paystack_ref}:`, err.message);
@@ -685,8 +708,19 @@ function getSyncStatus() {
   };
 }
 
+/**
+ * Register a callback invoked when a PAYMENT_SETTLED cloud event is pulled.
+ * Called from main.js with processSuccessfulPayment so the full settlement
+ * (fee_transactions + student_fees + WhatsApp receipt) runs on cloud payments.
+ * Must be registered BEFORE the first sync cycle fires.
+ */
+function registerPaymentSettledHandler(fn) {
+  _onPaymentSettled = fn;
+}
+
 module.exports = {
   initSyncWorker,
+  registerPaymentSettledHandler,
   pushSchoolDelta,
   pullPendingSyncEvents,
   performSyncCycle,
@@ -701,4 +735,5 @@ module.exports = {
   requestCloudBotReset,
   checkCloudBotStatus,
 };
+
 

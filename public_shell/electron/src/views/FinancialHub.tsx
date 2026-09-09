@@ -232,6 +232,9 @@ export function FinancialHub() {
   const [payRef,       setPayRef]       = useState('');
   const [payNote,      setPayNote]      = useState('');
   const [recordingPay, setRecordingPay] = useState(false);
+  const [botLive,      setBotLive]      = useState(false);   // WhatsApp bot ready at modal open?
+  const [sendReceipt,  setSendReceipt]  = useState(false);   // admin's choice — send receipt?
+
 
   // ── Ledger (Diamond) ──────────────────────────────────────────────────────
   const [ledgerStudent, setLedgerStudent] = useState<{ id: string; name: string }|null>(null);
@@ -1709,6 +1712,16 @@ export function FinancialHub() {
   // ═══════════════════════════════════════════════════════════════════════════
   // DIAMOND: Record Payment
   // ═══════════════════════════════════════════════════════════════════════════
+  // Check bot status whenever the record-payment modal opens
+  useEffect(() => {
+    if (!payStudent) return;
+    window.electronAPI.pulse.status().then((s: { status: string }) => {
+      const alive = s?.status === 'ready';
+      setBotLive(alive);
+      setSendReceipt(alive); // pre-check if bot is live, admin can uncheck
+    }).catch(() => { setBotLive(false); setSendReceipt(false); });
+  }, [payStudent]);
+
   const handlePaymentSubmit = async () => {
     const payValidation = validatePaymentInput(payStudent, payAmount, payMethod, payRef);
     if (!payValidation.ok) {
@@ -1720,6 +1733,7 @@ export function FinancialHub() {
       const res = await window.electronAPI.fees.recordPayment({
         student_id:payStudent.id, academic_session:sessionRef.current, term:termRef.current,
         amount:Number(payAmount), payment_method:payMethod, reference_number:payRef.trim(), note:payNote.trim(),
+        send_receipt: sendReceipt,
       });
       if (res?.ok) {
         setPayStudent(null);
@@ -3502,6 +3516,24 @@ export function FinancialHub() {
               <div><Lbl>Payment Method</Lbl><select id="payment-method" value={payMethod} onChange={e => setPayMethod(e.target.value)} className="modern-input" style={{ width:'100%' }}><option value="cash">💵 Cash</option><option value="transfer">🏦 Bank Transfer</option><option value="pos">💳 POS</option><option value="bank_teller">🧾 Bank Teller</option></select></div>
               <div><Lbl>Reference / Teller No. <span style={{ color:'var(--text-dim)', fontWeight:'normal', textTransform:'none' }}>(optional)</span></Lbl><input type="text" id="payment-reference" placeholder="e.g. TXN12345678" value={payRef} onChange={e => setPayRef(e.target.value)} className="modern-input" style={{ width:'100%' }} /></div>
               <div><Lbl>Note <span style={{ color:'var(--text-dim)', fontWeight:'normal', textTransform:'none' }}>(optional)</span></Lbl><input type="text" id="payment-note" placeholder="e.g. Part payment" value={payNote} onChange={e => setPayNote(e.target.value)} className="modern-input" style={{ width:'100%' }} /></div>
+
+              {/* ── WhatsApp receipt gate ────────────────────────────── */}
+              <div style={{ background: botLive ? 'rgba(76,175,80,0.08)' : 'rgba(255,82,82,0.08)', border: `1px solid ${botLive ? 'rgba(76,175,80,0.25)' : 'rgba(255,82,82,0.25)'}`, borderRadius:'8px', padding:'10px 12px', display:'flex', alignItems:'center', gap:'10px' }}>
+                <span style={{ fontSize:'16px' }}>{botLive ? '🟢' : '🔴'}</span>
+                <div style={{ flex:1, fontSize:'12px', color:'var(--text-dim)' }}>
+                  {botLive ? 'WhatsApp bot is live' : 'WhatsApp bot is offline — receipt will not be sent'}
+                </div>
+                <label style={{ display:'flex', alignItems:'center', gap:'6px', cursor: botLive ? 'pointer' : 'default', fontSize:'12px', fontWeight:600, color: botLive ? 'var(--accent)' : 'var(--text-dim)', whiteSpace:'nowrap' }}>
+                  <input
+                    type="checkbox"
+                    checked={sendReceipt}
+                    disabled={!botLive}
+                    onChange={e => setSendReceipt(e.target.checked)}
+                    style={{ accentColor:'var(--accent)', width:'14px', height:'14px' }}
+                  />
+                  Send receipt
+                </label>
+              </div>
             </div>
             <div style={{ display:'flex', gap:'10px', marginTop:'22px', justifyContent:'flex-end' }}>
               <button id="btn-payment-cancel" className="secondary-btn" onClick={() => setPayStudent(null)}>Cancel</button>
@@ -3512,6 +3544,7 @@ export function FinancialHub() {
           </div>
         </div>
       )}
+
 
       {/* ══════════════════════════════════════════════════════════════════════
           MODAL: Ledger (Diamond)

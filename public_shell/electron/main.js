@@ -2017,6 +2017,100 @@ async function sendBrandedReceiptHelper(db, ref, session) {
   }
 }
 
+/**
+ * sendManualReceiptHelper — generates and sends a PDF receipt for a manually
+ * recorded payment (cash / transfer / POS / bank teller).
+ *
+ * Unlike sendBrandedReceiptHelper, this reads from fee_transactions directly
+ * because manual payments do NOT create a fee_payment_sessions row.
+ *
+ * @param {object} db
+ * @param {{ student_id, academic_session, term, amount, payment_method, reference_number, note }} params
+ * @returns {Promise<boolean>}
+ */
+async function sendManualReceiptHelper(db, { student_id, academic_session, term, amount, payment_method, reference_number, note }) {
+  const sRow = db.prepare("SELECT name, class_name, parent_phone, parent_email FROM students WHERE id = ?").get(student_id);
+  if (!sRow?.parent_phone) {
+    console.warn("[Manual Receipt] No parent phone for student", student_id, "— skipping WhatsApp dispatch");
+    return false;
+  }
+
+  const termConfig = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get() || {};
+  const feeRow = db.prepare(
+    "SELECT total_billed, total_paid FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?"
+  ).get(student_id, academic_session || termConfig.academic_session, term || termConfig.term);
+  const balance = Math.max(0, (feeRow?.total_billed || 0) - (feeRow?.total_paid || 0));
+
+  const PAY_LABELS = { cash: "Cash", transfer: "Bank Transfer", pos: "POS", bank_teller: "Bank Teller" };
+  const methodLabel = PAY_LABELS[payment_method] || payment_method;
+  const ref = reference_number || `MAN-${Date.now()}`;
+  const dateStr = new Date().toLocaleDateString("en-NG");
+
+  // Build receiptData matching generateReceiptPdf's expected shape
+  let schoolName = identityPacket?.name || "the school";
+  let schoolAddress = identityPacket?.address || "";
+  let schoolPhone = identityPacket?.phone || "";
+  let schoolLogoB64 = identityPacket?.logoBase64 || "";
+  try {
+    const nRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_name'").get();
+    if (nRow?.value) schoolName = nRow.value;
+    const aRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_address'").get();
+    if (aRow?.value) schoolAddress = aRow.value;
+    const pRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_phone'").get();
+    if (pRow?.value) schoolPhone = pRow.value;
+    const lRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_logo_b64'").get();
+    if (lRow?.value) schoolLogoB64 = lRow.value;
+  } catch (_) {}
+
+  const receiptData = {
+    schoolName, schoolAddress, schoolPhone, schoolLogoB64,
+    studentName:   sRow.name,
+    studentClass:  sRow.class_name || "—",
+    parentEmail:   sRow.parent_email || "—",
+    academicSession: academic_session || termConfig.academic_session || "—",
+    term:          term || termConfig.term || "—",
+    reference:     ref,
+    amountPaid:    amount,
+    paymentMethod: methodLabel,
+    paymentDate:   dateStr,
+    allocations:   [{ name: sRow.name, amount, balance }],
+    feeItems:      [],
+  };
+
+  try {
+    const pdfBuffer = await receiptGenerator.generateReceiptPdf(receiptData);
+    const caption = `🧾 *${schoolName} Receipt*\n${sRow.name} — ₦${amount.toLocaleString("en-NG")} (${methodLabel})\nRef: ${ref}\nThank you!`;
+    await pulseBot.sendReceiptPdf(sRow.parent_phone, `Receipt-${ref}.pdf`, pdfBuffer, caption);
+
+    // Notify school owner
+    try {
+      const ownerRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_phone'").get();
+      if (ownerRow?.value) {
+        const ownerMsg = `💳 *Manual Payment Alert*\nStudent: ${sRow.name} (${sRow.class_name})\nAmount: ₦${amount.toLocaleString("en-NG")}\nMethod: ${methodLabel}\nRef: ${ref}\nTerm: ${receiptData.term} (${receiptData.academicSession})\n_Nexus School OS_`;
+        db.prepare("INSERT INTO pending_pulse_messages (phone, message, type) VALUES (?, ?, 'general')").run(ownerRow.value, ownerMsg);
+      }
+    } catch (_) {}
+
+    console.log(`[Manual Receipt] PDF sent to ${sRow.parent_phone} for ${sRow.name}`);
+    return true;
+  } catch (err) {
+    console.error(`[Manual Receipt] PDF failed, falling back to text:`, err.message);
+    const fallback =
+      `✅ *Payment Recorded — ${schoolName}*\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `👤 *${sRow.name}* (${sRow.class_name || "—"})\n` +
+      `💰 Amount: ₦${amount.toLocaleString("en-NG")}\n` +
+      `📋 Method: ${methodLabel}\n` +
+      `🔖 Reference: ${ref}\n` +
+      `📅 Date: ${dateStr}\n` +
+      `💳 Outstanding Balance: ₦${balance.toLocaleString("en-NG")}\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `_Your payment has been recorded. Thank you!_\n_Powered by Nexus Pulse_ 🎓`;
+    await pulseBot.sendRawMessage(sRow.parent_phone, fallback);
+    return false;
+  }
+}
+
 async function processFailedPayment(ref, reason) {
   const db = database.getDb();
   const session = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(ref);
@@ -4338,7 +4432,7 @@ ipcMain.handle("fees:upsert", (event, { student_id, academic_session, term, tota
  * fees:record-payment — Diamond ledger write.
  * Appends transaction, then recomputes total_paid from the ledger (single source of truth).
  */
-ipcMain.handle("fees:record-payment", (event, { student_id, academic_session, term, amount, payment_method, reference_number, note }) => {
+ipcMain.handle("fees:record-payment", async (event, { student_id, academic_session, term, amount, payment_method, reference_number, note, send_receipt }) => {
   try {
     const db = database.getDb();
     const amt = Number(amount);
@@ -4370,12 +4464,25 @@ ipcMain.handle("fees:record-payment", (event, { student_id, academic_session, te
           updated_at = datetime('now')
       `).run(student_id, academic_session, term, existing.total_billed, total_paid, status);
     })();
+
+    // Non-blocking receipt dispatch — UI gets { ok: true } immediately
+    if (send_receipt === true) {
+      const botStatus = pulseBot?.getPulseStatus?.();
+      if (botStatus?.status === "ready") {
+        setImmediate(() =>
+          sendManualReceiptHelper(db, { student_id, academic_session, term, amount: amt, payment_method, reference_number, note })
+            .catch(err => console.error("[Manual Receipt] dispatch error:", err.message))
+        );
+      }
+    }
+
     return { ok: true };
   } catch (err) {
     console.error("[Fees] record-payment error:", err);
     return { ok: false, error: err.message };
   }
 });
+
 
 /** fees:get-transactions — ledger history for a student+term (Diamond). */
 ipcMain.handle("fees:get-transactions", (event, { student_id, academic_session, term }) => {
@@ -6883,6 +6990,10 @@ function createWindow() {
   // belongs around startPulse() only, not around the window-ref init.
   pulseBot.initPulseBot(mainWindow);
   syncWorker.initSyncWorker(mainWindow);
+  // Wire full settlement: cloud PAYMENT_SETTLED events run processSuccessfulPayment()
+  // which writes fee_transactions, student_fees, and sends the WhatsApp receipt.
+  // Must be registered before startSyncSchedule() fires the first cycle.
+  syncWorker.registerPaymentSettledHandler(processSuccessfulPayment);
   syncWorker.startSyncSchedule();
 
   // Message queue worker is a tier-gated feature — start it once tier is known.
