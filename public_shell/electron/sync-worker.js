@@ -207,6 +207,15 @@ async function pushSchoolDelta() {
     `).all();
   } catch (_) {}
 
+  // 4. Gather Fee Settings (FinancialHub settings)
+  let feeSettingsPayload = null;
+  try {
+    const fsRow = db.prepare("SELECT value FROM app_settings WHERE key = 'fee_settings'").get();
+    if (fsRow?.value) {
+      feeSettingsPayload = JSON.parse(fsRow.value);
+    }
+  } catch (_) {}
+
   const syncToken = getSyncToken(db);
   const url = `${getApiBase()}/api/sync/push`;
   const response = await fetch(url, {
@@ -220,7 +229,8 @@ async function pushSchoolDelta() {
       delta: {
         students: studentPayload,
         news: newsPayload,
-        policies: policiesPayload
+        policies: policiesPayload,
+        fee_settings: feeSettingsPayload
       }
     })
   });

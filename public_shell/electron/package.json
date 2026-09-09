@@ -1,7 +1,7 @@
 {
   "name": "nexus-school-os",
   "productName": "Nexus School OS",
-  "version": "1.0.93",
+  "version": "1.0.94",
   "description": "Nexus School OS - sovereign desktop engine",
   "author": "Nexus Infrastructure",
   "repository": {
@@ -113,7 +113,9 @@
       "category": "Education",
       "maintainer": "Nexus Infrastructure Ltd <support@nexusos.com.ng>",
       "synopsis": "High-End School Management System",
-      "executableArgs": ["--no-sandbox"],
+      "executableArgs": [
+        "--no-sandbox"
+      ],
       "desktop": {
         "Name": "Nexus School OS",
         "Comment": "Sovereign school management system",
@@ -133,8 +135,10 @@
         "libasound2"
       ],
       "fpm": [
-        "--conflicts", "nexusschoolos",
-        "--replaces", "nexusschoolos"
+        "--conflicts",
+        "nexusschoolos",
+        "--replaces",
+        "nexusschoolos"
       ]
     },
     "nsis": {
