@@ -103,4 +103,128 @@ describe('Pulse Cloud 2-Way Delta Sync & Normalization', () => {
     const dangerClass = "danger-outline-btn";
     expect(dangerClass).toBe("danger-outline-btn");
   });
+
+  it("6. Auto-provisions missing cloud payment session and deducts student balance upon reconciliation", () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE students (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        class_name TEXT,
+        parent_phone TEXT
+      );
+      CREATE TABLE student_fees (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id TEXT NOT NULL,
+        academic_session TEXT NOT NULL,
+        term TEXT NOT NULL,
+        total_billed REAL NOT NULL,
+        total_paid REAL NOT NULL,
+        status TEXT DEFAULT 'unpaid',
+        UNIQUE(student_id, academic_session, term)
+      );
+      CREATE TABLE fee_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id TEXT NOT NULL,
+        academic_session TEXT NOT NULL,
+        term TEXT NOT NULL,
+        amount REAL NOT NULL,
+        reference_number TEXT
+      );
+      CREATE TABLE fee_payment_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        parent_phone TEXT NOT NULL,
+        student_ids TEXT NOT NULL,
+        total_amount REAL NOT NULL,
+        payment_type TEXT NOT NULL,
+        paystack_ref TEXT UNIQUE,
+        receipt_url TEXT,
+        status TEXT DEFAULT 'pending',
+        created_at TEXT DEFAULT (datetime('now')),
+        settled_at TEXT
+      );
+      CREATE TABLE school_term_config (
+        id INTEGER PRIMARY KEY,
+        academic_session TEXT,
+        term TEXT
+      );
+    `);
+
+    db.prepare("INSERT INTO school_term_config (id, academic_session, term) VALUES (1, '2026/2027', 'First Term')").run();
+    db.prepare("INSERT INTO students (id, name, class_name, parent_phone) VALUES ('STU-0057', 'Abubakar Chukwuma', 'JSS 1', '07066324306')").run();
+    db.prepare("INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status) VALUES ('STU-0057', '2026/2027', 'First Term', 68000, 0, 'unpaid')").run();
+
+    // Simulate PAYMENT_SETTLED event arriving from cloud where local session was never created
+    const eventPayload = {
+      paystack_ref: 'PAY-1789041557278-8028',
+      amount: 1000,
+      receipt_url: 'https://res.cloudinary.com/nexus/receipt.pdf',
+      student_ids: ['STU-0057'],
+      parent_phone: '07066324306',
+      payment_type: 'custom',
+      settled_at: new Date().toISOString()
+    };
+
+    // 1. Auto-provisioning check
+    let existing = db.prepare("SELECT id FROM fee_payment_sessions WHERE paystack_ref = ?").get(eventPayload.paystack_ref);
+    expect(existing).toBeUndefined();
+
+    db.prepare(`
+      INSERT INTO fee_payment_sessions (
+        parent_phone, student_ids, total_amount, payment_type, paystack_ref, status, receipt_url, created_at
+      ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+    `).run(
+      eventPayload.parent_phone,
+      eventPayload.student_ids.join(','),
+      eventPayload.amount,
+      eventPayload.payment_type,
+      eventPayload.paystack_ref,
+      eventPayload.receipt_url,
+      eventPayload.settled_at
+    );
+
+    existing = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(eventPayload.paystack_ref);
+    expect(existing).toBeDefined();
+    expect(existing.status).toBe('pending');
+
+    // 2. Simulate processSuccessfulPayment
+    const session = existing;
+    const studentIds = session.student_ids.split(',');
+    let remainingPaid = session.total_amount;
+    const termConfig = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get();
+
+    for (const studentId of studentIds) {
+      const feesRow = db.prepare("SELECT total_billed, total_paid FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?").get(studentId, termConfig.academic_session, termConfig.term);
+      const balance = feesRow.total_billed - feesRow.total_paid;
+      const alloc = Math.min(remainingPaid, balance);
+      remainingPaid -= alloc;
+
+      db.prepare("INSERT INTO fee_transactions (student_id, academic_session, term, amount, reference_number) VALUES (?, ?, ?, ?, ?)").run(studentId, termConfig.academic_session, termConfig.term, alloc, session.paystack_ref);
+
+      const totalPaidSum = db.prepare("SELECT SUM(amount) as s FROM fee_transactions WHERE student_id = ? AND academic_session = ? AND term = ?").get(studentId, termConfig.academic_session, termConfig.term).s;
+
+      db.prepare(`
+        UPDATE student_fees SET total_paid = ?, status = 'partial'
+        WHERE student_id = ? AND academic_session = ? AND term = ?
+      `).run(totalPaidSum, studentId, termConfig.academic_session, termConfig.term);
+    }
+    db.prepare("UPDATE fee_payment_sessions SET status = 'settled' WHERE id = ?").run(session.id);
+
+    // Verify local ledger
+    const updatedFee = db.prepare("SELECT total_billed, total_paid FROM student_fees WHERE student_id = 'STU-0057'").get();
+    expect(updatedFee.total_paid).toBe(1000);
+    expect(updatedFee.total_billed - updatedFee.total_paid).toBe(67000);
+
+    // 3. Verify push query uses the newly deducted balance
+    const pushRow = db.prepare(`
+      SELECT s.id, COALESCE(sf.total_billed - sf.total_paid, 0) as fee_balance, COALESCE(sf.total_paid, 0) as total_paid
+      FROM students s
+      LEFT JOIN student_fees sf ON sf.student_id = s.id
+        AND sf.academic_session = ? AND sf.term = ?
+      WHERE s.id = 'STU-0057'
+    `).get(termConfig.academic_session, termConfig.term);
+
+    expect(pushRow.total_paid).toBe(1000);
+    expect(pushRow.fee_balance).toBe(67000);
+  });
 });

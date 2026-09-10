@@ -128,6 +128,11 @@ async function pushSchoolDelta() {
   // protects against any future boot-order reordering or direct sync-worker use.
   try { db.exec(`ALTER TABLE students ADD COLUMN parent_phone_2 TEXT DEFAULT NULL`); } catch (_) {}
 
+  const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get() || {
+    academic_session: "2025/2026",
+    term: "First Term"
+  };
+
   const students = db.prepare(`
     SELECT s.id, s.name, s.class_name, s.class_arm, s.parent_phone,
            COALESCE(s.parent_phone_2, NULL) as parent_phone_2,
@@ -137,13 +142,9 @@ async function pushSchoolDelta() {
            COALESCE(sf.total_billed - sf.total_paid, 0) as fee_balance
     FROM students s
     LEFT JOIN student_fees sf ON sf.student_id = s.id
+      AND sf.academic_session = ? AND sf.term = ?
     WHERE s.parent_phone IS NOT NULL AND s.parent_phone != ''
-  `).all();
-
-  const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get() || {
-    academic_session: "2025/2026",
-    term: "First Term"
-  };
+  `).all(termConfig.academic_session, termConfig.term);
 
   const studentPayload = students.map((st) => {
     // Query published result summary for active term
@@ -354,8 +355,46 @@ async function pullPendingSyncEvents() {
 
   for (const ev of events) {
     if (ev.event_type === "PAYMENT_SETTLED") {
-      const { paystack_ref, amount, receipt_url, settled_at } = ev.payload;
+      const {
+        paystack_ref,
+        amount,
+        receipt_url,
+        settled_at,
+        student_ids,
+        parent_phone,
+        payment_type
+      } = ev.payload || {};
+
       try {
+        if (paystack_ref) {
+          // 1. Auto-provision fee_payment_sessions row if payment originated on the cloud
+          const rawStudentIds = Array.isArray(student_ids)
+            ? student_ids.join(",")
+            : (typeof student_ids === "string" ? student_ids : "");
+          const totalAmount = Number(amount || 0);
+
+          const existing = db.prepare(
+            "SELECT id, status FROM fee_payment_sessions WHERE paystack_ref = ?"
+          ).get(paystack_ref);
+
+          if (!existing) {
+            db.prepare(`
+              INSERT INTO fee_payment_sessions (
+                parent_phone, student_ids, total_amount, payment_type, paystack_ref, status, receipt_url, created_at
+              ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+            `).run(
+              parent_phone || "",
+              rawStudentIds,
+              totalAmount,
+              payment_type || "full",
+              paystack_ref,
+              receipt_url || null,
+              settled_at || new Date().toISOString()
+            );
+            console.log(`[Sync Worker] Auto-provisioned pending fee session for cloud payment: ${paystack_ref}`);
+          }
+        }
+
         if (_onPaymentSettled) {
           // Full path: processSuccessfulPayment() writes fee_transactions,
           // student_fees, marks session 'settled', and sends the WhatsApp receipt.
@@ -412,10 +451,10 @@ async function performSyncCycle() {
   if (isSyncing) return;
   isSyncing = true;
   try {
-    // Outbound push
-    const pushRes = await pushSchoolDelta();
-    // Inbound pull
+    // 1. Inbound pull first: reconcile cloud events into local ledger
     const pullRes = await pullPendingSyncEvents();
+    // 2. Outbound push second: push fresh local state (including newly reconciled balances)
+    const pushRes = await pushSchoolDelta();
 
     lastSyncSuccess = new Date().toISOString();
     lastSyncError = null;

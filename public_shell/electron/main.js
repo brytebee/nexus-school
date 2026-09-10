@@ -1760,7 +1760,16 @@ async function processSuccessfulPayment(ref, amountInKobo, transactionId = null)
     return true;
   }
 
-  const studentIds = session.student_ids.split(",");
+  let studentIds = [];
+  try {
+    if (typeof session.student_ids === 'string' && session.student_ids.trim().startsWith('[')) {
+      studentIds = JSON.parse(session.student_ids);
+    } else {
+      studentIds = (session.student_ids || '').split(',').map(s => s.trim()).filter(Boolean);
+    }
+  } catch (_) {
+    studentIds = (session.student_ids || '').split(',').map(s => s.trim()).filter(Boolean);
+  }
   // Fix: Only record the base amount raised (session.total_amount) in the school's ledger database.
   // The full charge paid by the parent is stored in Paystack metadata/dashboard.
   const totalPaidNaira = session.total_amount;
@@ -1861,6 +1870,13 @@ async function processSuccessfulPayment(ref, amountInKobo, transactionId = null)
   } catch (err) {
     console.error(`[Payment Processor] PDF receipt dispatch failed:`, err.message);
   }
+
+  // Notify renderer of fee update
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("fees:updated", { ref, studentIds });
+    }
+  } catch (_) {}
 
   return true;
 }
@@ -1965,7 +1981,16 @@ async function uploadReceiptToCloudinary(receiptData, ref, schoolId) {
 }
 
 async function sendBrandedReceiptHelper(db, ref, session) {
-  const studentIds = session.student_ids.split(",");
+  let studentIds = [];
+  try {
+    if (typeof session.student_ids === 'string' && session.student_ids.trim().startsWith('[')) {
+      studentIds = JSON.parse(session.student_ids);
+    } else {
+      studentIds = (session.student_ids || '').split(',').map(s => s.trim()).filter(Boolean);
+    }
+  } catch (_) {
+    studentIds = (session.student_ids || '').split(',').map(s => s.trim()).filter(Boolean);
+  }
   const termConfig = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get();
   const academicSession = termConfig.academic_session;
   const term = termConfig.term;
