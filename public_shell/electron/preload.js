@@ -58,6 +58,12 @@ const nexusAPI = {
     wasRestored:      () => ipcRenderer.invoke('app:was-restored'),
     getQuotaStatus:   () => ipcRenderer.invoke('app:quota-status'),
     getVersion:       () => ipcRenderer.invoke('app:get-version'),
+    flagsGet:         () => ipcRenderer.invoke('flags:get'),
+    onFeatureFlagsUpdated: (cb) => {
+      const handler = (_e, v) => cb(v);
+      ipcRenderer.on('feature-flags-updated', handler);
+      return () => ipcRenderer.removeListener('feature-flags-updated', handler);
+    },
 
     getTeachers: () => ipcRenderer.invoke('get-teachers'),
     setTeacher: (data) => ipcRenderer.invoke('set-teacher', data),

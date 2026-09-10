@@ -302,6 +302,17 @@ async function pushSchoolDelta() {
     } catch (_) {}
   }
 
+  if (json.features) {
+    try {
+      db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('feature_results_dispatch', ?)").run(json.features.results_dispatch_active ? '1' : '0');
+      if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+        mainWindowRef.webContents.send('feature-flags-updated', json.features);
+      }
+    } catch (fErr) {
+      console.warn("[Sync Worker] Failed to persist feature flags on push:", fErr.message);
+    }
+  }
+
   return { ok: true, count: studentPayload.length, synced_at: json.synced_at };
 }
 
@@ -325,6 +336,17 @@ async function pullPendingSyncEvents() {
 
   if (!response.ok || !json.ok) {
     throw new Error(json.error || `Sync pull failed with HTTP ${response.status}`);
+  }
+
+  if (json.features) {
+    try {
+      db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('feature_results_dispatch', ?)").run(json.features.results_dispatch_active ? '1' : '0');
+      if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+        mainWindowRef.webContents.send('feature-flags-updated', json.features);
+      }
+    } catch (fErr) {
+      console.warn("[Sync Worker] Failed to persist feature flags on pull:", fErr.message);
+    }
   }
 
   const events = json.events || [];

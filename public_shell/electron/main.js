@@ -6005,10 +6005,26 @@ ipcMain.handle("save-identity", (event, newIdentity) => {
       if (mainWindow) mainWindow.webContents.send("qr-payload", qrPayload);
     }
 
+    // Trigger sync cycle immediately so cloud bot & portal are refreshed with the new identity / slug
+    syncWorker.performSyncCycle().catch((err) => {
+      console.warn("[save-identity] Background sync cycle failed:", err.message);
+    });
+
     return { ok: true, identity: { ...identityPacket, tier: licenseStatus?.tier || "Silver" } };
   } catch (err) {
     console.error("Failed to save identity:", err);
     return { ok: false, error: err.message };
+  }
+});
+
+// ── Feature Flags Gate (Sovereign Controls) ──────────────────────────────────
+ipcMain.handle("flags:get", () => {
+  try {
+    const db = database.getDb();
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'feature_results_dispatch'").get();
+    return { ok: true, results_dispatch_active: row?.value === '1' };
+  } catch (err) {
+    return { ok: true, results_dispatch_active: false };
   }
 });
 

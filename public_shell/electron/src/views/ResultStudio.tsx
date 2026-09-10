@@ -116,6 +116,7 @@ export function ResultStudio() {
   const [ilsSaving, setIlsSaving] = useState(false);
   const [ilsMsg, setIlsMsg] = useState('');
   const [ilsStudentSummary, setIlsStudentSummary] = useState<any[]>([]);
+  const [resultsDispatchActive, setResultsDispatchActive] = useState<boolean>(false);
 
   const skipZeroGrades = skipZeroGradesState;
   const skipUngraded = skipUngradedState;
@@ -248,6 +249,26 @@ export function ResultStudio() {
 
   useEffect(() => {
     fetchMetadata();
+
+    const api = (window as any).electronAPI;
+    if (api?.flagsGet) {
+      api.flagsGet().then((res: any) => {
+        if (res && typeof res.results_dispatch_active === 'boolean') {
+          setResultsDispatchActive(res.results_dispatch_active);
+        }
+      }).catch((err: any) => console.warn('[ResultStudio] flagsGet failed:', err));
+    }
+
+    if (api?.onFeatureFlagsUpdated) {
+      const unsub = api.onFeatureFlagsUpdated((flags: any) => {
+        if (flags && typeof flags.results_dispatch_active === 'boolean') {
+          setResultsDispatchActive(flags.results_dispatch_active);
+        }
+      });
+      return () => {
+        if (typeof unsub === 'function') unsub();
+      };
+    }
   }, []);
 
   // Phase 10: when selectedClass changes and scope=class, check ILS type
@@ -1508,11 +1529,11 @@ export function ResultStudio() {
                   animation: "none",
                 }}
                 id="rs-generate-btn"
-                onClick={() => handleActionRestrictedByPolicy("Generate & Save")}
-                disabled={!queryResults.length}
-                title="Direct report card generation is restricted. Results are accessed via Result PIN on the web portal."
+                onClick={resultsDispatchActive ? handleGenerate : () => handleActionRestrictedByPolicy("Generate & Save")}
+                disabled={!queryResults.length || (resultsDispatchActive ? generating : false)}
+                title={resultsDispatchActive ? "Generate and save official report card PDFs" : "Direct report card generation is restricted. Results are accessed via Result PIN on the web portal."}
               >
-                📄 Generate & Save
+                {resultsDispatchActive && generating ? "⏳ Generating…" : "📄 Generate & Save"}
               </button>
             </div>
 
@@ -1770,11 +1791,12 @@ export function ResultStudio() {
 
                     <button
                       className="primary-btn"
-                      onClick={() => handleActionRestrictedByPolicy("Dispatch Results")}
+                      onClick={resultsDispatchActive ? handleDispatch : () => handleActionRestrictedByPolicy("Dispatch Results")}
+                      disabled={resultsDispatchActive ? dispatching : false}
                       style={{ padding: "6px 14px", fontSize: "12px", background: "var(--accent)", color: "#000", border: "none", animation: "none", boxShadow: "none" }}
-                      title="Direct result dispatch via WhatsApp/Email is restricted. Results are accessible via official PIN on the portal."
+                      title={resultsDispatchActive ? "Dispatch results via WhatsApp and/or Email" : "Direct result dispatch via WhatsApp/Email is restricted. Results are accessible via official PIN on the portal."}
                     >
-                      ⚡ Dispatch Results
+                      {resultsDispatchActive && dispatching ? "⏳ Dispatching…" : "⚡ Dispatch Results"}
                     </button>
                     {dispatchStatus && (
                       <span style={{ fontSize: "12px", color: "var(--text-dim)" }}>{dispatchStatus}</span>
@@ -2405,12 +2427,13 @@ export function ResultStudio() {
                 📧 Email
               </label>
               <button
-                onClick={() => handleActionRestrictedByPolicy("Dispatch Results")}
-                title="Direct result dispatch via WhatsApp/Email is restricted. Results are accessible via official PIN on the portal."
+                onClick={resultsDispatchActive ? handleDispatch : () => handleActionRestrictedByPolicy("Dispatch Results")}
+                disabled={resultsDispatchActive ? dispatching : false}
+                title={resultsDispatchActive ? "Dispatch results via WhatsApp and/or Email" : "Direct result dispatch via WhatsApp/Email is restricted. Results are accessible via official PIN on the portal."}
                 className="secondary-btn"
                 style={{ padding: "6px 14px", fontSize: "12px", cursor: "pointer" }}
               >
-                ⚡ Dispatch Results
+                {resultsDispatchActive && dispatching ? "⏳ Dispatching…" : "⚡ Dispatch Results"}
               </button>
               <button
                 onClick={handlePublishToPortal}
@@ -2432,12 +2455,13 @@ export function ResultStudio() {
                 Close
               </button>
               <button
-                onClick={() => handleActionRestrictedByPolicy("Generate Report PDF")}
-                title="Direct report card generation is restricted. Results are accessed via Result PIN on the web portal."
+                onClick={resultsDispatchActive ? handleGenerate : () => handleActionRestrictedByPolicy("Generate Report PDF")}
+                disabled={resultsDispatchActive ? generating : false}
+                title={resultsDispatchActive ? "Generate and save official report card PDFs" : "Direct report card generation is restricted. Results are accessed via Result PIN on the web portal."}
                 className="primary-btn"
                 style={{ padding: "8px 20px", cursor: "pointer" }}
               >
-                ⚡ Generate Reports PDF
+                {resultsDispatchActive && generating ? "⏳ Generating…" : "⚡ Generate Reports PDF"}
               </button>
             </div>
           </div>
