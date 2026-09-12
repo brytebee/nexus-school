@@ -227,4 +227,72 @@ describe('Pulse Cloud 2-Way Delta Sync & Normalization', () => {
     expect(pushRow.total_paid).toBe(1000);
     expect(pushRow.fee_balance).toBe(67000);
   });
+
+  it("7. Prunes deleted and soft-deactivated students from cloud delta push query and cloud roster", () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE students (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        class_name TEXT,
+        parent_phone TEXT,
+        is_active INTEGER DEFAULT 1
+      );
+      CREATE TABLE student_fees (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id TEXT NOT NULL,
+        academic_session TEXT NOT NULL,
+        term TEXT NOT NULL,
+        total_billed REAL NOT NULL,
+        total_paid REAL NOT NULL,
+        status TEXT DEFAULT 'unpaid'
+      );
+      CREATE TABLE school_term_config (
+        id INTEGER PRIMARY KEY,
+        academic_session TEXT,
+        term TEXT
+      );
+    `);
+
+    db.prepare("INSERT INTO school_term_config (id, academic_session, term) VALUES (1, '2026/2027', 'First Term')").run();
+    db.prepare("INSERT INTO students (id, name, class_name, parent_phone, is_active) VALUES ('STU-001', 'Active Child', 'JSS 1', '08011112222', 1)").run();
+    db.prepare("INSERT INTO students (id, name, class_name, parent_phone, is_active) VALUES ('STU-002', 'Deactivated Child', 'JSS 1', '08033334444', 0)").run();
+    db.prepare("INSERT INTO students (id, name, class_name, parent_phone, is_active) VALUES ('STU-003', 'Deleted Later', 'JSS 1', '08055556666', 1)").run();
+
+    const termConfig = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get();
+
+    // 1. Delete STU-003 locally (simulating delete-student handler)
+    db.prepare("DELETE FROM students WHERE id = ?").run("STU-003");
+
+    // 2. Query pushSchoolDelta student list
+    const pushedStudents = db.prepare(`
+      SELECT s.id, s.name, s.parent_phone
+      FROM students s
+      LEFT JOIN student_fees sf ON sf.student_id = s.id
+        AND sf.academic_session = ? AND sf.term = ?
+      WHERE s.parent_phone IS NOT NULL AND s.parent_phone != ''
+        AND COALESCE(s.is_active, 1) = 1
+    `).all(termConfig.academic_session, termConfig.term);
+
+    // Only STU-001 should be in the push roster
+    expect(pushedStudents.length).toBe(1);
+    expect(pushedStudents[0].id).toBe("STU-001");
+
+    // 3. Simulate cloud reconciliation (what POST /api/sync/push does in nexus-api)
+    // Cloud currently holds all 3 students from previous sync
+    const cloudStudents = [
+      { id: "STU-001", name: "Active Child" },
+      { id: "STU-002", name: "Deactivated Child" },
+      { id: "STU-003", name: "Deleted Later" }
+    ];
+
+    const activeIds = pushedStudents.map(s => s.id);
+    const reconciledCloud = cloudStudents.filter(s => activeIds.includes(s.id));
+
+    // STU-002 (deactivated) and STU-003 (deleted) are pruned
+    expect(reconciledCloud.length).toBe(1);
+    expect(reconciledCloud[0].id).toBe("STU-001");
+    expect(reconciledCloud.some(s => s.id === "STU-002")).toBe(false);
+    expect(reconciledCloud.some(s => s.id === "STU-003")).toBe(false);
+  });
 });

@@ -144,6 +144,7 @@ async function pushSchoolDelta() {
     LEFT JOIN student_fees sf ON sf.student_id = s.id
       AND sf.academic_session = ? AND sf.term = ?
     WHERE s.parent_phone IS NOT NULL AND s.parent_phone != ''
+      AND COALESCE(s.is_active, 1) = 1
   `).all(termConfig.academic_session, termConfig.term);
 
   const studentPayload = students.map((st) => {
