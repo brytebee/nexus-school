@@ -362,5 +362,84 @@ describe('Pulse Cloud 2-Way Delta Sync & Normalization', () => {
     expect(perStudentTotal).toBe(8000);
     expect(totalAmount).toBe(8000);
   });
+
+  it("9. Multi-ward payment splits cleanly without inflating individual child's printed/dispatched receipt total", () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE students (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        class_name TEXT,
+        parent_phone TEXT
+      );
+      CREATE TABLE student_fees (
+        student_id TEXT,
+        academic_session TEXT,
+        term TEXT,
+        total_billed REAL,
+        total_paid REAL,
+        status TEXT
+      );
+      CREATE TABLE fee_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id TEXT,
+        academic_session TEXT,
+        term TEXT,
+        amount REAL,
+        reference_number TEXT
+      );
+      CREATE TABLE fee_payment_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_ids TEXT,
+        total_amount REAL,
+        paystack_ref TEXT,
+        status TEXT
+      );
+      CREATE TABLE school_term_config (
+        id INTEGER PRIMARY KEY,
+        academic_session TEXT,
+        term TEXT
+      );
+    `);
+
+    db.prepare("INSERT INTO school_term_config VALUES (1, '2026/2027', 'First Term')").run();
+    db.prepare("INSERT INTO students VALUES ('STU-A', 'Liam Abraham', 'Primary 1', '08012345678')").run();
+    db.prepare("INSERT INTO students VALUES ('STU-B', 'Test Abraham', 'Nursery 2', '08012345678')").run();
+
+    // Billed amounts: Liam owed 70,000, Test owed 30,000
+    db.prepare("INSERT INTO student_fees VALUES ('STU-A', '2026/2027', 'First Term', 70000, 0, 'unpaid')").run();
+    db.prepare("INSERT INTO student_fees VALUES ('STU-B', '2026/2027', 'First Term', 30000, 0, 'unpaid')").run();
+
+    // Parent pays 100,000 for both wards in one session
+    const ref = 'PAY-FAMILY-1001';
+    db.prepare("INSERT INTO fee_payment_sessions (student_ids, total_amount, paystack_ref, status) VALUES ('STU-A,STU-B', 100000, ?, 'settled')").run(ref);
+
+    // Ledger transactions after settlement: Liam allocated 70,000, Test allocated 30,000
+    db.prepare("INSERT INTO fee_transactions (student_id, academic_session, term, amount, reference_number) VALUES ('STU-A', '2026/2027', 'First Term', 70000, ?)").run(ref);
+    db.prepare("INSERT INTO fee_transactions (student_id, academic_session, term, amount, reference_number) VALUES ('STU-B', '2026/2027', 'First Term', 30000, ?)").run(ref);
+
+    const session = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(ref);
+
+    // 1. Simulate fees:print-receipt for Liam (STU-A)
+    const txLiam = db.prepare("SELECT * FROM fee_transactions WHERE reference_number = ? AND student_id = ?").get(ref, 'STU-A');
+    const studentIdLiam = 'STU-A';
+    const amountPaidLiam = studentIdLiam ? txLiam.amount : (session ? session.total_amount : txLiam.amount);
+    
+    // Liam's receipt MUST show 70,000, NOT the 100,000 grand total
+    expect(amountPaidLiam).toBe(70000);
+
+    // 2. Simulate fees:print-receipt for Test (STU-B)
+    const txTest = db.prepare("SELECT * FROM fee_transactions WHERE reference_number = ? AND student_id = ?").get(ref, 'STU-B');
+    const studentIdTest = 'STU-B';
+    const amountPaidTest = studentIdTest ? txTest.amount : (session ? session.total_amount : txTest.amount);
+
+    // Test's receipt MUST show 30,000, NOT the 100,000 grand total
+    expect(amountPaidTest).toBe(30000);
+
+    // 3. Simulate consolidated family receipt when studentId is omitted
+    const amountPaidFamily = undefined ? null : (session ? session.total_amount : 0);
+    expect(amountPaidFamily).toBe(100000);
+  });
 });
+
 

@@ -1444,7 +1444,7 @@ ipcMain.handle('fees:send-receipt-pdf', async (event, { studentId, txRef }) => {
     }
 
     try {
-        const success = await sendBrandedReceiptHelper(db, txRef, session);
+        const success = await sendBrandedReceiptHelper(db, txRef, session, studentId);
         return { ok: success };
     } catch (err) {
         return { ok: false, error: err.message };
@@ -1468,8 +1468,25 @@ ipcMain.handle('fees:print-receipt', async (event, { txRef, studentId, format })
     const amountPaid = tx.amount;
 
     let allocations = [];
-    if (session) {
-        const studentIds = session.student_ids.split(",");
+    if (studentId) {
+        const feeRow = db.prepare("SELECT total_billed, total_paid FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?").get(studentId, tx.academic_session, tx.term);
+        const balance = (feeRow?.total_billed || 0) - (feeRow?.total_paid || 0);
+        allocations.push({
+            name: `${studentName} (Allocated Payment)`,
+            amount: tx.amount,
+            balance: Math.max(0, balance)
+        });
+    } else if (session) {
+        let studentIds = [];
+        try {
+            if (typeof session.student_ids === 'string' && session.student_ids.trim().startsWith('[')) {
+                studentIds = JSON.parse(session.student_ids);
+            } else {
+                studentIds = (session.student_ids || '').split(',').map(s => s.trim()).filter(Boolean);
+            }
+        } catch (_) {
+            studentIds = (session.student_ids || '').split(',').map(s => s.trim()).filter(Boolean);
+        }
         for (const sid of studentIds) {
             const allocRow = db.prepare("SELECT amount FROM fee_transactions WHERE student_id = ? AND reference_number = ?").get(sid, txRef);
             const feeRow = db.prepare("SELECT total_billed, total_paid FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?").get(sid, tx.academic_session, tx.term);
@@ -1581,7 +1598,7 @@ ipcMain.handle('fees:print-receipt', async (event, { txRef, studentId, format })
         academicSession: tx.academic_session,
         term: tx.term,
         reference: txRef,
-        amountPaid: session ? session.total_amount : amountPaid,
+        amountPaid: studentId ? tx.amount : (session ? session.total_amount : amountPaid),
         paymentMethod: PAY_LABELS_VALUE[tx.payment_method] || tx.payment_method,
         paymentDate: new Date(tx.created_at).toLocaleDateString('en-NG'),
         allocations,
@@ -1980,7 +1997,7 @@ async function uploadReceiptToCloudinary(receiptData, ref, schoolId) {
   }
 }
 
-async function sendBrandedReceiptHelper(db, ref, session) {
+async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null) {
   let studentIds = [];
   try {
     if (typeof session.student_ids === 'string' && session.student_ids.trim().startsWith('[')) {
@@ -1995,26 +2012,56 @@ async function sendBrandedReceiptHelper(db, ref, session) {
   const academicSession = termConfig.academic_session;
   const term = termConfig.term;
 
-  const firstStudentId = studentIds[0];
-  const sRow = db.prepare("SELECT name, class_name, parent_email FROM students WHERE id = ?").get(firstStudentId);
-  const studentName = sRow?.name || "Student";
-  const studentClass = sRow?.class_name || "—";
-  const parentEmail = sRow?.parent_email || "—";
+  let studentName = "Student";
+  let studentClass = "—";
+  let parentEmail = "—";
+  let amountPaid = session.total_amount;
+  let receiptRecords = [];
+  const primaryStudentId = targetStudentId || studentIds[0];
 
-  const receiptRecords = [];
-  for (const studentId of studentIds) {
-    const allocRow = db.prepare("SELECT amount FROM fee_transactions WHERE student_id = ? AND reference_number = ?").get(studentId, ref);
-    const amount = allocRow?.amount || 0;
+  if (targetStudentId) {
+    const sRow = db.prepare("SELECT name, class_name, parent_email FROM students WHERE id = ?").get(targetStudentId);
+    studentName = sRow?.name || "Student";
+    studentClass = sRow?.class_name || "—";
+    parentEmail = sRow?.parent_email || "—";
 
-    const feeRow = db.prepare("SELECT total_billed, total_paid FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?").get(studentId, academicSession, term);
+    const allocRow = db.prepare("SELECT amount FROM fee_transactions WHERE student_id = ? AND reference_number = ?").get(targetStudentId, ref);
+    amountPaid = allocRow?.amount || session.total_amount;
+
+    const feeRow = db.prepare("SELECT total_billed, total_paid FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?").get(targetStudentId, academicSession, term);
     const balance = (feeRow?.total_billed || 0) - (feeRow?.total_paid || 0);
 
-    const sName = db.prepare("SELECT name FROM students WHERE id = ?").get(studentId)?.name || `Student ID ${studentId}`;
-    receiptRecords.push({
-      name: sName,
-      amount: amount,
+    receiptRecords = [{
+      name: `${studentName} (Allocated Payment)`,
+      amount: amountPaid,
       balance: Math.max(0, balance)
-    });
+    }];
+  } else {
+    // Multi-ward family settlement
+    const names = [];
+    const classes = [];
+    for (const studentId of studentIds) {
+      const sRow = db.prepare("SELECT name, class_name, parent_email FROM students WHERE id = ?").get(studentId);
+      if (sRow?.name) names.push(sRow.name);
+      if (sRow?.class_name && !classes.includes(sRow.class_name)) classes.push(sRow.class_name);
+      if (sRow?.parent_email && parentEmail === "—") parentEmail = sRow.parent_email;
+
+      const allocRow = db.prepare("SELECT amount FROM fee_transactions WHERE student_id = ? AND reference_number = ?").get(studentId, ref);
+      const amount = allocRow?.amount || 0;
+
+      const feeRow = db.prepare("SELECT total_billed, total_paid FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?").get(studentId, academicSession, term);
+      const balance = (feeRow?.total_billed || 0) - (feeRow?.total_paid || 0);
+
+      const sName = sRow?.name || `Student ID ${studentId}`;
+      receiptRecords.push({
+        name: sName,
+        amount: amount,
+        balance: Math.max(0, balance)
+      });
+    }
+    studentName = names.length > 0 ? names.join(', ') : "Student";
+    studentClass = classes.length > 0 ? classes.join(', ') : "—";
+    amountPaid = session.total_amount;
   }
 
   // ── Phase 8: Build itemized fee line items for receipt ──────────────────
@@ -2050,7 +2097,7 @@ async function sendBrandedReceiptHelper(db, ref, session) {
         AND ses.academic_session = ?
         AND ses.term = ?
       ORDER BY fe.item_name ASC
-    `).all(firstStudentId, academicSession, term);
+    `).all(primaryStudentId, academicSession, term);
 
     for (const row of extraRows) {
       const bankLabel = row.bank_account_id
@@ -2091,7 +2138,7 @@ async function sendBrandedReceiptHelper(db, ref, session) {
     academicSession,
     term,
     reference: ref,
-    amountPaid: session.total_amount,
+    amountPaid,
     paymentMethod: "Paystack Online",
     paymentDate: new Date(session.settled_at || Date.now()).toLocaleDateString('en-NG'),
     allocations: receiptRecords,
@@ -2100,7 +2147,7 @@ async function sendBrandedReceiptHelper(db, ref, session) {
 
   try {
     const pdfBuffer = await receiptGenerator.generateReceiptPdf(receiptData);
-    const caption = `🎓 *Branded PDF Receipt* for *${studentName}*\nTotal Paid: ₦${session.total_amount.toLocaleString('en-NG')}\nReference: ${ref}\nThank you!`;
+    const caption = `🎓 *Branded PDF Receipt* for *${studentName}*\nTotal Paid: ₦${amountPaid.toLocaleString('en-NG')}\nReference: ${ref}\nThank you!`;
     await pulseBot.sendReceiptPdf(session.parent_phone, `Receipt-${ref}.pdf`, pdfBuffer, caption);
     console.log(`[Payment Processor] PDF receipt sent successfully to ${session.parent_phone}`);
 
@@ -2121,7 +2168,7 @@ async function sendBrandedReceiptHelper(db, ref, session) {
     try {
       const ownerRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_phone'").get();
       if (ownerRow?.value) {
-        const ownerMsg = `💳 *Payment Alert*\nStudent: ${studentName} (${studentClass})\nAmount Paid: ₦${session.total_amount.toLocaleString('en-NG')}\nRef: ${ref}\nTerm: ${term} (${academicSession})\n_Nexus School OS_`;
+        const ownerMsg = `💳 *Payment Alert*\nStudent: ${studentName} (${studentClass})\nAmount Paid: ₦${amountPaid.toLocaleString('en-NG')}\nRef: ${ref}\nTerm: ${term} (${academicSession})\n_Nexus School OS_`;
         db.prepare("INSERT INTO pending_pulse_messages (phone, message, type) VALUES (?, ?, 'general')").run(ownerRow.value, ownerMsg);
       }
     } catch (_) {}
