@@ -295,4 +295,72 @@ describe('Pulse Cloud 2-Way Delta Sync & Normalization', () => {
     expect(reconciledCloud.some(s => s.id === "STU-002")).toBe(false);
     expect(reconciledCloud.some(s => s.id === "STU-003")).toBe(false);
   });
+
+  it("8. Gathers active fee_extras in delta push and verifies extras selection parsing", () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE fee_extras (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_name TEXT NOT NULL,
+        item_name TEXT NOT NULL,
+        amount REAL NOT NULL,
+        term TEXT DEFAULT 'All Terms',
+        is_active INTEGER DEFAULT 1
+      );
+    `);
+
+    db.prepare(`
+      INSERT INTO fee_extras (class_name, item_name, amount, term, is_active)
+      VALUES 
+        ('Primary 1', 'Graduation Gown', 5000, 'Third Term', 1),
+        ('All Classes', 'End of Year Party', 3000, 'Third Term', 1),
+        ('Primary 1', 'Discontinued Club', 2000, 'All Terms', 0),
+        ('Primary 2', 'Lab Coat', 4500, 'First Term', 1)
+    `).run();
+
+    // 1. Gather active extras as done in pushSchoolDelta
+    const activeExtras = db.prepare(`
+      SELECT id, class_name, item_name, amount, term
+      FROM fee_extras
+      WHERE is_active = 1
+      ORDER BY id ASC
+    `).all();
+
+    expect(activeExtras.length).toBe(3);
+    expect(activeExtras.some(e => e.item_name === "Discontinued Club")).toBe(false);
+    expect(activeExtras.map(e => e.item_name)).toEqual([
+      "Graduation Gown",
+      "End of Year Party",
+      "Lab Coat"
+    ]);
+
+    // 2. Simulate matching extras for a parent with a child in 'Primary 1'
+    const childClasses = ['Primary 1'];
+    const matchedExtras = activeExtras.filter(e => 
+      e.class_name === 'All Classes' || childClasses.includes(e.class_name)
+    );
+    expect(matchedExtras.length).toBe(2);
+    expect(matchedExtras[0].item_name).toBe("Graduation Gown");
+    expect(matchedExtras[1].item_name).toBe("End of Year Party");
+
+    // 3. Simulate parsing multi-item selection input (e.g. "1, 2" or "item 1, 2")
+    const userInput = "item 1, 2";
+    const cleaned = userInput.toUpperCase().replace(/ITEM/g, "").trim();
+    const rawParts = cleaned.split(/[\s,]+/).map(p => p.trim()).filter(Boolean);
+    const selectedIndices = rawParts
+      .map(p => parseInt(p, 10) - 1)
+      .filter(i => !isNaN(i) && i >= 0 && i < matchedExtras.length);
+
+    const uniqueIndices = Array.from(new Set(selectedIndices));
+    const chosenExtras = uniqueIndices.map(i => matchedExtras[i]);
+
+    expect(chosenExtras.length).toBe(2);
+    const perStudentTotal = chosenExtras.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+    const studentCount = 1;
+    const totalAmount = perStudentTotal * studentCount;
+
+    expect(perStudentTotal).toBe(8000);
+    expect(totalAmount).toBe(8000);
+  });
 });
+

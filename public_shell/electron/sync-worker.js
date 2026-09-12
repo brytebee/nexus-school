@@ -220,6 +220,17 @@ async function pushSchoolDelta() {
     }
   } catch (_) {}
 
+  // 4b. Gather Active Fee Extras (Optional Fees & Materials)
+  let extrasPayload = [];
+  try {
+    extrasPayload = db.prepare(`
+      SELECT id, class_name, item_name, amount, term
+      FROM fee_extras
+      WHERE is_active = 1
+      ORDER BY id ASC
+    `).all();
+  } catch (_) {}
+
   // 5. Gather Active Paystack Verified Subaccount Code
   let subaccountCode = null;
   try {
@@ -281,6 +292,7 @@ async function pushSchoolDelta() {
         news: newsPayload,
         policies: policiesPayload,
         fee_settings: feeSettingsPayload,
+        extras: extrasPayload,
         paystack_subaccount_code: subaccountCode,
         portal_slug: portalSlug,
         school_name: schoolName
