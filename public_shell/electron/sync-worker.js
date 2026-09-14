@@ -458,6 +458,228 @@ async function pullPendingSyncEvents() {
 }
 
 /**
+ * 2b. Inbound Online Admissions Pull: Ingests newly accepted candidate bio-data,
+ * enrolled subjects, and acceptance fee payments directly from the school web portal.
+ */
+async function pullOnlineAdmissions() {
+  const db = database.getDb();
+  const schoolId = getSchoolId(db);
+  if (!schoolId) return { ok: false, reason: "no_school_id" };
+
+  // Read school_website_url from app_settings (or environment override)
+  let websiteUrl = "";
+  try {
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'school_website_url'").get();
+    if (row && row.value) websiteUrl = row.value.trim().replace(/\/+$/, "");
+  } catch (_) {}
+
+  if (!websiteUrl && process.env.SCHOOL_WEBSITE_URL) {
+    websiteUrl = process.env.SCHOOL_WEBSITE_URL.trim().replace(/\/+$/, "");
+  }
+
+  // If no school website is configured, skip gracefully
+  if (!websiteUrl) {
+    return { ok: true, skipped: true, reason: "no_school_website_url" };
+  }
+
+  // Read sync token
+  let syncToken = "";
+  try {
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'school_website_sync_token'").get();
+    if (row && row.value) syncToken = row.value.trim();
+  } catch (_) {}
+
+  if (!syncToken) {
+    syncToken = process.env.SCHOOL_WEBSITE_SYNC_TOKEN || getSyncToken(db);
+  }
+
+  const pollUrl = `${websiteUrl}/api/sync/enrollments?school_cloud_id=${encodeURIComponent(schoolId)}&status=accepted`;
+
+  let response;
+  try {
+    response = await fetch(pollUrl, {
+      headers: {
+        "x-sync-token": syncToken,
+      },
+    });
+  } catch (netErr) {
+    console.warn("[Sync Worker] Failed to connect to school website:", netErr.message);
+    return { ok: false, error: netErr.message };
+  }
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+    console.warn(`[Sync Worker] School website sync poll returned HTTP ${response.status}: ${errText}`);
+    return { ok: false, error: `HTTP ${response.status}` };
+  }
+
+  const json = await response.json().catch(() => ({}));
+  if (!json.ok || !Array.isArray(json.data)) {
+    return { ok: false, error: json.error || "invalid_response_format" };
+  }
+
+  const candidates = json.data;
+  if (candidates.length === 0) {
+    return { ok: true, ingested: 0 };
+  }
+
+  // Belt-and-suspenders column check
+  try { db.exec("ALTER TABLE students ADD COLUMN parent_phone_2 TEXT DEFAULT NULL"); } catch (_) {}
+
+  const ackIds = [];
+
+  const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get() || {
+    academic_session: "2025/2026",
+    term: "First Term",
+  };
+
+  for (const cand of candidates) {
+    try {
+      db.transaction(() => {
+        // Resolve student ID
+        let existing = null;
+        if (cand.admissionNo) {
+          existing = db.prepare("SELECT id FROM students WHERE admission_no = ? LIMIT 1").get(cand.admissionNo);
+        }
+        if (!existing && cand.studentName && cand.parentPhone) {
+          existing = db.prepare("SELECT id FROM students WHERE name = ? AND parent_phone = ? LIMIT 1").get(cand.studentName, cand.parentPhone);
+        }
+
+        const studentId = existing
+          ? existing.id
+          : (cand.id || `STU-${Date.now().toString(36).toUpperCase()}`);
+
+        // Insert or update student
+        db.prepare(`
+          INSERT INTO students (
+            id, name, class_name, class_arm, reg_no, admission_no, gender, dob, photo,
+            parent_email, parent_phone, parent_phone_2, parent_name, fee_status, enrollment_status
+          ) VALUES (
+            @id, @name, @class_name, @class_arm, @reg_no, @admission_no, @gender, @dob, @photo,
+            @parent_email, @parent_phone, @parent_phone_2, @parent_name, @fee_status, @enrollment_status
+          )
+          ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            class_name = excluded.class_name,
+            admission_no = COALESCE(NULLIF(excluded.admission_no, ''), students.admission_no),
+            gender = COALESCE(NULLIF(excluded.gender, ''), students.gender),
+            dob = COALESCE(NULLIF(excluded.dob, ''), students.dob),
+            photo = COALESCE(excluded.photo, students.photo),
+            parent_email = COALESCE(NULLIF(excluded.parent_email, ''), students.parent_email),
+            parent_phone = COALESCE(NULLIF(excluded.parent_phone, ''), students.parent_phone),
+            parent_phone_2 = COALESCE(excluded.parent_phone_2, students.parent_phone_2),
+            parent_name = COALESCE(NULLIF(excluded.parent_name, ''), students.parent_name),
+            enrollment_status = 'active'
+        `).run({
+          id: studentId,
+          name: cand.studentName,
+          class_name: cand.classApplied,
+          class_arm: "",
+          reg_no: cand.admissionNo || "",
+          admission_no: cand.admissionNo || "",
+          gender: cand.gender || "",
+          dob: cand.dob || "",
+          photo: cand.photoUrl || null,
+          parent_email: cand.parentEmail || "",
+          parent_phone: cand.parentPhone || "",
+          parent_phone_2: cand.parentPhone2 || null,
+          parent_name: cand.parentName || null,
+          fee_status: cand.totalPaidKobo > 0 ? "cleared" : "owing",
+          enrollment_status: "active",
+        });
+
+        // Insert enrolled subjects
+        if (Array.isArray(cand.selectedSubjects) && cand.selectedSubjects.length > 0) {
+          const insertSubj = db.prepare("INSERT OR IGNORE INTO student_subjects (student_id, subject) VALUES (?, ?)");
+          for (const subj of cand.selectedSubjects) {
+            if (typeof subj === "string" && subj.trim().length > 0) {
+              insertSubj.run(studentId, subj.trim());
+            }
+          }
+        }
+
+        // Record acceptance fee payments
+        if (Array.isArray(cand.feePayments) && cand.feePayments.length > 0) {
+          for (const payment of cand.feePayments) {
+            const amountNaira = (payment.amountKobo || 0) / 100;
+            if (amountNaira > 0 && payment.paystackRef) {
+              const txExists = db.prepare("SELECT 1 FROM fee_transactions WHERE reference_number = ? LIMIT 1").get(payment.paystackRef);
+              if (!txExists) {
+                db.prepare(`
+                  INSERT INTO fee_transactions (
+                    student_id, academic_session, term, amount, payment_method, reference_number, note, recorded_by, created_at
+                  ) VALUES (?, ?, ?, ?, 'transfer', ?, ?, 'Online Admission Portal', ?)
+                `).run(
+                  studentId,
+                  termConfig.academic_session,
+                  termConfig.term,
+                  amountNaira,
+                  payment.paystackRef,
+                  `Acceptance: ${payment.itemName || 'Admission Fee'} (${payment.receiptNumber || ''})`,
+                  payment.paidAt || new Date().toISOString()
+                );
+              }
+            }
+          }
+
+          // Recalculate student_fees state
+          const totalPaidRow = db.prepare(`
+            SELECT COALESCE(SUM(amount), 0) AS total_paid FROM fee_transactions
+            WHERE student_id = ? AND academic_session = ? AND term = ?
+          `).get(studentId, termConfig.academic_session, termConfig.term);
+
+          const feeRow = db.prepare(`
+            SELECT COALESCE(total_billed, 0) AS total_billed FROM student_fees
+            WHERE student_id = ? AND academic_session = ? AND term = ?
+          `).get(studentId, termConfig.academic_session, termConfig.term) || { total_billed: 0 };
+
+          const paidAmt = totalPaidRow?.total_paid || 0;
+          let feeStatus = "unpaid";
+          if (paidAmt >= feeRow.total_billed && feeRow.total_billed > 0) {
+            feeStatus = "cleared";
+          } else if (paidAmt > 0) {
+            feeStatus = "partial";
+          }
+
+          db.prepare(`
+            INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
+              total_paid = excluded.total_paid,
+              status     = excluded.status,
+              updated_at = datetime('now')
+          `).run(studentId, termConfig.academic_session, termConfig.term, feeRow.total_billed, paidAmt, feeStatus);
+        }
+
+        ackIds.push(cand.id);
+      })();
+      console.log(`[Sync Worker] Ingested online candidate: ${cand.studentName} (${cand.admissionNo || cand.id})`);
+    } catch (candErr) {
+      console.warn(`[Sync Worker] Failed to ingest candidate ${cand.id}:`, candErr.message);
+    }
+  }
+
+  // Acknowledge successfully ingested enrollments
+  if (ackIds.length > 0) {
+    try {
+      await fetch(`${websiteUrl}/api/sync/enrollments`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "x-sync-token": syncToken,
+        },
+        body: JSON.stringify({ enrollmentIds: ackIds }),
+      });
+      console.log(`[Sync Worker] Acknowledged ${ackIds.length} ingested candidates to web portal.`);
+    } catch (ackErr) {
+      console.warn("[Sync Worker] Failed to send ACK to school website:", ackErr.message);
+    }
+  }
+
+  return { ok: true, ingested: ackIds.length };
+}
+
+/**
  * 3. Full 2-Way Sync Loop Cycle
  */
 async function performSyncCycle() {
@@ -466,7 +688,16 @@ async function performSyncCycle() {
   try {
     // 1. Inbound pull first: reconcile cloud events into local ledger
     const pullRes = await pullPendingSyncEvents();
-    // 2. Outbound push second: push fresh local state (including newly reconciled balances)
+
+    // 2. Inbound online admissions pull: ingest accepted web enrollments
+    let admissionsRes = { ok: true, skipped: true };
+    try {
+      admissionsRes = await pullOnlineAdmissions();
+    } catch (admErr) {
+      console.warn("[Sync Worker] Online admissions pull error (non-fatal):", admErr.message);
+    }
+
+    // 3. Outbound push third: push fresh local state (including newly reconciled balances)
     const pushRes = await pushSchoolDelta();
 
     lastSyncSuccess = new Date().toISOString();
@@ -869,6 +1100,7 @@ module.exports = {
   registerPaymentSettledHandler,
   pushSchoolDelta,
   pullPendingSyncEvents,
+  pullOnlineAdmissions,
   performSyncCycle,
   startSyncSchedule,
   stopSyncSchedule,
