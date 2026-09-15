@@ -5272,12 +5272,25 @@ ipcMain.handle('fee-extras:get-available-for-class', (event, { class_name, term 
     const db = database.getDb();
     const whereParts = ['fe.is_active = 1'];
     const params = [];
-    if (class_name) {
-      whereParts.push("(fe.class_name = ? OR fe.class_name = 'All Classes')");
-      params.push(class_name);
+    if (class_name && typeof class_name === 'string') {
+      const trimmed = class_name.trim();
+      const parts = trimmed.split(/\s+/);
+      const bareClass = parts.length > 1 && isNaN(Number(parts[parts.length - 1]))
+        ? parts.slice(0, -1).join(' ')
+        : trimmed;
+
+      whereParts.push(`(
+        fe.class_name = ? 
+        OR fe.class_name = ? 
+        OR fe.class_name = 'All Classes' 
+        OR fe.class_name IS NULL 
+        OR fe.class_name = '' 
+        OR ? LIKE (fe.class_name || '%')
+      )`);
+      params.push(trimmed, bareClass, trimmed);
     }
-    if (term) {
-      whereParts.push("(fe.term = ? OR fe.term = 'All Terms')");
+    if (term && term !== 'All Terms' && term !== 'All Term') {
+      whereParts.push("(fe.term = ? OR fe.term = 'All Terms' OR fe.term = 'All Term' OR fe.term IS NULL OR fe.term = '')");
       params.push(term);
     }
     const where = 'WHERE ' + whereParts.join(' AND ');
@@ -5468,6 +5481,7 @@ ipcMain.handle('fee-extras:get-orders', (event, { term, session, class_name, sea
         ses.student_id,
         s.name AS student_name,
         s.class_name,
+        s.class_arm,
         s.parent_phone,
         fe.item_name,
         fe.amount,
@@ -5475,7 +5489,7 @@ ipcMain.handle('fee-extras:get-orders', (event, { term, session, class_name, sea
         ses.term,
         COALESCE(ses.is_fulfilled, 0) AS is_fulfilled,
         ses.fulfilled_at,
-        ses.created_at
+        COALESCE(ses.selected_at, '') AS created_at
       FROM student_extra_selections ses
       JOIN students s ON s.id = ses.student_id
       JOIN fee_extras fe ON fe.id = ses.extra_id
@@ -5483,33 +5497,34 @@ ipcMain.handle('fee-extras:get-orders', (event, { term, session, class_name, sea
     `;
     const params = [];
 
-    if (term) {
+    if (term && term !== 'All Terms' && term !== 'All Term') {
       query += ` AND ses.term = ?`;
       params.push(term);
     }
-    if (session) {
+    if (session && session !== 'All Sessions') {
       query += ` AND ses.academic_session = ?`;
       params.push(session);
     }
     if (class_name && class_name !== 'All Classes') {
-      query += ` AND s.class_name = ?`;
-      params.push(class_name);
+      query += ` AND (s.class_name = ? OR (s.class_name || ' ' || COALESCE(s.class_arm, '')) = ?)`;
+      params.push(class_name, class_name);
     }
-    if (search) {
-      query += ` AND (s.name LIKE ? OR fe.item_name LIKE ?)`;
-      params.push(`%${search}%`, `%${search}%`);
+    if (search && search.trim()) {
+      const q = `%${search.trim()}%`;
+      query += ` AND (s.name LIKE ? OR s.id LIKE ? OR fe.item_name LIKE ?)`;
+      params.push(q, q, q);
     }
-    if (is_fulfilled !== undefined && is_fulfilled !== null && is_fulfilled !== '') {
+    if (is_fulfilled !== undefined && is_fulfilled !== null && is_fulfilled !== '' && is_fulfilled !== 'all') {
       query += ` AND COALESCE(ses.is_fulfilled, 0) = ?`;
       params.push(Number(is_fulfilled));
     }
 
-    query += ` ORDER BY ses.is_fulfilled ASC, ses.created_at DESC`;
+    query += ` ORDER BY ses.is_fulfilled ASC, ses.id DESC`;
     const orders = db.prepare(query).all(...params);
     return { ok: true, orders };
   } catch (err) {
     console.error('[Fees] fee-extras:get-orders error:', err);
-    return { ok: false, error: err.message };
+    return { ok: false, error: err.message, orders: [] };
   }
 });
 

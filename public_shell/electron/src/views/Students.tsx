@@ -79,6 +79,10 @@ export function Students() {
   const [availableExtras, setAvailableExtras] = useState<any[]>([]);
   const [selectedExtraIds, setSelectedExtraIds] = useState<number[]>([]);
   const [savingExtras, setSavingExtras] = useState(false);
+  const [quickExtraName, setQuickExtraName] = useState('');
+  const [quickExtraAmount, setQuickExtraAmount] = useState('');
+  const [showQuickExtraForm, setShowQuickExtraForm] = useState(false);
+  const [creatingQuickExtra, setCreatingQuickExtra] = useState(false);
 
   // Form Fields State
   const [name, setName] = useState('');
@@ -1244,17 +1248,26 @@ export function Students() {
           setIsDrawerOpen(false);
           fetchStudents();
 
-          // Fetch available extras for the student's class and open modal
+          const studentClassName = payload.class_name + (payload.class_arm ? ' ' + payload.class_arm : '');
+          setSelectedExtraIds([]);
+          setShowQuickExtraForm(false);
+          setQuickExtraName('');
+          setQuickExtraAmount('');
+          setExtrasModalStudent({ id, name: payload.name, class_name: studentClassName });
+
+          // Fetch available extras for the student's class
           try {
             const extrasRes = await window.electronAPI.feeExtras.getAvailableForClass({
-              class_name: payload.class_name + (payload.class_arm ? ' ' + payload.class_arm : ''),
+              class_name: studentClassName,
             });
-            if (extrasRes.ok && Array.isArray(extrasRes.data) && extrasRes.data.length > 0) {
+            if (extrasRes && extrasRes.ok && Array.isArray(extrasRes.data)) {
               setAvailableExtras(extrasRes.data);
-              setSelectedExtraIds([]);
-              setExtrasModalStudent({ id, name: payload.name, class_name: payload.class_name + (payload.class_arm ? ' ' + payload.class_arm : '') });
+            } else {
+              setAvailableExtras([]);
             }
-          } catch (_) {}
+          } catch (_) {
+            setAvailableExtras([]);
+          }
         } else {
           setFormLog({ text: `❌ ${res.error}`, isError: true });
         }
@@ -2571,62 +2584,157 @@ export function Students() {
             </div>
 
             {/* Extras List */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {availableExtras.length === 0 ? (
-                <p style={{ fontSize: '13px', color: 'var(--text-dim)', textAlign: 'center', margin: '24px 0' }}>
-                  No optional extras available for this class.
-                </p>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {availableExtras.length === 0 && !showQuickExtraForm ? (
+                <div style={{ textAlign: 'center', margin: '20px 0' }}>
+                  <p style={{ fontSize: '13px', color: 'var(--text-dim)', margin: '0 0 12px' }}>
+                    No optional extras currently registered for this class.
+                  </p>
+                  <button
+                    type="button"
+                    className="small-btn"
+                    onClick={() => setShowQuickExtraForm(true)}
+                    style={{ fontSize: '12px', padding: '6px 14px', margin: '0 auto' }}
+                  >
+                    ＋ Create Extra Item Now
+                  </button>
+                </div>
               ) : (
-                availableExtras.map((extra) => {
-                  const checked = selectedExtraIds.includes(extra.id);
-                  return (
-                    <div
-                      key={extra.id}
-                      onClick={() => {
-                        setSelectedExtraIds((prev) =>
-                          checked ? prev.filter((x) => x !== extra.id) : [...prev, extra.id]
-                        );
-                      }}
+                <>
+                  {availableExtras.map((extra) => {
+                    const checked = selectedExtraIds.includes(extra.id);
+                    return (
+                      <div
+                        key={extra.id}
+                        onClick={() => {
+                          setSelectedExtraIds((prev) =>
+                            checked ? prev.filter((x) => x !== extra.id) : [...prev, extra.id]
+                          );
+                        }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '12px',
+                          padding: '12px 14px', borderRadius: '8px', cursor: 'pointer',
+                          background: checked ? 'rgba(var(--accent-rgb), 0.12)' : 'rgba(255,255,255,0.03)',
+                          border: `1px solid ${checked ? 'var(--accent)' : 'var(--glass-border)'}`,
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          readOnly
+                          style={{ width: '16px', height: '16px', accentColor: 'var(--accent)', cursor: 'pointer' }}
+                        />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-main)' }}>{extra.item_name}</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-dim)' }}>
+                            {extra.class_name || 'All Classes'} {extra.bank_name ? `· via ${extra.bank_name}` : ''}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent)' }}>
+                          ₦{Number(extra.amount).toLocaleString()}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {!showQuickExtraForm && availableExtras.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowQuickExtraForm(true)}
                       style={{
-                        display: 'flex', alignItems: 'center', gap: '12px',
-                        padding: '12px 14px', borderRadius: '8px', cursor: 'pointer',
-                        background: checked ? 'rgba(var(--accent-rgb), 0.12)' : 'rgba(255,255,255,0.03)',
-                        border: `1px solid ${checked ? 'var(--accent)' : 'var(--glass-border)'}`,
-                        transition: 'all 0.15s',
+                        background: 'transparent', border: '1px dashed var(--glass-border)',
+                        color: 'var(--text-dim)', padding: '8px', borderRadius: '8px',
+                        cursor: 'pointer', fontSize: '12px', width: '100%',
                       }}
                     >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        readOnly
-                        style={{ width: '16px', height: '16px', accentColor: 'var(--accent)', cursor: 'pointer' }}
-                      />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-main)' }}>{extra.item_name}</div>
-                        {extra.bank_name && (
-                          <div style={{ fontSize: '11px', color: 'var(--text-dim)' }}>via {extra.bank_name}</div>
-                        )}
-                      </div>
-                      <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent)' }}>
-                        ₦{Number(extra.amount).toLocaleString()}
-                      </div>
-                    </div>
-                  );
-                })
+                      ＋ Create Another Extra Item
+                    </button>
+                  )}
+                </>
+              )}
+
+              {/* Inline Quick Create Extra Form */}
+              {showQuickExtraForm && (
+                <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-main)' }}>New Extra Item</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '8px' }}>
+                    <input
+                      placeholder="Item name (e.g. Uniform)"
+                      value={quickExtraName}
+                      onChange={(e) => setQuickExtraName(e.target.value)}
+                      style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.05)', color: 'var(--text-main)', fontSize: '12px' }}
+                    />
+                    <input
+                      placeholder="Amount (₦)"
+                      type="number"
+                      value={quickExtraAmount}
+                      onChange={(e) => setQuickExtraAmount(e.target.value)}
+                      style={{ padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.05)', color: 'var(--text-main)', fontSize: '12px' }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
+                    <button
+                      type="button"
+                      className="small-btn"
+                      onClick={() => { setShowQuickExtraForm(false); setQuickExtraName(''); setQuickExtraAmount(''); }}
+                      style={{ fontSize: '11px', padding: '4px 10px' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="primary-btn"
+                      disabled={creatingQuickExtra || !quickExtraName.trim() || !quickExtraAmount.trim()}
+                      onClick={async () => {
+                        if (!quickExtraName.trim() || !quickExtraAmount.trim()) return;
+                        setCreatingQuickExtra(true);
+                        try {
+                          const res = await window.electronAPI.feeExtras.createMasterExtra({
+                            item_name: quickExtraName.trim(),
+                            amount: Number(quickExtraAmount),
+                            class_name: extrasModalStudent.class_name || 'All Classes',
+                            term: 'All Terms',
+                          });
+                          if (res.ok && res.id) {
+                            const newExtra = {
+                              id: res.id,
+                              item_name: quickExtraName.trim(),
+                              amount: Number(quickExtraAmount),
+                              class_name: extrasModalStudent.class_name || 'All Classes',
+                              term: 'All Terms',
+                            };
+                            setAvailableExtras((prev) => [...prev, newExtra]);
+                            setSelectedExtraIds((prev) => [...prev, res.id]);
+                            setQuickExtraName('');
+                            setQuickExtraAmount('');
+                            setShowQuickExtraForm(false);
+                          }
+                        } catch (_) {}
+                        setCreatingQuickExtra(false);
+                      }}
+                      style={{ fontSize: '11px', padding: '4px 12px' }}
+                    >
+                      {creatingQuickExtra ? 'Adding…' : 'Add Item'}
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
 
             {/* Footer */}
             <div style={{ padding: '16px 24px', borderTop: '1px solid var(--glass-border)', display: 'flex', gap: '10px' }}>
               <button
+                type="button"
                 className="secondary-btn"
                 style={{ flex: 1, justifyContent: 'center', padding: '12px' }}
-                onClick={() => { setExtrasModalStudent(null); setSelectedExtraIds([]); }}
+                onClick={() => { setExtrasModalStudent(null); setSelectedExtraIds([]); setShowQuickExtraForm(false); }}
                 disabled={savingExtras}
               >
                 Skip / Close
               </button>
               <button
+                type="button"
                 className="primary-btn"
                 style={{ flex: 1, justifyContent: 'center', padding: '12px', opacity: selectedExtraIds.length === 0 ? 0.5 : 1 }}
                 disabled={savingExtras || selectedExtraIds.length === 0}
@@ -2641,6 +2749,7 @@ export function Students() {
                     if (r.ok) {
                       setExtrasModalStudent(null);
                       setSelectedExtraIds([]);
+                      setShowQuickExtraForm(false);
                       fetchStudents();
                     }
                   } catch (_) {}

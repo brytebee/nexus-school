@@ -341,6 +341,8 @@ export function FinancialHub() {
   const [seNewItem,         setSeNewItem]         = useState({ item_name: '', amount: '', class_name: 'All Classes', term: 'All Terms' });
   const [seShowNewForm,     setSeShowNewForm]     = useState(false);
   const [seCreatingItem,    setSeCreatingItem]    = useState(false);
+  const [seCatalog,         setSeCatalog]         = useState<any[]>([]);
+  const [seLoadingCatalog,  setSeLoadingCatalog]  = useState(false);
 
 
   const handleFeeCSV = (type: 'structure' | 'payment' | 'adjustment') => {
@@ -1278,27 +1280,42 @@ export function FinancialHub() {
   // ═══════════════════════════════════════════════════════════════════════════
   // STUDENT EXTRAS TAB
   // ═══════════════════════════════════════════════════════════════════════════
-  const seSearchStudents = async (q: string) => {
-    if (!q || q.length < 2) { setSeStudents([]); return; }
+  const seLoadCatalog = async () => {
+    setSeLoadingCatalog(true);
     try {
-      const res = await window.electronAPI.fees.getRoster({
-        search: q,
-        academic_session: sessionRef.current,
-        term: termRef.current,
+      const res = await window.electronAPI.feeExtras.getAll();
+      if (res?.ok) setSeCatalog(res.data || []);
+    } catch (_) {} finally { setSeLoadingCatalog(false); }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'student-extras') {
+      seLoadCatalog();
+    }
+  }, [activeTab]);
+
+  const seSearchStudents = async (q: string) => {
+    if (!q || q.trim().length < 2) { setSeStudents([]); return; }
+    try {
+      const res = await window.electronAPI.getAllStudents({
+        search: q.trim(),
         limit: 20,
-        offset: 0,
       });
-      setSeStudents(res?.data || []);
+      if (res?.ok) {
+        setSeStudents(res.data || []);
+      }
     } catch (_) {}
   };
 
   const seLoadSummary = async (student: any) => {
-    setSeSelectedStudent(student);
+    const studentId = student.id || student.student_id;
+    if (!studentId) return;
+    setSeSelectedStudent({ ...student, id: studentId });
     setSeSummary(null);
     setSeLoadingSummary(true);
     try {
       const res = await window.electronAPI.feeExtras.getStudentExtrasSummary({
-        student_id: student.id,
+        student_id: studentId,
         academic_session: sessionRef.current,
         term: termRef.current,
       });
@@ -1313,11 +1330,12 @@ export function FinancialHub() {
   };
 
   const seHandleAddExtra = async () => {
-    if (!seSelectedStudent || !seSelectedExtraId) return;
+    const studentId = seSelectedStudent?.id || seSelectedStudent?.student_id;
+    if (!studentId || !seSelectedExtraId) return;
     setSeAddingExtra(true);
     try {
       const res = await window.electronAPI.feeExtras.addStudentExtra({
-        student_id: seSelectedStudent.id,
+        student_id: studentId,
         extra_ids: [seSelectedExtraId],
         academic_session: sessionRef.current,
         term: termRef.current,
@@ -1333,11 +1351,12 @@ export function FinancialHub() {
   };
 
   const seHandleRemoveExtra = async (selectionId: number, extraId: number, force = false) => {
-    if (!seSelectedStudent) return;
+    const studentId = seSelectedStudent?.id || seSelectedStudent?.student_id;
+    if (!studentId) return;
     setSeRemovingId(selectionId);
     try {
       const res = await window.electronAPI.feeExtras.removeStudentExtra({
-        student_id: seSelectedStudent.id,
+        student_id: studentId,
         extra_id: extraId,
         academic_session: sessionRef.current,
         term: termRef.current,
@@ -1355,6 +1374,28 @@ export function FinancialHub() {
     } catch (_) {} finally { setSeRemovingId(null); }
   };
 
+  const seHandleDeleteCatalogExtra = async (id: number) => {
+    const confirm = await Swal?.fire({
+      title: 'Deactivate Extra Item?',
+      text: 'This will deactivate the item from the catalog. Existing billing records are preserved.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, Deactivate',
+      background: '#0b0f19',
+      color: '#fff',
+      confirmButtonColor: '#ef4444',
+    });
+    if (!confirm?.isConfirmed) return;
+    try {
+      const res = await window.electronAPI.feeExtras.delete({ id });
+      if (res?.ok) {
+        showIndicator('✅ Extra item deactivated');
+        await seLoadCatalog();
+        if (seSelectedStudent) await seLoadSummary(seSelectedStudent);
+      }
+    } catch (_) {}
+  };
+
   const seHandleCreateMasterExtra = async () => {
     if (!seNewItem.item_name || !seNewItem.amount) return;
     setSeCreatingItem(true);
@@ -1368,6 +1409,7 @@ export function FinancialHub() {
       if (res?.ok) {
         setSeNewItem({ item_name: '', amount: '', class_name: 'All Classes', term: 'All Terms' });
         setSeShowNewForm(false);
+        await seLoadCatalog();
         if (seSelectedStudent) await seLoadSummary(seSelectedStudent);
         showIndicator('✅ New extra item created');
       }
@@ -2752,65 +2794,190 @@ export function FinancialHub() {
             {/* Header */}
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px' }}>
               <div>
-                <div style={{ fontWeight:700, fontSize:'16px' }}>🎒 Student Extras Management</div>
+                <div style={{ fontWeight:700, fontSize:'16px' }}>🎒 Student Extras & Optional Billing</div>
                 <div style={{ fontSize:'12px', color:'var(--text-dim)', marginTop:'2px' }}>
-                  Assign optional extras to a student and update their total billed amount.
+                  Manage the school's optional extras catalog and assign extra items to students.
                 </div>
               </div>
-              <button
-                className="small-btn"
-                onClick={() => setSeShowNewForm(v => !v)}
-                style={{ fontSize:'12px', padding:'6px 12px' }}
-              >
-                {seShowNewForm ? '✕ Cancel' : '＋ New Extra Item'}
-              </button>
+              <div style={{ display:'flex', gap:'8px' }}>
+                <button
+                  className="small-btn"
+                  onClick={seLoadCatalog}
+                  disabled={seLoadingCatalog}
+                  style={{ fontSize:'12px', padding:'6px 12px' }}
+                >
+                  {seLoadingCatalog ? '⌛' : '🔄 Refresh Catalog'}
+                </button>
+                <button
+                  className="primary-btn"
+                  onClick={() => setSeShowNewForm(v => !v)}
+                  style={{ fontSize:'12px', padding:'6px 14px' }}
+                >
+                  {seShowNewForm ? '✕ Cancel' : '＋ New Catalog Extra'}
+                </button>
+              </div>
             </div>
 
             {/* New Extra Item Form */}
             {seShowNewForm && (
-              <div style={{ background:'rgba(255,255,255,0.04)', border:'1px solid var(--glass-border)', borderRadius:'10px', padding:'16px 20px', display:'flex', flexDirection:'column', gap:'10px' }}>
-                <div style={{ fontWeight:600, fontSize:'13px' }}>Create New Catalog Item</div>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
-                  <input placeholder="Item name" value={seNewItem.item_name} onChange={e => setSeNewItem(p => ({ ...p, item_name: e.target.value }))} style={{ padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }} />
-                  <input placeholder="Amount (₦)" type="number" value={seNewItem.amount} onChange={e => setSeNewItem(p => ({ ...p, amount: e.target.value }))} style={{ padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }} />
-                  <input placeholder="Class (or All Classes)" value={seNewItem.class_name} onChange={e => setSeNewItem(p => ({ ...p, class_name: e.target.value }))} style={{ padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }} />
-                  <input placeholder="Term (or All Terms)" value={seNewItem.term} onChange={e => setSeNewItem(p => ({ ...p, term: e.target.value }))} style={{ padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }} />
+              <div style={{ background:'rgba(255,255,255,0.04)', border:'1px solid var(--glass-border)', borderRadius:'10px', padding:'16px 20px', display:'flex', flexDirection:'column', gap:'12px' }}>
+                <div style={{ fontWeight:600, fontSize:'13px', color:'var(--text-main)' }}>Create New Master Extra Item</div>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:'10px' }}>
+                  <div>
+                    <label style={{ fontSize:'11px', color:'var(--text-dim)', display:'block', marginBottom:'4px' }}>Item Name</label>
+                    <input
+                      placeholder="e.g. Uniform, Books, Cardigan"
+                      value={seNewItem.item_name}
+                      onChange={e => setSeNewItem(p => ({ ...p, item_name: e.target.value }))}
+                      style={{ width:'100%', padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize:'11px', color:'var(--text-dim)', display:'block', marginBottom:'4px' }}>Amount (₦)</label>
+                    <input
+                      placeholder="e.g. 24000"
+                      type="number"
+                      value={seNewItem.amount}
+                      onChange={e => setSeNewItem(p => ({ ...p, amount: e.target.value }))}
+                      style={{ width:'100%', padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize:'11px', color:'var(--text-dim)', display:'block', marginBottom:'4px' }}>Applicable Class</label>
+                    <select
+                      value={seNewItem.class_name}
+                      onChange={e => setSeNewItem(p => ({ ...p, class_name: e.target.value }))}
+                      style={{ width:'100%', padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }}
+                    >
+                      <option value="All Classes">All Classes</option>
+                      {fullList.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize:'11px', color:'var(--text-dim)', display:'block', marginBottom:'4px' }}>Term</label>
+                    <select
+                      value={seNewItem.term}
+                      onChange={e => setSeNewItem(p => ({ ...p, term: e.target.value }))}
+                      style={{ width:'100%', padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }}
+                    >
+                      <option value="All Terms">All Terms</option>
+                      <option value="1st Term">1st Term</option>
+                      <option value="2nd Term">2nd Term</option>
+                      <option value="3rd Term">3rd Term</option>
+                    </select>
+                  </div>
                 </div>
-                <button className="primary-btn" disabled={seCreatingItem || !seNewItem.item_name || !seNewItem.amount} onClick={seHandleCreateMasterExtra} style={{ alignSelf:'flex-end', padding:'8px 20px', fontSize:'12px' }}>
-                  {seCreatingItem ? 'Creating…' : 'Create Item'}
-                </button>
+                <div style={{ display:'flex', justifyContent:'flex-end', gap:'8px' }}>
+                  <button
+                    className="small-btn"
+                    onClick={() => setSeShowNewForm(false)}
+                    style={{ padding:'7px 14px', fontSize:'12px' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="primary-btn"
+                    disabled={seCreatingItem || !seNewItem.item_name.trim() || !seNewItem.amount}
+                    onClick={seHandleCreateMasterExtra}
+                    style={{ padding:'7px 20px', fontSize:'12px' }}
+                  >
+                    {seCreatingItem ? 'Saving…' : 'Save Item to Catalog'}
+                  </button>
+                </div>
               </div>
             )}
 
-            {/* Student Search */}
-            <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
-              <input
-                placeholder="Search student by name…"
-                value={seSearch}
-                onChange={e => { setSeSearch(e.target.value); seSearchStudents(e.target.value); }}
-                style={{ flex:1, padding:'9px 12px', borderRadius:'8px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }}
-              />
+            {/* Student Search Box */}
+            <div style={{ position:'relative', width:'100%' }}>
+              <label style={{ fontSize:'12px', fontWeight:600, color:'var(--text-main)', display:'block', marginBottom:'6px' }}>
+                🔍 Select Student to Assign & Manage Extras
+              </label>
+              <div style={{ display:'flex', gap:'8px' }}>
+                <input
+                  placeholder="Search student by name or ID (e.g. Ada, STU-1234)..."
+                  value={seSearch}
+                  onChange={e => {
+                    setSeSearch(e.target.value);
+                    seSearchStudents(e.target.value);
+                  }}
+                  style={{ flex:1, padding:'10px 14px', borderRadius:'8px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }}
+                />
+                {seSelectedStudent && (
+                  <button
+                    className="small-btn"
+                    onClick={() => {
+                      setSeSelectedStudent(null);
+                      setSeSummary(null);
+                      setSeSearch('');
+                    }}
+                    style={{ fontSize:'12px', padding:'0 14px' }}
+                  >
+                    ✕ Clear Student
+                  </button>
+                )}
+              </div>
+
+              {/* Autocomplete Dropdown */}
               {seSearch && seStudents.length > 0 && (
-                <div style={{ position:'relative' }}>
-                  <div style={{ position:'absolute', top:'4px', left:'-320px', background:'var(--bg-dark)', border:'1px solid var(--glass-border)', borderRadius:'8px', width:'320px', maxHeight:'200px', overflowY:'auto', zIndex:100, boxShadow:'0 8px 24px rgba(0,0,0,0.4)' }}>
-                    {seStudents.map((s: any) => (
-                      <div key={s.id} onClick={() => { setSeSearch(s.name); setSeStudents([]); seLoadSummary(s); }} style={{ padding:'10px 14px', cursor:'pointer', borderBottom:'1px solid rgba(255,255,255,0.04)', fontSize:'13px' }}>
-                        <span style={{ fontWeight:600 }}>{s.name}</span>
-                        <span style={{ color:'var(--text-dim)', marginLeft:'8px', fontSize:'11px' }}>{s.class_name}</span>
+                <div style={{
+                  position:'absolute', top:'100%', left:0, right:0, marginTop:'4px',
+                  background:'var(--bg-dark)', border:'1px solid var(--glass-border)',
+                  borderRadius:'8px', maxHeight:'260px', overflowY:'auto', zIndex:1000,
+                  boxShadow:'0 12px 32px rgba(0,0,0,0.6)'
+                }}>
+                  {seStudents.map((s: any) => {
+                    const sid = s.id || s.student_id;
+                    const sClass = s.class_name + (s.class_arm ? ' ' + s.class_arm : '');
+                    return (
+                      <div
+                        key={sid}
+                        onClick={() => {
+                          setSeSearch(s.name);
+                          setSeStudents([]);
+                          seLoadSummary(s);
+                        }}
+                        style={{
+                          padding:'10px 16px', cursor:'pointer',
+                          borderBottom:'1px solid rgba(255,255,255,0.04)',
+                          display:'flex', justifyContent:'space-between', alignItems:'center',
+                          transition:'background 0.15s'
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <div>
+                          <span style={{ fontWeight:600, color:'var(--text-main)' }}>{s.name}</span>
+                          <span style={{ color:'var(--text-dim)', marginLeft:'8px', fontSize:'11px' }}>({sid})</span>
+                        </div>
+                        <span style={{ fontSize:'12px', color:'var(--accent)', fontWeight:500 }}>
+                          {sClass}
+                        </span>
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
 
-            {/* Summary & Extras Table */}
-            {seLoadingSummary && <div style={{ textAlign:'center', color:'var(--text-dim)', padding:'24px 0' }}>Loading…</div>}
+            {/* Loading Indicator */}
+            {seLoadingSummary && <div style={{ textAlign:'center', color:'var(--text-dim)', padding:'24px 0' }}>Loading student billing record…</div>}
 
-            {seSummary && !seLoadingSummary && (
-              <div style={{ display:'flex', flexDirection:'column', gap:'16px' }}>
+            {/* Student Selected View */}
+            {seSelectedStudent && seSummary && !seLoadingSummary && (
+              <div style={{ display:'flex', flexDirection:'column', gap:'16px', background:'rgba(255,255,255,0.02)', border:'1px solid var(--glass-border)', borderRadius:'12px', padding:'20px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px' }}>
+                  <div>
+                    <h3 style={{ margin:0, fontSize:'16px', fontWeight:700, color:'var(--text-main)' }}>
+                      👤 {seSelectedStudent.name}
+                    </h3>
+                    <p style={{ margin:'4px 0 0', fontSize:'12px', color:'var(--text-dim)' }}>
+                      Class: <strong style={{ color:'var(--text-main)' }}>{seSelectedStudent.class_name}{seSelectedStudent.class_arm ? ' ' + seSelectedStudent.class_arm : ''}</strong> · Student ID: {seSelectedStudent.id || seSelectedStudent.student_id}
+                    </p>
+                  </div>
+                </div>
+
                 {/* Summary Cards */}
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:'10px' }}>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(130px, 1fr))', gap:'10px' }}>
                   {[
                     { label:'Base Tuition', value: seSummary.baseFee, color:'var(--text-dim)' },
                     { label:'Extras Billed', value: seSummary.extrasFee, color:'#f59e0b' },
@@ -2827,14 +2994,19 @@ export function FinancialHub() {
 
                 {/* Assigned Extras Table */}
                 <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid var(--glass-border)', borderRadius:'10px', overflow:'hidden' }}>
-                  <div style={{ padding:'12px 16px', borderBottom:'1px solid var(--glass-border)', fontWeight:600, fontSize:'13px' }}>Assigned Extras</div>
+                  <div style={{ padding:'12px 16px', borderBottom:'1px solid var(--glass-border)', fontWeight:600, fontSize:'13px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                    <span>Assigned Extras for {termRef.current || 'Active Term'}</span>
+                    <span style={{ fontSize:'11px', color:'var(--text-dim)' }}>{seSummary.assignedExtras.length} items</span>
+                  </div>
                   {seSummary.assignedExtras.length === 0 ? (
-                    <div style={{ padding:'20px', textAlign:'center', fontSize:'13px', color:'var(--text-dim)' }}>No extras assigned for this term.</div>
+                    <div style={{ padding:'24px', textAlign:'center', fontSize:'13px', color:'var(--text-dim)' }}>
+                      No extras currently assigned to this student. Choose an item below to assign.
+                    </div>
                   ) : (
                     <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'13px' }}>
                       <thead>
                         <tr style={{ background:'rgba(255,255,255,0.04)' }}>
-                          {['Item', 'Amount', 'Fulfilled', 'Remove'].map(h => (
+                          {['Item', 'Amount', 'Fulfillment', 'Action'].map(h => (
                             <th key={h} style={{ padding:'8px 14px', textAlign:'left', color:'var(--text-dim)', fontWeight:600, fontSize:'11px' }}>{h}</th>
                           ))}
                         </tr>
@@ -2846,7 +3018,7 @@ export function FinancialHub() {
                             <td style={{ padding:'10px 14px', color:'#f59e0b', fontWeight:600 }}>₦{Number(e.amount).toLocaleString()}</td>
                             <td style={{ padding:'10px 14px' }}>
                               <span style={{ fontSize:'11px', padding:'2px 8px', borderRadius:'4px', background: e.is_fulfilled ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.12)', color: e.is_fulfilled ? '#22c55e' : '#f87171' }}>
-                                {e.is_fulfilled ? '✅ Done' : '⏳ Pending'}
+                                {e.is_fulfilled ? '✅ Fulfilled' : '⏳ Pending'}
                               </span>
                             </td>
                             <td style={{ padding:'10px 14px' }}>
@@ -2856,7 +3028,7 @@ export function FinancialHub() {
                                 onClick={() => seHandleRemoveExtra(e.selection_id, e.extra_id)}
                                 style={{ fontSize:'11px', padding:'4px 10px', color:'#f87171', borderColor:'rgba(239,68,68,0.3)', background:'rgba(239,68,68,0.08)' }}
                               >
-                                {seRemovingId === e.selection_id ? '…' : 'Remove'}
+                                {seRemovingId === e.selection_id ? '…' : 'Remove & Deduct'}
                               </button>
                             </td>
                           </tr>
@@ -2866,17 +3038,19 @@ export function FinancialHub() {
                   )}
                 </div>
 
-                {/* Assign Extra */}
-                <div style={{ display:'flex', gap:'10px', alignItems:'center', flexWrap:'wrap' }}>
+                {/* Assign Extra Control */}
+                <div style={{ display:'flex', gap:'10px', alignItems:'center', flexWrap:'wrap', paddingTop:'4px' }}>
                   <select
                     value={seSelectedExtraId ?? ''}
                     onChange={e => setSeSelectedExtraId(Number(e.target.value) || null)}
-                    style={{ flex:1, minWidth:'200px', padding:'9px 12px', borderRadius:'8px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }}
+                    style={{ flex:1, minWidth:'220px', padding:'9px 12px', borderRadius:'8px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }}
                   >
-                    <option value="">— Select an extra to assign —</option>
-                    {seAvailExtras.filter((a: any) => !seSummary.assignedExtras.some((x: any) => x.extra_id === a.id)).map((a: any) => (
-                      <option key={a.id} value={a.id}>{a.item_name} — ₦{Number(a.amount).toLocaleString()}</option>
-                    ))}
+                    <option value="">— Select an extra to assign & bill —</option>
+                    {seAvailExtras
+                      .filter((a: any) => !seSummary.assignedExtras.some((x: any) => x.extra_id === a.id))
+                      .map((a: any) => (
+                        <option key={a.id} value={a.id}>{a.item_name} — ₦{Number(a.amount).toLocaleString()}</option>
+                      ))}
                   </select>
                   <button
                     className="primary-btn"
@@ -2884,17 +3058,59 @@ export function FinancialHub() {
                     onClick={seHandleAddExtra}
                     style={{ padding:'9px 18px', fontSize:'13px' }}
                   >
-                    {seAddingExtra ? 'Adding…' : '＋ Assign'}
+                    {seAddingExtra ? 'Assigning…' : '＋ Assign & Bill'}
                   </button>
                 </div>
               </div>
             )}
 
-            {!seSelectedStudent && !seLoadingSummary && (
-              <div style={{ textAlign:'center', padding:'48px 0', color:'var(--text-dim)', fontSize:'14px' }}>
-                Search for a student above to manage their optional extras.
+            {/* School Master Extras Catalog Section */}
+            <div style={{ marginTop:'10px', display:'flex', flexDirection:'column', gap:'12px' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <h4 style={{ margin:0, fontSize:'14px', fontWeight:600, color:'var(--text-main)' }}>
+                  📦 School Extras Catalog ({seCatalog.length} Active Items)
+                </h4>
               </div>
-            )}
+
+              {seCatalog.length === 0 ? (
+                <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid var(--glass-border)', borderRadius:'10px', padding:'32px', textAlign:'center', color:'var(--text-dim)', fontSize:'13px' }}>
+                  No extra items configured in the school catalog yet.
+                  <br />
+                  Click <strong>＋ New Catalog Extra</strong> above to add uniforms, cardigans, excursion fees, or optional books.
+                </div>
+              ) : (
+                <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid var(--glass-border)', borderRadius:'10px', overflow:'hidden' }}>
+                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'13px' }}>
+                    <thead>
+                      <tr style={{ background:'rgba(255,255,255,0.04)' }}>
+                        {['Item Name', 'Applicable Class', 'Term', 'Amount', 'Action'].map(h => (
+                          <th key={h} style={{ padding:'10px 14px', textAlign:'left', color:'var(--text-dim)', fontWeight:600, fontSize:'11px' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {seCatalog.map((item: any) => (
+                        <tr key={item.id} style={{ borderTop:'1px solid rgba(255,255,255,0.04)' }}>
+                          <td style={{ padding:'10px 14px', fontWeight:600, color:'var(--text-main)' }}>{item.item_name}</td>
+                          <td style={{ padding:'10px 14px', color:'var(--text-dim)' }}>{item.class_name || 'All Classes'}</td>
+                          <td style={{ padding:'10px 14px', color:'var(--text-dim)' }}>{item.term || 'All Terms'}</td>
+                          <td style={{ padding:'10px 14px', color:'#f59e0b', fontWeight:700 }}>₦{Number(item.amount).toLocaleString()}</td>
+                          <td style={{ padding:'10px 14px' }}>
+                            <button
+                              className="small-btn"
+                              onClick={() => seHandleDeleteCatalogExtra(item.id)}
+                              style={{ fontSize:'11px', padding:'4px 10px', color:'#f87171', borderColor:'rgba(239,68,68,0.3)', background:'rgba(239,68,68,0.08)' }}
+                            >
+                              Deactivate
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
