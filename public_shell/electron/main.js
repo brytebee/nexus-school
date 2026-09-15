@@ -5048,6 +5048,89 @@ ipcMain.handle('fees:dry-run-recovery-pulse', (event, { academic_session, term }
 // ── Phase 8: Optional Fees & Multi-Bank Routing ────────────────────────────────
 
 /**
+ * recalculateStudentTotalBilled — Recalculates student_fees.total_billed from:
+ * base fee_structures + assigned student_extra_selections.
+ * MUST ALWAYS be called within an existing db.transaction() or active transaction!
+ */
+function recalculateStudentTotalBilled(db, studentId, academicSession, term) {
+  if (!studentId || !academicSession || !term) return null;
+
+  // 1. Get student class
+  const student = db.prepare('SELECT class_name, class_arm FROM students WHERE id = ?').get(studentId);
+  const className = student ? (student.class_name + (student.class_arm ? ' ' + student.class_arm : '')) : '';
+
+  // 2. Base class fee from fee_structures
+  let baseFee = 0;
+  if (className) {
+    const feeRow = db.prepare(`
+      SELECT COALESCE(SUM(amount), 0) as total FROM fee_structures
+      WHERE class_name = ? AND (LOWER(TRIM(term)) IN ('all terms', 'all term') OR term = ?)
+    `).get(className, term);
+    baseFee = Number(feeRow?.total || 0);
+  }
+
+  // 3. Extras fee from student_extra_selections joined with fee_extras
+  const extrasRow = db.prepare(`
+    SELECT COALESCE(SUM(fe.amount), 0) as total
+    FROM student_extra_selections ses
+    JOIN fee_extras fe ON fe.id = ses.extra_id
+    WHERE ses.student_id = ? AND ses.academic_session = ? AND ses.term = ? AND fe.is_active = 1
+  `).get(studentId, academicSession, term);
+  const extrasFee = Number(extrasRow?.total || 0);
+
+  const newTotalBilled = baseFee + extrasFee;
+
+  // 4. Update student_fees row atomically
+  const existing = db.prepare(`
+    SELECT total_paid FROM student_fees
+    WHERE student_id = ? AND academic_session = ? AND term = ?
+  `).get(studentId, academicSession, term);
+
+  const totalPaid = Number(existing?.total_paid || 0);
+  const status = totalPaid >= newTotalBilled && newTotalBilled > 0
+    ? 'cleared'
+    : (totalPaid > 0 ? 'partial' : (newTotalBilled > 0 ? 'unpaid' : 'cleared'));
+
+  if (existing) {
+    db.prepare(`
+      UPDATE student_fees
+      SET total_billed = ?, status = ?
+      WHERE student_id = ? AND academic_session = ? AND term = ?
+    `).run(newTotalBilled, status, studentId, academicSession, term);
+  } else if (newTotalBilled > 0) {
+    db.prepare(`
+      INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status)
+      VALUES (?, ?, ?, ?, 0, 'unpaid')
+    `).run(studentId, academicSession, term, newTotalBilled);
+  }
+
+  return { baseFee, extrasFee, totalBilled: newTotalBilled, totalPaid, status };
+}
+
+/**
+ * reconcileExistingStudentExtras — Startup reconciliation loop that recalculates
+ * student_fees.total_billed for all students with active extra selections.
+ */
+function reconcileExistingStudentExtras(db) {
+  try {
+    const rows = db.prepare(`
+      SELECT DISTINCT student_id, academic_session, term
+      FROM student_extra_selections
+    `).all();
+    if (rows && rows.length > 0) {
+      db.transaction(() => {
+        for (const r of rows) {
+          recalculateStudentTotalBilled(db, r.student_id, r.academic_session, r.term);
+        }
+      })();
+      console.log(`[Database] Reconciled extras billing for ${rows.length} student term record(s).`);
+    }
+  } catch (err) {
+    console.warn('[Database] Extras reconciliation error (non-fatal):', err.message);
+  }
+}
+
+/**
  * fee-extras:get-all — Fetch all active extra items, optionally filtered by class/term.
  */
 ipcMain.handle('fee-extras:get-all', (event, { class_name, term } = {}) => {
@@ -5149,27 +5232,229 @@ ipcMain.handle('fee-extras:get-selections', (event, { student_id, academic_sessi
 /**
  * fee-extras:toggle-selection — Student opts in or out of a fee extra.
  * select: true = opt in, false = opt out.
+ * Runs atomically inside a transaction with recalculateStudentTotalBilled.
  */
 ipcMain.handle('fee-extras:toggle-selection', (event, { student_id, extra_id, academic_session, term, select }) => {
   try {
     const db = database.getDb();
-    if (select) {
-      db.prepare(`
-        INSERT OR IGNORE INTO student_extra_selections (student_id, extra_id, academic_session, term)
-        VALUES (?, ?, ?, ?)
-      `).run(student_id, extra_id, academic_session, term);
-    } else {
-      db.prepare(`
-        DELETE FROM student_extra_selections
-        WHERE student_id = ? AND extra_id = ? AND academic_session = ? AND term = ?
-      `).run(student_id, extra_id, academic_session, term);
+    if (!academic_session || !term) {
+      const termConfig = db.prepare('SELECT academic_session, term FROM school_term_config WHERE id = 1').get();
+      academic_session = academic_session || termConfig?.academic_session;
+      term = term || termConfig?.term;
     }
+
+    db.transaction(() => {
+      if (select) {
+        db.prepare(`
+          INSERT OR IGNORE INTO student_extra_selections (student_id, extra_id, academic_session, term)
+          VALUES (?, ?, ?, ?)
+        `).run(student_id, extra_id, academic_session, term);
+      } else {
+        db.prepare(`
+          DELETE FROM student_extra_selections
+          WHERE student_id = ? AND extra_id = ? AND academic_session = ? AND term = ?
+        `).run(student_id, extra_id, academic_session, term);
+      }
+      recalculateStudentTotalBilled(db, student_id, academic_session, term);
+    })();
     return { ok: true };
   } catch (err) {
     console.error('[Fees] fee-extras:toggle-selection error:', err);
     return { ok: false, error: err.message };
   }
 });
+
+/**
+ * fee-extras:get-available-for-class — Fetch active extra items matching student class or 'All Classes'.
+ */
+ipcMain.handle('fee-extras:get-available-for-class', (event, { class_name, term } = {}) => {
+  try {
+    const db = database.getDb();
+    const whereParts = ['fe.is_active = 1'];
+    const params = [];
+    if (class_name) {
+      whereParts.push("(fe.class_name = ? OR fe.class_name = 'All Classes')");
+      params.push(class_name);
+    }
+    if (term) {
+      whereParts.push("(fe.term = ? OR fe.term = 'All Terms')");
+      params.push(term);
+    }
+    const where = 'WHERE ' + whereParts.join(' AND ');
+    const rows = db.prepare(`
+      SELECT fe.*, ba.bank_name, ba.account_number
+      FROM fee_extras fe
+      LEFT JOIN bank_accounts ba ON ba.id = fe.bank_account_id
+      ${where}
+      ORDER BY fe.item_name ASC
+    `).all(...params);
+    return { ok: true, data: rows };
+  } catch (err) {
+    console.error('[Fees] fee-extras:get-available-for-class error:', err);
+    return { ok: false, error: err.message, data: [] };
+  }
+});
+
+/**
+ * fee-extras:get-student-extras-summary — Summary of student's base fees, assigned extras, total billed, paid, and balance.
+ */
+ipcMain.handle('fee-extras:get-student-extras-summary', (event, { student_id, academic_session, term }) => {
+  try {
+    const db = database.getDb();
+    if (!academic_session || !term) {
+      const termConfig = db.prepare('SELECT academic_session, term FROM school_term_config WHERE id = 1').get();
+      academic_session = academic_session || termConfig?.academic_session;
+      term = term || termConfig?.term;
+    }
+
+    const student = db.prepare('SELECT id, name, class_name, class_arm FROM students WHERE id = ?').get(student_id);
+    if (!student) return { ok: false, error: 'Student not found.' };
+
+    const fullClassName = student.class_name + (student.class_arm ? ' ' + student.class_arm : '');
+
+    // Base fee from fee_structures
+    const feeRow = db.prepare(`
+      SELECT COALESCE(SUM(amount), 0) as total FROM fee_structures
+      WHERE class_name = ? AND (LOWER(TRIM(term)) IN ('all terms', 'all term') OR term = ?)
+    `).get(fullClassName, term);
+    const baseFee = Number(feeRow?.total || 0);
+
+    // Assigned extras
+    const assignedExtras = db.prepare(`
+      SELECT ses.id as selection_id, ses.extra_id, ses.is_fulfilled, ses.fulfilled_at, ses.selected_at,
+             fe.item_name, fe.amount, fe.term, fe.class_name, ba.bank_name
+      FROM student_extra_selections ses
+      JOIN fee_extras fe ON fe.id = ses.extra_id
+      LEFT JOIN bank_accounts ba ON ba.id = fe.bank_account_id
+      WHERE ses.student_id = ? AND ses.academic_session = ? AND ses.term = ?
+      ORDER BY fe.item_name ASC
+    `).all(student_id, academic_session, term);
+
+    const extrasFee = assignedExtras.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+    const totalBilled = baseFee + extrasFee;
+
+    const sfRow = db.prepare(`
+      SELECT total_billed, total_paid, status
+      FROM student_fees
+      WHERE student_id = ? AND academic_session = ? AND term = ?
+    `).get(student_id, academic_session, term);
+
+    const totalPaid = Number(sfRow?.total_paid || 0);
+    const balance = Math.max(0, (sfRow?.total_billed ?? totalBilled) - totalPaid);
+
+    return {
+      ok: true,
+      data: {
+        student,
+        academic_session,
+        term,
+        baseFee,
+        extrasFee,
+        totalBilled: sfRow?.total_billed ?? totalBilled,
+        totalPaid,
+        balance,
+        status: sfRow?.status || (totalPaid >= totalBilled && totalBilled > 0 ? 'cleared' : (totalPaid > 0 ? 'partial' : 'unpaid')),
+        assignedExtras
+      }
+    };
+  } catch (err) {
+    console.error('[Fees] fee-extras:get-student-extras-summary error:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+/**
+ * fee-extras:add-student-extra — Assign one or more extras to a student and recalculate total_billed inside a transaction.
+ */
+ipcMain.handle('fee-extras:add-student-extra', (event, { student_id, extra_ids, academic_session, term }) => {
+  try {
+    const db = database.getDb();
+    if (!academic_session || !term) {
+      const termConfig = db.prepare('SELECT academic_session, term FROM school_term_config WHERE id = 1').get();
+      academic_session = academic_session || termConfig?.academic_session;
+      term = term || termConfig?.term;
+    }
+
+    const ids = Array.isArray(extra_ids) ? extra_ids : [extra_ids].filter(Boolean);
+    if (ids.length === 0) return { ok: false, error: 'No extra_id provided.' };
+
+    db.transaction(() => {
+      const stmt = db.prepare(`
+        INSERT OR IGNORE INTO student_extra_selections (student_id, extra_id, academic_session, term)
+        VALUES (?, ?, ?, ?)
+      `);
+      for (const extraId of ids) {
+        stmt.run(student_id, extraId, academic_session, term);
+      }
+      recalculateStudentTotalBilled(db, student_id, academic_session, term);
+    })();
+
+    return { ok: true };
+  } catch (err) {
+    console.error('[Fees] fee-extras:add-student-extra error:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+/**
+ * fee-extras:remove-student-extra — Remove an assigned extra with financial guard and recalculate inside a transaction.
+ */
+ipcMain.handle('fee-extras:remove-student-extra', (event, { student_id, extra_id, academic_session, term, force = false }) => {
+  try {
+    const db = database.getDb();
+    if (!academic_session || !term) {
+      const termConfig = db.prepare('SELECT academic_session, term FROM school_term_config WHERE id = 1').get();
+      academic_session = academic_session || termConfig?.academic_session;
+      term = term || termConfig?.term;
+    }
+
+    const extraRow = db.prepare('SELECT amount, item_name FROM fee_extras WHERE id = ?').get(extra_id);
+    const feeRow = db.prepare('SELECT total_billed, total_paid FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?').get(student_id, academic_session, term);
+
+    if (feeRow && !force) {
+      const newPotentialBilled = Math.max(0, feeRow.total_billed - (extraRow?.amount || 0));
+      if (feeRow.total_paid > newPotentialBilled) {
+        return {
+          ok: false,
+          requiresConfirmation: true,
+          error: `Removing this extra (${extraRow?.item_name || 'Item'} - ₦${(extraRow?.amount || 0).toLocaleString()}) will leave total paid (₦${feeRow.total_paid.toLocaleString()}) exceeding the new total billed (₦${newPotentialBilled.toLocaleString()}). Confirm to proceed.`
+        };
+      }
+    }
+
+    db.transaction(() => {
+      db.prepare(`
+        DELETE FROM student_extra_selections
+        WHERE student_id = ? AND extra_id = ? AND academic_session = ? AND term = ?
+      `).run(student_id, extra_id, academic_session, term);
+
+      recalculateStudentTotalBilled(db, student_id, academic_session, term);
+    })();
+
+    return { ok: true };
+  } catch (err) {
+    console.error('[Fees] fee-extras:remove-student-extra error:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+/**
+ * fee-extras:create-master-extra — Create an item in the master fee_extras catalog.
+ */
+ipcMain.handle('fee-extras:create-master-extra', (event, { class_name, item_name, amount, term, bank_account_id }) => {
+  try {
+    const db = database.getDb();
+    const result = db.prepare(`
+      INSERT OR REPLACE INTO fee_extras (class_name, item_name, amount, term, bank_account_id)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(class_name || 'All Classes', item_name, amount, term || 'All Terms', bank_account_id || null);
+    return { ok: true, id: result.lastInsertRowid };
+  } catch (err) {
+    console.error('[Fees] fee-extras:create-master-extra error:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
 
 /**
  * fee-extras:get-orders — Fetch optional fee payment orders for admin fulfillment tracking.
@@ -6798,6 +7083,7 @@ function createWindow() {
     const betterSqlite3 = require("better-sqlite3");
     database.init(dbPath, betterSqlite3);
     ensureIlsSchema(database.getDb());
+    reconcileExistingStudentExtras(database.getDb());
     
     // FINAL DEMO CHECK: Print the number of records found
     try {

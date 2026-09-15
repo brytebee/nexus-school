@@ -440,6 +440,162 @@ describe('Pulse Cloud 2-Way Delta Sync & Normalization', () => {
     const amountPaidFamily = undefined ? null : (session ? session.total_amount : 0);
     expect(amountPaidFamily).toBe(100000);
   });
+
+  it('10. Unified Student Extras & Dynamic Fee Billing: base + extras recalculation', () => {
+    const db = new Database(':memory:');
+    db.exec(`
+      CREATE TABLE students (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        class_name TEXT,
+        class_arm TEXT
+      );
+      CREATE TABLE fee_structures (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_name TEXT,
+        term TEXT,
+        item_name TEXT,
+        amount REAL,
+        bank_account_id INTEGER
+      );
+      CREATE TABLE fee_extras (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_name TEXT,
+        item_name TEXT,
+        amount REAL,
+        term TEXT,
+        bank_account_id INTEGER,
+        is_active INTEGER DEFAULT 1
+      );
+      CREATE TABLE student_extra_selections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id TEXT NOT NULL,
+        extra_id INTEGER NOT NULL,
+        academic_session TEXT NOT NULL,
+        term TEXT NOT NULL,
+        is_fulfilled INTEGER DEFAULT 0,
+        fulfilled_at TEXT,
+        selected_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(student_id, extra_id, academic_session, term)
+      );
+      CREATE TABLE student_fees (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id TEXT NOT NULL,
+        academic_session TEXT NOT NULL,
+        term TEXT NOT NULL,
+        total_billed REAL DEFAULT 0,
+        total_paid REAL DEFAULT 0,
+        status TEXT DEFAULT 'unpaid',
+        UNIQUE(student_id, academic_session, term)
+      );
+    `);
+
+    // Helper implementation matching main.js
+    function recalculateStudentTotalBilled(db, studentId, academicSession, term) {
+      if (!studentId || !academicSession || !term) return null;
+      const student = db.prepare('SELECT class_name, class_arm FROM students WHERE id = ?').get(studentId);
+      const className = student ? (student.class_name + (student.class_arm ? ' ' + student.class_arm : '')) : '';
+      let baseFee = 0;
+      if (className) {
+        const feeRow = db.prepare(`
+          SELECT COALESCE(SUM(amount), 0) as total FROM fee_structures
+          WHERE class_name = ? AND (LOWER(TRIM(term)) IN ('all terms', 'all term') OR term = ?)
+        `).get(className, term);
+        baseFee = Number(feeRow?.total || 0);
+      }
+      const extrasRow = db.prepare(`
+        SELECT COALESCE(SUM(fe.amount), 0) as total
+        FROM student_extra_selections ses
+        JOIN fee_extras fe ON fe.id = ses.extra_id
+        WHERE ses.student_id = ? AND ses.academic_session = ? AND ses.term = ? AND fe.is_active = 1
+      `).get(studentId, academicSession, term);
+      const extrasFee = Number(extrasRow?.total || 0);
+      const newTotalBilled = baseFee + extrasFee;
+
+      const existing = db.prepare(`
+        SELECT total_paid FROM student_fees
+        WHERE student_id = ? AND academic_session = ? AND term = ?
+      `).get(studentId, academicSession, term);
+
+      const totalPaid = Number(existing?.total_paid || 0);
+      const status = totalPaid >= newTotalBilled && newTotalBilled > 0
+        ? 'cleared'
+        : (totalPaid > 0 ? 'partial' : (newTotalBilled > 0 ? 'unpaid' : 'cleared'));
+
+      if (existing) {
+        db.prepare(`
+          UPDATE student_fees
+          SET total_billed = ?, status = ?
+          WHERE student_id = ? AND academic_session = ? AND term = ?
+        `).run(newTotalBilled, status, studentId, academicSession, term);
+      } else if (newTotalBilled > 0) {
+        db.prepare(`
+          INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status)
+          VALUES (?, ?, ?, ?, 0, 'unpaid')
+        `).run(studentId, academicSession, term, newTotalBilled);
+      }
+      return { baseFee, extrasFee, totalBilled: newTotalBilled, totalPaid, status };
+    }
+
+    const session = '2025/2026';
+    const term = '1st Term';
+
+    // 1. Setup Student and Base Tuition
+    db.prepare("INSERT INTO students (id, name, class_name) VALUES ('STU-100', 'Ada Lovelace', 'JSS 1')").run();
+    db.prepare("INSERT INTO fee_structures (class_name, term, item_name, amount) VALUES ('JSS 1', '1st Term', 'Tuition Fee', 100000)").run();
+    db.prepare("INSERT INTO fee_extras (id, class_name, item_name, amount, term, is_active) VALUES (1, 'All Classes', 'School Uniform', 24000, 'All Terms', 1)").run();
+
+    // Initial calculation (base only)
+    recalculateStudentTotalBilled(db, 'STU-100', session, term);
+    let fee = db.prepare("SELECT * FROM student_fees WHERE student_id = 'STU-100'").get();
+    expect(fee.total_billed).toBe(100000);
+    expect(fee.total_paid).toBe(0);
+    expect(fee.status).toBe('unpaid');
+
+    // 2. Assign extra (Uniform ₦24,000) inside transaction
+    db.transaction(() => {
+      db.prepare("INSERT INTO student_extra_selections (student_id, extra_id, academic_session, term) VALUES ('STU-100', 1, ?, ?)").run(session, term);
+      recalculateStudentTotalBilled(db, 'STU-100', session, term);
+    })();
+
+    fee = db.prepare("SELECT * FROM student_fees WHERE student_id = 'STU-100'").get();
+    expect(fee.total_billed).toBe(124000);
+    expect(fee.total_paid).toBe(0);
+    expect(fee.status).toBe('unpaid');
+
+    // 3. Record full payment of ₦124,000
+    db.transaction(() => {
+      db.prepare("UPDATE student_fees SET total_paid = 124000 WHERE student_id = 'STU-100'").run();
+      recalculateStudentTotalBilled(db, 'STU-100', session, term);
+    })();
+
+    fee = db.prepare("SELECT * FROM student_fees WHERE student_id = 'STU-100'").get();
+    expect(fee.total_billed).toBe(124000);
+    expect(fee.total_paid).toBe(124000);
+    const balance = fee.total_billed - fee.total_paid;
+    expect(balance).toBe(0); // NOT negative -24,000!
+    expect(fee.status).toBe('cleared');
+
+    // 4. Verify receipt line items contain both base items and extra items
+    const baseItems = db.prepare("SELECT item_name, amount FROM fee_structures WHERE class_name = 'JSS 1'").all();
+    const extraItems = db.prepare(`
+      SELECT fe.item_name, fe.amount
+      FROM student_extra_selections ses
+      JOIN fee_extras fe ON fe.id = ses.extra_id
+      WHERE ses.student_id = 'STU-100'
+    `).all();
+
+    const receiptLineItems = [
+      ...baseItems.map(i => ({ name: i.item_name, amount: i.amount, type: 'mandatory' })),
+      ...extraItems.map(i => ({ name: `${i.item_name} (Optional)`, amount: i.amount, type: 'extra' }))
+    ];
+
+    expect(receiptLineItems.length).toBe(2);
+    expect(receiptLineItems[0].name).toBe('Tuition Fee');
+    expect(receiptLineItems[0].amount).toBe(100000);
+    expect(receiptLineItems[1].name).toBe('School Uniform (Optional)');
+    expect(receiptLineItems[1].amount).toBe(24000);
+  });
 });
 
 

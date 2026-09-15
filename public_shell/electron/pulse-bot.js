@@ -936,6 +936,19 @@ async function sendFeeStatus(msg, session, matchable) {
           AND  (term = 'All Terms' OR term = ?)
         ORDER BY item_name ASC
       `).all(studentClassNameWithArm, student.class_name, termConfig.term);
+
+      // Also append active assigned extras for this student
+      const extraItems = db.prepare(`
+        SELECT fe.item_name || ' (Extra)' AS item_name, fe.amount
+        FROM student_extra_selections ses
+        JOIN fee_extras fe ON fe.id = ses.extra_id
+        WHERE ses.student_id = ? AND ses.academic_session = ? AND ses.term = ? AND fe.is_active = 1
+        ORDER BY fe.item_name ASC
+      `).all(student.id, termConfig.academic_session, termConfig.term);
+
+      if (extraItems && extraItems.length > 0) {
+        breakdown.push(...extraItems);
+      }
     } catch (err) {
       console.error("[Pulse Bot] Failed to query breakdown for status:", err);
     }

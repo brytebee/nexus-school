@@ -240,13 +240,18 @@ const nexusAPI = {
     },
     // ── Phase 8: Optional Fees & Multi-Bank Routing ───────────────────
     feeExtras: {
-        getAll:         (params) => ipcRenderer.invoke('fee-extras:get-all',          params),
-        upsert:         (data)   => ipcRenderer.invoke('fee-extras:upsert',           data),
-        delete:         (data)   => ipcRenderer.invoke('fee-extras:delete',           data),
-        getSelections:  (params) => ipcRenderer.invoke('fee-extras:get-selections',   params),
-        toggleSelection:(data)   => ipcRenderer.invoke('fee-extras:toggle-selection', data),
-        getOrders:      (params) => ipcRenderer.invoke('fee-extras:get-orders',       params),
-        markFulfilled:  (data)   => ipcRenderer.invoke('fee-extras:mark-fulfilled',   data),
+        getAll:                  (params) => ipcRenderer.invoke('fee-extras:get-all',                   params),
+        upsert:                  (data)   => ipcRenderer.invoke('fee-extras:upsert',                    data),
+        delete:                  (data)   => ipcRenderer.invoke('fee-extras:delete',                    data),
+        getSelections:           (params) => ipcRenderer.invoke('fee-extras:get-selections',            params),
+        toggleSelection:         (data)   => ipcRenderer.invoke('fee-extras:toggle-selection',          data),
+        getOrders:               (params) => ipcRenderer.invoke('fee-extras:get-orders',                params),
+        markFulfilled:           (data)   => ipcRenderer.invoke('fee-extras:mark-fulfilled',            data),
+        getAvailableForClass:    (params) => ipcRenderer.invoke('fee-extras:get-available-for-class',     params),
+        getStudentExtrasSummary: (params) => ipcRenderer.invoke('fee-extras:get-student-extras-summary', params),
+        addStudentExtra:         (data)   => ipcRenderer.invoke('fee-extras:add-student-extra',          data),
+        removeStudentExtra:      (data)   => ipcRenderer.invoke('fee-extras:remove-student-extra',       data),
+        createMasterExtra:       (data)   => ipcRenderer.invoke('fee-extras:create-master-extra',        data),
     },
     // ── Message Queue (WhatsApp bulk send) ───────────────────────────
     queue: {

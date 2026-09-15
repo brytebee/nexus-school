@@ -161,7 +161,7 @@ export function FinancialHub() {
   const Swal       = (window as any).Swal;
 
   // ── Active tab ────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<'roster'|'structure'|'adjustments'|'receipts'|'online-payments'|'import'>('roster');
+  const [activeTab, setActiveTab] = useState<'roster'|'structure'|'adjustments'|'receipts'|'online-payments'|'import'|'optional-orders'|'student-extras'>('roster');
 
   // ── Session/Term ──────────────────────────────────────────────────────────
   const [sessions,        setSessions]        = useState<string[]>([]);
@@ -327,6 +327,21 @@ export function FinancialHub() {
   const [ordersFulfillFilter,  setOrdersFulfillFilter]  = useState<string>('all');
   const [ordersSearch,         setOrdersSearch]         = useState('');
   const [markingOrderId,       setMarkingOrderId]       = useState<number|null>(null);
+
+  // ── Student Extras Tab State ──────────────────────────────────────────────
+  const [seSearch,          setSeSearch]          = useState('');
+  const [seStudents,        setSeStudents]        = useState<any[]>([]);
+  const [seSelectedStudent, setSeSelectedStudent] = useState<any | null>(null);
+  const [seSummary,         setSeSummary]         = useState<any | null>(null);
+  const [seLoadingSummary,  setSeLoadingSummary]  = useState(false);
+  const [seAvailExtras,     setSeAvailExtras]     = useState<any[]>([]);
+  const [seSelectedExtraId, setSeSelectedExtraId] = useState<number | null>(null);
+  const [seAddingExtra,     setSeAddingExtra]     = useState(false);
+  const [seRemovingId,      setSeRemovingId]      = useState<number | null>(null);
+  const [seNewItem,         setSeNewItem]         = useState({ item_name: '', amount: '', class_name: 'All Classes', term: 'All Terms' });
+  const [seShowNewForm,     setSeShowNewForm]     = useState(false);
+  const [seCreatingItem,    setSeCreatingItem]    = useState(false);
+
 
   const handleFeeCSV = (type: 'structure' | 'payment' | 'adjustment') => {
     const api = (window as any).electronAPI;
@@ -1260,6 +1275,105 @@ export function FinancialHub() {
     }
   };
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // STUDENT EXTRAS TAB
+  // ═══════════════════════════════════════════════════════════════════════════
+  const seSearchStudents = async (q: string) => {
+    if (!q || q.length < 2) { setSeStudents([]); return; }
+    try {
+      const res = await window.electronAPI.fees.getRoster({
+        search: q,
+        academic_session: sessionRef.current,
+        term: termRef.current,
+        limit: 20,
+        offset: 0,
+      });
+      setSeStudents(res?.data || []);
+    } catch (_) {}
+  };
+
+  const seLoadSummary = async (student: any) => {
+    setSeSelectedStudent(student);
+    setSeSummary(null);
+    setSeLoadingSummary(true);
+    try {
+      const res = await window.electronAPI.feeExtras.getStudentExtrasSummary({
+        student_id: student.id,
+        academic_session: sessionRef.current,
+        term: termRef.current,
+      });
+      if (res?.ok) {
+        setSeSummary(res.data);
+        // Also load available extras for this student's class
+        const cls = student.class_name + (student.class_arm ? ' ' + student.class_arm : '');
+        const aRes = await window.electronAPI.feeExtras.getAvailableForClass({ class_name: cls, term: termRef.current });
+        if (aRes?.ok) setSeAvailExtras(aRes.data || []);
+      }
+    } catch (_) {} finally { setSeLoadingSummary(false); }
+  };
+
+  const seHandleAddExtra = async () => {
+    if (!seSelectedStudent || !seSelectedExtraId) return;
+    setSeAddingExtra(true);
+    try {
+      const res = await window.electronAPI.feeExtras.addStudentExtra({
+        student_id: seSelectedStudent.id,
+        extra_ids: [seSelectedExtraId],
+        academic_session: sessionRef.current,
+        term: termRef.current,
+      });
+      if (res?.ok) {
+        setSeSelectedExtraId(null);
+        await seLoadSummary(seSelectedStudent);
+        showIndicator('✅ Extra assigned and billing updated');
+      } else {
+        if (Swal) Swal.fire({ title: 'Error', text: res?.error, icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+      }
+    } catch (_) {} finally { setSeAddingExtra(false); }
+  };
+
+  const seHandleRemoveExtra = async (selectionId: number, extraId: number, force = false) => {
+    if (!seSelectedStudent) return;
+    setSeRemovingId(selectionId);
+    try {
+      const res = await window.electronAPI.feeExtras.removeStudentExtra({
+        student_id: seSelectedStudent.id,
+        extra_id: extraId,
+        academic_session: sessionRef.current,
+        term: termRef.current,
+        force,
+      });
+      if (res?.ok) {
+        await seLoadSummary(seSelectedStudent);
+        showIndicator('✅ Extra removed and billing updated');
+      } else if (res?.requiresConfirmation) {
+        const confirm = await Swal?.fire({ title: 'Confirm Removal', text: res.error, icon: 'warning', showCancelButton: true, confirmButtonText: 'Remove Anyway', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+        if (confirm?.isConfirmed) await seHandleRemoveExtra(selectionId, extraId, true);
+      } else {
+        if (Swal) Swal.fire({ title: 'Error', text: res?.error, icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+      }
+    } catch (_) {} finally { setSeRemovingId(null); }
+  };
+
+  const seHandleCreateMasterExtra = async () => {
+    if (!seNewItem.item_name || !seNewItem.amount) return;
+    setSeCreatingItem(true);
+    try {
+      const res = await window.electronAPI.feeExtras.createMasterExtra({
+        item_name: seNewItem.item_name,
+        amount: Number(seNewItem.amount),
+        class_name: seNewItem.class_name || 'All Classes',
+        term: seNewItem.term || 'All Terms',
+      });
+      if (res?.ok) {
+        setSeNewItem({ item_name: '', amount: '', class_name: 'All Classes', term: 'All Terms' });
+        setSeShowNewForm(false);
+        if (seSelectedStudent) await seLoadSummary(seSelectedStudent);
+        showIndicator('✅ New extra item created');
+      }
+    } catch (_) {} finally { setSeCreatingItem(false); }
+  };
+
   const handleMarkSettled = async (sessionId: number) => {
     if (!window.electronAPI?.fees?.markSessionSettled) return;
     setMarkingSessionId(sessionId);
@@ -2055,6 +2169,13 @@ export function FinancialHub() {
           📦 Optional Orders
         </button>
         <button
+          id="fees-tab-btn-student-extras"
+          className={`fees-tab-btn${activeTab==='student-extras'?' active':''}`}
+          onClick={() => setActiveTab('student-extras')}
+        >
+          🎒 Student Extras
+        </button>
+        <button
           id="fees-tab-btn-import"
           className={`fees-tab-btn${activeTab==='import'?' active':''}`}
           onClick={() => setActiveTab('import')}
@@ -2622,6 +2743,158 @@ export function FinancialHub() {
                 </table>
               )}
             </div>
+          </div>
+        )}
+
+        {/* ── Student Extras Panel ──────────────────────────────────────────── */}
+        {activeTab === 'student-extras' && (
+          <div id="fees-tab-student-extras" style={{ flex:1, overflowY:'auto', padding:'24px 28px', display:'flex', flexDirection:'column', gap:'20px' }}>
+            {/* Header */}
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px' }}>
+              <div>
+                <div style={{ fontWeight:700, fontSize:'16px' }}>🎒 Student Extras Management</div>
+                <div style={{ fontSize:'12px', color:'var(--text-dim)', marginTop:'2px' }}>
+                  Assign optional extras to a student and update their total billed amount.
+                </div>
+              </div>
+              <button
+                className="small-btn"
+                onClick={() => setSeShowNewForm(v => !v)}
+                style={{ fontSize:'12px', padding:'6px 12px' }}
+              >
+                {seShowNewForm ? '✕ Cancel' : '＋ New Extra Item'}
+              </button>
+            </div>
+
+            {/* New Extra Item Form */}
+            {seShowNewForm && (
+              <div style={{ background:'rgba(255,255,255,0.04)', border:'1px solid var(--glass-border)', borderRadius:'10px', padding:'16px 20px', display:'flex', flexDirection:'column', gap:'10px' }}>
+                <div style={{ fontWeight:600, fontSize:'13px' }}>Create New Catalog Item</div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
+                  <input placeholder="Item name" value={seNewItem.item_name} onChange={e => setSeNewItem(p => ({ ...p, item_name: e.target.value }))} style={{ padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }} />
+                  <input placeholder="Amount (₦)" type="number" value={seNewItem.amount} onChange={e => setSeNewItem(p => ({ ...p, amount: e.target.value }))} style={{ padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }} />
+                  <input placeholder="Class (or All Classes)" value={seNewItem.class_name} onChange={e => setSeNewItem(p => ({ ...p, class_name: e.target.value }))} style={{ padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }} />
+                  <input placeholder="Term (or All Terms)" value={seNewItem.term} onChange={e => setSeNewItem(p => ({ ...p, term: e.target.value }))} style={{ padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }} />
+                </div>
+                <button className="primary-btn" disabled={seCreatingItem || !seNewItem.item_name || !seNewItem.amount} onClick={seHandleCreateMasterExtra} style={{ alignSelf:'flex-end', padding:'8px 20px', fontSize:'12px' }}>
+                  {seCreatingItem ? 'Creating…' : 'Create Item'}
+                </button>
+              </div>
+            )}
+
+            {/* Student Search */}
+            <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
+              <input
+                placeholder="Search student by name…"
+                value={seSearch}
+                onChange={e => { setSeSearch(e.target.value); seSearchStudents(e.target.value); }}
+                style={{ flex:1, padding:'9px 12px', borderRadius:'8px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }}
+              />
+              {seSearch && seStudents.length > 0 && (
+                <div style={{ position:'relative' }}>
+                  <div style={{ position:'absolute', top:'4px', left:'-320px', background:'var(--bg-dark)', border:'1px solid var(--glass-border)', borderRadius:'8px', width:'320px', maxHeight:'200px', overflowY:'auto', zIndex:100, boxShadow:'0 8px 24px rgba(0,0,0,0.4)' }}>
+                    {seStudents.map((s: any) => (
+                      <div key={s.id} onClick={() => { setSeSearch(s.name); setSeStudents([]); seLoadSummary(s); }} style={{ padding:'10px 14px', cursor:'pointer', borderBottom:'1px solid rgba(255,255,255,0.04)', fontSize:'13px' }}>
+                        <span style={{ fontWeight:600 }}>{s.name}</span>
+                        <span style={{ color:'var(--text-dim)', marginLeft:'8px', fontSize:'11px' }}>{s.class_name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Summary & Extras Table */}
+            {seLoadingSummary && <div style={{ textAlign:'center', color:'var(--text-dim)', padding:'24px 0' }}>Loading…</div>}
+
+            {seSummary && !seLoadingSummary && (
+              <div style={{ display:'flex', flexDirection:'column', gap:'16px' }}>
+                {/* Summary Cards */}
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:'10px' }}>
+                  {[
+                    { label:'Base Tuition', value: seSummary.baseFee, color:'var(--text-dim)' },
+                    { label:'Extras Billed', value: seSummary.extrasFee, color:'#f59e0b' },
+                    { label:'Total Billed', value: seSummary.totalBilled, color:'var(--text-main)' },
+                    { label:'Total Paid', value: seSummary.totalPaid, color:'#22c55e' },
+                    { label:'Balance Due', value: seSummary.balance, color: seSummary.balance > 0 ? '#ef4444' : '#22c55e' },
+                  ].map(c => (
+                    <div key={c.label} style={{ background:'rgba(255,255,255,0.04)', border:'1px solid var(--glass-border)', borderRadius:'8px', padding:'12px 14px' }}>
+                      <div style={{ fontSize:'10px', color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.05em' }}>{c.label}</div>
+                      <div style={{ fontSize:'15px', fontWeight:700, color:c.color, marginTop:'4px' }}>₦{Number(c.value||0).toLocaleString()}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Assigned Extras Table */}
+                <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid var(--glass-border)', borderRadius:'10px', overflow:'hidden' }}>
+                  <div style={{ padding:'12px 16px', borderBottom:'1px solid var(--glass-border)', fontWeight:600, fontSize:'13px' }}>Assigned Extras</div>
+                  {seSummary.assignedExtras.length === 0 ? (
+                    <div style={{ padding:'20px', textAlign:'center', fontSize:'13px', color:'var(--text-dim)' }}>No extras assigned for this term.</div>
+                  ) : (
+                    <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'13px' }}>
+                      <thead>
+                        <tr style={{ background:'rgba(255,255,255,0.04)' }}>
+                          {['Item', 'Amount', 'Fulfilled', 'Remove'].map(h => (
+                            <th key={h} style={{ padding:'8px 14px', textAlign:'left', color:'var(--text-dim)', fontWeight:600, fontSize:'11px' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {seSummary.assignedExtras.map((e: any) => (
+                          <tr key={e.selection_id} style={{ borderTop:'1px solid rgba(255,255,255,0.04)' }}>
+                            <td style={{ padding:'10px 14px', fontWeight:500 }}>{e.item_name}</td>
+                            <td style={{ padding:'10px 14px', color:'#f59e0b', fontWeight:600 }}>₦{Number(e.amount).toLocaleString()}</td>
+                            <td style={{ padding:'10px 14px' }}>
+                              <span style={{ fontSize:'11px', padding:'2px 8px', borderRadius:'4px', background: e.is_fulfilled ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.12)', color: e.is_fulfilled ? '#22c55e' : '#f87171' }}>
+                                {e.is_fulfilled ? '✅ Done' : '⏳ Pending'}
+                              </span>
+                            </td>
+                            <td style={{ padding:'10px 14px' }}>
+                              <button
+                                className="small-btn"
+                                disabled={seRemovingId === e.selection_id}
+                                onClick={() => seHandleRemoveExtra(e.selection_id, e.extra_id)}
+                                style={{ fontSize:'11px', padding:'4px 10px', color:'#f87171', borderColor:'rgba(239,68,68,0.3)', background:'rgba(239,68,68,0.08)' }}
+                              >
+                                {seRemovingId === e.selection_id ? '…' : 'Remove'}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                {/* Assign Extra */}
+                <div style={{ display:'flex', gap:'10px', alignItems:'center', flexWrap:'wrap' }}>
+                  <select
+                    value={seSelectedExtraId ?? ''}
+                    onChange={e => setSeSelectedExtraId(Number(e.target.value) || null)}
+                    style={{ flex:1, minWidth:'200px', padding:'9px 12px', borderRadius:'8px', border:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.05)', color:'var(--text-main)', fontSize:'13px' }}
+                  >
+                    <option value="">— Select an extra to assign —</option>
+                    {seAvailExtras.filter((a: any) => !seSummary.assignedExtras.some((x: any) => x.extra_id === a.id)).map((a: any) => (
+                      <option key={a.id} value={a.id}>{a.item_name} — ₦{Number(a.amount).toLocaleString()}</option>
+                    ))}
+                  </select>
+                  <button
+                    className="primary-btn"
+                    disabled={seAddingExtra || !seSelectedExtraId}
+                    onClick={seHandleAddExtra}
+                    style={{ padding:'9px 18px', fontSize:'13px' }}
+                  >
+                    {seAddingExtra ? 'Adding…' : '＋ Assign'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!seSelectedStudent && !seLoadingSummary && (
+              <div style={{ textAlign:'center', padding:'48px 0', color:'var(--text-dim)', fontSize:'14px' }}>
+                Search for a student above to manage their optional extras.
+              </div>
+            )}
           </div>
         )}
 

@@ -74,6 +74,12 @@ export function Students() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [editStudentId, setEditStudentId] = useState<string | null>(null);
 
+  // Post-Registration Optional Extras Modal State
+  const [extrasModalStudent, setExtrasModalStudent] = useState<{ id: string; name: string; class_name: string } | null>(null);
+  const [availableExtras, setAvailableExtras] = useState<any[]>([]);
+  const [selectedExtraIds, setSelectedExtraIds] = useState<number[]>([]);
+  const [savingExtras, setSavingExtras] = useState(false);
+
   // Form Fields State
   const [name, setName] = useState('');
   const [className, setClassName] = useState('');
@@ -1234,10 +1240,21 @@ export function Students() {
 
         if (res.ok) {
           setFormLog({ text: `✅ Student registered! (${id})`, isError: false });
-          setTimeout(() => {
-            setIsDrawerOpen(false);
-            fetchStudents();
-          }, 1000);
+          // Close drawer immediately, then open optional extras assignment modal
+          setIsDrawerOpen(false);
+          fetchStudents();
+
+          // Fetch available extras for the student's class and open modal
+          try {
+            const extrasRes = await window.electronAPI.feeExtras.getAvailableForClass({
+              class_name: payload.class_name + (payload.class_arm ? ' ' + payload.class_arm : ''),
+            });
+            if (extrasRes.ok && Array.isArray(extrasRes.data) && extrasRes.data.length > 0) {
+              setAvailableExtras(extrasRes.data);
+              setSelectedExtraIds([]);
+              setExtrasModalStudent({ id, name: payload.name, class_name: payload.class_name + (payload.class_arm ? ' ' + payload.class_arm : '') });
+            }
+          } catch (_) {}
         } else {
           setFormLog({ text: `❌ ${res.error}`, isError: true });
         }
@@ -2517,6 +2534,120 @@ export function Students() {
                 style={{ flex: 1, justifyContent: 'center', padding: '12px' }}
               >
                 {editStudentId ? 'Save Changes' : 'Confirm Enrollment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Post-Registration Optional Extras Modal ──────────────────────────── */}
+      {extrasModalStudent && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 3000,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.80)', backdropFilter: 'blur(10px)',
+          }}
+        >
+          <div
+            style={{
+              background: 'var(--bg-dark)', border: '1px solid var(--glass-border)',
+              borderRadius: '12px', width: '480px', maxHeight: '80vh',
+              display: 'flex', flexDirection: 'column', overflow: 'hidden',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
+            }}
+          >
+            {/* Header */}
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--glass-border)' }}>
+              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--text-main)' }}>
+                🎒 Assign Optional Extras
+              </h3>
+              <p style={{ margin: '6px 0 0', fontSize: '12px', color: 'var(--text-dim)' }}>
+                {extrasModalStudent.name} · {extrasModalStudent.class_name}
+              </p>
+              <p style={{ margin: '4px 0 0', fontSize: '11px', color: 'var(--accent)' }}>
+                Items you select will be added to the student's total billed amount.
+              </p>
+            </div>
+
+            {/* Extras List */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {availableExtras.length === 0 ? (
+                <p style={{ fontSize: '13px', color: 'var(--text-dim)', textAlign: 'center', margin: '24px 0' }}>
+                  No optional extras available for this class.
+                </p>
+              ) : (
+                availableExtras.map((extra) => {
+                  const checked = selectedExtraIds.includes(extra.id);
+                  return (
+                    <div
+                      key={extra.id}
+                      onClick={() => {
+                        setSelectedExtraIds((prev) =>
+                          checked ? prev.filter((x) => x !== extra.id) : [...prev, extra.id]
+                        );
+                      }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '12px',
+                        padding: '12px 14px', borderRadius: '8px', cursor: 'pointer',
+                        background: checked ? 'rgba(var(--accent-rgb), 0.12)' : 'rgba(255,255,255,0.03)',
+                        border: `1px solid ${checked ? 'var(--accent)' : 'var(--glass-border)'}`,
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        readOnly
+                        style={{ width: '16px', height: '16px', accentColor: 'var(--accent)', cursor: 'pointer' }}
+                      />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-main)' }}>{extra.item_name}</div>
+                        {extra.bank_name && (
+                          <div style={{ fontSize: '11px', color: 'var(--text-dim)' }}>via {extra.bank_name}</div>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent)' }}>
+                        ₦{Number(extra.amount).toLocaleString()}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '16px 24px', borderTop: '1px solid var(--glass-border)', display: 'flex', gap: '10px' }}>
+              <button
+                className="secondary-btn"
+                style={{ flex: 1, justifyContent: 'center', padding: '12px' }}
+                onClick={() => { setExtrasModalStudent(null); setSelectedExtraIds([]); }}
+                disabled={savingExtras}
+              >
+                Skip / Close
+              </button>
+              <button
+                className="primary-btn"
+                style={{ flex: 1, justifyContent: 'center', padding: '12px', opacity: selectedExtraIds.length === 0 ? 0.5 : 1 }}
+                disabled={savingExtras || selectedExtraIds.length === 0}
+                onClick={async () => {
+                  if (selectedExtraIds.length === 0 || !extrasModalStudent) return;
+                  setSavingExtras(true);
+                  try {
+                    const r = await window.electronAPI.feeExtras.addStudentExtra({
+                      student_id: extrasModalStudent.id,
+                      extra_ids: selectedExtraIds,
+                    });
+                    if (r.ok) {
+                      setExtrasModalStudent(null);
+                      setSelectedExtraIds([]);
+                      fetchStudents();
+                    }
+                  } catch (_) {}
+                  setSavingExtras(false);
+                }}
+              >
+                {savingExtras ? 'Saving…' : `Save & Bill ${selectedExtraIds.length > 0 ? `(${selectedExtraIds.length})` : ''} Extra${selectedExtraIds.length !== 1 ? 's' : ''}`}
               </button>
             </div>
           </div>
