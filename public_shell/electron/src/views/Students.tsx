@@ -1379,7 +1379,11 @@ export function Students() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {s.photo ? (
             <img
-              src={s.photo.startsWith('data:') ? s.photo : `data:image/jpeg;base64,${s.photo}`}
+              src={
+                s.photo.startsWith('data:') || s.photo.startsWith('http://') || s.photo.startsWith('https://')
+                  ? s.photo
+                  : `data:image/jpeg;base64,${s.photo}`
+              }
               alt={s.name}
               style={{
                 width: '32px',
@@ -1410,22 +1414,35 @@ export function Students() {
               {s.name ? s.name.charAt(0).toUpperCase() : '?'}
             </div>
           )}
-          <span style={{ fontWeight: 'bold', color: s.is_active === 0 ? 'var(--text-dim)' : 'var(--text-main)', fontSize: '13px', opacity: s.is_active === 0 ? 0.6 : 1 }}>{s.name}</span>
-          {s.is_active === 0 && (
-            <span style={{
-              background: 'rgba(251,191,36,0.12)',
-              color: '#fbbf24',
-              border: '1px solid rgba(251,191,36,0.3)',
-              fontSize: '10px',
-              borderRadius: '4px',
-              padding: '1px 5px',
-              fontWeight: 700,
-              marginLeft: '6px',
-              flexShrink: 0,
-            }}>
-              DEACTIVATED
-            </span>
-          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontWeight: 'bold', color: s.is_active === 0 ? 'var(--text-dim)' : 'var(--text-main)', fontSize: '13px', opacity: s.is_active === 0 ? 0.6 : 1 }}>{s.name}</span>
+              {s.is_active === 0 && (
+                <span style={{
+                  background: 'rgba(251,191,36,0.12)',
+                  color: '#fbbf24',
+                  border: '1px solid rgba(251,191,36,0.3)',
+                  fontSize: '10px',
+                  borderRadius: '4px',
+                  padding: '1px 5px',
+                  fontWeight: 700,
+                  marginLeft: '6px',
+                  flexShrink: 0,
+                }}>
+                  DEACTIVATED
+                </span>
+              )}
+            </div>
+            {(s.parent_phone || s.parent_email) ? (
+              <div style={{ fontSize: '11px', color: 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {s.parent_phone && <span>📱 {s.parent_phone}</span>}
+                {s.parent_phone && s.parent_email && <span style={{ opacity: 0.5 }}>·</span>}
+                {s.parent_email && <span>✉️ {s.parent_email}</span>}
+              </div>
+            ) : (
+              <span style={{ fontSize: '10px', color: 'var(--text-dim)', opacity: 0.5, fontStyle: 'italic' }}>No contact info</span>
+            )}
+          </div>
         </div>
       ),
 
@@ -2181,7 +2198,11 @@ export function Students() {
                 <div style={{ display: 'flex', gap: '16px', alignItems: 'center', background: 'rgba(255, 255, 255, 0.02)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--glass-border)' }}>
                   {photo ? (
                     <img
-                      src={photo.startsWith('data:') ? photo : `data:image/jpeg;base64,${photo}`}
+                      src={
+                        photo.startsWith('data:') || photo.startsWith('http://') || photo.startsWith('https://')
+                          ? photo
+                          : `data:image/jpeg;base64,${photo}`
+                      }
                       alt="Student Preview"
                       style={{
                         width: '64px',
@@ -2801,7 +2822,13 @@ export function Students() {
               {/* Student Photo */}
               {detailStudent.photo ? (
                 <img
-                  src={detailStudent.photo.startsWith('data:') ? detailStudent.photo : `data:image/jpeg;base64,${detailStudent.photo}`}
+                  src={
+                    detailStudent.photo.startsWith('data:') ||
+                    detailStudent.photo.startsWith('http://') ||
+                    detailStudent.photo.startsWith('https://')
+                      ? detailStudent.photo
+                      : `data:image/jpeg;base64,${detailStudent.photo}`
+                  }
                   alt={detailStudent.name}
                   style={{
                     width: '64px',

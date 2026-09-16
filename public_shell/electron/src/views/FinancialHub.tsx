@@ -226,7 +226,7 @@ export function FinancialHub() {
   const [rejectingR,   setRejectingR]   = useState(false);
 
   // ── Record Payment (Diamond) ──────────────────────────────────────────────
-  const [payStudent,   setPayStudent]   = useState<{ id: string; name: string }|null>(null);
+  const [payStudent,   setPayStudent]   = useState<{ id: string; name: string; total_billed?: number; total_paid?: number; balance?: number }|null>(null);
   const [payAmount,    setPayAmount]    = useState('');
   const [payMethod,    setPayMethod]    = useState('cash');
   const [payRef,       setPayRef]       = useState('');
@@ -234,6 +234,10 @@ export function FinancialHub() {
   const [recordingPay, setRecordingPay] = useState(false);
   const [botLive,      setBotLive]      = useState(false);   // WhatsApp bot ready at modal open?
   const [sendReceipt,  setSendReceipt]  = useState(false);   // admin's choice — send receipt?
+  const [holdAdvanceExcess, setHoldAdvanceExcess] = useState(true);
+  const [advanceTargetTerm, setAdvanceTargetTerm] = useState('Second Term');
+  const [advanceBalance,    setAdvanceBalance]    = useState<{ total_available: number; advances: any[] }>({ total_available: 0, advances: [] });
+  const [applyingAdvance,   setApplyingAdvance]   = useState(false);
 
 
   // ── Ledger (Diamond) ──────────────────────────────────────────────────────
@@ -1868,17 +1872,18 @@ export function FinancialHub() {
   // ═══════════════════════════════════════════════════════════════════════════
   // DIAMOND: Record Payment
   // ═══════════════════════════════════════════════════════════════════════════
-  // Check bot status whenever the record-payment modal opens
+  // Check bot status whenever the record-payment or receipt modal opens
   useEffect(() => {
-    if (!payStudent) return;
-    window.electronAPI.pulse.status().then((s: { status: string }) => {
+    if (!payStudent && !receiptTarget) return;
+    window.electronAPI?.pulse?.status?.().then((s: { status: string }) => {
       const alive = s?.status === 'ready';
       setBotLive(alive);
-      setSendReceipt(alive); // pre-check if bot is live, admin can uncheck
-    }).catch(() => { setBotLive(false); setSendReceipt(false); });
-  }, [payStudent]);
+      if (payStudent) setSendReceipt(alive); // pre-check if bot is live, admin can uncheck
+    }).catch(() => { setBotLive(false); if (payStudent) setSendReceipt(false); });
+  }, [payStudent, receiptTarget]);
 
   const handlePaymentSubmit = async () => {
+    if (!payStudent) return;
     const payValidation = validatePaymentInput(payStudent, payAmount, payMethod, payRef);
     if (!payValidation.ok) {
       showIndicator(`❌ ${payValidation.error}`);
@@ -1886,25 +1891,51 @@ export function FinancialHub() {
     }
     setRecordingPay(true);
     try {
+      const payNum = Number(payAmount);
+      const currentBal = Math.max(0, (payStudent.balance ?? 0));
+      const hasExcess = currentBal > 0 && payNum > currentBal && holdAdvanceExcess;
+      const termPaymentAmt = hasExcess ? currentBal : payNum;
+      const excessAmt = hasExcess ? payNum - currentBal : 0;
+
       const res = await window.electronAPI.fees.recordPayment({
-        student_id:payStudent.id, academic_session:sessionRef.current, term:termRef.current,
-        amount:Number(payAmount), payment_method:payMethod, reference_number:payRef.trim(), note:payNote.trim(),
+        student_id: payStudent.id, academic_session: sessionRef.current, term: termRef.current,
+        amount: termPaymentAmt, payment_method: payMethod, reference_number: payRef.trim(), note: payNote.trim(),
         send_receipt: sendReceipt,
       });
+
       if (res?.ok) {
+        if (excessAmt > 0) {
+          try {
+            await window.electronAPI.fees.recordAdvancePayment({
+              student_id: payStudent.id,
+              amount: excessAmt,
+              payment_method: payMethod,
+              reference_number: payRef.trim() ? `${payRef.trim()}-ADV` : `ADV-${Date.now()}`,
+              source_session: sessionRef.current,
+              source_term: termRef.current,
+              target_term: advanceTargetTerm,
+              note: `Advance deposit from overpayment (${payNote.trim() || 'Credit'})`
+            });
+          } catch (advErr: any) {
+            console.warn('[FinancialHub] Failed to save advance excess:', advErr);
+          }
+        }
+
         setPayStudent(null);
-        showIndicator('✅ Payment recorded');
+        showIndicator('✅ Payment recorded' + (excessAmt > 0 ? ' & advance held' : ''));
         if (Swal) {
           Swal.fire({
             title: 'Payment Recorded',
-            text: `Successfully recorded payment of ₦${fmt(Number(payAmount))} for ${payStudent.name}.`,
+            text: excessAmt > 0
+              ? `Recorded ₦${fmt(termPaymentAmt)} for ${termRef.current} and safely held ₦${fmt(excessAmt)} as Advance Credit for ${advanceTargetTerm}.`
+              : `Successfully recorded payment of ₦${fmt(payNum)} for ${payStudent.name}.`,
             icon: 'success',
             background: '#0b0f19',
             color: '#fff',
             confirmButtonColor: '#00E5FF'
           });
         }
-        doLoadRoster(sessionRef.current,termRef.current,rosterPage,searchQuery,statusFilter);
+        doLoadRoster(sessionRef.current, termRef.current, rosterPage, searchQuery, statusFilter);
       } else {
         showIndicator('❌ Payment record failed');
         if (Swal) {
@@ -1918,7 +1949,7 @@ export function FinancialHub() {
           });
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       showIndicator('❌ Payment recording error');
       if (Swal) {
         Swal.fire({
@@ -1939,10 +1970,57 @@ export function FinancialHub() {
   const openLedger = async (sid: string, name: string) => {
     setLedgerStudent({ id:sid, name });
     setLedgerTx([]); setLoadingLedger(true);
+    setAdvanceBalance({ total_available: 0, advances: [] });
     try {
-      const res = await window.electronAPI.fees.getTransactions({ student_id:sid, academic_session:sessionRef.current, term:termRef.current });
+      const [res, advRes] = await Promise.all([
+        window.electronAPI.fees.getTransactions({ student_id:sid, academic_session:sessionRef.current, term:termRef.current }),
+        window.electronAPI.fees.getAdvanceBalance({ student_id:sid }).catch(() => null)
+      ]);
       if (res?.ok) setLedgerTx(res.data||[]);
+      if (advRes?.ok) setAdvanceBalance({ total_available: advRes.total_available || 0, advances: advRes.advances || [] });
     } finally { setLoadingLedger(false); }
+  };
+
+  const handleApplyAdvance = async () => {
+    if (!ledgerStudent) return;
+    setApplyingAdvance(true);
+    try {
+      const res = await window.electronAPI.fees.applyAdvanceCredit({
+        student_id: ledgerStudent.id,
+        academic_session: sessionRef.current,
+        term: termRef.current
+      });
+      if (res?.ok) {
+        showIndicator(`✅ Applied ₦${fmt(res.offset_applied)} advance credit`);
+        if (Swal) {
+          Swal.fire({
+            title: 'Advance Credit Applied',
+            text: `Successfully applied ₦${fmt(res.offset_applied)} to ${termRef.current} fees. Remaining balance: ₦${fmt(res.new_balance)}.`,
+            icon: 'success',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#00E5FF'
+          });
+        }
+        openLedger(ledgerStudent.id, ledgerStudent.name);
+        doLoadRoster(sessionRef.current, termRef.current, rosterPage, searchQuery, statusFilter);
+      } else {
+        if (Swal) {
+          Swal.fire({
+            title: 'Offset Failed',
+            text: res?.error || 'Could not apply advance credit.',
+            icon: 'info',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#00E5FF'
+          });
+        }
+      }
+    } catch (err: any) {
+      showIndicator('❌ ' + (err.message || 'Error applying advance credit'));
+    } finally {
+      setApplyingAdvance(false);
+    }
   };
 
   const handleRefundSubmit = async () => {
@@ -2370,7 +2448,7 @@ export function FinancialHub() {
                           {/* Diamond actions */}
                           {isDiamond && (
                             <td style={{ textAlign:'center', whiteSpace:'nowrap' }} onClick={e => e.stopPropagation()}>
-                              <button onClick={() => { setPayStudent({id:row.student_id,name:row.name}); setPayAmount(''); setPayRef(''); setPayNote(''); setPayMethod('cash'); }} className="small-btn btn-record-payment" style={{ fontSize:'11px', padding:'4px 10px', marginRight:'4px', background:'rgba(0,229,255,0.08)', color:'var(--accent)', borderColor:'rgba(0,229,255,0.3)' }}>+Pay</button>
+                              <button onClick={() => { setPayStudent({id:row.student_id, name:row.name, total_billed: row.total_billed, total_paid: row.total_paid, balance: bal}); setPayAmount(''); setPayRef(''); setPayNote(''); setPayMethod('cash'); setHoldAdvanceExcess(true); }} className="small-btn btn-record-payment" style={{ fontSize:'11px', padding:'4px 10px', marginRight:'4px', background:'rgba(0,229,255,0.08)', color:'var(--accent)', borderColor:'rgba(0,229,255,0.3)' }}>+Pay</button>
                               <button onClick={() => openLedger(row.student_id, row.name)} className="small-btn btn-view-ledger" style={{ fontSize:'11px', padding:'4px 10px', background:'rgba(255,255,255,0.05)', color:'var(--text-dim)', borderColor:'var(--glass-border)' }}>Ledger</button>
                             </td>
                           )}
@@ -4002,6 +4080,47 @@ export function FinancialHub() {
             <input type="hidden" id="payment-student-id" value={payStudent.id} />
             <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
               <div><Lbl>Amount Paid (₦)</Lbl><input type="number" id="payment-amount" placeholder="e.g. 50000" min={1} value={payAmount} onChange={e => setPayAmount(e.target.value)} className="modern-input" style={{ width:'100%' }} /></div>
+
+              {/* Overpayment / Advance Credit Detector */}
+              {(() => {
+                const currentBal = Math.max(0, (payStudent?.balance ?? 0));
+                const payNum = Number(payAmount) || 0;
+                const excess = currentBal > 0 && payNum > currentBal ? payNum - currentBal : 0;
+                if (excess <= 0) return null;
+                return (
+                  <div style={{ background: 'rgba(74, 222, 128, 0.08)', border: '1px solid rgba(74, 222, 128, 0.25)', borderRadius: '8px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ fontSize: '11px', color: '#4ade80', fontWeight: 600 }}>
+                      💡 ₦{fmt(excess)} exceeds current term balance (₦{fmt(currentBal)})
+                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-main)', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={holdAdvanceExcess}
+                        onChange={e => setHoldAdvanceExcess(e.target.checked)}
+                        style={{ accentColor: '#22c55e', width: '14px', height: '14px' }}
+                      />
+                      <span>Hold ₦{fmt(excess)} as Advance Credit for future terms</span>
+                    </label>
+                    {holdAdvanceExcess && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '2px' }}>
+                        <label style={{ fontSize: '10px', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Target Term / Period</label>
+                        <select
+                          value={advanceTargetTerm}
+                          onChange={e => setAdvanceTargetTerm(e.target.value)}
+                          className="modern-input"
+                          style={{ fontSize: '11px', padding: '4px 8px' }}
+                        >
+                          <option value="Second Term">Second Term</option>
+                          <option value="Third Term">Third Term</option>
+                          <option value="Next Academic Session">Next Academic Session</option>
+                          <option value="General Holding">General Advance Holding</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               <div><Lbl>Payment Method</Lbl><select id="payment-method" value={payMethod} onChange={e => setPayMethod(e.target.value)} className="modern-input" style={{ width:'100%' }}><option value="cash">💵 Cash</option><option value="transfer">🏦 Bank Transfer</option><option value="pos">💳 POS</option><option value="bank_teller">🧾 Bank Teller</option></select></div>
               <div><Lbl>Reference / Teller No. <span style={{ color:'var(--text-dim)', fontWeight:'normal', textTransform:'none' }}>(optional)</span></Lbl><input type="text" id="payment-reference" placeholder="e.g. TXN12345678" value={payRef} onChange={e => setPayRef(e.target.value)} className="modern-input" style={{ width:'100%' }} /></div>
               <div><Lbl>Note <span style={{ color:'var(--text-dim)', fontWeight:'normal', textTransform:'none' }}>(optional)</span></Lbl><input type="text" id="payment-note" placeholder="e.g. Part payment" value={payNote} onChange={e => setPayNote(e.target.value)} className="modern-input" style={{ width:'100%' }} /></div>
@@ -4048,6 +4167,49 @@ export function FinancialHub() {
               </div>
               <button id="btn-ledger-close" onClick={() => setLedgerStudent(null)} style={{ background:'none', border:'none', color:'var(--text-dim)', fontSize:'20px', cursor:'pointer' }}>✕</button>
             </div>
+
+            {/* Advance Credit Holding Available Banner */}
+            {advanceBalance.total_available > 0 && (
+              <div style={{
+                background: 'rgba(74, 222, 128, 0.08)',
+                border: '1px solid rgba(74, 222, 128, 0.25)',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                marginBottom: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexShrink: 0
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '18px' }}>💳</span>
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: '#4ade80' }}>
+                      ₦{fmt(advanceBalance.total_available)} Advance Credit Available
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-dim)' }}>
+                      {advanceBalance.advances.length} advance deposit(s) on file for future term fees
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={handleApplyAdvance}
+                  disabled={applyingAdvance}
+                  className="primary-btn"
+                  style={{
+                    padding: '6px 14px',
+                    fontSize: '11px',
+                    background: '#16a34a',
+                    borderColor: '#22c55e',
+                    color: '#fff',
+                    borderRadius: '6px'
+                  }}
+                >
+                  {applyingAdvance ? 'Applying...' : 'Apply to Current Fees'}
+                </button>
+              </div>
+            )}
+
             <div style={{ overflowY:'auto', flex:1 }}>
               <table className="data-table" id="ledger-table">
                 <thead>
@@ -4200,16 +4362,24 @@ export function FinancialHub() {
               >
                 🧾 Local Print (80mm Thermal)
               </button>
-              {receiptTarget.isOnline && (
-                <button 
-                  onClick={handleSendReceiptPdf} 
-                  disabled={sendingReceipt}
-                  className="primary-btn"
-                  style={{ width: '100%', padding: '12px', justifyContent: 'center', background: 'rgba(0,229,255,0.1)', borderColor: 'rgba(0,229,255,0.3)', color: '#00e5ff' }}
-                >
-                  💬 {sendingReceipt ? 'Sending PDF...' : 'Send Branded PDF to Parent (WhatsApp)'}
-                </button>
-              )}
+              <button 
+                onClick={handleSendReceiptPdf} 
+                disabled={sendingReceipt || !botLive}
+                className="primary-btn"
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  justifyContent: 'center',
+                  background: botLive ? 'rgba(0,229,255,0.1)' : 'rgba(255,255,255,0.03)',
+                  borderColor: botLive ? 'rgba(0,229,255,0.3)' : 'var(--glass-border)',
+                  color: botLive ? '#00e5ff' : 'var(--text-dim)',
+                  cursor: botLive ? 'pointer' : 'not-allowed',
+                  opacity: botLive ? 1 : 0.6
+                }}
+                title={botLive ? 'Dispatch PDF receipt directly to parent WhatsApp' : 'WhatsApp bot is offline — connect Nexus Pulse first'}
+              >
+                💬 {sendingReceipt ? 'Sending PDF...' : botLive ? 'Send Branded PDF to Parent (WhatsApp)' : 'WhatsApp Bot Offline'}
+              </button>
             </div>
 
             <div style={{ marginTop:'20px', display:'flex', justifyContent:'center' }}>

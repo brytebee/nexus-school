@@ -1435,16 +1435,40 @@ ipcMain.handle('fees:send-receipt-pdf', async (event, { studentId, txRef }) => {
         return { ok: false, error: 'WhatsApp bot is offline — connect Nexus Pulse first.' };
     }
     const db = database.getDb();
+
+    // Path A: Paystack online payment — has a fee_payment_sessions row
     const session = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(txRef);
-    if (!session) {
-        return { ok: false, error: 'Payment session not found for this reference.' };
-    }
-    if (!session.parent_phone) {
-        return { ok: false, error: 'No parent phone number recorded for this payment session.' };
+    if (session) {
+        if (!session.parent_phone) {
+            return { ok: false, error: 'No parent phone number recorded for this payment session.' };
+        }
+        try {
+            const success = await sendBrandedReceiptHelper(db, txRef, session, studentId);
+            return { ok: success };
+        } catch (err) {
+            return { ok: false, error: err.message };
+        }
     }
 
+    // Path B: Manual payment (cash / transfer / POS / bank teller) — no payment session
+    const tx = db.prepare("SELECT * FROM fee_transactions WHERE reference_number = ? AND student_id = ?").get(txRef, studentId);
+    if (!tx) {
+        return { ok: false, error: 'Transaction record not found. It may have been deleted or the reference is incorrect.' };
+    }
+    const sRow = db.prepare("SELECT parent_phone FROM students WHERE id = ?").get(studentId);
+    if (!sRow?.parent_phone) {
+        return { ok: false, error: 'No parent WhatsApp number on record for this student. Please update the student profile first.' };
+    }
     try {
-        const success = await sendBrandedReceiptHelper(db, txRef, session, studentId);
+        const success = await sendManualReceiptHelper(db, {
+            student_id:       tx.student_id,
+            academic_session: tx.academic_session,
+            term:             tx.term,
+            amount:           tx.amount,
+            payment_method:   tx.payment_method,
+            reference_number: tx.reference_number,
+            note:             tx.note,
+        });
         return { ok: success };
     } catch (err) {
         return { ok: false, error: err.message };
@@ -3710,7 +3734,7 @@ ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = ""
 
       selectSql = `
         SELECT s.id, s.name, s.class_name, COALESCE(s.class_arm, '') as class_arm, 
-               s.reg_no, s.gender, s.dob, s.photo, s.parent_email, s.parent_phone, s.parent_name, s.enrollment_status,
+               s.reg_no, s.gender, s.dob, s.photo, s.parent_email, s.parent_phone, s.parent_phone_2, s.parent_name, s.enrollment_status,
                CASE 
                  WHEN f.id IS NOT NULL AND (COALESCE(f.total_billed, 0) - COALESCE(f.total_paid, 0)) <= 0 THEN 'cleared'
                  WHEN f.id IS NOT NULL AND (COALESCE(f.total_billed, 0) - COALESCE(f.total_paid, 0)) > 0 THEN 'owing'
@@ -3729,7 +3753,7 @@ ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = ""
     } else {
       selectSql = `
         SELECT s.id, s.name, s.class_name, COALESCE(s.class_arm, '') as class_arm, 
-               s.reg_no, s.gender, s.dob, s.photo, s.parent_email, s.parent_phone, s.parent_name, s.enrollment_status,
+               s.reg_no, s.gender, s.dob, s.photo, s.parent_email, s.parent_phone, s.parent_phone_2, s.parent_name, s.enrollment_status,
                CASE 
                  WHEN s.fee_status = 'cleared' THEN 'cleared'
                  ELSE 'owing'
@@ -4697,6 +4721,237 @@ ipcMain.handle("fees:get-transactions", (event, { student_id, academic_session, 
   } catch (err) {
     console.error("[Fees] get-transactions error:", err);
     return { ok: false, error: err.message, data: [] };
+  }
+});
+
+/**
+ * ensureAdvanceFeesSchema — Ensures student_fee_advances exists and is indexed.
+ */
+function ensureAdvanceFeesSchema(db) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS student_fee_advances (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id       TEXT NOT NULL,
+        amount           REAL NOT NULL,
+        amount_used      REAL NOT NULL DEFAULT 0,
+        payment_method   TEXT NOT NULL DEFAULT 'cash',
+        reference_number TEXT NOT NULL,
+        source_session   TEXT NOT NULL,
+        source_term      TEXT NOT NULL,
+        target_session   TEXT DEFAULT NULL,
+        target_term      TEXT DEFAULT NULL,
+        recorded_by      TEXT,
+        note             TEXT,
+        status           TEXT NOT NULL DEFAULT 'available',
+        created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_advances_student ON student_fee_advances(student_id, status);
+    `);
+  } catch (err) {
+    console.warn('[Database] ensureAdvanceFeesSchema error:', err.message);
+  }
+}
+
+/** fees:record-advance-payment — Record advance credit for future terms */
+ipcMain.handle("fees:record-advance-payment", async (event, { student_id, amount, payment_method, reference_number, source_session, source_term, target_session, target_term, note }) => {
+  try {
+    const db = database.getDb();
+    const amt = Number(amount);
+    if (!amt || amt <= 0) return { ok: false, error: "Invalid advance payment amount." };
+    if (!student_id) return { ok: false, error: "Student ID is required." };
+
+    const ref = reference_number?.trim() || `ADV-${Date.now()}`;
+    const sRow = db.prepare("SELECT name, class_name, parent_phone FROM students WHERE id = ?").get(student_id);
+    if (!sRow) return { ok: false, error: "Student not found." };
+
+    let advId;
+    db.transaction(() => {
+      const stmt = db.prepare(`
+        INSERT INTO student_fee_advances (
+          student_id, amount, amount_used, payment_method, reference_number,
+          source_session, source_term, target_session, target_term, recorded_by, note, status
+        ) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, 'available')
+      `);
+      const result = stmt.run(
+        student_id, amt, payment_method || 'cash', ref,
+        source_session || '', source_term || '',
+        target_session || null, target_term || null,
+        currentAdminSession?.username || 'Admin', note || ''
+      );
+      advId = result.lastInsertRowid;
+    })();
+
+    // Non-blocking WhatsApp receipt/alert dispatch if bot is ready
+    const botStatus = pulseBot?.getPulseStatus?.();
+    if (botStatus?.status === "ready" && sRow.parent_phone) {
+      setImmediate(async () => {
+        try {
+          const targetStr = target_term ? `${target_term}${target_session ? ' (' + target_session + ')' : ''}` : 'Future Terms Holding';
+          const msg = `🧾 *Advance Fee Payment Receipt*\n\n` +
+            `Dear Parent, an advance payment of *₦${amt.toLocaleString("en-NG")}* has been credited for *${sRow.name}*.\n\n` +
+            `*Target:* ${targetStr}\n` +
+            `*Reference:* ${ref}\n` +
+            `*Status:* Held safely as Advance Credit\n\n` +
+            `_This credit will automatically be applied toward future term bills._ 🎓`;
+          await pulseBot.sendRawMessage(sRow.parent_phone, msg);
+        } catch (msgErr) {
+          console.error("[Advance Receipt] Failed to send WhatsApp advance receipt:", msgErr.message);
+        }
+      });
+    }
+
+    return { ok: true, id: advId };
+  } catch (err) {
+    console.error("[Fees] record-advance-payment error:", err);
+    return { ok: false, error: err.message };
+  }
+});
+
+/** fees:get-advance-balance — Query total available advance credit and breakdown */
+ipcMain.handle("fees:get-advance-balance", (event, { student_id }) => {
+  try {
+    const db = database.getDb();
+    if (!student_id) return { ok: false, error: "student_id is required." };
+    const advances = db.prepare(`
+      SELECT id, amount, amount_used, (amount - amount_used) AS available,
+             payment_method, reference_number, source_session, source_term,
+             target_session, target_term, note, status, created_at
+      FROM student_fee_advances
+      WHERE student_id = ? AND status != 'exhausted' AND (amount - amount_used) > 0
+      ORDER BY created_at ASC
+    `).all(student_id);
+
+    const total_available = advances.reduce((sum, a) => sum + (a.available || 0), 0);
+    return { ok: true, total_available, advances };
+  } catch (err) {
+    console.error("[Fees] get-advance-balance error:", err);
+    return { ok: false, error: err.message, total_available: 0, advances: [] };
+  }
+});
+
+/** fees:apply-advance-credit — Apply available advance credit to current student fee balance */
+ipcMain.handle("fees:apply-advance-credit", async (event, { student_id, academic_session, term, advance_id }) => {
+  try {
+    const db = database.getDb();
+    if (!student_id || !academic_session || !term) {
+      return { ok: false, error: "student_id, academic_session, and term are required." };
+    }
+
+    const feeRow = db.prepare(`
+      SELECT total_billed, total_paid FROM student_fees
+      WHERE student_id = ? AND academic_session = ? AND term = ?
+    `).get(student_id, academic_session, term);
+
+    if (!feeRow) {
+      return { ok: false, error: "No fee record found for this student in this term." };
+    }
+
+    const balanceDue = (feeRow.total_billed || 0) - (feeRow.total_paid || 0);
+    if (balanceDue <= 0) {
+      return { ok: false, error: "Student has no outstanding balance to offset." };
+    }
+
+    let query = `
+      SELECT id, amount, amount_used, (amount - amount_used) AS available, reference_number, note
+      FROM student_fee_advances
+      WHERE student_id = ? AND status != 'exhausted' AND (amount - amount_used) > 0
+    `;
+    const params = [student_id];
+    if (advance_id) {
+      query += ` AND id = ?`;
+      params.push(advance_id);
+    }
+    query += ` ORDER BY created_at ASC`;
+    const availableAdvances = db.prepare(query).all(...params);
+
+    if (!availableAdvances || availableAdvances.length === 0) {
+      return { ok: false, error: "No available advance credit found for this student." };
+    }
+
+    let remainingToOffset = balanceDue;
+    let totalOffsetApplied = 0;
+
+    db.transaction(() => {
+      for (const adv of availableAdvances) {
+        if (remainingToOffset <= 0) break;
+        const available = adv.available;
+        const offsetForThis = Math.min(remainingToOffset, available);
+        if (offsetForThis <= 0) continue;
+
+        const offsetRef = `ADV-OFFSET-${Date.now()}-${adv.id}`;
+        const offsetNote = `Advance offset from deposit ${adv.reference_number}${adv.note ? ' (' + adv.note + ')' : ''}`;
+
+        // 1. Insert fee_transactions record
+        db.prepare(`
+          INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, recorded_by, note)
+          VALUES (?, ?, ?, ?, 'advance_offset', ?, ?, ?)
+        `).run(student_id, academic_session, term, offsetForThis, offsetRef, currentAdminSession?.username || 'Admin', offsetNote);
+
+        // 2. Update advance row
+        const newUsed = adv.amount_used + offsetForThis;
+        const newStatus = newUsed >= adv.amount ? 'exhausted' : 'partially_used';
+        db.prepare(`
+          UPDATE student_fee_advances
+          SET amount_used = ?, status = ?
+          WHERE id = ?
+        `).run(newUsed, newStatus, adv.id);
+
+        totalOffsetApplied += offsetForThis;
+        remainingToOffset -= offsetForThis;
+      }
+
+      // 3. Recompute student_fees.total_paid
+      const { sumPaid } = db.prepare(`
+        SELECT COALESCE(SUM(amount), 0) AS sumPaid FROM fee_transactions
+        WHERE student_id = ? AND academic_session = ? AND term = ?
+      `).get(student_id, academic_session, term);
+
+      const newStatus = feeCalculator.computeFeeStatus(feeRow.total_billed, sumPaid);
+      db.prepare(`
+        UPDATE student_fees
+        SET total_paid = ?, status = ?, updated_at = datetime('now')
+        WHERE student_id = ? AND academic_session = ? AND term = ?
+      `).run(sumPaid, newStatus, student_id, academic_session, term);
+    })();
+
+    const finalFee = db.prepare(`
+      SELECT total_billed, total_paid FROM student_fees
+      WHERE student_id = ? AND academic_session = ? AND term = ?
+    `).get(student_id, academic_session, term);
+    const newBalance = Math.max(0, (finalFee?.total_billed || 0) - (finalFee?.total_paid || 0));
+
+    // WhatsApp notification
+    const sRow = db.prepare("SELECT name, parent_phone FROM students WHERE id = ?").get(student_id);
+    const botStatus = pulseBot?.getPulseStatus?.();
+    if (botStatus?.status === "ready" && sRow?.parent_phone && totalOffsetApplied > 0) {
+      setImmediate(async () => {
+        try {
+          const msg = `💳 *Advance Fee Credit Applied*\n\n` +
+            `Dear Parent, an advance credit of *₦${totalOffsetApplied.toLocaleString("en-NG")}* has been applied to *${sRow.name}*'s fees for *${term}* (${academic_session}).\n\n` +
+            `*New Balance:* ₦${newBalance.toLocaleString("en-NG")}\n\n` +
+            `_Nexus School OS_ 🎓`;
+          await pulseBot.sendRawMessage(sRow.parent_phone, msg);
+        } catch (_) {}
+      });
+    }
+
+    const remainingRow = db.prepare(`
+      SELECT COALESCE(SUM(amount - amount_used), 0) AS rem
+      FROM student_fee_advances
+      WHERE student_id = ? AND status != 'exhausted'
+    `).get(student_id);
+
+    return {
+      ok: true,
+      offset_applied: totalOffsetApplied,
+      new_balance: newBalance,
+      remaining_advance: remainingRow ? remainingRow.rem : 0,
+    };
+  } catch (err) {
+    console.error("[Fees] apply-advance-credit error:", err);
+    return { ok: false, error: err.message };
   }
 });
 
@@ -7099,6 +7354,7 @@ function createWindow() {
     database.init(dbPath, betterSqlite3);
     ensureIlsSchema(database.getDb());
     reconcileExistingStudentExtras(database.getDb());
+    ensureAdvanceFeesSchema(database.getDb());
     
     // FINAL DEMO CHECK: Print the number of records found
     try {

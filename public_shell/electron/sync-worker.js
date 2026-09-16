@@ -535,6 +535,22 @@ async function pullOnlineAdmissions() {
 
   for (const cand of candidates) {
     try {
+      // Offline-first photo ingestion: Convert remote HTTP/Cloudinary URLs into base64 data URIs
+      // so student photos render offline and never depend on external network connectivity
+      let photoDataUri = cand.photoUrl || null;
+      if (cand.photoUrl && (cand.photoUrl.startsWith('http://') || cand.photoUrl.startsWith('https://'))) {
+        try {
+          const imgRes = await fetch(cand.photoUrl);
+          if (imgRes.ok) {
+            const arrayBuffer = await imgRes.arrayBuffer();
+            const mimeType = imgRes.headers.get('content-type') || 'image/jpeg';
+            photoDataUri = `data:${mimeType};base64,${Buffer.from(arrayBuffer).toString('base64')}`;
+          }
+        } catch (imgErr) {
+          console.warn(`[Sync Worker] Could not fetch remote photo for ${cand.studentName}:`, imgErr.message);
+        }
+      }
+
       db.transaction(() => {
         // Resolve student ID
         let existing = null;
@@ -579,7 +595,7 @@ async function pullOnlineAdmissions() {
           admission_no: cand.admissionNo || "",
           gender: cand.gender || "",
           dob: cand.dob || "",
-          photo: cand.photoUrl || null,
+          photo: photoDataUri,
           parent_email: cand.parentEmail || "",
           parent_phone: cand.parentPhone || "",
           parent_phone_2: cand.parentPhone2 || null,
