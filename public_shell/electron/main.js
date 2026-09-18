@@ -42,6 +42,7 @@ const feeCalculator = require("./src/lib/fee-calculator");
 const paystackService = require("./paystack-service.js");
 const { toDisplayTier } = require("./src/tierDisplay.js");
 const receiptGenerator = require('./receipt-generator.js');
+const { generateTablePdf } = require('./table-pdf-generator.js');
 const resultDispatcher = (() => {
   try {
     return require("@nexus/engine/src/result-dispatcher");
@@ -1443,8 +1444,9 @@ ipcMain.handle('fees:send-receipt-pdf', async (event, { studentId, txRef }) => {
             return { ok: false, error: 'No parent phone number recorded for this payment session.' };
         }
         try {
-            const success = await sendBrandedReceiptHelper(db, txRef, session, studentId);
-            return { ok: success };
+            const result = await sendBrandedReceiptHelper(db, txRef, session, studentId);
+            if (typeof result === 'object') return result;
+            return { ok: Boolean(result) };
         } catch (err) {
             return { ok: false, error: err.message };
         }
@@ -1460,7 +1462,7 @@ ipcMain.handle('fees:send-receipt-pdf', async (event, { studentId, txRef }) => {
         return { ok: false, error: 'No parent WhatsApp number on record for this student. Please update the student profile first.' };
     }
     try {
-        const success = await sendManualReceiptHelper(db, {
+        const result = await sendManualReceiptHelper(db, {
             student_id:       tx.student_id,
             academic_session: tx.academic_session,
             term:             tx.term,
@@ -1469,7 +1471,8 @@ ipcMain.handle('fees:send-receipt-pdf', async (event, { studentId, txRef }) => {
             reference_number: tx.reference_number,
             note:             tx.note,
         });
-        return { ok: success };
+        if (typeof result === 'object') return result;
+        return { ok: Boolean(result) };
     } catch (err) {
         return { ok: false, error: err.message };
     }
@@ -2232,8 +2235,13 @@ async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null
     receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
     receiptMsg += `_Your official school records have been updated automatically._\n_Powered by Nexus Pulse_ 🎓`;
     
-    await pulseBot.sendRawMessage(session.parent_phone, receiptMsg);
-    return false;
+    try {
+      await pulseBot.sendRawMessage(session.parent_phone, receiptMsg);
+      return { ok: true, fallback: true };
+    } catch (fallbackErr) {
+      console.error(`[Payment Processor] Fallback text failed:`, fallbackErr.message);
+      return { ok: false, error: err.message };
+    }
   }
 }
 
@@ -2299,7 +2307,7 @@ async function sendManualReceiptHelper(db, { student_id, academic_session, term,
 
   try {
     const pdfBuffer = await receiptGenerator.generateReceiptPdf(receiptData);
-    const caption = `🧾 *${schoolName} Receipt*\n${sRow.name} — ₦${amount.toLocaleString("en-NG")} (${methodLabel})\nRef: ${ref}\nThank you!`;
+    const caption = `🧾 *${schoolName} Receipt*\n${sRow.name} — NGN ${amount.toLocaleString("en-NG")} (${methodLabel})\nRef: ${ref}\nThank you!`;
     await pulseBot.sendReceiptPdf(sRow.parent_phone, `Receipt-${ref}.pdf`, pdfBuffer, caption);
 
     // Cloudinary upload for parent receipt portal
@@ -2327,7 +2335,7 @@ async function sendManualReceiptHelper(db, { student_id, academic_session, term,
     } catch (_) {}
 
     console.log(`[Manual Receipt] PDF sent to ${sRow.parent_phone} for ${sRow.name}`);
-    return true;
+    return { ok: true };
   } catch (err) {
     console.error(`[Manual Receipt] PDF failed, falling back to text:`, err.message);
     const fallback =
@@ -2341,8 +2349,14 @@ async function sendManualReceiptHelper(db, { student_id, academic_session, term,
       `💳 Outstanding Balance: ₦${balance.toLocaleString("en-NG")}\n` +
       `━━━━━━━━━━━━━━━━━━━━\n` +
       `_Your payment has been recorded. Thank you!_\n_Powered by Nexus Pulse_ 🎓`;
-    await pulseBot.sendRawMessage(sRow.parent_phone, fallback);
-    return false;
+    try {
+      await pulseBot.sendRawMessage(sRow.parent_phone, fallback);
+      console.log(`[Manual Receipt] Fallback text receipt sent to ${sRow.parent_phone}`);
+      return { ok: true, fallback: true };
+    } catch (fallbackErr) {
+      console.error(`[Manual Receipt] Fallback text also failed:`, fallbackErr.message);
+      return { ok: false, error: err.message };
+    }
   }
 }
 
@@ -2784,6 +2798,15 @@ ipcMain.handle("classes:getFullList", () => {
   } catch (err) {
     console.error("Failed to fetch classes:getFullList:", err);
     return [];
+  }
+});
+
+ipcMain.handle("classes:syncToWebsite", async () => {
+  try {
+    return await syncWorker.pushClassesToWebsite();
+  } catch (err) {
+    console.error("Failed to sync classes to website:", err);
+    return { ok: false, error: err.message };
   }
 });
 
@@ -4439,10 +4462,19 @@ function isStudentFeeGated(db, studentId, session, termOrNull) {
  * fees:get-roster — students LEFT-JOINed with student_fees for a given term.
  * balance = total_billed - total_paid is computed dynamically; never stored.
  */
-ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, offset = 0, search = "", filter = "all" }) => {
+ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, offset = 0, search = "", filter = "all", class_name = "" }) => {
   try {
     const db = database.getDb();
     const query = search ? `%${search}%` : "%";
+
+    // Class filter: match class_name alone or class_name + class_arm combined
+    const classNorm = class_name ? class_name.replace(/\s+/g, '').toUpperCase() : null;
+    const classClause = classNorm
+      ? `AND (UPPER(replace(s.class_name, ' ', '')) = ? OR UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', '')) = ?)`
+      : '';
+
+    const countParams = [academic_session, term, query, query, filter, filter];
+    if (classNorm) countParams.push(classNorm, classNorm);
 
     const total = db.prepare(`
       SELECT COUNT(*) as total
@@ -4454,13 +4486,19 @@ ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, 
       WHERE (s.name LIKE ? OR s.id LIKE ?)
         AND COALESCE(s.is_active, 1) = 1
         AND (? = 'all' OR COALESCE(f.status, 'unpaid') = ?)
-    `).get(academic_session, term, query, query, filter, filter).total;
+        ${classClause}
+    `).get(...countParams).total;
+
+    const rowParams = [academic_session, term, query, query, filter, filter];
+    if (classNorm) rowParams.push(classNorm, classNorm);
+    rowParams.push(limit, offset);
 
     const rows = db.prepare(`
       SELECT
         s.id              AS student_id,
         s.name,
         s.class_name,
+        s.class_arm,
         s.parent_phone,
         COALESCE(f.total_billed, 0)                              AS total_billed,
         COALESCE(f.total_paid,   0)                              AS total_paid,
@@ -4476,9 +4514,10 @@ ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, 
       WHERE (s.name LIKE ? OR s.id LIKE ?)
         AND COALESCE(s.is_active, 1) = 1
         AND (? = 'all' OR COALESCE(f.status, 'unpaid') = ?)
+        ${classClause}
       ORDER BY s.class_name ASC, s.name ASC
       LIMIT ? OFFSET ?
-    `).all(academic_session, term, query, query, filter, filter, limit, offset);
+    `).all(...rowParams);
     
     return { ok: true, data: rows, total };
   } catch (err) {
@@ -4490,10 +4529,18 @@ ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, 
 /**
  * fees:get-summary — aggregates outstanding totals and counts across matching students.
  */
-ipcMain.handle("fees:get-summary", (event, { academic_session, term, search = "" }) => {
+ipcMain.handle("fees:get-summary", (event, { academic_session, term, search = "", class_name = "" }) => {
   try {
     const db = database.getDb();
     const query = search ? `%${search}%` : "%";
+
+    const classNorm = class_name ? class_name.replace(/\s+/g, '').toUpperCase() : null;
+    const classClause = classNorm
+      ? `AND (UPPER(replace(s.class_name, ' ', '')) = ? OR UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', '')) = ?)`
+      : '';
+
+    const sumParams = [academic_session, term, query, query];
+    if (classNorm) sumParams.push(classNorm, classNorm);
 
     const summary = db.prepare(`
       SELECT
@@ -4507,8 +4554,9 @@ ipcMain.handle("fees:get-summary", (event, { academic_session, term, search = ""
         ON  f.student_id       = s.id
         AND f.academic_session = ?
         AND f.term             = ?
-      WHERE s.name LIKE ? OR s.id LIKE ?
-    `).get(academic_session, term, query, query);
+      WHERE (s.name LIKE ? OR s.id LIKE ?)
+        ${classClause}
+    `).get(...sumParams);
 
     return { ok: true, data: summary || { outstanding: 0, cleared: 0, partial: 0, unpaid: 0, total: 0 } };
   } catch (err) {
@@ -5199,26 +5247,39 @@ ipcMain.handle('fees:mark-session-settled', (event, { sessionId, note }) => {
 /**
  * fees:export-roster-csv — Full unpaginated roster as a CSV string.
  */
-ipcMain.handle('fees:export-roster-csv', (event, { academic_session, term, filter = 'all' }) => {
+ipcMain.handle('fees:export-roster-csv', (event, { academic_session, term, filter = 'all', class_name = '', search = '' }) => {
   try {
     const db = database.getDb();
-    const whereParts = [
-      "COALESCE(s.is_active, 1) = 1",
-      "sf.academic_session = ?",
-      "sf.term = ?"
-    ];
-    const params = [academic_session, term];
 
-    if (filter === 'unpaid')  { whereParts.push("COALESCE(sf.status,'Unpaid') = 'Unpaid'"); }
-    if (filter === 'partial') { whereParts.push("sf.status = 'Partial'"); }
-    if (filter === 'cleared') { whereParts.push("sf.status = 'Cleared'"); }
+    const classNorm = class_name ? class_name.replace(/\s+/g, '').toUpperCase() : null;
+
+    const whereParts = ["COALESCE(s.is_active, 1) = 1"];
+    const params = [];  // academic_session & term are passed explicitly in .all()
+
+    // Status filter — use LEFT JOIN so we also include students with no fee record
+    if (filter === 'unpaid')  { whereParts.push("COALESCE(sf.status,'unpaid') = 'unpaid'"); }
+    if (filter === 'partial') { whereParts.push("COALESCE(sf.status,'unpaid') = 'partial'"); }
+    if (filter === 'cleared') { whereParts.push("COALESCE(sf.status,'unpaid') = 'cleared'"); }
+
+    // Search filter
+    if (search) {
+      whereParts.push("(s.name LIKE ? OR s.id LIKE ?)");
+      const sq = `%${search}%`;
+      params.push(sq, sq);
+    }
+
+    // Class filter
+    if (classNorm) {
+      whereParts.push("(UPPER(replace(s.class_name, ' ', '')) = ? OR UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', '')) = ?)");
+      params.push(classNorm, classNorm);
+    }
 
     const rows = db.prepare(`
       SELECT s.id, s.name, s.class_name, s.class_arm, s.reg_no,
              COALESCE(sf.total_billed, 0)  AS total_billed,
              COALESCE(sf.total_paid, 0)    AS total_paid,
              COALESCE(sf.total_billed, 0) - COALESCE(sf.total_paid, 0) AS outstanding,
-             COALESCE(sf.status, 'Unpaid') AS status,
+             COALESCE(sf.status, 'unpaid') AS status,
              sf.next_due_date
       FROM students s
       LEFT JOIN student_fees sf
@@ -5236,9 +5297,56 @@ ipcMain.handle('fees:export-roster-csv', (event, { academic_session, term, filte
         r.total_billed, r.total_paid, r.outstanding, r.status, r.next_due_date || ''
       ].join(','));
     }
-    return { ok: true, csv: lines.join('\n'), count: rows.length };
+    // Return both csv string and raw rows (rows used by export:table-pdf in the renderer)
+    return { ok: true, csv: lines.join('\n'), rows, rowCount: rows.length };
   } catch (err) {
     console.error('[Fees] export-roster-csv error:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+/**
+ * export:table-pdf — Global branded table PDF exporter.
+ * Accepts a column schema and row data from any view in the renderer.
+ * Fetches school branding from app_settings and generates a PDFKit PDF.
+ * Returns: { ok: true, pdfBase64: string } | { ok: false, error: string }
+ */
+ipcMain.handle('export:table-pdf', async (event, { title, subtitle, columns, rows, summaryTotals, orientation }) => {
+  try {
+    const db = database.getDb();
+
+    // Fetch school branding (same pattern as sendBrandedReceiptHelper)
+    let schoolName = identityPacket?.name || 'Nexus School OS';
+    let schoolAddress = identityPacket?.address || '';
+    let schoolPhone = identityPacket?.phone || '';
+    let schoolLogoB64 = identityPacket?.logoBase64 || '';
+    try {
+      const nameRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_name'").get();
+      if (nameRow?.value) schoolName = nameRow.value;
+      const addrRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_address'").get();
+      if (addrRow?.value) schoolAddress = addrRow.value;
+      const phoneRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_phone'").get();
+      if (phoneRow?.value) schoolPhone = phoneRow.value;
+      const logoRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_logo_b64'").get();
+      if (logoRow?.value) schoolLogoB64 = logoRow.value;
+    } catch (_) {}
+
+    const pdfBuffer = await generateTablePdf({
+      title,
+      subtitle,
+      columns,
+      rows,
+      summaryTotals,
+      orientation,
+      schoolName,
+      schoolAddress,
+      schoolPhone,
+      schoolLogoB64,
+    });
+
+    return { ok: true, pdfBase64: pdfBuffer.toString('base64') };
+  } catch (err) {
+    console.error('[Export] table-pdf error:', err);
     return { ok: false, error: err.message };
   }
 });

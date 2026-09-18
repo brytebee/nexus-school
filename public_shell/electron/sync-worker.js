@@ -577,6 +577,7 @@ async function pullOnlineAdmissions() {
           ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             class_name = excluded.class_name,
+            class_arm = COALESCE(NULLIF(excluded.class_arm, ''), students.class_arm),
             admission_no = COALESCE(NULLIF(excluded.admission_no, ''), students.admission_no),
             gender = COALESCE(NULLIF(excluded.gender, ''), students.gender),
             dob = COALESCE(NULLIF(excluded.dob, ''), students.dob),
@@ -589,8 +590,8 @@ async function pullOnlineAdmissions() {
         `).run({
           id: studentId,
           name: cand.studentName,
-          class_name: cand.classApplied,
-          class_arm: "",
+          class_name: cand.className || cand.classApplied,
+          class_arm: cand.classArm || "",
           reg_no: cand.admissionNo || "",
           admission_no: cand.admissionNo || "",
           gender: cand.gender || "",
@@ -696,6 +697,110 @@ async function pullOnlineAdmissions() {
 }
 
 /**
+ * 2c. Outbound Push Classes to Website: Pushes authoritative class hierarchy and arms
+ * to the connected school website so public applicants choose from exact school classes.
+ */
+async function pushClassesToWebsite() {
+  const db = database.getDb();
+  const schoolId = getSchoolId(db);
+  if (!schoolId) return { ok: false, reason: "no_school_id" };
+
+  let websiteUrl = "";
+  try {
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'school_website_url'").get();
+    if (row && row.value) websiteUrl = row.value.trim().replace(/\/+$/, "");
+  } catch (_) {}
+
+  if (!websiteUrl && process.env.SCHOOL_WEBSITE_URL) {
+    websiteUrl = process.env.SCHOOL_WEBSITE_URL.trim().replace(/\/+$/, "");
+  }
+
+  if (!websiteUrl) {
+    return { ok: true, skipped: true, reason: "no_school_website_url" };
+  }
+
+  let syncToken = "";
+  try {
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'school_website_sync_token'").get();
+    if (row && row.value) syncToken = row.value.trim();
+  } catch (_) {}
+
+  if (!syncToken) {
+    syncToken = process.env.SCHOOL_WEBSITE_SYNC_TOKEN || getSyncToken(db);
+  }
+
+  try {
+    const setting = db.prepare("SELECT value FROM system_settings WHERE key = 'class_hierarchy'").get();
+    const hierarchy = setting ? JSON.parse(setting.value) : [];
+    const configs = db.prepare("SELECT hierarchy_class, max_subjects, pass_mark_override FROM class_configs").all();
+    const arms = db.prepare("SELECT hierarchy_class, arm FROM class_arms ORDER BY arm ASC").all();
+
+    const armsMap = {};
+    arms.forEach(r => {
+      if (!armsMap[r.hierarchy_class]) armsMap[r.hierarchy_class] = [];
+      armsMap[r.hierarchy_class].push(r.arm);
+    });
+
+    const configsMap = {};
+    configs.forEach(c => {
+      configsMap[c.hierarchy_class] = c;
+    });
+
+    const hierarchyPayload = hierarchy.filter(cls => configsMap[cls]).map(cls => {
+      const c = configsMap[cls];
+      return {
+        hierarchyClass: cls,
+        maxSubjects: c.max_subjects || 0,
+        arms: armsMap[cls] || []
+      };
+    });
+
+    const flatList = [];
+    hierarchyPayload.forEach(item => {
+      if (item.arms && item.arms.length > 0) {
+        item.arms.forEach(arm => {
+          const fullName = arm.startsWith(`${item.hierarchyClass} `) ? arm : `${item.hierarchyClass} ${arm}`;
+          flatList.push(fullName);
+        });
+      } else {
+        flatList.push(item.hierarchyClass);
+      }
+    });
+
+    if (hierarchyPayload.length === 0 && flatList.length === 0) {
+      return { ok: true, skipped: true, reason: "no_classes_configured" };
+    }
+
+    const res = await fetch(`${websiteUrl}/api/sync/classes`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-sync-token": syncToken,
+      },
+      body: JSON.stringify({
+        schoolCloudId: schoolId,
+        hierarchy: hierarchyPayload,
+        fullList: flatList,
+        source: "desktop_sync",
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.warn(`[Sync Worker] Classes push returned HTTP ${res.status}: ${errText}`);
+      return { ok: false, error: `HTTP ${res.status}` };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    console.log(`[Sync Worker] Successfully pushed ${flatList.length} classes to school website.`);
+    return { ok: true, count: flatList.length };
+  } catch (err) {
+    console.warn("[Sync Worker] Failed to push classes to website:", err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
  * 3. Full 2-Way Sync Loop Cycle
  */
 async function performSyncCycle() {
@@ -711,6 +816,13 @@ async function performSyncCycle() {
       admissionsRes = await pullOnlineAdmissions();
     } catch (admErr) {
       console.warn("[Sync Worker] Online admissions pull error (non-fatal):", admErr.message);
+    }
+
+    // 2b. Outbound class roster sync: push current classes and arms to website
+    try {
+      await pushClassesToWebsite();
+    } catch (clsErr) {
+      console.warn("[Sync Worker] Classes push error (non-fatal):", clsErr.message);
     }
 
     // 3. Outbound push third: push fresh local state (including newly reconciled balances)
@@ -1117,6 +1229,7 @@ module.exports = {
   pushSchoolDelta,
   pullPendingSyncEvents,
   pullOnlineAdmissions,
+  pushClassesToWebsite,
   performSyncCycle,
   startSyncSchedule,
   stopSyncSchedule,
