@@ -111,6 +111,25 @@ function getSyncToken(db) {
   return "nexus_desktop_client";
 }
 
+function getSchoolWebsiteUrl(db) {
+  let websiteUrl = "";
+  try {
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'school_website_url'").get();
+    if (row && row.value) websiteUrl = row.value.trim().replace(/\/+$/, "");
+  } catch (_) {}
+
+  if (!websiteUrl && process.env.SCHOOL_WEBSITE_URL) {
+    websiteUrl = process.env.SCHOOL_WEBSITE_URL.trim().replace(/\/+$/, "");
+  }
+
+  // Development fallback: when electron runs on 3000, school-website runs on 3005
+  if (!websiteUrl) {
+    websiteUrl = "http://localhost:3005";
+  }
+
+  return websiteUrl;
+}
+
 /**
  * 1. Outbound Push: Gathers parent-facing data chunks from local SQLite
  * and pushes to nexus-api /api/sync/push
@@ -466,18 +485,7 @@ async function pullOnlineAdmissions() {
   const schoolId = getSchoolId(db);
   if (!schoolId) return { ok: false, reason: "no_school_id" };
 
-  // Read school_website_url from app_settings (or environment override)
-  let websiteUrl = "";
-  try {
-    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'school_website_url'").get();
-    if (row && row.value) websiteUrl = row.value.trim().replace(/\/+$/, "");
-  } catch (_) {}
-
-  if (!websiteUrl && process.env.SCHOOL_WEBSITE_URL) {
-    websiteUrl = process.env.SCHOOL_WEBSITE_URL.trim().replace(/\/+$/, "");
-  }
-
-  // If no school website is configured, skip gracefully
+  const websiteUrl = getSchoolWebsiteUrl(db);
   if (!websiteUrl) {
     return { ok: true, skipped: true, reason: "no_school_website_url" };
   }
@@ -705,16 +713,7 @@ async function pushClassesToWebsite() {
   const schoolId = getSchoolId(db);
   if (!schoolId) return { ok: false, reason: "no_school_id" };
 
-  let websiteUrl = "";
-  try {
-    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'school_website_url'").get();
-    if (row && row.value) websiteUrl = row.value.trim().replace(/\/+$/, "");
-  } catch (_) {}
-
-  if (!websiteUrl && process.env.SCHOOL_WEBSITE_URL) {
-    websiteUrl = process.env.SCHOOL_WEBSITE_URL.trim().replace(/\/+$/, "");
-  }
-
+  const websiteUrl = getSchoolWebsiteUrl(db);
   if (!websiteUrl) {
     return { ok: true, skipped: true, reason: "no_school_website_url" };
   }
