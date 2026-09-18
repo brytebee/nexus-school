@@ -30,6 +30,9 @@ export default function Classes() {
   // CSV Import state
   const [csvStatus, setCsvStatus] = useState<string | null>(null);
 
+  // Web Portal Sync state
+  const [isSyncingWeb, setIsSyncingWeb] = useState(false);
+
   // Setup Guard & CSV Review Modal States
   const [setupGuardOpen, setSetupGuardOpen] = useState(false);
   const [setupGuardStep, setSetupGuardStep] = useState('');
@@ -77,6 +80,7 @@ export default function Classes() {
         } else {
           setCsvStatus(`✅ Classes CSV Processed: ${res.count} records loaded`);
           refresh();
+          (window as any).electronAPI?.classes?.syncToWebsite?.().catch(() => {});
           if (Swal) {
             Swal.fire({
               title: 'Success!',
@@ -92,6 +96,93 @@ export default function Classes() {
       });
     }
   }, [refresh]);
+
+  const handleSyncClassesToWebsite = async () => {
+    const api = (window as any).electronAPI;
+    const Swal = (window as any).Swal;
+    if (!api?.classes?.syncToWebsite) {
+      if (Swal) {
+        Swal.fire({
+          toast: true,
+          position: 'top-end',
+          icon: 'warning',
+          title: 'Sync bridge not initialized',
+          showConfirmButton: false,
+          timer: 3000,
+          background: '#0d1235',
+          color: '#fff',
+        });
+      }
+      return;
+    }
+
+    setIsSyncingWeb(true);
+    try {
+      const res = await api.classes.syncToWebsite();
+      if (res?.ok) {
+        if (res.skipped) {
+          const reasonMsg = res.reason === 'no_school_website_url'
+            ? 'No School Website URL bound in settings'
+            : res.reason === 'no_classes_configured'
+            ? 'No classes found to sync'
+            : 'Class sync skipped';
+          if (Swal) {
+            Swal.fire({
+              toast: true,
+              position: 'top-end',
+              icon: 'info',
+              title: reasonMsg,
+              showConfirmButton: false,
+              timer: 3500,
+              background: '#0d1235',
+              color: '#fff',
+            });
+          }
+        } else {
+          if (Swal) {
+            Swal.fire({
+              toast: true,
+              position: 'top-end',
+              icon: 'success',
+              title: `✓ Synced ${res.count || 0} classes & arms to web portal`,
+              showConfirmButton: false,
+              timer: 3500,
+              background: '#0d1235',
+              color: '#fff',
+            });
+          }
+        }
+      } else {
+        if (Swal) {
+          Swal.fire({
+            toast: true,
+            position: 'top-end',
+            icon: 'error',
+            title: res?.error || 'Failed to sync classes to website',
+            showConfirmButton: false,
+            timer: 4000,
+            background: '#0d1235',
+            color: '#fff',
+          });
+        }
+      }
+    } catch (err: any) {
+      if (Swal) {
+        Swal.fire({
+          toast: true,
+          position: 'top-end',
+          icon: 'error',
+          title: err?.message || 'Sync error occurred',
+          showConfirmButton: false,
+          timer: 3000,
+          background: '#0d1235',
+          color: '#fff',
+        });
+      }
+    } finally {
+      setIsSyncingWeb(false);
+    }
+  };
 
   const handleClassesCSVUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -281,6 +372,7 @@ export default function Classes() {
         // Refresh class list & global settings
         refresh();
         fetchGlobalSettings();
+        (window as any).electronAPI?.classes?.syncToWebsite?.().catch(() => {});
       } else {
         if (Swal) {
           Swal.fire({
@@ -482,6 +574,7 @@ export default function Classes() {
         return;
       }
       refresh();
+      api?.classes?.syncToWebsite?.().catch(() => {});
     } catch (err: any) {
       if (Swal) Swal.fire({ toast: true, position: 'top-end', icon: 'error', title: 'Failed saving config', showConfirmButton: false, timer: 3000, background: '#0d1235', color: '#fff' });
     }
@@ -501,6 +594,7 @@ export default function Classes() {
       }
       if (res && res.success) {
         refresh();
+        api?.classes?.syncToWebsite?.().catch(() => {});
       } else if (Swal) {
         Swal.fire({ toast: true, position: 'top-end', icon: 'error', title: res?.error || 'Failed adding arm', showConfirmButton: false, timer: 3000, background: '#0d1235', color: '#fff' });
       }
@@ -531,6 +625,7 @@ export default function Classes() {
       const res = await api.classes.removeArm({ hierarchyClass, arm });
       if (res && res.success) {
         refresh();
+        api?.classes?.syncToWebsite?.().catch(() => {});
       } else {
         Swal.fire({ toast: true, position: 'top-end', icon: 'error', title: res?.error || 'Failed removing arm', showConfirmButton: false, timer: 3000, background: '#0d1235', color: '#fff' });
       }
@@ -604,6 +699,7 @@ export default function Classes() {
       await (window as any).electronAPI.cbt.saveSystemSetting({ key: 'class_hierarchy', value: classHierarchy });
       if (Swal) Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Class hierarchy updated', showConfirmButton: false, timer: 2800, background: '#0d1235', color: '#fff' });
       refresh();
+      (window as any).electronAPI?.classes?.syncToWebsite?.().catch(() => {});
     } catch (err: any) {
       if (Swal) Swal.fire({ toast: true, position: 'top-end', icon: 'error', title: 'Failed saving hierarchy', showConfirmButton: false, timer: 3000, background: '#0d1235', color: '#fff' });
     }
@@ -749,6 +845,34 @@ export default function Classes() {
             onChange={handleClassesCSVUpload}
             style={{ display: 'none' }}
           />
+          <button
+            onClick={handleSyncClassesToWebsite}
+            disabled={isSyncingWeb}
+            title="Push current class hierarchy and arms directly to the school web portal"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: isSyncingWeb ? 'rgba(0, 229, 255, 0.25)' : 'rgba(0, 229, 255, 0.12)',
+              border: '1px solid rgba(0, 229, 255, 0.4)',
+              borderRadius: '6px',
+              color: '#00e5ff',
+              fontSize: '12px',
+              fontWeight: 600,
+              padding: '6px 14px',
+              cursor: isSyncingWeb ? 'not-allowed' : 'pointer',
+              opacity: isSyncingWeb ? 0.7 : 1,
+              transition: 'all 0.2s',
+            }}
+            onMouseOver={(e) => {
+              if (!isSyncingWeb) e.currentTarget.style.background = 'rgba(0, 229, 255, 0.22)';
+            }}
+            onMouseOut={(e) => {
+              if (!isSyncingWeb) e.currentTarget.style.background = 'rgba(0, 229, 255, 0.12)';
+            }}
+          >
+            {isSyncingWeb ? '⏳ Syncing...' : '🌐 Sync to Website'}
+          </button>
           {configs.length > 0 && (
             <button
               onClick={handleClearClasses}

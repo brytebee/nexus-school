@@ -127,6 +127,7 @@ const nexusAPI = {
         saveArms: (data) => ipcRenderer.invoke('classes:saveArms', data),
         addArm: (data) => ipcRenderer.invoke('classes:addArm', data),
         removeArm: (data) => ipcRenderer.invoke('classes:removeArm', data),
+        syncToWebsite: () => ipcRenderer.invoke('classes:syncToWebsite'),
         create: (data) => ipcRenderer.invoke('create-class', data),
     },
     insertScore: (data) => ipcRenderer.invoke('insert-score', data),
@@ -192,6 +193,10 @@ const nexusAPI = {
         markSessionSettled:    (data)   => ipcRenderer.invoke('fees:mark-session-settled',   data),
         exportRosterCsv:       (params) => ipcRenderer.invoke('fees:export-roster-csv',      params),
         dryRunRecoveryPulse:   (params) => ipcRenderer.invoke('fees:dry-run-recovery-pulse', params),
+    },
+    // Global export utilities (available to all views)
+    export: {
+        tablePdf: (params) => ipcRenderer.invoke('export:table-pdf', params),
     },
     results: {
         dispatch:          (params) => ipcRenderer.invoke('results:dispatch', params),
