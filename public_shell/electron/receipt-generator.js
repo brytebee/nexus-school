@@ -88,9 +88,9 @@ function generateReceiptPdf(data) {
       let tableY = 230;
       doc.rect(40, tableY, 515, 20).fill('#f8fafc');
       doc.fillColor('#475569').fontSize(9).font('Helvetica-Bold')
-         .text('Student / Item Allocation', 50, tableY + 6)
-         .text('Allocated (₦)', 320, tableY + 6, { width: 100, align: 'right' })
-         .text('Remaining Balance (₦)', 440, tableY + 6, { width: 110, align: 'right' });
+        .text('Student / Item Allocation', 50, tableY + 6)
+        .text('Allocated (NGN)', 320, tableY + 6, { width: 100, align: 'right' })
+        .text('Remaining Balance (NGN)', 440, tableY + 6, { width: 110, align: 'right' });
 
       // Allocation Table Rows
       let currentY = tableY + 20;
@@ -116,7 +116,7 @@ function generateReceiptPdf(data) {
       currentY += 10;
       doc.rect(320, currentY, 235, 45).fill('#0f172a');
       doc.fillColor('#ffffff').fontSize(11).font('Helvetica-Bold')
-         .text('TOTAL PAID (₦)', 335, currentY + 16)
+         .text('TOTAL PAID (NGN)', 335, currentY + 16)
          .fontSize(13).text(Number(data.amountPaid || 0).toLocaleString('en-NG'), 415, currentY + 15, { width: 130, align: 'right' });
 
       // ── Phase 8: Fee Breakdown Section ──────────────────────────────────────
@@ -128,7 +128,7 @@ function generateReceiptPdf(data) {
         doc.rect(40, currentY, 515, 20).fill('#1e293b');
         doc.fillColor('#94a3b8').fontSize(9).font('Helvetica-Bold')
            .text('FEE BREAKDOWN', 50, currentY + 6)
-           .text('Amount (₦)', 440, currentY + 6, { width: 110, align: 'right' });
+           .text('Amount (NGN)', 440, currentY + 6, { width: 110, align: 'right' });
 
         currentY += 20;
 

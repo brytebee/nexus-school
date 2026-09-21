@@ -40,6 +40,8 @@ const SESSION_TTL_MS = 5 * 60 * 1000; // 5 minutes inactivity
 // Lives for the lifetime of the bot session — cleared on destroyPulse().
 const _jidPhoneCache = new Map();
 
+
+
 const STATE = Object.freeze({
   MENU:                    "MENU",
   SCOPE:                   "SCOPE",
@@ -243,11 +245,24 @@ async function startPulse() {
       }
     });
 
-    client.on("ready", () => {
+    client.on("ready", async () => {
       console.log("[Pulse Bot] Client is ready!");
       isReady = true;
       qrCodeData = null;
+      await ensureLidSafetyPatch(client);
       sendStatus("ready");
+
+      // Guard against WhatsApp Web silently reloading its page (version pushes,
+      // service-worker restarts). When the frame detaches, pupPage.evaluate calls
+      // throw "Attempted to use detached Frame". Reset isReady immediately so the
+      // next outbound call gets a clean "bot is reconnecting" error instead of
+      // a raw Puppeteer frame ID in the user-facing dialog.
+      try {
+        client.pupPage.once('close', () => {
+          console.warn('[Pulse Bot] WhatsApp Web page closed — marking disconnected and cleaning up.');
+          if (isReady) { isReady = false; destroyPulse(); }
+        });
+      } catch (_) {}
     });
 
     client.on("authenticated", () => {
@@ -1182,7 +1197,10 @@ async function handleMessage(msg) {
   if (!msg.from || (!msg.body && !msg.hasMedia)) return;
   if (msg.from.includes("@g.us") || msg.from === "status@broadcast") return;
 
+
   const text = (msg.body || '').trim();
+
+
   // Match any positive integer (1-9, 10, 100…) so "9" (custom amount) and
   // multi-digit plan indices are captured. "0" stays null — cancel paths use text === '0'.
   const numericInput = /^[1-9]\d*$/.test(text) ? parseInt(text, 10) : null;
@@ -2198,6 +2216,118 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
 }
 
 
+// Defensive patch: WhatsApp Web internal memoization getter throws
+// "Data passed to getter must include an id property" when interacting with
+// contacts that are un-cached or lack an .id property on their model.
+async function ensureLidSafetyPatch(botClient) {
+  if (!botClient?.pupPage) return;
+  try {
+    await botClient.pupPage.evaluate(() => {
+      try {
+        const patchModule = (modName) => {
+          try {
+            const mod = window.require(modName);
+            if (mod && !mod._antiCrashPatched) {
+              mod._antiCrashPatched = true;
+              for (const k of Object.keys(mod)) {
+                if (typeof mod[k] === 'function') {
+                  const orig = mod[k];
+                  mod[k] = function(contact, ...args) {
+                    if (!contact) return false;
+                    if (!contact.id) {
+                      contact.id = contact.wid || contact.phoneNumber || { _serialized: 'user@c.us', user: 'user' };
+                    }
+                    try {
+                      return orig.call(this, contact, ...args);
+                    } catch (e) {
+                      if (e && e.message && e.message.includes('Data passed to getter must include an id property')) {
+                        return false;
+                      }
+                      throw e;
+                    }
+                  };
+                }
+              }
+            }
+          } catch (_) {}
+        };
+
+        patchModule('WAWebContactGetters');
+        patchModule('WAWebFrontendContactGetters');
+
+        // Patch WAWebUserPrefsMeUser so getMaybeMePnUser falls back to LID user (and vice-versa).
+        // Prevents: "Data passed to getter must include an id property (it's how we memoize) but got undefined"
+        // caused when getMaybeMePnUser() returns undefined in LID-mode sessions.
+        try {
+          const userPrefs = window.require('WAWebUserPrefsMeUser');
+          if (userPrefs && !userPrefs._pnFallbackPatched) {
+            userPrefs._pnFallbackPatched = true;
+            const origPn = userPrefs.getMaybeMePnUser;
+            const origLid = userPrefs.getMaybeMeLidUser;
+            const getAnyMe = () => {
+              try {
+                return window.require('WAWebConnModel')?.Conn?.wid;
+              } catch (_) {
+                return null;
+              }
+            };
+            userPrefs.getMaybeMePnUser = function() {
+              return origPn?.() || origLid?.() || getAnyMe();
+            };
+            userPrefs.getMaybeMeLidUser = function() {
+              return origLid?.() || origPn?.() || getAnyMe();
+            };
+          }
+        } catch (_) {}
+
+        // Patch WAWebWidFactory.createWidFromWidLike so it never throws on undefined
+        try {
+          const widFactory = window.require('WAWebWidFactory');
+          if (widFactory && !widFactory._safeCreateWidPatched) {
+            widFactory._safeCreateWidPatched = true;
+            const origCreateWid = widFactory.createWidFromWidLike;
+            widFactory.createWidFromWidLike = function(widLike) {
+              if (!widLike) return null;
+              try {
+                return origCreateWid.call(this, widLike);
+              } catch (_) {
+                return null;
+              }
+            };
+          }
+        } catch (_) {}
+
+        // Patch WAWebMsgGetters so getSender never throws on any internal error
+        try {
+          const msgGetters = window.require('WAWebMsgGetters');
+          if (msgGetters && !msgGetters._safeGetSenderPatched) {
+            msgGetters._safeGetSenderPatched = true;
+            const origGetSender = msgGetters.getSender;
+            msgGetters.getSender = function(msg, ...args) {
+              if (msg && !msg.id) {
+                msg.id = msg.key || { toString: () => 'msg_' + Date.now() };
+              }
+              try {
+                const res = origGetSender.call(this, msg, ...args);
+                if (res) return res;
+              } catch (_) {}
+              return msg?.from || msg?.author || (window.require('WAWebUserPrefsMeUser')?.getMaybeMePnUser?.() || window.require('WAWebUserPrefsMeUser')?.getMaybeMeLidUser?.());
+            };
+            const origGetOrigSender = msgGetters.getOriginalSender;
+            msgGetters.getOriginalSender = function(msg, ...args) {
+              try {
+                const res = origGetOrigSender?.call(this, msg, ...args);
+                if (res) return res;
+              } catch (_) {}
+              return msg?.from || msg?.author || null;
+            };
+          }
+        } catch (_) {}
+      } catch (_) {}
+    });
+  } catch (_) {}
+}
+
 // ─── Module Exports ────────────────────────────────────────────────────────────
 module.exports = {
   initPulseBot,
@@ -2287,26 +2417,34 @@ module.exports = {
   // Takes a pre-formatted message and a raw phone number. Normalises to E.164.
   sendRawMessage: async (phone, message) => {
     if (!client || !isReady) throw new Error('WhatsApp bot not connected');
+    if (client.pupPage?.isClosed()) {
+      isReady = false;
+      destroyPulse();
+      throw new Error('WhatsApp is reconnecting after a page reload. Please wait 30 seconds and try again.');
+    }
     let target = phone.replace(/\D/g, "");
     if (target.length === 10) target = "234" + target;
     else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
     if (!target.includes("@c.us")) target += "@c.us";
+
+    await ensureLidSafetyPatch(client);
+
+    try {
+      const numberId = await client.getNumberId(target);
+      // NEVER overwrite with @lid — whatsapp-web.js requires @c.us for 1-on-1 sends
+      if (numberId?._serialized && !numberId._serialized.includes('@lid')) {
+        target = numberId._serialized;
+      }
+    } catch (_) {}
+
+    // Pre-warm the chat/contact in WhatsApp Web store
+    try {
+      await client.getChatById(target);
+    } catch (_) {}
+
     await client.sendMessage(target, message);
   },
 
-  sendReceiptPdf: async (phone, filename, pdfBuffer, caption = "") => {
-    if (!client || !isReady) throw new Error('WhatsApp bot not connected');
-    let target = phone.replace(/\D/g, "");
-    if (target.length === 10) target = "234" + target;
-    else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
-    if (!target.includes("@c.us")) target += "@c.us";
-    // Normalise to Buffer — Electron 31+ printToPDF returns Uint8Array, not Buffer
-    const safeBuffer = Buffer.isBuffer(pdfBuffer) ? pdfBuffer : Buffer.from(pdfBuffer);
-    console.log(`[Pulse Bot] Preparing PDF document send to ${target} (${filename}, ${safeBuffer.length} bytes)…`);
-    const media = new MessageMedia("application/pdf", safeBuffer.toString("base64"), filename);
-    await client.sendMessage(target, media, { caption, sendMediaAsDocument: true });
-    console.log(`[Pulse Bot] Successfully sent PDF document to ${target}`);
-  },
 
   // ── Smart Intent & Knowledge Engine Exports ──────────────────────────────────
   detectIntent,

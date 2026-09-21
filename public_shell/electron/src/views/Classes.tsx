@@ -5,6 +5,7 @@ import { useTermConfig } from '../hooks/useTermConfig';
 import { useSudoAuth } from '../context/SudoAuthContext';
 import { SetupGuardModal } from '../components/SetupGuardModal';
 import { CSVReviewModal } from '../components/CSVReviewModal';
+import { WebSyncModal } from '../components/WebSyncModal';
 
 export default function Classes() {
   const { configs, refresh } = useClassArms();
@@ -32,6 +33,7 @@ export default function Classes() {
 
   // Web Portal Sync state
   const [isSyncingWeb, setIsSyncingWeb] = useState(false);
+  const [webSyncModalOpen, setWebSyncModalOpen] = useState(false);
 
   // Setup Guard & CSV Review Modal States
   const [setupGuardOpen, setSetupGuardOpen] = useState(false);
@@ -846,9 +848,9 @@ export default function Classes() {
             style={{ display: 'none' }}
           />
           <button
-            onClick={handleSyncClassesToWebsite}
+            onClick={() => setWebSyncModalOpen(true)}
             disabled={isSyncingWeb}
-            title="Push current class hierarchy and arms directly to the school web portal"
+            title="Preview, stage, and sync school data directly to the school web portal"
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -2165,6 +2167,14 @@ A Principal or Superadmin (Level 7+) must authorize this change.`;
         onClose={() => { setCsvReviewOpen(false); setPendingCsvFile(null); }}
         result={csvReviewResult}
         onAccept={handleCSVReviewAccept}
+      />
+      <WebSyncModal
+        isOpen={webSyncModalOpen}
+        onClose={() => setWebSyncModalOpen(false)}
+        onSuccess={() => {
+          refresh();
+        }}
+        defaultTab="classes"
       />
 
     </div>

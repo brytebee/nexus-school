@@ -86,6 +86,10 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
   const [shuffleQuestions, setShuffleQuestions] = useState(true);
   const [shuffleOptions, setShuffleOptions] = useState(true);
   const [enableCalculator, setEnableCalculator] = useState(false);
+  const [deployCalculatorType, setDeployCalculatorType] = useState<'none' | 'basic' | 'scientific'>('none');
+  const [enableProctoring, setEnableProctoring] = useState(false);
+  const [deployDeliveryMode, setDeployDeliveryMode] = useState<'on_premises' | 'online'>('on_premises');
+  const [deployTargetClasses, setDeployTargetClasses] = useState<string[]>([]);
   const [enforceKiosk, setEnforceKiosk] = useState(true);
   const [releasePolicy, setReleasePolicy] = useState('immediate');
   const [isPromotional, setIsPromotional] = useState(false);
@@ -878,21 +882,26 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
 
   // Deploying Exam template
   const handleDeployExam = async () => {
-    const deployClassName = deployClassLevel
+    const singleClass = deployClassLevel
       ? (deployClassArm ? `${deployClassLevel} ${deployClassArm}` : deployClassLevel)
       : '';
-    if (!deployTitle || !deployBankId || !deployClassLevel) {
+    const resolvedTargetClasses = deployTargetClasses.length > 0
+      ? deployTargetClasses
+      : (singleClass ? [singleClass] : []);
+    const deployClassName = resolvedTargetClasses.join(', ');
+
+    if (!deployTitle || !deployBankId || resolvedTargetClasses.length === 0) {
       if (Swal) {
         Swal.fire({
           title: 'Required Fields Missing',
-          text: "Please fill all required fields (Title, Question Bank, Class Level).",
+          text: "Please fill all required fields (Title, Question Bank, and at least one Target Class).",
           icon: 'warning',
           background: '#0b0f19',
           color: '#fff',
           confirmButtonColor: '#f59e0b'
         });
       } else {
-        alert("Please fill all required fields (Title, Question Bank, Class Level).");
+        alert("Please fill all required fields (Title, Question Bank, and at least one Target Class).");
       }
       return;
     }
@@ -977,6 +986,8 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
       title: deployTitle,
       bank_id: parseInt(deployBankId),
       class_name: deployClassName,
+      target_classes: resolvedTargetClasses,
+      delivery_mode: deployDeliveryMode,
       class_level: deployClassLevel,
       class_arm: deployClassArm || null,
       academic_session: academicSession || '2025/2026',
@@ -986,12 +997,16 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
       duration_minutes: deployDuration,
       exam_type: deployExamType,
       is_promotional: isPromotional,
+      calculator_type: deployCalculatorType,
+      enable_proctoring: enableProctoring,
       shuffle_questions: shuffleQuestions,
       shuffle_options: shuffleOptions,
       result_release_policy: releasePolicy,
       security_profile: {
-        calculator: enableCalculator,
-        kiosk: enforceKiosk
+        calculator: deployCalculatorType !== 'none',
+        calculator_type: deployCalculatorType,
+        kiosk: enforceKiosk,
+        proctoring: enableProctoring
       }
     };
 
@@ -1024,6 +1039,7 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
         setDeployTitle('');
         setDeployClassLevel('');
         setDeployClassArm('');
+        setDeployTargetClasses([]);
         setCsvFile(null);
         setCsvStatus('');
 
@@ -1306,18 +1322,48 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
         return;
       }
 
-      // Use the dedicated IPC that handles optional class_arm gracefully.
-      const examClassName  = selectedLiveExam.class_name  || '';
-      const examClassArm   = selectedLiveExam.class_arm   || null;
-      // Back-compat: if class_arm not stored on exam, use regex to split composite names (e.g. "JSS1A" → level "JSS1", arm "A")
-      const matchArm = examClassName.trim().match(/^([A-Za-z\s]+[0-9]+)\s*([A-Za-z])$/);
-      const resolvedLevel = matchArm ? matchArm[1].trim() : examClassName.trim();
-      const resolvedArm   = examClassArm || (matchArm ? matchArm[2] : null);
+      // Multi-class target resolution
+      let targetClassesList: string[] = [];
+      try {
+        if (selectedLiveExam.target_classes) {
+          targetClassesList = typeof selectedLiveExam.target_classes === 'string'
+            ? JSON.parse(selectedLiveExam.target_classes)
+            : (Array.isArray(selectedLiveExam.target_classes) ? selectedLiveExam.target_classes : []);
+        }
+      } catch (e) {}
 
-      const classStudents = await window.electronAPI.cbt.getStudentsForClass({
-        class_name: resolvedLevel,
-        class_arm:  resolvedArm || 'all'
-      });
+      let classStudents: any[] = [];
+      const examClassName = selectedLiveExam.class_name || '';
+
+      if (targetClassesList.length > 0) {
+        const studentPromises = targetClassesList.map(async (tc) => {
+          const split = splitClass(tc, configs);
+          return window.electronAPI.cbt.getStudentsForClass({
+            class_name: split.class_name,
+            class_arm: split.class_arm || 'all'
+          });
+        });
+        const results = await Promise.all(studentPromises);
+        const seenIds = new Set();
+        for (const list of results) {
+          for (const s of (list || [])) {
+            if (!seenIds.has(s.id)) {
+              seenIds.add(s.id);
+              classStudents.push(s);
+            }
+          }
+        }
+      } else {
+        const examClassArm = selectedLiveExam.class_arm || null;
+        const matchArm = examClassName.trim().match(/^([A-Za-z\s]+[0-9]+)\s*([A-Za-z])$/);
+        const resolvedLevel = matchArm ? matchArm[1].trim() : examClassName.trim();
+        const resolvedArm = examClassArm || (matchArm ? matchArm[2] : null);
+
+        classStudents = await window.electronAPI.cbt.getStudentsForClass({
+          class_name: resolvedLevel,
+          class_arm:  resolvedArm || 'all'
+        });
+      }
 
       if (!classStudents || classStudents.length === 0) {
         Swal.fire({
@@ -2035,17 +2081,107 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                   </select>
                 </div>
                 
+                {/* Delivery Mode Selector */}
+                <div style={{ gridColumn: 'span 2', marginBottom: '5px' }}>
+                  <label className="ph-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)', display: 'block', marginBottom: '6px' }}>
+                    Delivery Mode
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setDeployDeliveryMode('on_premises')}
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        border: deployDeliveryMode === 'on_premises' ? '1px solid #a855f7' : '1px solid rgba(255,255,255,0.1)',
+                        background: deployDeliveryMode === 'on_premises' ? 'rgba(168,85,247,0.15)' : 'rgba(0,0,0,0.2)',
+                        color: deployDeliveryMode === 'on_premises' ? '#d8b4fe' : 'var(--text-dim)',
+                        cursor: 'pointer',
+                        textAlign: 'left'
+                      }}
+                    >
+                      <div style={{ fontWeight: 'bold', fontSize: '12px' }}>🖥️ On-Premises CBT Lab</div>
+                      <div style={{ fontSize: '10px', opacity: 0.7, marginTop: '2px' }}>Lab PC capacity, time batches & offline seatings</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeployDeliveryMode('online')}
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        border: deployDeliveryMode === 'online' ? '1px solid #00e5ff' : '1px solid rgba(255,255,255,0.1)',
+                        background: deployDeliveryMode === 'online' ? 'rgba(0,229,255,0.15)' : 'rgba(0,0,0,0.2)',
+                        color: deployDeliveryMode === 'online' ? '#00e5ff' : 'var(--text-dim)',
+                        cursor: 'pointer',
+                        textAlign: 'left'
+                      }}
+                    >
+                      <div style={{ fontWeight: 'bold', fontSize: '12px' }}>🌐 Online Remote Assessment</div>
+                      <div style={{ fontSize: '10px', opacity: 0.7, marginTop: '2px' }}>Remote candidating via Web Portal</div>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Multi-Class Selector */}
                 <div style={{ gridColumn: 'span 2' }}>
-                  <label className="ph-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)', display: 'block', marginBottom: '6px' }}>Target Class</label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label className="ph-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)', margin: 0 }}>
+                      Target Class(es) / Arms {deployTargetClasses.length > 0 && `(${deployTargetClasses.length} Selected)`}
+                    </label>
+                    {deployTargetClasses.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setDeployTargetClasses([])}
+                        style={{ background: 'none', border: 'none', color: '#f87171', fontSize: '10px', cursor: 'pointer', padding: 0 }}
+                      >
+                        Clear All
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Selected Pills */}
+                  {deployTargetClasses.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px', padding: '8px', background: 'rgba(0,0,0,0.25)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                      {deployTargetClasses.map((cls) => (
+                        <span
+                          key={cls}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            background: 'rgba(0,229,255,0.15)',
+                            border: '1px solid rgba(0,229,255,0.4)',
+                            color: '#00e5ff',
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            fontSize: '11px',
+                            fontWeight: 600
+                          }}
+                        >
+                          {cls}
+                          <span
+                            onClick={() => setDeployTargetClasses(prev => prev.filter(c => c !== cls))}
+                            style={{ cursor: 'pointer', opacity: 0.8 }}
+                          >
+                            ✕
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
                   <Combobox
                     options={cbtClassOptions}
-                    value={deployClassLevel ? (deployClassArm ? `${deployClassLevel} ${deployClassArm}` : deployClassLevel) : ''}
+                    value=""
                     onChange={(selected) => {
-                      const { class_name, class_arm } = splitClass(selected, configs);
-                      setDeployClassLevel(class_name);
-                      setDeployClassArm(class_arm);
+                      if (selected && !deployTargetClasses.includes(selected)) {
+                        setDeployTargetClasses(prev => [...prev, selected]);
+                        const { class_name, class_arm } = splitClass(selected, configs);
+                        setDeployClassLevel(class_name);
+                        setDeployClassArm(class_arm);
+                      }
                     }}
-                    placeholder="Select Target Class..."
+                    placeholder="Search and click to add target class or arm..."
                   />
                 </div>
 
@@ -2127,7 +2263,7 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                 </div>
               </div>
 
-              <h4 style={{ fontSize: '13px', color: 'var(--text-dim)', marginBottom: '10px', marginTop: 0, fontWeight: 500 }}>Advanced Security Toggles</h4>
+              <h4 style={{ fontSize: '13px', color: 'var(--text-dim)', marginBottom: '10px', marginTop: 0, fontWeight: 500 }}>Advanced Security & Surveillance Engine</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px', background: 'rgba(0,0,0,0.2)', padding: '15px', borderRadius: '8px' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#fff', cursor: 'pointer' }}>
                   <input 
@@ -2143,20 +2279,40 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                     onChange={(e) => setShuffleOptions(e.target.checked)}
                   /> Shuffle Options
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#fff', cursor: 'pointer' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#f43f5e', fontWeight: 600, cursor: 'pointer' }}>
                   <input 
                     type="checkbox" 
-                    checked={enableCalculator}
-                    onChange={(e) => setEnableCalculator(e.target.checked)}
-                  /> Enable Calculator (Opt-in)
+                    checked={enableProctoring}
+                    onChange={(e) => setEnableProctoring(e.target.checked)}
+                  /> 📸 AI Video Surveillance & Webcam HUD
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#fff', cursor: 'pointer' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#fbbf24', fontWeight: 600, cursor: 'pointer' }}>
                   <input 
                     type="checkbox" 
                     checked={enforceKiosk}
                     onChange={(e) => setEnforceKiosk(e.target.checked)}
-                  /> Enforce Kiosk Mode (Tab Lock)
+                  /> 🛡️ Enforce Kiosk Mode (Tab Lock)
                 </label>
+
+                <div style={{ gridColumn: 'span 2', marginTop: '6px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                  <label className="ph-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)', display: 'block', marginBottom: '6px' }}>
+                    Candidate Calculator Mode
+                  </label>
+                  <select
+                    value={deployCalculatorType}
+                    onChange={(e) => {
+                      const val = e.target.value as any;
+                      setDeployCalculatorType(val);
+                      setEnableCalculator(val !== 'none');
+                    }}
+                    className="modern-input"
+                    style={{ width: '100%', background: '#0d1235', color: '#fff' }}
+                  >
+                    <option value="none">No Calculator (Strict Mental Math)</option>
+                    <option value="basic">Standard Basic (+ - × ÷ % √ ± mem)</option>
+                    <option value="scientific">Scientific & Engineering (Trigonometry, Log, Exponents, π, e)</option>
+                  </select>
+                </div>
               </div>
 
               <h4 style={{ fontSize: '13px', color: 'var(--text-dim)', marginBottom: '10px', marginTop: 0, fontWeight: 500 }}>Release Policy</h4>

@@ -2024,6 +2024,58 @@ async function uploadReceiptToCloudinary(receiptData, ref, schoolId) {
   }
 }
 
+/**
+ * uploadPdfToCloudinary — uploads a real PDF buffer to Cloudinary as a
+ * publicly-accessible raw asset. Returns the secure_url or null on failure.
+ *
+ * access_mode=public is included in both the signature and the form params.
+ * This overrides any account-level delivery restriction for this specific asset,
+ * making the URL directly accessible without a signed delivery token or proxy.
+ *
+ * Folder convention: nexus/receipts/{schoolId}/{ref}.pdf
+ * Signature params sorted alphabetically: access_mode, folder, public_id, timestamp.
+ */
+async function uploadPdfToCloudinary(pdfBuffer, ref, schoolId) {
+  const cloud  = process.env.CLOUDINARY_CLOUD_NAME;
+  const key    = process.env.CLOUDINARY_API_KEY;
+  const secret = process.env.CLOUDINARY_API_SECRET;
+  if (!cloud || !key || !secret) return null;
+
+  const folder      = `nexus/receipts/${schoolId}`;
+  const publicId    = `${ref}.pdf`;     // .pdf extension → application/pdf content-type on delivery
+  const timestamp   = String(Math.floor(Date.now() / 1000));
+  const accessMode  = 'public';         // override account-level delivery restriction per-asset
+
+  // Params MUST be sorted alphabetically for the Cloudinary HMAC-SHA1 signature.
+  // access_mode(a) < folder(f) < public_id(p) < timestamp(t)
+  const signMsg   = `access_mode=${accessMode}&folder=${folder}&public_id=${publicId}&timestamp=${timestamp}${secret}`;
+  const signature = require('crypto').createHash('sha1').update(signMsg).digest('hex');
+
+  try {
+    const safeBuffer = Buffer.isBuffer(pdfBuffer) ? pdfBuffer : Buffer.from(pdfBuffer);
+    const dataUri    = `data:application/pdf;base64,${safeBuffer.toString('base64')}`;
+
+    const form = new FormData();
+    form.append('file',         dataUri);
+    form.append('public_id',    publicId);
+    form.append('folder',       folder);
+    form.append('access_mode',  accessMode);
+    form.append('timestamp',    timestamp);
+    form.append('api_key',      key);
+    form.append('signature',    signature);
+
+    const res  = await fetch(`https://api.cloudinary.com/v1_1/${cloud}/raw/upload`, { method: 'POST', body: form });
+    const json = await res.json();
+    if (!res.ok || json.error) throw new Error(json.error?.message || res.statusText);
+    console.log(`[Cloudinary] PDF receipt uploaded (public): ${json.secure_url}`);
+    return json.secure_url;
+  } catch (err) {
+    console.error('[Cloudinary] PDF receipt upload failed:', err.message);
+    return null;
+  }
+}
+
+
 async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null) {
   let studentIds = [];
   try {
@@ -2172,78 +2224,77 @@ async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null
     feeItems, // Phase 8: itemised breakdown — Tuition, PTA, Extras, etc.
   };
 
+  // ── Generate PDF and upload to Cloudinary ───────────────────────────────
+  let receiptUrl = null;
   try {
     const pdfBuffer = await receiptGenerator.generateReceiptPdf(receiptData);
-    const caption = `🎓 *Branded PDF Receipt* for *${studentName}*\nTotal Paid: ₦${amountPaid.toLocaleString('en-NG')}\nReference: ${ref}\nThank you!`;
-    await pulseBot.sendReceiptPdf(session.parent_phone, `Receipt-${ref}.pdf`, pdfBuffer, caption);
-    console.log(`[Payment Processor] PDF receipt sent successfully to ${session.parent_phone}`);
-
-    // Upload HTML receipt to Cloudinary for parent portal access (non-blocking)
-    try {
-      const schoolIdRow = db.prepare("SELECT value FROM app_settings WHERE key = 'cloud_school_id'").get();
-      if (schoolIdRow?.value) {
-        const receiptUrl = await uploadReceiptToCloudinary(receiptData, ref, schoolIdRow.value);
-        if (receiptUrl) {
-          try {
-            db.prepare("UPDATE fee_payment_sessions SET receipt_url = ? WHERE paystack_ref = ?").run(receiptUrl, ref);
-          } catch (_) {}
-        }
-      }
-    } catch (_) {}
-
-    // Notify School Owner via WA
-    try {
-      const ownerRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_phone'").get();
-      if (ownerRow?.value) {
-        const ownerMsg = `💳 *Payment Alert*\nStudent: ${studentName} (${studentClass})\nAmount Paid: ₦${amountPaid.toLocaleString('en-NG')}\nRef: ${ref}\nTerm: ${term} (${academicSession})\n_Nexus School OS_`;
-        db.prepare("INSERT INTO pending_pulse_messages (phone, message, type) VALUES (?, ?, 'general')").run(ownerRow.value, ownerMsg);
-      }
-    } catch (_) {}
-
-    return true;
-  } catch (err) {
-    console.error(`[Payment Processor] PDF receipt sending failed, falling back to text:`, err.message);
-    
-    // Text fallback
-    let receiptMsg  = `✅ *Payment Confirmed!*\n\n`;
-    receiptMsg += `Thank you for your payment to *${schoolName}*.\n`;
-    receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
-    receiptMsg += `💳 *Transaction Details*:\n`;
-    receiptMsg += `   Reference:  ${ref}\n`;
-    receiptMsg += `   Total Paid: ₦${session.total_amount.toLocaleString('en-NG')}\n`;
-    receiptMsg += `   Channel:    Paystack Online\n`;
-    receiptMsg += `   Date:       ${new Date().toLocaleDateString('en-NG')}\n\n`;
-    receiptMsg += `👤 *Student Allocations*:\n`;
-    receiptRecords.forEach(rec => {
-      receiptMsg += `   • *${rec.name}*:\n`;
-      receiptMsg += `     Allocated:   ₦${rec.amount.toLocaleString('en-NG')}\n`;
-      receiptMsg += `     New Balance: ₦${rec.balance.toLocaleString('en-NG')}\n`;
-    });
-    if (feeItems.length > 0) {
-      receiptMsg += `\n📋 *Payment Breakdown*:\n`;
-      const mandatory = feeItems.filter(f => f.type === 'mandatory');
-      const extras = feeItems.filter(f => f.type === 'extra');
-      if (mandatory.length > 0) {
-        receiptMsg += `   _School Fees_:\n`;
-        mandatory.forEach(f => { receiptMsg += `     • ${f.name}: ₦${Number(f.amount).toLocaleString('en-NG')}${f.bankLabel ? ` (${f.bankLabel})` : ''}\n`; });
-      }
-      if (extras.length > 0) {
-        receiptMsg += `   _Optional Items_:\n`;
-        extras.forEach(f => { receiptMsg += `     • ${f.name}: ₦${Number(f.amount).toLocaleString('en-NG')}\n`; });
+    const schoolIdRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_cloud_id'").get()
+                    || db.prepare("SELECT value FROM app_settings WHERE key = 'cloud_school_id'").get();
+    if (schoolIdRow?.value) {
+      receiptUrl = await uploadPdfToCloudinary(pdfBuffer, ref, schoolIdRow.value);
+      if (receiptUrl) {
+        try {
+          db.prepare("UPDATE fee_payment_sessions SET receipt_url = ? WHERE paystack_ref = ?").run(receiptUrl, ref);
+        } catch (_) {}
       }
     }
-    receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
-    receiptMsg += `_Your official school records have been updated automatically._\n_Powered by Nexus Pulse_ 🎓`;
-    
-    try {
-      await pulseBot.sendRawMessage(session.parent_phone, receiptMsg);
-      return { ok: true, fallback: true };
-    } catch (fallbackErr) {
-      console.error(`[Payment Processor] Fallback text failed:`, fallbackErr.message);
-      return { ok: false, error: err.message };
+  } catch (pdfErr) {
+    console.warn('[Payment Processor] PDF/Cloudinary upload skipped (non-fatal):', pdfErr.message);
+  }
+
+
+  // ── Send WhatsApp receipt (text + optional PDF link) ──────────────────────
+  let receiptMsg = `✅ *Payment Confirmed!*\n\n`;
+  receiptMsg += `Thank you for your payment to *${schoolName}*.\n`;
+  receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
+  receiptMsg += `💳 *Transaction Details*:\n`;
+  receiptMsg += `   Reference:  ${ref}\n`;
+  receiptMsg += `   Total Paid: ₦${session.total_amount.toLocaleString('en-NG')}\n`;
+  receiptMsg += `   Channel:    Paystack Online\n`;
+  receiptMsg += `   Date:       ${new Date().toLocaleDateString('en-NG')}\n\n`;
+  receiptMsg += `👤 *Student Allocations*:\n`;
+  receiptRecords.forEach(rec => {
+    receiptMsg += `   • *${rec.name}*:\n`;
+    receiptMsg += `     Allocated:   ₦${rec.amount.toLocaleString('en-NG')}\n`;
+    receiptMsg += `     New Balance: ₦${rec.balance.toLocaleString('en-NG')}\n`;
+  });
+  if (feeItems.length > 0) {
+    receiptMsg += `\n📋 *Payment Breakdown*:\n`;
+    const mandatory = feeItems.filter(f => f.type === 'mandatory');
+    const extras = feeItems.filter(f => f.type === 'extra');
+    if (mandatory.length > 0) {
+      receiptMsg += `   _School Fees_:\n`;
+      mandatory.forEach(f => { receiptMsg += `     • ${f.name}: ₦${Number(f.amount).toLocaleString('en-NG')}${f.bankLabel ? ` (${f.bankLabel})` : ''}\n`; });
+    }
+    if (extras.length > 0) {
+      receiptMsg += `   _Optional Items_:\n`;
+      extras.forEach(f => { receiptMsg += `     • ${f.name}: ₦${Number(f.amount).toLocaleString('en-NG')}\n`; });
     }
   }
+  receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
+  receiptMsg += `_Your official school records have been updated automatically._\n`;
+  if (receiptUrl) receiptMsg += `\n📎 *Download PDF Receipt:*\n${receiptUrl}\n`;
+  receiptMsg += `_Powered by Nexus Pulse_ 🎓`;
+
+  try {
+    await pulseBot.sendRawMessage(session.parent_phone, receiptMsg);
+    console.log(`[Payment Processor] Receipt sent to ${session.parent_phone}${receiptUrl ? ' (with PDF link)' : ''}`);
+  } catch (sendErr) {
+    console.error('[Payment Processor] WhatsApp send failed:', sendErr.message);
+  }
+
+  // Notify school owner
+  try {
+    const ownerRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_phone'").get();
+    if (ownerRow?.value) {
+      const ownerMsg = `💳 *Payment Alert*\nStudent: ${studentName} (${studentClass})\nAmount Paid: ₦${amountPaid.toLocaleString('en-NG')}\nRef: ${ref}\nTerm: ${term} (${academicSession})\n_Nexus School OS_`;
+      db.prepare("INSERT INTO pending_pulse_messages (phone, message, type) VALUES (?, ?, 'general')").run(ownerRow.value, ownerMsg);
+    }
+  } catch (_) {}
+
+  return true;
 }
+
 
 /**
  * sendManualReceiptHelper — generates and sends a PDF receipt for a manually
@@ -2305,60 +2356,69 @@ async function sendManualReceiptHelper(db, { student_id, academic_session, term,
     feeItems:      [],
   };
 
+  // ── Step 1: Generate PDF and upload to Cloudinary ────────────────────────
+  // We upload first so we can embed the direct download link in the text message
+  // itself. No attachment is sent via WhatsApp (LID-mode prevents outbound media
+  // to cold contacts). The parent clicks the Cloudinary link to download the PDF.
+  let receiptUrl = null;
   try {
     const pdfBuffer = await receiptGenerator.generateReceiptPdf(receiptData);
-    const caption = `🧾 *${schoolName} Receipt*\n${sRow.name} — NGN ${amount.toLocaleString("en-NG")} (${methodLabel})\nRef: ${ref}\nThank you!`;
-    await pulseBot.sendReceiptPdf(sRow.parent_phone, `Receipt-${ref}.pdf`, pdfBuffer, caption);
-
-    // Cloudinary upload for parent receipt portal
-    try {
-      const schoolIdRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_cloud_id'").get();
-      if (schoolIdRow?.value) {
-        const receiptUrl = await uploadReceiptToCloudinary(receiptData, ref, schoolIdRow.value);
-        if (receiptUrl) {
-          try {
-            db.prepare("UPDATE fee_transactions SET receipt_url = ? WHERE reference_number = ?").run(receiptUrl, ref);
-          } catch (_) {}
-        }
+    const schoolIdRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_cloud_id'").get();
+    if (schoolIdRow?.value) {
+      receiptUrl = await uploadPdfToCloudinary(pdfBuffer, ref, schoolIdRow.value);
+      if (receiptUrl) {
+        try {
+          db.prepare("UPDATE fee_transactions SET receipt_url = ? WHERE reference_number = ?").run(receiptUrl, ref);
+        } catch (_) {}
       }
-    } catch (cErr) {
-      console.warn('[Manual Receipt] Cloudinary upload skipped:', cErr.message);
     }
-
-    // Notify school owner
-    try {
-      const ownerRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_phone'").get();
-      if (ownerRow?.value) {
-        const ownerMsg = `💳 *Manual Payment Alert*\nStudent: ${sRow.name} (${sRow.class_name})\nAmount: ₦${amount.toLocaleString("en-NG")}\nMethod: ${methodLabel}\nRef: ${ref}\nTerm: ${receiptData.term} (${receiptData.academicSession})\n_Nexus School OS_`;
-        db.prepare("INSERT INTO pending_pulse_messages (phone, message, type) VALUES (?, ?, 'general')").run(ownerRow.value, ownerMsg);
-      }
-    } catch (_) {}
-
-    console.log(`[Manual Receipt] PDF sent to ${sRow.parent_phone} for ${sRow.name}`);
-    return { ok: true };
-  } catch (err) {
-    console.error(`[Manual Receipt] PDF failed, falling back to text:`, err.message);
-    const fallback =
-      `✅ *Payment Recorded — ${schoolName}*\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
-      `👤 *${sRow.name}* (${sRow.class_name || "—"})\n` +
-      `💰 Amount: ₦${amount.toLocaleString("en-NG")}\n` +
-      `📋 Method: ${methodLabel}\n` +
-      `🔖 Reference: ${ref}\n` +
-      `📅 Date: ${dateStr}\n` +
-      `💳 Outstanding Balance: ₦${balance.toLocaleString("en-NG")}\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
-      `_Your payment has been recorded. Thank you!_\n_Powered by Nexus Pulse_ 🎓`;
-    try {
-      await pulseBot.sendRawMessage(sRow.parent_phone, fallback);
-      console.log(`[Manual Receipt] Fallback text receipt sent to ${sRow.parent_phone}`);
-      return { ok: true, fallback: true };
-    } catch (fallbackErr) {
-      console.error(`[Manual Receipt] Fallback text also failed:`, fallbackErr.message);
-      return { ok: false, error: err.message };
-    }
+  } catch (pdfErr) {
+    console.warn('[Manual Receipt] PDF generation or Cloudinary upload failed (non-fatal):', pdfErr.message);
   }
+
+  // ── Step 2: Send text receipt (with optional PDF link) ───────────────────
+  const textReceipt =
+    `✅ *Payment Recorded — ${schoolName}*\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n` +
+    `👤 *${sRow.name}* (${sRow.class_name || "—"})\n` +
+    `💰 Amount: ₦${amount.toLocaleString("en-NG")}\n` +
+    `📋 Method: ${methodLabel}\n` +
+    `🔖 Reference: ${ref}\n` +
+    `📅 Date: ${dateStr}\n` +
+    `💳 Outstanding Balance: ₦${balance.toLocaleString("en-NG")}\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n` +
+    `_Your payment has been recorded. Thank you!_\n` +
+    (receiptUrl ? `\n📎 *Download PDF Receipt:*\n${receiptUrl}\n` : '') +
+    `_Powered by Nexus Pulse_ 🎓`;
+
+  try {
+    await pulseBot.sendRawMessage(sRow.parent_phone, textReceipt);
+    console.log(`[Manual Receipt] Text receipt sent to ${sRow.parent_phone}${receiptUrl ? ' (with PDF link)' : ''}`);
+  } catch (textErr) {
+    const isFrameDetached = textErr.message?.includes('detached Frame') ||
+                            textErr.message?.includes('reconnecting after a page reload');
+    console.error('[Manual Receipt] Text send failed:', textErr.message);
+    return {
+      ok: false,
+      error: isFrameDetached
+        ? 'WhatsApp is reconnecting after a page reload. Please wait 30 seconds, then try again.'
+        : textErr.message,
+    };
+  }
+
+  // ── Step 3: Notify school owner ──────────────────────────────────────────
+  try {
+    const ownerRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_phone'").get();
+    if (ownerRow?.value) {
+      const ownerMsg = `💳 *Manual Payment Alert*\nStudent: ${sRow.name} (${sRow.class_name})\nAmount: ₦${amount.toLocaleString("en-NG")}\nMethod: ${methodLabel}\nRef: ${ref}\nTerm: ${receiptData.term} (${receiptData.academicSession})\n_Nexus School OS_`;
+      db.prepare("INSERT INTO pending_pulse_messages (phone, message, type) VALUES (?, ?, 'general')").run(ownerRow.value, ownerMsg);
+    }
+  } catch (_) {}
+
+  return { ok: true };
 }
+
+
 
 async function processFailedPayment(ref, reason) {
   const db = database.getDb();
@@ -2806,6 +2866,33 @@ ipcMain.handle("classes:syncToWebsite", async () => {
     return await syncWorker.pushClassesToWebsite();
   } catch (err) {
     console.error("Failed to sync classes to website:", err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("webSync:getPackage", async () => {
+  try {
+    return await syncWorker.gatherSyncPackage();
+  } catch (err) {
+    console.error("Failed to gather sync package:", err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("webSync:dryRun", async (event, payload) => {
+  try {
+    return await syncWorker.dispatchSyncPackage(payload, { dryRun: true });
+  } catch (err) {
+    console.error("Failed to execute sync dryRun:", err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("webSync:dispatch", async (event, payload) => {
+  try {
+    return await syncWorker.dispatchSyncPackage(payload, { dryRun: false });
+  } catch (err) {
+    console.error("Failed to dispatch sync package:", err);
     return { ok: false, error: err.message };
   }
 });

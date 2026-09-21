@@ -130,6 +130,11 @@ const nexusAPI = {
         syncToWebsite: () => ipcRenderer.invoke('classes:syncToWebsite'),
         create: (data) => ipcRenderer.invoke('create-class', data),
     },
+    webSync: {
+        getPackage: () => ipcRenderer.invoke('webSync:getPackage'),
+        dryRun: (payload) => ipcRenderer.invoke('webSync:dryRun', payload),
+        dispatch: (payload) => ipcRenderer.invoke('webSync:dispatch', payload),
+    },
     insertScore: (data) => ipcRenderer.invoke('insert-score', data),
     db: {
         getClearImpact: (data) => ipcRenderer.invoke('db:get-clear-impact', data),

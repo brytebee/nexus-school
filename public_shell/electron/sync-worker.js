@@ -800,6 +800,305 @@ async function pushClassesToWebsite() {
 }
 
 /**
+ * Gathers a complete snapshot of local school data ready for staging, preview, and sync.
+ */
+async function gatherSyncPackage() {
+  const db = database.getDb();
+  const schoolId = getSchoolId(db);
+  const websiteUrl = getSchoolWebsiteUrl(db);
+
+  // 1. Classes & Hierarchy
+  let hierarchy = [];
+  let hierarchyPayload = [];
+  let flatList = [];
+  try {
+    const setting = db.prepare("SELECT value FROM system_settings WHERE key = 'class_hierarchy'").get();
+    hierarchy = setting ? JSON.parse(setting.value) : [];
+    const configs = db.prepare("SELECT hierarchy_class, max_subjects, pass_mark_override FROM class_configs").all();
+    const arms = db.prepare("SELECT hierarchy_class, arm FROM class_arms ORDER BY arm ASC").all();
+
+    const armsMap = {};
+    arms.forEach((r) => {
+      if (!armsMap[r.hierarchy_class]) armsMap[r.hierarchy_class] = [];
+      armsMap[r.hierarchy_class].push(r.arm);
+    });
+
+    const configsMap = {};
+    configs.forEach((c) => {
+      configsMap[c.hierarchy_class] = c;
+    });
+
+    hierarchyPayload = hierarchy
+      .filter((cls) => configsMap[cls])
+      .map((cls) => {
+        const c = configsMap[cls];
+        return {
+          hierarchyClass: cls,
+          maxSubjects: c.max_subjects || 0,
+          arms: armsMap[cls] || [],
+        };
+      });
+
+    hierarchyPayload.forEach((item) => {
+      if (item.arms && item.arms.length > 0) {
+        item.arms.forEach((arm) => {
+          const fullName = arm.startsWith(`${item.hierarchyClass} `)
+            ? arm
+            : `${item.hierarchyClass} ${arm}`;
+          flatList.push(fullName);
+        });
+      } else {
+        flatList.push(item.hierarchyClass);
+      }
+    });
+  } catch (err) {
+    console.error("[Sync Worker] Error gathering classes for sync:", err);
+  }
+
+  // 2. School Profile & Branding
+  let branding = {
+    schoolName: "",
+    motto: "",
+    address: "",
+    phone: "",
+    email: "",
+    primaryColor: "#0B3D2E",
+    accentColor: "#D4AF37",
+    logoUrl: null,
+  };
+  try {
+    const getSetting = (key) => {
+      const row = db.prepare("SELECT value FROM app_settings WHERE key = ?").get(key);
+      return row ? row.value : "";
+    };
+    branding.schoolName = getSetting("school_name");
+    branding.motto = getSetting("school_motto");
+    branding.address = getSetting("school_address");
+    branding.phone = getSetting("school_phone");
+    branding.email = getSetting("school_email");
+
+    const identityRow = db
+      .prepare("SELECT value FROM app_settings WHERE key = 'school_identity'")
+      .get();
+    if (identityRow && identityRow.value) {
+      try {
+        const ident = JSON.parse(identityRow.value);
+        if (ident.name) branding.schoolName = ident.name;
+        if (ident.themePrimary) branding.primaryColor = ident.themePrimary;
+        if (ident.themeSecondary) branding.accentColor = ident.themeSecondary;
+        if (ident.logoBase64) branding.logoUrl = ident.logoBase64;
+      } catch (_) {}
+    }
+  } catch (err) {
+    console.error("[Sync Worker] Error gathering branding for sync:", err);
+  }
+
+  // 3. Academic Calendar & Session
+  let calendar = {
+    academicSession: "2026/2027",
+    term: "First Term",
+  };
+  try {
+    const sessRow = db
+      .prepare("SELECT value FROM system_settings WHERE key = 'current_academic_session'")
+      .get();
+    if (sessRow && sessRow.value) calendar.academicSession = sessRow.value;
+    const termRow = db.prepare("SELECT value FROM system_settings WHERE key = 'current_term'").get();
+    if (termRow && termRow.value) calendar.term = termRow.value;
+  } catch (err) {
+    console.error("[Sync Worker] Error gathering calendar for sync:", err);
+  }
+
+  // 4. Fee Structures
+  let fees = [];
+  try {
+    const rows = db
+      .prepare("SELECT class_name, item_name, amount, term, is_optional FROM fee_structures")
+      .all();
+    fees = rows.map((r) => ({
+      className: r.class_name,
+      itemName: r.item_name,
+      amount: r.amount,
+      term: r.term,
+      isOptional: Boolean(r.is_optional),
+    }));
+  } catch (err) {
+    console.error("[Sync Worker] Error gathering fees for sync:", err);
+  }
+
+  // 5. Custom Subjects
+  let customSubjects = [];
+  try {
+    const rows = db.prepare("SELECT subject_name FROM custom_subjects").all();
+    customSubjects = rows.map((r) => r.subject_name).filter(Boolean);
+  } catch (err) {
+    console.error("[Sync Worker] Error gathering custom subjects for sync:", err);
+  }
+
+  // 6. Entrance & Online CBT Exams
+  let cbtExams = [];
+  try {
+    const tableExists = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='cbt_exams'")
+      .get();
+    if (tableExists) {
+      let rows = [];
+      try {
+        rows = db
+          .prepare(
+            "SELECT * FROM cbt_exams WHERE delivery_mode = 'online' OR exam_type = 'external'"
+          )
+          .all();
+      } catch (colErr) {
+        // Fallback if delivery_mode column hasn't migrated yet
+        rows = db
+          .prepare("SELECT * FROM cbt_exams WHERE exam_type = 'external'")
+          .all();
+      }
+
+      cbtExams = rows.map((r) => {
+        let targetClasses = [];
+        try {
+          targetClasses = r.target_classes ? JSON.parse(r.target_classes) : [];
+        } catch (e) {
+          targetClasses = [];
+        }
+        if (!Array.isArray(targetClasses) || targetClasses.length === 0) {
+          targetClasses = r.class_name
+            ? r.class_name.split(',').map((s) => s.trim()).filter(Boolean)
+            : [];
+        }
+
+        let subjectQuotas = [];
+        try {
+          subjectQuotas = r.subject_quotas ? JSON.parse(r.subject_quotas) : [];
+        } catch (e) {
+          subjectQuotas = [];
+        }
+
+        let secProfile = {};
+        try {
+          secProfile = r.security_profile ? JSON.parse(r.security_profile) : {};
+        } catch (e) {
+          secProfile = {};
+        }
+
+        const enforceKiosk = Boolean(secProfile.kiosk);
+        const enableProctoring =
+          r.enable_proctoring !== undefined && r.enable_proctoring !== null
+            ? Boolean(r.enable_proctoring)
+            : Boolean(secProfile.proctoring);
+
+        const calculatorType =
+          r.calculator_type ||
+          (secProfile.calculator
+            ? secProfile.calculator_type || 'basic'
+            : 'none');
+
+        return {
+          id: r.id,
+          title: r.title,
+          className:
+            r.class_name ||
+            (targetClasses.length > 0 ? targetClasses.join(', ') : 'All Classes'),
+          targetClasses,
+          academicSession: r.academic_session || '2026/2027',
+          durationMinutes: r.duration_minutes || 45,
+          questionCount: r.question_count || 40,
+          passMarkPercentage: r.pass_mark_percentage || 50,
+          passPercentage: r.pass_mark_percentage || 50,
+          shuffleQuestions: r.shuffle_questions !== 0,
+          shuffleOptions: r.shuffle_options !== 0,
+          examType: r.exam_type === 'external' ? 'entrance' : (r.exam_type || 'entrance'),
+          deliveryMode:
+            r.delivery_mode || (r.exam_type === 'external' ? 'online' : 'on_premises'),
+          isPromotional: Boolean(r.is_promotional),
+          calculatorType,
+          enableProctoring,
+          enforceKiosk,
+          resultReleasePolicy: r.result_release_policy || 'immediate',
+          pcCount: r.pc_count ? Number(r.pc_count) : 30,
+          autoIssueOffer:
+            r.auto_issue_offer !== undefined && r.auto_issue_offer !== null
+              ? Boolean(r.auto_issue_offer)
+              : true,
+          instructions: r.instructions || '',
+          subjectQuotas,
+        };
+      });
+    }
+  } catch (err) {
+    console.error("[Sync Worker] Error gathering CBT exams for sync:", err);
+  }
+
+  return {
+    ok: true,
+    schoolCloudId: schoolId,
+    websiteUrl,
+    modules: {
+      classes: {
+        hierarchy: hierarchyPayload,
+        fullList: flatList,
+      },
+      branding,
+      calendar,
+      fees,
+      customSubjects,
+      cbtExams,
+    },
+  };
+}
+
+/**
+ * Sends a vetted sync package to the school website (supports dryRun = true).
+ */
+async function dispatchSyncPackage(payload, options = {}) {
+  const db = database.getDb();
+  const schoolId = getSchoolId(db);
+  if (!schoolId) return { ok: false, error: "no_school_id" };
+
+  const websiteUrl = getSchoolWebsiteUrl(db);
+  if (!websiteUrl) return { ok: false, error: "no_school_website_url" };
+
+  let syncToken = "";
+  try {
+    const row = db
+      .prepare("SELECT value FROM app_settings WHERE key = 'school_website_sync_token'")
+      .get();
+    if (row && row.value) syncToken = row.value.trim();
+  } catch (_) {}
+
+  if (!syncToken) {
+    syncToken = process.env.SCHOOL_WEBSITE_SYNC_TOKEN || getSyncToken(db);
+  }
+
+  const dryRun = Boolean(options.dryRun);
+  const targetEndpoint = `${websiteUrl}/api/sync/package`;
+
+  const bodyData = {
+    schoolCloudId: schoolId,
+    dryRun,
+    modules: payload?.modules || {},
+  };
+
+  const res = await fetch(targetEndpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-sync-token": syncToken,
+    },
+    body: JSON.stringify(bodyData),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return { ok: false, status: res.status, error: data.error || `HTTP ${res.status}` };
+  }
+
+  return { ok: true, dryRun, impact: data.impact, message: data.message };
+}
+
+/**
  * 3. Full 2-Way Sync Loop Cycle
  */
 async function performSyncCycle() {
@@ -1229,6 +1528,8 @@ module.exports = {
   pullPendingSyncEvents,
   pullOnlineAdmissions,
   pushClassesToWebsite,
+  gatherSyncPackage,
+  dispatchSyncPackage,
   performSyncCycle,
   startSyncSchedule,
   stopSyncSchedule,

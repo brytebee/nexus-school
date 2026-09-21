@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useLicense } from '../hooks/useLicense';
 import { useClassArms } from '../hooks/useClassArms';
 import { Combobox } from '../components/Combobox';
@@ -7,6 +7,7 @@ import { useTermConfig } from '../hooks/useTermConfig';
 import { applyInlineEdit, validatePaymentInput, validateRefundInput, validateBankAccounts } from '../lib/financialUtils';
 import { SetupGuardModal } from '../components/SetupGuardModal';
 import { CSVReviewModal } from '../components/CSVReviewModal';
+import { useExportPdf } from '../lib/useExportPdf';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 interface RosterRow {
@@ -177,12 +178,20 @@ export function FinancialHub() {
   const [rosterPage,    setRosterPage]    = useState(0);
   const [statusFilter,  setStatusFilter]  = useState('all');
   const [searchQuery,   setSearchQuery]   = useState('');
+  const [classFilter,   setClassFilter]   = useState('All Classes');
   const [loading,       setLoading]       = useState(false);
   const [pendingEdits,  setPendingEdits]  = useState<Record<string, Partial<RosterRow>>>({});
 
-  // Session/term refs — needed for callbacks that fire after state updates
-  const sessionRef = useRef('');
-  const termRef    = useRef('First Term');
+  // Session/term/class refs — needed for callbacks that fire after state updates
+  const sessionRef     = useRef('');
+  const termRef        = useRef('First Term');
+  const classFilterRef = useRef('All Classes');
+
+  // ── Global PDF export hook ────────────────────────────────────────────────
+  const { exportTablePdf, exporting: exportingPdf } = useExportPdf();
+
+  // Derived class list from useClassArms — includes arms (e.g. "JSS 1 Gold", "SSS 2 Science")
+  const uniqueClasses = useMemo(() => [...fullList].sort(), [fullList]);
 
   // ── Fee Structure ─────────────────────────────────────────────────────────
   const [structClass,   setStructClass]   = useState('');
@@ -452,7 +461,7 @@ export function FinancialHub() {
         }
 
         if (!res.error) {
-          doLoadRoster(sessionRef.current, termRef.current, 0, searchQuery, statusFilter);
+          doLoadRoster(sessionRef.current, termRef.current, 0, searchQuery, statusFilter, classFilterRef.current);
         }
       });
       // ── Dry-run validation before sending ────────────────────────────────
@@ -679,7 +688,7 @@ export function FinancialHub() {
   // ROSTER LOAD
   // ═══════════════════════════════════════════════════════════════════════════
   const doLoadRoster = async (
-    session: string, term: string, page: number, search: string, _filter: string
+    session: string, term: string, page: number, search: string, _filter: string, _classFilter = 'All Classes'
   ) => {
     if (!session || !term) {
       console.warn('[FinancialHub] doLoadRoster: missing session or term', { session, term });
@@ -695,10 +704,11 @@ export function FinancialHub() {
       const res = await window.electronAPI.fees.getRoster({
         academic_session: session,
         term,
-        limit:  PAGE_SIZE,
-        offset: page * PAGE_SIZE,
-        search: search || '',
-        filter: _filter || 'all',
+        limit:      PAGE_SIZE,
+        offset:     page * PAGE_SIZE,
+        search:     search || '',
+        filter:     _filter || 'all',
+        class_name: _classFilter === 'All Classes' ? '' : _classFilter,
       });
       if (res?.ok) {
         setRoster(res.data  || []);
@@ -706,8 +716,8 @@ export function FinancialHub() {
       } else {
         console.error('[FinancialHub] getRoster error:', res?.error);
       }
-      // Also load summary stats
-      await loadDbSummary(session, term, search);
+      // Also load summary stats (pass the same class filter)
+      await loadDbSummary(session, term, search, _classFilter);
     } catch (err) {
       console.error('[FinancialHub] getRoster threw:', err);
     } finally {
@@ -715,10 +725,15 @@ export function FinancialHub() {
     }
   };
 
-  const loadDbSummary = async (session: string, term: string, search: string) => {
+  const loadDbSummary = async (session: string, term: string, search: string, _classFilter = 'All Classes') => {
     if (!window.electronAPI?.fees?.getSummary) return;
     try {
-      const res = await window.electronAPI.fees.getSummary({ academic_session: session, term, search });
+      const res = await window.electronAPI.fees.getSummary({
+        academic_session: session,
+        term,
+        search,
+        class_name: _classFilter === 'All Classes' ? '' : _classFilter,
+      });
       if (res?.ok) {
         setDbSummary(res.data);
       }
@@ -736,7 +751,7 @@ export function FinancialHub() {
     const handler = setTimeout(() => {
       setSearchQuery(searchVal);
       setRosterPage(0);
-      doLoadRoster(sessionRef.current, termRef.current, 0, searchVal, statusFilter);
+      doLoadRoster(sessionRef.current, termRef.current, 0, searchVal, statusFilter, classFilterRef.current);
     }, 300);
     return () => clearTimeout(handler);
   }, [searchVal]);
@@ -771,7 +786,7 @@ export function FinancialHub() {
     sessionRef.current = selectedSession;
     termRef.current    = selectedTerm;
     setRosterPage(0);
-    doLoadRoster(selectedSession, selectedTerm, 0, searchQuery, statusFilter);
+    doLoadRoster(selectedSession, selectedTerm, 0, searchQuery, statusFilter, classFilterRef.current);
   };
 
   const handleClearData = async () => {
@@ -861,7 +876,7 @@ export function FinancialHub() {
         setSettingsOpen(false);
         
         // Reload all data streams from the DB
-        doLoadRoster(sessionRef.current, termRef.current, 0, searchQuery, statusFilter);
+        doLoadRoster(sessionRef.current, termRef.current, 0, searchQuery, statusFilter, classFilterRef.current);
         loadStructure();
         loadAdjustments();
         loadReceipts();
@@ -877,7 +892,7 @@ export function FinancialHub() {
 
   const handlePage = (p: number) => {
     setRosterPage(p);
-    doLoadRoster(sessionRef.current, termRef.current, p, searchQuery, statusFilter);
+    doLoadRoster(sessionRef.current, termRef.current, p, searchQuery, statusFilter, classFilterRef.current);
   };
 
   // Inline edit (Gold)
@@ -927,7 +942,7 @@ export function FinancialHub() {
         }
         setPendingEdits({});
       }
-      doLoadRoster(sessionRef.current, termRef.current, rosterPage, searchQuery, statusFilter);
+      doLoadRoster(sessionRef.current, termRef.current, rosterPage, searchQuery, statusFilter, classFilterRef.current);
     } catch (err) {
       showIndicator('❌ Error saving changes');
       if (Swal) {
@@ -1437,16 +1452,17 @@ export function FinancialHub() {
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PHASE 7 — EXPORT ROSTER CSV
+  // PHASE 7 — EXPORT ROSTER CSV / PDF
   // ═══════════════════════════════════════════════════════════════════════════
   const handleExportRosterCsv = async () => {
     if (!window.electronAPI?.fees?.exportRosterCsv) return;
     try {
       const res = await window.electronAPI.fees.exportRosterCsv({
         academic_session: sessionRef.current,
-        term: termRef.current,
-        filter: statusFilter,
-        search: searchQuery,
+        term:       termRef.current,
+        filter:     statusFilter,
+        search:     searchQuery,
+        class_name: classFilterRef.current === 'All Classes' ? '' : classFilterRef.current,
       });
       if (res?.ok && res.csv) {
         const blob = new Blob([res.csv], { type: 'text/csv' });
@@ -1462,6 +1478,74 @@ export function FinancialHub() {
       }
     } catch (err: any) {
       if (Swal) Swal.fire({ title: 'Export Error', text: err?.message || 'Unexpected error.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+    }
+  };
+
+  const handleExportRosterPdf = async () => {
+    if (!window.electronAPI?.fees?.exportRosterCsv) return;
+    try {
+      // Fetch the full unpaginated dataset (same as CSV export — reuse query)
+      const res = await window.electronAPI.fees.exportRosterCsv({
+        academic_session: sessionRef.current,
+        term:       termRef.current,
+        filter:     statusFilter,
+        search:     searchQuery,
+        class_name: classFilterRef.current === 'All Classes' ? '' : classFilterRef.current,
+      });
+      if (!res?.ok || !Array.isArray(res.rows)) {
+        if (Swal) Swal.fire({ title: 'Export Failed', text: res?.error || 'No data to export.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
+        return;
+      }
+      if (res.rows.length === 0) {
+        if (Swal) Swal.fire({ title: 'Nothing to Export', text: 'No students match the current filters.', icon: 'info', background: '#0b0f19', color: '#fff', confirmButtonColor: '#00E5FF' });
+        return;
+      }
+
+      // Build indexed rows for the PDF
+      const rows = res.rows.map((r: any, i: number) => ({ ...r, _idx: i + 1 }));
+
+      // Build subtitle from active filters
+      const parts: string[] = [
+        `Session: ${sessionRef.current}`,
+        `Term: ${termRef.current}`,
+      ];
+      if (classFilterRef.current !== 'All Classes') parts.push(`Class: ${classFilterRef.current}`);
+      if (statusFilter !== 'all') parts.push(`Status: ${statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1)}`);
+
+      // Summary totals
+      const totalBilled   = rows.reduce((s: number, r: any) => s + Number(r.total_billed || 0), 0);
+      const totalPaid     = rows.reduce((s: number, r: any) => s + Number(r.total_paid   || 0), 0);
+      const totalOutstanding = rows.reduce((s: number, r: any) => s + Number(r.outstanding || 0), 0);
+
+      const filename = `fee-roster-${sessionRef.current}-${termRef.current}${classFilterRef.current !== 'All Classes' ? '-' + classFilterRef.current : ''}`.replace(/\s/g, '-');
+
+      await exportTablePdf({
+        title: 'STUDENT FEE ROSTER',
+        subtitle: parts.join('  |  '),
+        columns: [
+          { key: '_idx',        header: '#',               width: 30,  align: 'left' },
+          { key: 'name',        header: 'Student Name',    width: 180, align: 'left' },
+          { key: 'class_name',  header: 'Class',           width: 100, align: 'left' },
+          { key: 'reg_no',      header: 'Reg No',          width: 80,  align: 'left' },
+          { key: 'total_billed',header: 'Total Billed (NGN)',width: 100, align: 'right', format: 'currency' },
+          { key: 'total_paid',  header: 'Amount Paid (NGN)', width: 100, align: 'right', format: 'currency' },
+          { key: 'outstanding', header: 'Balance (NGN)',     width: 100, align: 'right', format: 'currency' },
+          { key: 'status',      header: 'Status',            width: 70,  align: 'center' },
+        ],
+        rows,
+        summaryTotals: [
+          { label: 'Total Students',  value: rows.length },
+          { label: 'Total Billed',    value: totalBilled,      format: 'currency' },
+          { label: 'Total Paid',      value: totalPaid,        format: 'currency' },
+          { label: 'Outstanding',     value: totalOutstanding, format: 'currency' },
+        ],
+        orientation: 'landscape',
+        filename,
+      });
+
+      showIndicator(`✅ PDF exported — ${rows.length} students`);
+    } catch (err: any) {
+      if (Swal) Swal.fire({ title: 'PDF Export Error', text: err?.message || 'Unexpected error generating PDF.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
     }
   };
 
@@ -1528,7 +1612,7 @@ export function FinancialHub() {
           const lr = await window.electronAPI.fees.getLedger({ studentId: ledgerStudent.id });
           if (lr?.ok) setLedgerTx(lr.data || []);
         }
-        doLoadRoster(sessionRef.current, termRef.current, rosterPage, searchQuery, statusFilter);
+        doLoadRoster(sessionRef.current, termRef.current, rosterPage, searchQuery, statusFilter, classFilterRef.current);
       } else {
         if (Swal) Swal.fire({ title: 'Reversal Failed', text: res?.error || 'Could not reverse transaction.', icon: 'error', background: '#0b0f19', color: '#fff', confirmButtonColor: '#ef4444' });
       }
@@ -1935,7 +2019,7 @@ export function FinancialHub() {
             confirmButtonColor: '#00E5FF'
           });
         }
-        doLoadRoster(sessionRef.current, termRef.current, rosterPage, searchQuery, statusFilter);
+        doLoadRoster(sessionRef.current, termRef.current, rosterPage, searchQuery, statusFilter, classFilterRef.current);
       } else {
         showIndicator('❌ Payment record failed');
         if (Swal) {
@@ -2003,7 +2087,7 @@ export function FinancialHub() {
           });
         }
         openLedger(ledgerStudent.id, ledgerStudent.name);
-        doLoadRoster(sessionRef.current, termRef.current, rosterPage, searchQuery, statusFilter);
+        doLoadRoster(sessionRef.current, termRef.current, rosterPage, searchQuery, statusFilter, classFilterRef.current);
       } else {
         if (Swal) {
           Swal.fire({
@@ -2068,7 +2152,7 @@ export function FinancialHub() {
           openLedger(ledgerStudent.id, ledgerStudent.name);
         }
         // Refresh roster
-        doLoadRoster(sessionRef.current, termRef.current, rosterPage, searchQuery, statusFilter);
+        doLoadRoster(sessionRef.current, termRef.current, rosterPage, searchQuery, statusFilter, classFilterRef.current);
       } else {
         throw new Error(res?.error || 'Refund initiation failed.');
       }
@@ -2097,7 +2181,7 @@ export function FinancialHub() {
         txRef: receiptTarget.txRef
       });
       if (res?.ok) {
-        showIndicator('✅ PDF Receipt dispatched to WhatsApp!');
+        showIndicator(res.fallback ? 'ℹ️ Receipt sent via WhatsApp (Text Fallback)' : '✅ PDF Receipt dispatched to WhatsApp!');
         setReceiptTarget(null);
       } else {
         throw new Error(res?.error || 'Failed to dispatch WhatsApp PDF receipt.');
@@ -2335,13 +2419,34 @@ export function FinancialHub() {
                     const newFilter = e.target.value;
                     setStatusFilter(newFilter);
                     setRosterPage(0);
-                    doLoadRoster(sessionRef.current, termRef.current, 0, searchQuery, newFilter);
+                    doLoadRoster(sessionRef.current, termRef.current, 0, searchQuery, newFilter, classFilterRef.current);
                   }}
                   className="modern-input" style={{ width:'130px', fontSize:'12px' }}>
                   <option value="all">All Students</option>
                   <option value="unpaid">Unpaid Only</option>
                   <option value="partial">Partial Only</option>
                   <option value="cleared">Cleared Only</option>
+                </select>
+              </div>
+              <div className="ph-config-group">
+                <Lbl>Class</Lbl>
+                <select
+                  id="fees-class-filter"
+                  value={classFilter}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setClassFilter(val);
+                    classFilterRef.current = val;
+                    setRosterPage(0);
+                    doLoadRoster(sessionRef.current, termRef.current, 0, searchQuery, statusFilter, val);
+                  }}
+                  className="modern-input"
+                  style={{ width:'155px', fontSize:'12px' }}
+                >
+                  <option value="All Classes">All Classes</option>
+                  {uniqueClasses.map(cls => (
+                    <option key={cls} value={cls}>{cls}</option>
+                  ))}
                 </select>
               </div>
               <div style={{ marginLeft:'auto', display:'flex', gap:'10px', alignItems:'center' }}>
@@ -2355,6 +2460,16 @@ export function FinancialHub() {
                   style={{ padding:'7px 16px', fontSize:'12px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.15)' }}
                 >
                   📤 Export CSV
+                </button>
+                <button
+                  id="btn-fees-export-pdf"
+                  onClick={handleExportRosterPdf}
+                  disabled={exportingPdf}
+                  className="primary-btn"
+                  title="Export this roster as a branded PDF report"
+                  style={{ padding:'7px 16px', fontSize:'12px', background:'rgba(218,165,32,0.10)', border:'1px solid rgba(218,165,32,0.35)', color:'#daa520' }}
+                >
+                  {exportingPdf ? '⌛ Generating…' : '🖨️ Export PDF'}
                 </button>
                 <button
                   id="btn-fees-recovery-pulse"
@@ -2511,7 +2626,7 @@ export function FinancialHub() {
                   <span id="fees-pending-count" style={{ fontSize:'12px', color:'var(--text-dim)' }}>{unsavedCount} unsaved change{unsavedCount!==1?'s':''}</span>
                   <div style={{ display:'flex', gap:'10px' }}>
                     <button id="btn-fees-discard" className="secondary-btn" style={{ fontSize:'12px', padding:'7px 16px' }}
-                      onClick={() => { setPendingEdits({}); doLoadRoster(sessionRef.current,termRef.current,rosterPage,searchQuery,statusFilter); }}>
+                      onClick={() => { setPendingEdits({}); doLoadRoster(sessionRef.current,termRef.current,rosterPage,searchQuery,statusFilter,classFilterRef.current); }}>
                       Discard
                     </button>
                     <button id="btn-fees-save-all" onClick={handleSaveAll} className="primary-btn" style={{ fontSize:'12px', padding:'7px 18px', background:'linear-gradient(135deg,#b8860b,#ffd700)', color:'#000', border:'none', boxShadow:'none' }}>

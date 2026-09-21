@@ -158,22 +158,41 @@ module.exports = function registerCBTHandlers(database) {
         const {
             title, bank_id, class_name, academic_session, term, question_count, duration_minutes, pass_mark_percentage,
             shuffle_questions, shuffle_options, exam_type, is_promotional, assessment_mapping, security_profile, result_release_policy,
-            pc_count
+            pc_count,
+            target_classes, delivery_mode, calculator_type, enable_proctoring, auto_issue_offer, instructions, subject_quotas
         } = examData;
+
+        const resolvedTargetClasses = Array.isArray(target_classes)
+            ? target_classes
+            : (class_name ? [class_name] : []);
+        const resolvedClassName = class_name || (resolvedTargetClasses.length > 0 ? resolvedTargetClasses.join(', ') : 'All Classes');
+
+        const resolvedCalculatorType = calculator_type || (security_profile?.calculator ? 'basic' : 'none');
+        const resolvedEnableProctoring = enable_proctoring !== undefined
+            ? (enable_proctoring ? 1 : 0)
+            : (security_profile?.proctoring ? 1 : 0);
 
         const stmt = database.getDb().prepare(`
             INSERT INTO cbt_exams (
                 title, bank_id, class_name, academic_session, term, question_count, duration_minutes, 
                 status, pass_mark_percentage, shuffle_questions, shuffle_options, exam_type, is_promotional,
-                assessment_mapping, security_profile, result_release_policy, pc_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                assessment_mapping, security_profile, result_release_policy, pc_count,
+                target_classes, delivery_mode, calculator_type, enable_proctoring, auto_issue_offer, instructions, subject_quotas
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         
         const info = stmt.run(
-            title, bank_id, class_name, academic_session, term, question_count, duration_minutes,
+            title, bank_id, resolvedClassName, academic_session, term, question_count, duration_minutes,
             pass_mark_percentage || 50, shuffle_questions ? 1 : 0, shuffle_options ? 1 : 0, 
-            exam_type, is_promotional ? 1 : 0, assessment_mapping, JSON.stringify(security_profile || {}), result_release_policy,
-            pc_count ? Number(pc_count) : 30
+            exam_type, is_promotional ? 1 : 0, assessment_mapping, JSON.stringify(security_profile || {}), result_release_policy || 'immediate',
+            pc_count ? Number(pc_count) : 30,
+            JSON.stringify(resolvedTargetClasses),
+            delivery_mode || 'on_premises',
+            resolvedCalculatorType,
+            resolvedEnableProctoring,
+            auto_issue_offer ? 1 : 0,
+            instructions || '',
+            JSON.stringify(subject_quotas || [])
         );
         return { success: true, id: info.lastInsertRowid };
     });
