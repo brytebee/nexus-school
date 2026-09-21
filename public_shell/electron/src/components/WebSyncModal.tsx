@@ -26,6 +26,7 @@ export function WebSyncModal({
   const [syncCalendar, setSyncCalendar] = useState(true);
   const [syncFees, setSyncFees] = useState(false);
   const [syncCustomSubjects, setSyncCustomSubjects] = useState(true);
+  const [syncCbtQuestionBanks, setSyncCbtQuestionBanks] = useState(true);
   const [syncCbtExams, setSyncCbtExams] = useState(false);
 
   // Loaded snapshot data
@@ -121,6 +122,10 @@ export function WebSyncModal({
       activeModules.cbtExams = snapshot.modules.cbtExams;
     }
 
+    if (syncCbtQuestionBanks && snapshot?.modules?.cbtQuestionBanks) {
+      activeModules.cbtQuestionBanks = snapshot.modules.cbtQuestionBanks;
+    }
+
     return {
       schoolCloudId: snapshot?.schoolCloudId,
       modules: activeModules,
@@ -210,6 +215,13 @@ export function WebSyncModal({
   const hierarchyCount = snapshot?.modules?.classes?.hierarchy?.length || 0;
   const feesCount = snapshot?.modules?.fees?.length || 0;
   const cbtCount = snapshot?.modules?.cbtExams?.length || 0;
+  const cbtBanksCount = snapshot?.modules?.cbtQuestionBanks?.length || 0;
+  const cbtQuestionsTotal =
+    snapshot?.modules?.cbtQuestionBanks?.reduce(
+      (acc: number, b: any) =>
+        acc + (b.questions?.length || b.questionCount || 0),
+      0
+    ) || 0;
   const subjectsCount = snapshot?.modules?.customSubjects?.length || 0;
 
   return (
@@ -289,7 +301,7 @@ export function WebSyncModal({
             { id: 'branding', label: '🎨 Profile & Branding' },
             { id: 'calendar', label: '📅 Calendar' },
             { id: 'fees', label: `💳 Fees (${feesCount})` },
-            { id: 'cbt', label: `🧠 CBT (${cbtCount})` },
+            { id: 'cbt', label: `🧠 CBT (${cbtBanksCount > 0 ? `${cbtBanksCount} Banks` : `${cbtCount} Exams`})` },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -352,6 +364,12 @@ export function WebSyncModal({
                 <span>
                   Exams: <strong>+{impactResult.cbtExams.willAdd}</strong> new,{' '}
                   <strong>~{impactResult.cbtExams.willUpdate}</strong> updated
+                </span>
+              )}
+              {impactResult.cbtQuestionBanks && (
+                <span>
+                  Banks: <strong>+{impactResult.cbtQuestionBanks.banksWillAdd}</strong> new,{' '}
+                  <strong>~{impactResult.cbtQuestionBanks.banksWillUpdate}</strong> updated ({impactResult.cbtQuestionBanks.totalIncomingQuestions} Qs)
                 </span>
               )}
             </div>
@@ -438,11 +456,21 @@ export function WebSyncModal({
               </label>
 
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', padding: '10px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)' }}>
+                <input type="checkbox" checked={syncCbtQuestionBanks} onChange={(e) => setSyncCbtQuestionBanks(e.target.checked)} />
+                <div>
+                  <strong>CBT Question Banks &amp; Library</strong>
+                  <span style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
+                    {cbtBanksCount} banks ({cbtQuestionsTotal} questions) for cloud scheduling
+                  </span>
+                </div>
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', padding: '10px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)' }}>
                 <input type="checkbox" checked={syncCbtExams} onChange={(e) => setSyncCbtExams(e.target.checked)} />
                 <div>
-                  <strong>Entrance CBT Screening</strong>
+                  <strong>Deployed Entrance Exams</strong>
                   <span style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
-                    {cbtCount} external screening tests
+                    {cbtCount} deployed exam templates
                   </span>
                 </div>
               </label>
@@ -721,138 +749,200 @@ export function WebSyncModal({
           </div>
         )}
 
-        {/* TAB 6: ENTRANCE & ONLINE CBT EXAMS */}
+        {/* TAB 6: CBT QUESTION BANKS & EXAMS */}
         {activeTab === 'cbt' && (
-          <div style={{ maxHeight: '380px', overflowY: 'auto' }}>
-            {cbtCount === 0 ? (
-              <p style={{ color: 'rgba(255,255,255,0.5)', fontStyle: 'italic' }}>
-                No entrance or online CBT exams found. Deployed online exams or entrance tests will appear here.
-              </p>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {snapshot?.modules?.cbtExams?.map((exam: any, idx: number) => {
-                  const targetList = Array.isArray(exam.targetClasses) && exam.targetClasses.length > 0
-                    ? exam.targetClasses
-                    : (exam.className ? [exam.className] : []);
+          <div style={{ maxHeight: '380px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {/* Section 1: Question Banks (For Cloud Authoring & Deployment) */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <div>
+                  <strong style={{ fontSize: '13px', color: '#fff' }}>Question Banks ({cbtBanksCount})</strong>
+                  <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', display: 'block', marginTop: '2px' }}>
+                    Author offline in Question Studio. Synced banks can be scheduled directly on the school website without pre-existing student rosters.
+                  </span>
+                </div>
+                {cbtBanksCount > 0 && (
+                  <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', background: 'rgba(56,189,248,0.15)', color: '#38bdf8', fontWeight: 600, flexShrink: 0 }}>
+                    {cbtQuestionsTotal} Total Questions
+                  </span>
+                )}
+              </div>
 
-                  return (
+              {cbtBanksCount === 0 ? (
+                <div style={{ padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px dashed rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.4)', fontStyle: 'italic', fontSize: '12px' }}>
+                  No question banks found in local CBT repository. Create question banks in CBT Arena &gt; Question Studio to stage them here.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {snapshot?.modules?.cbtQuestionBanks?.map((bank: any, bIdx: number) => (
                     <div
-                      key={idx}
+                      key={bIdx}
                       style={{
-                        padding: '12px 14px',
+                        padding: '10px 14px',
                         borderRadius: '8px',
-                        background: 'rgba(255,255,255,0.03)',
-                        border: '1px solid rgba(255,255,255,0.08)',
+                        background: 'rgba(56,189,248,0.03)',
+                        border: '1px solid rgba(56,189,248,0.15)',
                         display: 'flex',
-                        flexDirection: 'column',
-                        gap: '8px',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div>
-                          <strong style={{ color: '#38bdf8', fontSize: '13px' }}>{exam.title}</strong>
-                          <span style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginTop: '2px' }}>
-                            {exam.durationMinutes} mins · {exam.questionCount} questions · Pass mark: {exam.passMarkPercentage || exam.passPercentage || 50}%
+                      <div style={{ flex: 1, minWidth: 0, marginRight: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <strong style={{ color: '#fff', fontSize: '13px' }}>{bank.name}</strong>
+                          <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: 'rgba(56,189,248,0.15)', color: '#38bdf8', fontWeight: 600 }}>
+                            {bank.subject}
+                          </span>
+                          <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)' }}>
+                            {bank.classCategory}
                           </span>
                         </div>
-                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                          <span
-                            style={{
-                              fontSize: '10px',
-                              padding: '2px 8px',
-                              borderRadius: '6px',
-                              background: exam.deliveryMode === 'online' ? 'rgba(56,189,248,0.15)' : 'rgba(16,185,129,0.15)',
-                              color: exam.deliveryMode === 'online' ? '#38bdf8' : '#34d399',
-                              border: `1px solid ${exam.deliveryMode === 'online' ? 'rgba(56,189,248,0.3)' : 'rgba(16,185,129,0.3)'}`,
-                              fontWeight: 'bold',
-                              textTransform: 'uppercase',
-                            }}
-                          >
-                            {exam.deliveryMode === 'online' ? '🌐 Online Remote' : '🏢 On-Premises'}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Badges & Multi-Class Target */}
-                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
-                        {targetList.map((cls: string, cIdx: number) => (
-                          <span
-                            key={cIdx}
-                            style={{
-                              fontSize: '10px',
-                              padding: '1px 7px',
-                              borderRadius: '4px',
-                              background: 'rgba(255,255,255,0.08)',
-                              color: '#cbd5e1',
-                            }}
-                          >
-                            {cls}
-                          </span>
-                        ))}
-
-                        {exam.enableProctoring && (
-                          <span
-                            style={{
-                              fontSize: '10px',
-                              padding: '1px 6px',
-                              borderRadius: '4px',
-                              background: 'rgba(239,68,68,0.15)',
-                              color: '#f87171',
-                              border: '1px solid rgba(239,68,68,0.3)',
-                            }}
-                          >
-                            📹 Surveillance
-                          </span>
-                        )}
-
-                        {exam.enforceKiosk && (
-                          <span
-                            style={{
-                              fontSize: '10px',
-                              padding: '1px 6px',
-                              borderRadius: '4px',
-                              background: 'rgba(245,158,11,0.15)',
-                              color: '#fbbf24',
-                              border: '1px solid rgba(245,158,11,0.3)',
-                            }}
-                          >
-                            🔒 Strict Kiosk
-                          </span>
-                        )}
-
-                        {exam.calculatorType && exam.calculatorType !== 'none' && (
-                          <span
-                            style={{
-                              fontSize: '10px',
-                              padding: '1px 6px',
-                              borderRadius: '4px',
-                              background: 'rgba(168,85,247,0.15)',
-                              color: '#c084fc',
-                              border: '1px solid rgba(168,85,247,0.3)',
-                            }}
-                          >
-                            🧮 {exam.calculatorType === 'scientific' ? 'Scientific Calc' : 'Basic Calc'}
-                          </span>
-                        )}
-
-                        {exam.isPromotional && (
-                          <span
-                            style={{
-                              fontSize: '10px',
-                              padding: '1px 6px',
-                              borderRadius: '4px',
-                              background: 'rgba(99,102,241,0.15)',
-                              color: '#818cf8',
-                              border: '1px solid rgba(99,102,241,0.3)',
-                            }}
-                          >
-                            🎓 Promotional
-                          </span>
+                        {bank.description && (
+                          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginTop: '3px', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                            {bank.description}
+                          </div>
                         )}
                       </div>
+                      <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '6px', background: 'rgba(16,185,129,0.15)', color: '#34d399', fontWeight: 700, flexShrink: 0 }}>
+                        {bank.questions?.length || bank.questionCount || 0} Qs
+                      </span>
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Section 2: Deployed Exam Templates */}
+            {cbtCount > 0 && (
+              <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '14px' }}>
+                <strong style={{ fontSize: '13px', color: '#fff', display: 'block', marginBottom: '8px' }}>
+                  Deployed Exam Schedules ({cbtCount})
+                </strong>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {snapshot?.modules?.cbtExams?.map((exam: any, idx: number) => {
+                    const targetList = Array.isArray(exam.targetClasses) && exam.targetClasses.length > 0
+                      ? exam.targetClasses
+                      : (exam.className ? [exam.className] : []);
+
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          padding: '12px 14px',
+                          borderRadius: '8px',
+                          background: 'rgba(255,255,255,0.03)',
+                          border: '1px solid rgba(255,255,255,0.08)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '8px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div>
+                            <strong style={{ color: '#38bdf8', fontSize: '13px' }}>{exam.title}</strong>
+                            <span style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginTop: '2px' }}>
+                              {exam.durationMinutes} mins · {exam.questionCount} questions · Pass mark: {exam.passMarkPercentage || exam.passPercentage || 50}%
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                background: exam.deliveryMode === 'online' ? 'rgba(56,189,248,0.15)' : 'rgba(16,185,129,0.15)',
+                                color: exam.deliveryMode === 'online' ? '#38bdf8' : '#34d399',
+                                border: `1px solid ${exam.deliveryMode === 'online' ? 'rgba(56,189,248,0.3)' : 'rgba(16,185,129,0.3)'}`,
+                                fontWeight: 'bold',
+                                textTransform: 'uppercase',
+                              }}
+                            >
+                              {exam.deliveryMode === 'online' ? '🌐 Online Remote' : '🏢 On-Premises'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Badges & Multi-Class Target */}
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+                          {targetList.map((cls: string, cIdx: number) => (
+                            <span
+                              key={cIdx}
+                              style={{
+                                fontSize: '10px',
+                                padding: '1px 7px',
+                                borderRadius: '4px',
+                                background: 'rgba(255,255,255,0.08)',
+                                color: '#cbd5e1',
+                              }}
+                            >
+                              {cls}
+                            </span>
+                          ))}
+
+                          {exam.enableProctoring && (
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                background: 'rgba(239,68,68,0.15)',
+                                color: '#f87171',
+                                border: '1px solid rgba(239,68,68,0.3)',
+                              }}
+                            >
+                              📹 Surveillance
+                            </span>
+                          )}
+
+                          {exam.enforceKiosk && (
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                background: 'rgba(245,158,11,0.15)',
+                                color: '#fbbf24',
+                                border: '1px solid rgba(245,158,11,0.3)',
+                              }}
+                            >
+                              🔒 Strict Kiosk
+                            </span>
+                          )}
+
+                          {exam.calculatorType && exam.calculatorType !== 'none' && (
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                background: 'rgba(168,85,247,0.15)',
+                                color: '#c084fc',
+                                border: '1px solid rgba(168,85,247,0.3)',
+                              }}
+                            >
+                              🧮 {exam.calculatorType === 'scientific' ? 'Scientific Calc' : 'Basic Calc'}
+                            </span>
+                          )}
+
+                          {exam.isPromotional && (
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                background: 'rgba(99,102,241,0.15)',
+                                color: '#818cf8',
+                                border: '1px solid rgba(99,102,241,0.3)',
+                              }}
+                            >
+                              🎓 Promotional
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>

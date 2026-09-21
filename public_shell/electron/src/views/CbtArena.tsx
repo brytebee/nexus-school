@@ -93,6 +93,59 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
   const [enforceKiosk, setEnforceKiosk] = useState(true);
   const [releasePolicy, setReleasePolicy] = useState('immediate');
   const [isPromotional, setIsPromotional] = useState(false);
+  const [deployBankMode, setDeployBankMode] = useState<'single' | 'composite'>('single');
+  const [compositeQuotas, setCompositeQuotas] = useState<Array<{
+    bank_id: number;
+    bank_name: string;
+    subject: string;
+    question_count: number;
+    available_count?: number;
+  }>>([]);
+
+  const addBankToComposite = (bankIdStr: string) => {
+    const bankId = parseInt(bankIdStr);
+    if (!bankId) return;
+    const bank = banksList.find(b => b.id === bankId);
+    if (!bank) return;
+    if (compositeQuotas.some(q => q.bank_id === bankId)) return;
+
+    const available = bank.question_count ?? 50;
+    const defaultQuota = Math.min(20, available > 0 ? available : 20);
+    const newQuotas = [
+      ...compositeQuotas,
+      {
+        bank_id: bankId,
+        bank_name: bank.name,
+        subject: bank.subject || bank.class_category || bank.category || 'General',
+        question_count: defaultQuota,
+        available_count: available,
+      }
+    ];
+    setCompositeQuotas(newQuotas);
+    const total = newQuotas.reduce((sum, q) => sum + (q.question_count || 0), 0);
+    setDeployCount(total);
+    if (!deployBankId) setDeployBankId(String(bankId));
+  };
+
+  const updateCompositeQuota = (bankId: number, count: number) => {
+    const validCount = Math.max(1, count || 1);
+    const newQuotas = compositeQuotas.map(q => q.bank_id === bankId ? { ...q, question_count: validCount } : q);
+    setCompositeQuotas(newQuotas);
+    const total = newQuotas.reduce((sum, q) => sum + (q.question_count || 0), 0);
+    setDeployCount(total);
+  };
+
+  const removeCompositeQuota = (bankId: number) => {
+    const newQuotas = compositeQuotas.filter(q => q.bank_id !== bankId);
+    setCompositeQuotas(newQuotas);
+    const total = newQuotas.reduce((sum, q) => sum + (q.question_count || 0), 0);
+    setDeployCount(total);
+    if (newQuotas.length > 0) {
+      setDeployBankId(String(newQuotas[0].bank_id));
+    } else {
+      setDeployBankId('');
+    }
+  };
 
   // System settings for deploy form
   const [classHierarchy, setClassHierarchy] = useState<string[]>([]);
@@ -890,21 +943,49 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
       : (singleClass ? [singleClass] : []);
     const deployClassName = resolvedTargetClasses.join(', ');
 
-    if (!deployTitle || !deployBankId || resolvedTargetClasses.length === 0) {
+    const isComposite = deployBankMode === 'composite';
+    const resolvedBankId = isComposite
+      ? (compositeQuotas.length > 0 ? compositeQuotas[0].bank_id : 0)
+      : parseInt(deployBankId);
+
+    const hasValidBank = isComposite
+      ? (compositeQuotas.length > 0 && compositeQuotas.every(q => q.question_count > 0))
+      : Boolean(resolvedBankId);
+
+    if (!deployTitle || resolvedTargetClasses.length === 0 || !hasValidBank) {
+      let errorMsg = "Please fill all required fields.";
+      if (!deployTitle) errorMsg = "Please enter an Exam Title.";
+      else if (resolvedTargetClasses.length === 0) errorMsg = "Please select at least one Target Class.";
+      else if (isComposite && compositeQuotas.length === 0) errorMsg = "Please add at least one Question Bank to the composite examination.";
+      else if (isComposite && !compositeQuotas.every(q => q.question_count > 0)) errorMsg = "Every question bank in the composite examination must have a quota of at least 1 question.";
+      else if (!resolvedBankId) errorMsg = "Please select a Question Bank.";
+
       if (Swal) {
         Swal.fire({
           title: 'Required Fields Missing',
-          text: "Please fill all required fields (Title, Question Bank, and at least one Target Class).",
+          text: errorMsg,
           icon: 'warning',
           background: '#0b0f19',
           color: '#fff',
           confirmButtonColor: '#f59e0b'
         });
       } else {
-        alert("Please fill all required fields (Title, Question Bank, and at least one Target Class).");
+        alert(errorMsg);
       }
       return;
     }
+
+    const resolvedSubjectQuotas = isComposite
+      ? compositeQuotas.map(q => ({
+          bank_id: q.bank_id,
+          subject: q.subject || q.bank_name,
+          question_count: q.question_count
+        }))
+      : [];
+
+    const resolvedQuestionCount = isComposite
+      ? resolvedSubjectQuotas.reduce((sum, q) => sum + q.question_count, 0)
+      : deployCount;
 
     let candidates: any[] = [];
     if (deployExamType === 'external') {
@@ -984,7 +1065,7 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
 
     const payload = {
       title: deployTitle,
-      bank_id: parseInt(deployBankId),
+      bank_id: resolvedBankId,
       class_name: deployClassName,
       target_classes: resolvedTargetClasses,
       delivery_mode: deployDeliveryMode,
@@ -993,7 +1074,7 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
       academic_session: academicSession || '2025/2026',
       term: deployTerm || availableTerms[0] || 'First',
       pc_count: deployPcCount,
-      question_count: deployCount,
+      question_count: resolvedQuestionCount,
       duration_minutes: deployDuration,
       exam_type: deployExamType,
       is_promotional: isPromotional,
@@ -1002,6 +1083,7 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
       shuffle_questions: shuffleQuestions,
       shuffle_options: shuffleOptions,
       result_release_policy: releasePolicy,
+      subject_quotas: resolvedSubjectQuotas,
       security_profile: {
         calculator: deployCalculatorType !== 'none',
         calculator_type: deployCalculatorType,
@@ -1040,6 +1122,9 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
         setDeployClassLevel('');
         setDeployClassArm('');
         setDeployTargetClasses([]);
+        setDeployBankId('');
+        setCompositeQuotas([]);
+        setDeployBankMode('single');
         setCsvFile(null);
         setCsvStatus('');
 
@@ -2054,31 +2139,199 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
               <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#fff', marginBottom: '20px', margin: '0 0 20px 0' }}>Deploy New Exam</h3>
               
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
-                <div>
+                <div style={{ gridColumn: 'span 2' }}>
                   <label className="ph-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)', display: 'block', marginBottom: '6px' }}>Exam Title</label>
                   <input 
                     type="text" 
                     value={deployTitle}
                     onChange={(e) => setDeployTitle(e.target.value)}
-                    placeholder="e.g. 2026 Entrance Exam"
+                    placeholder="e.g. 2026 Entrance Screening or SS 1 Termly Examination"
                     className="modern-input"
                     style={{ width: '100%' }}
                   />
                 </div>
-                
-                <div>
-                  <label className="ph-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)', display: 'block', marginBottom: '6px' }}>Question Bank</label>
-                  <select 
-                    value={deployBankId}
-                    onChange={(e) => setDeployBankId(e.target.value)}
-                    className="modern-input"
-                    style={{ width: '100%', background: '#0d1235', color: '#fff' }}
-                  >
-                    <option value="" style={{ background: '#0d1235', color: '#fff' }}>-- Select Bank --</option>
-                    {banksList.map(b => (
-                      <option key={b.id} value={b.id} style={{ background: '#0d1235', color: '#fff' }}>{b.name} ({b.class_category || b.category || 'General'})</option>
-                    ))}
-                  </select>
+
+                {/* Bank Composition Mode Selector */}
+                <div style={{ gridColumn: 'span 2' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label className="ph-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)', margin: 0 }}>
+                      Question Bank Composition
+                    </label>
+                    <span style={{ fontSize: '11px', color: deployBankMode === 'composite' ? '#38bdf8' : 'var(--text-dim)', fontWeight: 600 }}>
+                      {deployBankMode === 'composite' ? '📚 Multi-Subject Mode Active' : 'Single Subject Mode'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setDeployBankMode('single')}
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        border: deployBankMode === 'single' ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
+                        background: deployBankMode === 'single' ? 'rgba(16,185,129,0.15)' : 'rgba(0,0,0,0.2)',
+                        color: deployBankMode === 'single' ? '#34d399' : 'var(--text-dim)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px'
+                      }}
+                    >
+                      <span style={{ fontSize: '18px' }}>📄</span>
+                      <div>
+                        <div style={{ fontWeight: 'bold', fontSize: '12px' }}>Single Question Bank</div>
+                        <div style={{ fontSize: '10px', opacity: 0.7, marginTop: '2px' }}>Standard exam drawn from 1 subject bank</div>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeployBankMode('composite')}
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        border: deployBankMode === 'composite' ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)',
+                        background: deployBankMode === 'composite' ? 'rgba(56,189,248,0.15)' : 'rgba(0,0,0,0.2)',
+                        color: deployBankMode === 'composite' ? '#38bdf8' : 'var(--text-dim)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px'
+                      }}
+                    >
+                      <span style={{ fontSize: '18px' }}>📚</span>
+                      <div>
+                        <div style={{ fontWeight: 'bold', fontSize: '12px' }}>Composite Multi-Bank</div>
+                        <div style={{ fontSize: '10px', opacity: 0.7, marginTop: '2px' }}>Combine multiple subjects with custom quotas</div>
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* Single Bank Mode Dropdown */}
+                  {deployBankMode === 'single' && (
+                    <div>
+                      <select 
+                        value={deployBankId}
+                        onChange={(e) => setDeployBankId(e.target.value)}
+                        className="modern-input"
+                        style={{ width: '100%', background: '#0d1235', color: '#fff' }}
+                      >
+                        <option value="" style={{ background: '#0d1235', color: '#fff' }}>-- Select Question Bank --</option>
+                        {banksList.map(b => (
+                          <option key={b.id} value={b.id} style={{ background: '#0d1235', color: '#fff' }}>
+                            {b.name} ({b.class_category || b.category || 'General'}) {b.question_count !== undefined ? `— ${b.question_count} Qs available` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Composite Multi-Bank Quota Studio */}
+                  {deployBankMode === 'composite' && (
+                    <div style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(56,189,248,0.3)', borderRadius: '10px', padding: '14px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: '12px', color: '#38bdf8' }}>Subject Quota Assembler</div>
+                          <div style={{ fontSize: '10px', color: 'var(--text-dim)' }}>Select subjects below to draw questions from each into this single paper.</div>
+                        </div>
+                        {compositeQuotas.length > 0 && (
+                          <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '6px', background: 'rgba(56,189,248,0.15)', color: '#38bdf8', fontWeight: 600 }}>
+                            {compositeQuotas.reduce((sum, q) => sum + (q.question_count || 0), 0)} Questions · {compositeQuotas.length} Subject(s)
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ marginBottom: '12px' }}>
+                        <select
+                          className="modern-input"
+                          style={{ width: '100%', background: '#0d1235', color: '#fff' }}
+                          defaultValue=""
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              addBankToComposite(e.target.value);
+                              e.target.value = "";
+                            }
+                          }}
+                        >
+                          <option value="" disabled>+ Click to select and add a Question Bank to this exam...</option>
+                          {banksList
+                            .filter(b => !compositeQuotas.some(q => q.bank_id === b.id))
+                            .map(b => (
+                              <option key={b.id} value={b.id}>
+                                + {b.name} ({b.class_category || b.category || 'General'}) {b.question_count !== undefined ? `[${b.question_count} Qs available]` : ''}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+
+                      {compositeQuotas.length === 0 ? (
+                        <div style={{ padding: '14px', textAlign: 'center', color: 'var(--text-dim)', fontSize: '11px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px dashed rgba(255,255,255,0.1)' }}>
+                          No question banks added yet. Select a bank from the dropdown above to add it (e.g. Mathematics, English, General Studies).
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {compositeQuotas.map((item) => (
+                            <div
+                              key={item.bank_id}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '8px 12px',
+                                background: 'rgba(255,255,255,0.04)',
+                                border: '1px solid rgba(255,255,255,0.08)',
+                                borderRadius: '8px',
+                                gap: '12px'
+                              }}
+                            >
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#fff' }}>{item.bank_name}</span>
+                                  <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: 'rgba(255,255,255,0.1)', color: 'var(--text-dim)' }}>
+                                    {item.subject}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px' }}>
+                                  {item.available_count !== undefined ? `${item.available_count} questions in bank` : 'Available in bank'}
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <label style={{ fontSize: '11px', color: 'var(--text-dim)' }}>Quota:</label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={item.available_count && item.available_count > 0 ? item.available_count : 500}
+                                  value={item.question_count}
+                                  onChange={(e) => updateCompositeQuota(item.bank_id, parseInt(e.target.value) || 1)}
+                                  className="modern-input"
+                                  style={{ width: '65px', padding: '4px 6px', textAlign: 'center', fontSize: '12px', fontWeight: 'bold' }}
+                                />
+                                <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>Qs</span>
+                                <button
+                                  type="button"
+                                  onClick={() => removeCompositeQuota(item.bank_id)}
+                                  style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: '#ef4444',
+                                    cursor: 'pointer',
+                                    padding: '4px',
+                                    fontSize: '14px',
+                                    marginLeft: '6px'
+                                  }}
+                                  title="Remove Bank"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 
                 {/* Delivery Mode Selector */}
@@ -2240,13 +2493,16 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                 </div>
                 
                 <div>
-                  <label className="ph-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)', display: 'block', marginBottom: '6px' }}>Question Count</label>
+                  <label className="ph-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)', display: 'block', marginBottom: '6px' }}>
+                    Question Count {deployBankMode === 'composite' && <span style={{ color: '#38bdf8', textTransform: 'none', fontWeight: 600 }}>(Auto-Summed)</span>}
+                  </label>
                   <input 
                     type="number" 
                     value={deployCount}
                     onChange={(e) => setDeployCount(parseInt(e.target.value) || 0)}
+                    readOnly={deployBankMode === 'composite'}
                     className="modern-input"
-                    style={{ width: '100%' }}
+                    style={{ width: '100%', opacity: deployBankMode === 'composite' ? 0.75 : 1, cursor: deployBankMode === 'composite' ? 'not-allowed' : 'text' }}
                   />
                 </div>
 
@@ -2444,6 +2700,26 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                         <div style={{ fontSize: '12px', color: 'var(--text-dim)' }}>
                           Class: {ex.class_name} | Qs: {ex.question_count} | Dur: {ex.duration_minutes}m
                         </div>
+                        {ex.subject_quotas && (() => {
+                          try {
+                            const quotas = typeof ex.subject_quotas === 'string' ? JSON.parse(ex.subject_quotas) : ex.subject_quotas;
+                            if (Array.isArray(quotas) && quotas.length > 0) {
+                              return (
+                                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '6px', alignItems: 'center' }}>
+                                  <span style={{ fontSize: '10px', color: '#38bdf8', background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.3)', padding: '1px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                                    📚 Composite ({quotas.length} Subjects)
+                                  </span>
+                                  {quotas.map((q: any, qIdx: number) => (
+                                    <span key={qIdx} style={{ fontSize: '10px', color: '#cbd5e1', background: 'rgba(255,255,255,0.06)', padding: '1px 6px', borderRadius: '4px' }}>
+                                      {q.subject || `Bank #${q.bank_id}`}: <strong>{q.question_count}</strong>
+                                    </span>
+                                  ))}
+                                </div>
+                              );
+                            }
+                          } catch (_) {}
+                          return null;
+                        })()}
                       </div>
                     );
                   })}

@@ -6,7 +6,11 @@ module.exports = function registerCBTHandlers(database) {
     // QUESTION BANKS
     // --------------------------------------------------------
     ipcMain.handle("cbt:get-banks", () => {
-        return database.getDb().prepare("SELECT * FROM cbt_question_banks ORDER BY created_at DESC").all();
+        return database.getDb().prepare(`
+            SELECT b.*, (SELECT COUNT(*) FROM cbt_questions q WHERE q.bank_id = b.id) as question_count
+            FROM cbt_question_banks b 
+            ORDER BY b.created_at DESC
+        `).all();
     });
 
     ipcMain.handle("cbt:create-bank", (event, { name, description, category }) => {

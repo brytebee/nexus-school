@@ -3,6 +3,7 @@
 const { database } = require("@nexus/engine");
 const { getMatchableDigits } = require("./phone-utils");
 const path = require("path");
+const crypto = require("crypto");
 
 let syncTimer = null;
 let isSyncing = false;
@@ -1031,6 +1032,68 @@ async function gatherSyncPackage() {
     console.error("[Sync Worker] Error gathering CBT exams for sync:", err);
   }
 
+  // 7. Question Banks & Questions (For Cloud Scheduling & Self-Serve Admissions)
+  let cbtQuestionBanks = [];
+  try {
+    const banksTableExists = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='cbt_question_banks'")
+      .get();
+    if (banksTableExists) {
+      const bankRows = db.prepare("SELECT * FROM cbt_question_banks ORDER BY created_at DESC").all();
+      const questionStmt = db.prepare("SELECT * FROM cbt_questions WHERE bank_id = ? ORDER BY id ASC");
+
+      cbtQuestionBanks = bankRows.map((b) => {
+        let questions = [];
+        try {
+          questions = questionStmt.all(b.id).map((q) => {
+            let hash = q.question_hash;
+            if (!hash) {
+              hash = crypto
+                .createHash("sha256")
+                .update(
+                  (q.question_text || "").trim() +
+                    (q.option_a || "").trim() +
+                    (q.option_b || "").trim() +
+                    (q.option_c || "").trim() +
+                    (q.option_d || "").trim() +
+                    (q.correct_option || "").trim().toUpperCase()
+                )
+                .digest("hex");
+            }
+            return {
+              id: q.id,
+              questionText: q.question_text,
+              optionA: q.option_a,
+              optionB: q.option_b,
+              optionC: q.option_c,
+              optionD: q.option_d,
+              correctOption: (q.correct_option || "A").toUpperCase(),
+              marks: q.marks || 1,
+              difficulty: q.difficulty || "medium",
+              questionHash: hash,
+            };
+          });
+        } catch (qErr) {
+          console.error(`[Sync Worker] Error reading questions for bank ${b.id}:`, qErr);
+        }
+
+        return {
+          id: b.id,
+          name: b.name,
+          subject: b.subject || b.class_category || "General",
+          classCategory: b.class_category || "General",
+          description: b.description || "",
+          isPremium: Boolean(b.is_premium),
+          packId: b.pack_id || `local_bank_${b.id}`,
+          questionCount: questions.length,
+          questions,
+        };
+      });
+    }
+  } catch (err) {
+    console.error("[Sync Worker] Error gathering CBT question banks for sync:", err);
+  }
+
   return {
     ok: true,
     schoolCloudId: schoolId,
@@ -1045,6 +1108,7 @@ async function gatherSyncPackage() {
       fees,
       customSubjects,
       cbtExams,
+      cbtQuestionBanks,
     },
   };
 }
