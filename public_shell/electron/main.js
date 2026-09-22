@@ -2228,10 +2228,9 @@ async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null
   let receiptUrl = null;
   try {
     const pdfBuffer = await receiptGenerator.generateReceiptPdf(receiptData);
-    const schoolIdRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_cloud_id'").get()
-                    || db.prepare("SELECT value FROM app_settings WHERE key = 'cloud_school_id'").get();
-    if (schoolIdRow?.value) {
-      receiptUrl = await uploadPdfToCloudinary(pdfBuffer, ref, schoolIdRow.value);
+    const schoolId = syncWorker.getSchoolId(db);
+    if (schoolId) {
+      receiptUrl = await uploadPdfToCloudinary(pdfBuffer, ref, schoolId);
       if (receiptUrl) {
         try {
           db.prepare("UPDATE fee_payment_sessions SET receipt_url = ? WHERE paystack_ref = ?").run(receiptUrl, ref);
@@ -2363,9 +2362,9 @@ async function sendManualReceiptHelper(db, { student_id, academic_session, term,
   let receiptUrl = null;
   try {
     const pdfBuffer = await receiptGenerator.generateReceiptPdf(receiptData);
-    const schoolIdRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_cloud_id'").get();
-    if (schoolIdRow?.value) {
-      receiptUrl = await uploadPdfToCloudinary(pdfBuffer, ref, schoolIdRow.value);
+    const schoolId = syncWorker.getSchoolId(db);
+    if (schoolId) {
+      receiptUrl = await uploadPdfToCloudinary(pdfBuffer, ref, schoolId);
       if (receiptUrl) {
         try {
           db.prepare("UPDATE fee_transactions SET receipt_url = ? WHERE reference_number = ?").run(receiptUrl, ref);

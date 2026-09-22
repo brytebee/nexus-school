@@ -1612,7 +1612,7 @@ async function pullWebsiteBinding(force = false) {
     candidateBases.push(process.env.SCHOOL_WEBSITE_URL.trim().replace(/\/+$/, ""));
   }
   candidateBases.push("http://localhost:3005");
-  candidateBases.push("https://nexusschool.com.ng");
+  candidateBases.push("https://crestmont.nexusos.com.ng");
 
   let boundData = null;
 
@@ -1690,6 +1690,7 @@ module.exports = {
   requestCloudBotReset,
   checkCloudBotStatus,
   pullWebsiteBinding,
+  getSchoolId,
 };
 
 
