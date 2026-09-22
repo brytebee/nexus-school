@@ -29,6 +29,46 @@ export function WebSyncModal({
   const [syncCbtQuestionBanks, setSyncCbtQuestionBanks] = useState(true);
   const [syncCbtExams, setSyncCbtExams] = useState(false);
 
+  // Granular Item Selection Sets
+  const [selectedFeeIndices, setSelectedFeeIndices] = useState<Set<number>>(new Set());
+  const [selectedBankIds, setSelectedBankIds] = useState<Set<number>>(new Set());
+
+  const toggleFeeItem = (idx: number) => {
+    setSelectedFeeIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  const toggleAllFees = () => {
+    const total = snapshot?.modules?.fees?.length || 0;
+    if (selectedFeeIndices.size === total) {
+      setSelectedFeeIndices(new Set());
+    } else {
+      setSelectedFeeIndices(new Set(Array.from({ length: total }, (_, i) => i)));
+    }
+  };
+
+  const toggleBankItem = (id: number) => {
+    setSelectedBankIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllBanks = () => {
+    const banks: any[] = snapshot?.modules?.cbtQuestionBanks || [];
+    if (selectedBankIds.size === banks.length) {
+      setSelectedBankIds(new Set());
+    } else {
+      setSelectedBankIds(new Set(banks.map((b) => b.id)));
+    }
+  };
+
   // Loaded snapshot data
   const [snapshot, setSnapshot] = useState<any>(null);
 
@@ -76,6 +116,13 @@ export function WebSyncModal({
         const cal = res.modules.calendar || {};
         if (cal.academicSession) setEditSession(cal.academicSession);
         if (cal.term) setEditTerm(cal.term);
+
+        if (Array.isArray(res.modules.fees)) {
+          setSelectedFeeIndices(new Set(res.modules.fees.map((_: any, idx: number) => idx)));
+        }
+        if (Array.isArray(res.modules.cbtQuestionBanks)) {
+          setSelectedBankIds(new Set(res.modules.cbtQuestionBanks.map((bk: any) => bk.id)));
+        }
       }
     } catch (err: any) {
       console.error('Failed to load sync package:', err);
@@ -111,7 +158,7 @@ export function WebSyncModal({
     }
 
     if (syncFees && snapshot?.modules?.fees) {
-      activeModules.fees = snapshot.modules.fees;
+      activeModules.fees = snapshot.modules.fees.filter((_: any, idx: number) => selectedFeeIndices.has(idx));
     }
 
     if (syncCustomSubjects && snapshot?.modules?.customSubjects) {
@@ -123,7 +170,7 @@ export function WebSyncModal({
     }
 
     if (syncCbtQuestionBanks && snapshot?.modules?.cbtQuestionBanks) {
-      activeModules.cbtQuestionBanks = snapshot.modules.cbtQuestionBanks;
+      activeModules.cbtQuestionBanks = snapshot.modules.cbtQuestionBanks.filter((b: any) => selectedBankIds.has(b.id));
     }
 
     return {
@@ -440,7 +487,7 @@ export function WebSyncModal({
                 <div>
                   <strong>Acceptance Fee Schedules</strong>
                   <span style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
-                    {feesCount} itemized fee structures across classes
+                    {selectedFeeIndices.size} of {feesCount} selected — see Fees tab
                   </span>
                 </div>
               </label>
@@ -460,7 +507,7 @@ export function WebSyncModal({
                 <div>
                   <strong>CBT Question Banks &amp; Library</strong>
                   <span style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
-                    {cbtBanksCount} banks ({cbtQuestionsTotal} questions) for cloud scheduling
+                    {selectedBankIds.size} of {cbtBanksCount} banks selected — see CBT tab
                   </span>
                 </div>
               </label>
@@ -722,6 +769,14 @@ export function WebSyncModal({
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', textAlign: 'left', color: 'rgba(255,255,255,0.5)' }}>
+                    <th style={{ padding: '6px 8px', width: '32px' }}>
+                      <input
+                        type="checkbox"
+                        title="Select / deselect all fees"
+                        checked={selectedFeeIndices.size === feesCount && feesCount > 0}
+                        onChange={toggleAllFees}
+                      />
+                    </th>
                     <th style={{ padding: '6px 8px' }}>Class</th>
                     <th style={{ padding: '6px 8px' }}>Item Name</th>
                     <th style={{ padding: '6px 8px' }}>Amount</th>
@@ -730,7 +785,14 @@ export function WebSyncModal({
                 </thead>
                 <tbody>
                   {snapshot?.modules?.fees?.map((f: any, idx: number) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                    <tr
+                      key={idx}
+                      style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', opacity: selectedFeeIndices.has(idx) ? 1 : 0.4, cursor: 'pointer' }}
+                      onClick={() => toggleFeeItem(idx)}
+                    >
+                      <td style={{ padding: '6px 8px' }}>
+                        <input type="checkbox" checked={selectedFeeIndices.has(idx)} onChange={() => toggleFeeItem(idx)} onClick={(e) => e.stopPropagation()} />
+                      </td>
                       <td style={{ padding: '6px 8px', fontWeight: 600 }}>{f.className}</td>
                       <td style={{ padding: '6px 8px' }}>{f.itemName}</td>
                       <td style={{ padding: '6px 8px', fontFamily: 'monospace', color: '#34d399' }}>
@@ -762,9 +824,17 @@ export function WebSyncModal({
                   </span>
                 </div>
                 {cbtBanksCount > 0 && (
-                  <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', background: 'rgba(56,189,248,0.15)', color: '#38bdf8', fontWeight: 600, flexShrink: 0 }}>
-                    {cbtQuestionsTotal} Total Questions
-                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', flexShrink: 0, marginLeft: '10px' }}>
+                    <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', background: 'rgba(56,189,248,0.15)', color: '#38bdf8', fontWeight: 600 }}>
+                      {cbtQuestionsTotal} Total Questions
+                    </span>
+                    <button
+                      onClick={toggleAllBanks}
+                      style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.7)', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer' }}
+                    >
+                      {selectedBankIds.size === cbtBanksCount ? 'Deselect All' : 'Select All'}
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -777,33 +847,45 @@ export function WebSyncModal({
                   {snapshot?.modules?.cbtQuestionBanks?.map((bank: any, bIdx: number) => (
                     <div
                       key={bIdx}
+                      onClick={() => toggleBankItem(bank.id)}
                       style={{
                         padding: '10px 14px',
                         borderRadius: '8px',
-                        background: 'rgba(56,189,248,0.03)',
-                        border: '1px solid rgba(56,189,248,0.15)',
+                        background: selectedBankIds.has(bank.id) ? 'rgba(56,189,248,0.05)' : 'rgba(255,255,255,0.02)',
+                        border: `1px solid ${selectedBankIds.has(bank.id) ? 'rgba(56,189,248,0.3)' : 'rgba(255,255,255,0.08)'}`,
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center',
+                        cursor: 'pointer',
+                        opacity: selectedBankIds.has(bank.id) ? 1 : 0.45,
                       }}
                     >
-                      <div style={{ flex: 1, minWidth: 0, marginRight: '10px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <strong style={{ color: '#fff', fontSize: '13px' }}>{bank.name}</strong>
-                          <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: 'rgba(56,189,248,0.15)', color: '#38bdf8', fontWeight: 600 }}>
-                            {bank.subject}
-                          </span>
-                          <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)' }}>
-                            {bank.classCategory}
-                          </span>
-                        </div>
-                        {bank.description && (
-                          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginTop: '3px', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                            {bank.description}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedBankIds.has(bank.id)}
+                          onChange={() => toggleBankItem(bank.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ flexShrink: 0 }}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <strong style={{ color: '#fff', fontSize: '13px' }}>{bank.name}</strong>
+                            <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: 'rgba(56,189,248,0.15)', color: '#38bdf8', fontWeight: 600 }}>
+                              {bank.subject}
+                            </span>
+                            <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)' }}>
+                              {bank.classCategory}
+                            </span>
                           </div>
-                        )}
+                          {bank.description && (
+                            <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginTop: '3px', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                              {bank.description}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '6px', background: 'rgba(16,185,129,0.15)', color: '#34d399', fontWeight: 700, flexShrink: 0 }}>
+                      <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '6px', background: 'rgba(16,185,129,0.15)', color: '#34d399', fontWeight: 700, flexShrink: 0, marginLeft: '10px' }}>
                         {bank.questions?.length || bank.questionCount || 0} Qs
                       </span>
                     </div>

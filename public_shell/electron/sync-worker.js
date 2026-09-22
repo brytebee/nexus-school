@@ -930,8 +930,8 @@ async function gatherSyncPackage() {
   // 5. Custom Subjects
   let customSubjects = [];
   try {
-    const rows = db.prepare("SELECT subject_name FROM custom_subjects").all();
-    customSubjects = rows.map((r) => r.subject_name).filter(Boolean);
+    const rows = db.prepare("SELECT name FROM custom_subjects").all();
+    customSubjects = rows.map((r) => r.name).filter(Boolean);
   } catch (err) {
     console.error("[Sync Worker] Error gathering custom subjects for sync:", err);
   }
