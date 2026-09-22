@@ -1612,7 +1612,7 @@ async function pullWebsiteBinding(force = false) {
     candidateBases.push(process.env.SCHOOL_WEBSITE_URL.trim().replace(/\/+$/, ""));
   }
   candidateBases.push("http://localhost:3005");
-  candidateBases.push("https://nexusos.com.ng");
+  candidateBases.push("https://nexusschool.com.ng");
 
   let boundData = null;
 
