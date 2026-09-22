@@ -134,6 +134,7 @@ const nexusAPI = {
         getPackage: () => ipcRenderer.invoke('webSync:getPackage'),
         dryRun: (payload) => ipcRenderer.invoke('webSync:dryRun', payload),
         dispatch: (payload) => ipcRenderer.invoke('webSync:dispatch', payload),
+        pullBinding: (force) => ipcRenderer.invoke('webSync:pullBinding', force),
     },
     insertScore: (data) => ipcRenderer.invoke('insert-score', data),
     db: {

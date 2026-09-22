@@ -2897,6 +2897,15 @@ ipcMain.handle("webSync:dispatch", async (event, payload) => {
   }
 });
 
+ipcMain.handle("webSync:pullBinding", async (event, force = true) => {
+  try {
+    return await syncWorker.pullWebsiteBinding(Boolean(force));
+  } catch (err) {
+    console.error("Failed to pull website binding:", err);
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle("classes:saveConfig", (event, { hierarchyClass, maxSubjects, passMarkOverride }) => {
   try {
     const db = database.getDb();
@@ -7963,6 +7972,11 @@ function createWindow() {
   // Must be registered before startSyncSchedule() fires the first cycle.
   syncWorker.registerPaymentSettledHandler(processSuccessfulPayment);
   syncWorker.startSyncSchedule();
+
+  // Pull cloud website binding once on load if not yet configured
+  syncWorker.pullWebsiteBinding(false).catch((e) => {
+    console.warn('[Sync Worker] Background startup binding pull note:', e.message);
+  });
 
   // Message queue worker is a tier-gated feature — start it once tier is known.
   // licenseStatus.tier is set in the license block below (~line 4903).

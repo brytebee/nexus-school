@@ -1585,6 +1585,90 @@ function registerPaymentSettledHandler(fn) {
   _onPaymentSettled = fn;
 }
 
+/**
+ * Resolves and binds the cloud tenant website URL from school-website API.
+ * Can be run on app startup (if unbound) or manually triggered via UI recycle icon.
+ */
+async function pullWebsiteBinding(force = false) {
+  const db = database.getDb();
+  const schoolId = getSchoolId(db);
+  if (!schoolId) {
+    return { ok: false, error: "no_school_id", message: "No local school or license ID found." };
+  }
+
+  // If not forced, check if already configured
+  if (!force) {
+    try {
+      const existing = db.prepare("SELECT value FROM app_settings WHERE key = 'school_website_url'").get();
+      if (existing && existing.value) {
+        return { ok: true, isBound: true, skipped: true, websiteUrl: existing.value };
+      }
+    } catch (_) {}
+  }
+
+  // Check candidate portals: env override, local dev (3005), and production root domain
+  let candidateBases = [];
+  if (process.env.SCHOOL_WEBSITE_URL) {
+    candidateBases.push(process.env.SCHOOL_WEBSITE_URL.trim().replace(/\/+$/, ""));
+  }
+  candidateBases.push("http://localhost:3005");
+  candidateBases.push("https://nexusos.com.ng");
+
+  let boundData = null;
+
+  for (const base of candidateBases) {
+    try {
+      const endpoint = `${base}/api/sync/binding?school_cloud_id=${encodeURIComponent(schoolId)}`;
+      const res = await fetch(endpoint, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(3500),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && data.isBound && data.websiteUrl) {
+          boundData = data;
+          break;
+        }
+      }
+    } catch (_) {
+      // Continue to next candidate
+    }
+  }
+
+  if (boundData && boundData.websiteUrl) {
+    try {
+      db.prepare(`
+        INSERT OR REPLACE INTO app_settings (key, value)
+        VALUES ('school_website_url', ?)
+      `).run(boundData.websiteUrl);
+
+      db.prepare(`
+        INSERT OR REPLACE INTO app_settings (key, value)
+        VALUES ('school_cloud_id', ?)
+      `).run(schoolId);
+    } catch (dbErr) {
+      console.error("[Sync Worker] Failed to save pulled website URL to app_settings:", dbErr);
+    }
+
+    console.log(`[Sync Worker] Successfully pulled and bound website URL: ${boundData.websiteUrl} (${boundData.schoolName || ''})`);
+    return {
+      ok: true,
+      isBound: true,
+      websiteUrl: boundData.websiteUrl,
+      schoolName: boundData.schoolName,
+      slug: boundData.slug,
+    };
+  }
+
+  return {
+    ok: true,
+    isBound: false,
+    schoolId,
+    message: `No cloud website is currently bound to school license (${schoolId}). Please bind via /admin/system or sovereign console.`,
+  };
+}
+
 module.exports = {
   initSyncWorker,
   registerPaymentSettledHandler,
@@ -1605,6 +1689,7 @@ module.exports = {
   requestCloudBotInit,
   requestCloudBotReset,
   checkCloudBotStatus,
+  pullWebsiteBinding,
 };
 
 

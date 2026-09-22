@@ -34,6 +34,75 @@ export default function Classes() {
   // Web Portal Sync state
   const [isSyncingWeb, setIsSyncingWeb] = useState(false);
   const [webSyncModalOpen, setWebSyncModalOpen] = useState(false);
+  const [isPullingBinding, setIsPullingBinding] = useState(false);
+
+  const handlePullWebsiteBinding = async () => {
+    setIsPullingBinding(true);
+    const Swal = (window as any).Swal;
+    try {
+      const api = (window as any).electronAPI?.webSync;
+      if (!api?.pullBinding) {
+        if (Swal) {
+          Swal.fire({
+            toast: true,
+            position: 'top-end',
+            icon: 'warning',
+            title: 'Web Sync bridge not ready',
+            showConfirmButton: false,
+            timer: 3000,
+            background: '#0d1235',
+            color: '#fff',
+          });
+        }
+        return;
+      }
+
+      const res = await api.pullBinding(true);
+      if (res?.ok && res.isBound && res.websiteUrl) {
+        if (Swal) {
+          Swal.fire({
+            toast: true,
+            position: 'top-end',
+            icon: 'success',
+            title: `✓ Bound to website: ${res.websiteUrl}`,
+            showConfirmButton: false,
+            timer: 4500,
+            background: '#0d1235',
+            color: '#fff',
+          });
+        }
+      } else {
+        const msg = res?.message || 'No cloud website bound to this school installation yet.';
+        if (Swal) {
+          Swal.fire({
+            toast: true,
+            position: 'top-end',
+            icon: 'info',
+            title: msg,
+            showConfirmButton: false,
+            timer: 4500,
+            background: '#0d1235',
+            color: '#fff',
+          });
+        }
+      }
+    } catch (err: any) {
+      if (Swal) {
+        Swal.fire({
+          toast: true,
+          position: 'top-end',
+          icon: 'error',
+          title: `Failed to pull binding: ${err.message}`,
+          showConfirmButton: false,
+          timer: 3500,
+          background: '#0d1235',
+          color: '#fff',
+        });
+      }
+    } finally {
+      setIsPullingBinding(false);
+    }
+  };
 
   // Setup Guard & CSV Review Modal States
   const [setupGuardOpen, setSetupGuardOpen] = useState(false);
@@ -874,6 +943,35 @@ export default function Classes() {
             }}
           >
             {isSyncingWeb ? '⏳ Syncing...' : '🌐 Sync to Website'}
+          </button>
+          <button
+            onClick={handlePullWebsiteBinding}
+            disabled={isPullingBinding}
+            title="Refresh & pull cloud website binding (if missed at startup)"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: isPullingBinding ? 'rgba(0, 229, 255, 0.25)' : 'rgba(0, 229, 255, 0.12)',
+              border: '1px solid rgba(0, 229, 255, 0.4)',
+              borderRadius: '6px',
+              color: '#00e5ff',
+              fontSize: '13px',
+              padding: '6px 9px',
+              cursor: isPullingBinding ? 'not-allowed' : 'pointer',
+              opacity: isPullingBinding ? 0.7 : 1,
+              transition: 'all 0.2s',
+            }}
+            onMouseOver={(e) => {
+              if (!isPullingBinding) e.currentTarget.style.background = 'rgba(0, 229, 255, 0.22)';
+            }}
+            onMouseOut={(e) => {
+              if (!isPullingBinding) e.currentTarget.style.background = 'rgba(0, 229, 255, 0.12)';
+            }}
+          >
+            <span style={{ display: 'inline-block', transform: isPullingBinding ? 'rotate(360deg)' : 'none', transition: 'transform 0.6s' }}>
+              🔁
+            </span>
           </button>
           {configs.length > 0 && (
             <button
