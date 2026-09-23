@@ -2075,6 +2075,68 @@ async function uploadPdfToCloudinary(pdfBuffer, ref, schoolId) {
   }
 }
 
+/**
+ * resolveSchoolSlug — resolves the school's unique slug for portal and receipt URLs.
+ * Checks app_settings (portal_slug, school_slug, school_identity), identityPacket,
+ * identity.json, or derives from school name or cloud ID.
+ */
+function resolveSchoolSlug(db) {
+  try {
+    const slugRow = db.prepare("SELECT value FROM app_settings WHERE key = 'portal_slug' OR key = 'school_slug'").get();
+    if (slugRow?.value && slugRow.value.trim()) {
+      return slugRow.value.trim().toLowerCase();
+    }
+    const identRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_identity'").get();
+    if (identRow?.value) {
+      const parsed = JSON.parse(identRow.value);
+      if (parsed.portalSlug && parsed.portalSlug.trim()) {
+        return parsed.portalSlug.trim().toLowerCase();
+      }
+    }
+  } catch (_) {}
+
+  if (identityPacket?.portalSlug && identityPacket.portalSlug.trim()) {
+    return identityPacket.portalSlug.trim().toLowerCase();
+  }
+
+  try {
+    const { app } = require('electron');
+    const fs = require('fs');
+    const path = require('path');
+    const idPath = path.join(app.getPath('userData'), 'identity.json');
+    if (fs.existsSync(idPath)) {
+      const parsed = JSON.parse(fs.readFileSync(idPath, 'utf8'));
+      if (parsed.portalSlug && parsed.portalSlug.trim()) {
+        return parsed.portalSlug.trim().toLowerCase();
+      }
+    }
+  } catch (_) {}
+
+  try {
+    const nameRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_name'").get();
+    if (nameRow?.value) {
+      const firstWord = nameRow.value.trim().split(/\s+/)[0].replace(/[^a-zA-Z0-9-]/g, '').toLowerCase();
+      if (firstWord) return firstWord;
+    }
+  } catch (_) {}
+
+  const schoolId = syncWorker.getSchoolId(db);
+  if (schoolId) return schoolId;
+
+  return 'sch';
+}
+
+/**
+ * getPortalReceiptUrl — builds the canonical portal download link for a receipt.
+ * Points to the sovereign portal proxy which verifies the parent's phone and
+ * streams the authentic PDF directly to the browser.
+ */
+function getPortalReceiptUrl(db, ref, parentPhone) {
+  const slug = resolveSchoolSlug(db);
+  const cleanPhone = (parentPhone || '').replace(/[^0-9+]/g, '');
+  return `https://sch.nexusos.com.ng/api/${encodeURIComponent(slug)}/receipts/view/${encodeURIComponent(ref)}?format=pdf&phone=${encodeURIComponent(cleanPhone)}`;
+}
+
 
 async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null) {
   let studentIds = [];
@@ -2224,25 +2286,29 @@ async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null
     feeItems, // Phase 8: itemised breakdown — Tuition, PTA, Extras, etc.
   };
 
-  // ── Generate PDF and upload to Cloudinary ───────────────────────────────
-  let receiptUrl = null;
+  // ── Construct canonical portal receipt download URL ──────────────────────
+  const downloadUrl = getPortalReceiptUrl(db, ref, session.parent_phone);
+
+  // ── Background non-blocking PDF generation & optional Cloudinary archive ──
   try {
     const pdfBuffer = await receiptGenerator.generateReceiptPdf(receiptData);
     const schoolId = syncWorker.getSchoolId(db);
     if (schoolId) {
-      receiptUrl = await uploadPdfToCloudinary(pdfBuffer, ref, schoolId);
-      if (receiptUrl) {
-        try {
-          db.prepare("UPDATE fee_payment_sessions SET receipt_url = ? WHERE paystack_ref = ?").run(receiptUrl, ref);
-        } catch (_) {}
-      }
+      // Cloudinary backup runs in background; never blocks or exposes raw link to parents
+      uploadPdfToCloudinary(pdfBuffer, ref, schoolId).then(cloudUrl => {
+        if (cloudUrl) {
+          try {
+            db.prepare("UPDATE fee_payment_sessions SET receipt_url = ? WHERE paystack_ref = ?").run(cloudUrl, ref);
+          } catch (_) {}
+        }
+      }).catch(() => {});
     }
   } catch (pdfErr) {
-    console.warn('[Payment Processor] PDF/Cloudinary upload skipped (non-fatal):', pdfErr.message);
+    console.warn('[Payment Processor] Background PDF generation skipped (non-fatal):', pdfErr.message);
   }
 
 
-  // ── Send WhatsApp receipt (text + optional PDF link) ──────────────────────
+  // ── Send WhatsApp receipt (text + portal PDF link) ───────────────────────
   let receiptMsg = `✅ *Payment Confirmed!*\n\n`;
   receiptMsg += `Thank you for your payment to *${schoolName}*.\n`;
   receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
@@ -2271,13 +2337,13 @@ async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null
     }
   }
   receiptMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
-  receiptMsg += `_Your official school records have been updated automatically._\n`;
-  if (receiptUrl) receiptMsg += `\n📎 *Download PDF Receipt:*\n${receiptUrl}\n`;
+  receiptMsg += `_Your official school records have been updated automatically._\n\n`;
+  receiptMsg += `📎 *Download PDF Receipt:*\n${downloadUrl}\n\n`;
   receiptMsg += `_Powered by Nexus Pulse_ 🎓`;
 
   try {
     await pulseBot.sendRawMessage(session.parent_phone, receiptMsg);
-    console.log(`[Payment Processor] Receipt sent to ${session.parent_phone}${receiptUrl ? ' (with PDF link)' : ''}`);
+    console.log(`[Payment Processor] Receipt sent to ${session.parent_phone} (with portal link: ${downloadUrl})`);
   } catch (sendErr) {
     console.error('[Payment Processor] WhatsApp send failed:', sendErr.message);
   }
@@ -2355,27 +2421,27 @@ async function sendManualReceiptHelper(db, { student_id, academic_session, term,
     feeItems:      [],
   };
 
-  // ── Step 1: Generate PDF and upload to Cloudinary ────────────────────────
-  // We upload first so we can embed the direct download link in the text message
-  // itself. No attachment is sent via WhatsApp (LID-mode prevents outbound media
-  // to cold contacts). The parent clicks the Cloudinary link to download the PDF.
-  let receiptUrl = null;
+  // ── Step 1: Construct canonical portal receipt download URL ──────────────
+  const downloadUrl = getPortalReceiptUrl(db, ref, sRow.parent_phone);
+
+  // Background non-blocking PDF generation & optional Cloudinary archive
   try {
     const pdfBuffer = await receiptGenerator.generateReceiptPdf(receiptData);
     const schoolId = syncWorker.getSchoolId(db);
     if (schoolId) {
-      receiptUrl = await uploadPdfToCloudinary(pdfBuffer, ref, schoolId);
-      if (receiptUrl) {
-        try {
-          db.prepare("UPDATE fee_transactions SET receipt_url = ? WHERE reference_number = ?").run(receiptUrl, ref);
-        } catch (_) {}
-      }
+      uploadPdfToCloudinary(pdfBuffer, ref, schoolId).then(cloudUrl => {
+        if (cloudUrl) {
+          try {
+            db.prepare("UPDATE fee_transactions SET receipt_url = ? WHERE reference_number = ?").run(cloudUrl, ref);
+          } catch (_) {}
+        }
+      }).catch(() => {});
     }
   } catch (pdfErr) {
-    console.warn('[Manual Receipt] PDF generation or Cloudinary upload failed (non-fatal):', pdfErr.message);
+    console.warn('[Manual Receipt] Background PDF generation skipped (non-fatal):', pdfErr.message);
   }
 
-  // ── Step 2: Send text receipt (with optional PDF link) ───────────────────
+  // ── Step 2: Send text receipt (with portal PDF download link) ────────────
   const textReceipt =
     `✅ *Payment Recorded — ${schoolName}*\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -2386,13 +2452,13 @@ async function sendManualReceiptHelper(db, { student_id, academic_session, term,
     `📅 Date: ${dateStr}\n` +
     `💳 Outstanding Balance: ₦${balance.toLocaleString("en-NG")}\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
-    `_Your payment has been recorded. Thank you!_\n` +
-    (receiptUrl ? `\n📎 *Download PDF Receipt:*\n${receiptUrl}\n` : '') +
+    `_Your payment has been recorded. Thank you!_\n\n` +
+    `📎 *Download PDF Receipt:*\n${downloadUrl}\n\n` +
     `_Powered by Nexus Pulse_ 🎓`;
 
   try {
     await pulseBot.sendRawMessage(sRow.parent_phone, textReceipt);
-    console.log(`[Manual Receipt] Text receipt sent to ${sRow.parent_phone}${receiptUrl ? ' (with PDF link)' : ''}`);
+    console.log(`[Manual Receipt] Text receipt sent to ${sRow.parent_phone} (with portal link: ${downloadUrl})`);
   } catch (textErr) {
     const isFrameDetached = textErr.message?.includes('detached Frame') ||
                             textErr.message?.includes('reconnecting after a page reload');
