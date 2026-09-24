@@ -92,7 +92,7 @@ Version=1.0
 Type=Application
 Name=$APP_NAME
 Comment=Sovereign school management system
-Exec=$DEST --no-sandbox %U
+Exec=$DEST --no-sandbox --disable-gpu-sandbox --disable-font-subpixel-positioning --force-color-profile=srgb --font-render-hinting=none %U
 Icon=$EXEC_NAME
 Terminal=false
 Categories=Education;Office;

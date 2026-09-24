@@ -1,7 +1,7 @@
 {
   "name": "nexus-school-os",
   "productName": "Nexus School OS",
-  "version": "1.1.6",
+  "version": "1.1.7",
   "description": "Nexus School OS - sovereign desktop engine",
   "author": "Nexus Infrastructure",
   "repository": {
@@ -117,7 +117,8 @@
         "--no-sandbox",
         "--disable-gpu-sandbox",
         "--disable-font-subpixel-positioning",
-        "--force-color-profile=srgb"
+        "--force-color-profile=srgb",
+        "--font-render-hinting=none"
       ],
       "desktop": {
         "Name": "Nexus School OS",
@@ -135,7 +136,9 @@
         "libatk-bridge2.0-0",
         "libgtk-3-0",
         "libgbm1",
-        "libasound2"
+        "libasound2",
+        "fontconfig",
+        "fonts-liberation | fonts-dejavu-core"
       ],
       "fpm": [
         "--conflicts",

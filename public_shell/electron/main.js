@@ -56,6 +56,16 @@ const resultDispatcher = (() => {
 // On Linux, this value must match StartupWMClass in the .desktop file ("nexus-school-os")
 // so GNOME/KDE can link the running window to the launcher icon in the taskbar.
 if (process.platform === "linux") {
+  // Prevent zero-width glyphs, blank fonts, and GPU driver lockups in Chromium on Linux
+  app.commandLine.appendSwitch('disable-gpu-sandbox');
+  app.commandLine.appendSwitch('disable-font-subpixel-positioning');
+  app.commandLine.appendSwitch('force-color-profile', 'srgb');
+  app.commandLine.appendSwitch('font-render-hinting', 'none');
+
+  if (process.argv.includes('--disable-gpu') || process.env.NEXUS_DISABLE_GPU === '1') {
+    app.disableHardwareAcceleration();
+  }
+
   app.setName("nexus-school-os");
 } else {
   app.setName("NexusSchoolOS");
