@@ -93,4 +93,68 @@ describe('Receipt PDF Generator', () => {
     });
     expect(rich.length).toBeGreaterThan(sparse.length);
   });
+
+  // ── Safeguard assertions for recent production fixes ───────────────────────
+  const extractPdfText = (buf) => {
+    const zlib = require('zlib');
+    const str = buf.toString('latin1');
+    const streamRegex = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
+    let match;
+    let fullText = '';
+    while ((match = streamRegex.exec(str)) !== null) {
+      try {
+        const decomp = zlib.inflateSync(Buffer.from(match[1], 'binary')).toString('latin1');
+        const hexRegex = /<([0-9a-fA-F]+)>/g;
+        let h;
+        while ((h = hexRegex.exec(decomp)) !== null) {
+          fullText += Buffer.from(h[1], 'hex').toString('latin1');
+        }
+      } catch (_) {}
+    }
+    return fullText;
+  };
+
+  it('renders parentName in BILL TO section when provided', async () => {
+    const buf = await generateReceiptPdf({ ...BASE_DATA, parentName: 'Dr. Emeka Ani' });
+    const text = extractPdfText(buf);
+    expect(text).toContain('BILL TO:');
+    expect(text).toContain('Dr. Emeka Ani');
+  });
+
+  it('falls back to "Dear Parent" when parentName is omitted or blank', async () => {
+    const buf = await generateReceiptPdf({ ...BASE_DATA, parentName: undefined });
+    const text = extractPdfText(buf);
+    expect(text).toContain('BILL TO:');
+    expect(text).toContain('Dear Parent');
+  });
+
+  it('uses standard NGN currency formatting and contains no broken symbols (¦)', async () => {
+    const buf = await generateReceiptPdf(BASE_DATA);
+    const text = extractPdfText(buf);
+    expect(text).toContain('Allocated (NGN)');
+    expect(text).toContain('Remaining Balance (NGN)');
+    expect(text).toContain('TOTAL PAID (NGN)');
+    expect(text).not.toContain('¦');
+  });
+
+  it('formats single ward as Student: and multiple wards as Wards: N Students', async () => {
+    const singleBuf = await generateReceiptPdf({ ...BASE_DATA, studentName: 'Ada Okonkwo' });
+    const singleText = extractPdfText(singleBuf);
+    expect(singleText).toContain('Student: Ada Okonkwo');
+
+    const multiBuf = await generateReceiptPdf({ ...BASE_DATA, studentName: 'Ada Okonkwo, Chidi Okonkwo' });
+    const multiText = extractPdfText(multiBuf);
+    expect(multiText).toContain('Wards: 2 Students (See Details Below)');
+  });
+
+  it('handles remote HTTP image URL gracefully when unreachable without throwing', async () => {
+    const buf = await generateReceiptPdf({
+      ...BASE_DATA,
+      schoolLogoB64: 'http://127.0.0.1:59999/nonexistent-logo.png',
+    });
+    expect(buf).toBeInstanceOf(Buffer);
+    expect(buf.subarray(0, 4).toString('ascii')).toBe('%PDF');
+    const text = extractPdfText(buf);
+    expect(text).toContain('Nexus Academy');
+  });
 });

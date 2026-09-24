@@ -1652,6 +1652,15 @@ ipcMain.handle('fees:print-receipt', async (event, { txRef, studentId, txId, for
         if (phoneRow?.value) schoolPhone = phoneRow.value;
         const logoRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_logo_b64'").get();
         if (logoRow?.value) schoolLogoB64 = logoRow.value;
+        if (!schoolLogoB64) {
+            const identRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_identity'").get();
+            if (identRow?.value) {
+                try {
+                    const parsed = JSON.parse(identRow.value);
+                    if (parsed.logoBase64) schoolLogoB64 = parsed.logoBase64;
+                } catch (_) {}
+            }
+        }
     } catch (_) {}
 
     const printData = {
@@ -2310,9 +2319,18 @@ async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null
     if (phoneRow?.value) schoolPhone = phoneRow.value;
     const logoRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_logo_b64'").get();
     if (logoRow?.value) schoolLogoB64 = logoRow.value;
+    if (!schoolLogoB64) {
+      const identRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_identity'").get();
+      if (identRow?.value) {
+        try {
+          const parsed = JSON.parse(identRow.value);
+          if (parsed.logoBase64) schoolLogoB64 = parsed.logoBase64;
+        } catch (_) {}
+      }
+    }
   } catch (_) {}
 
-  if (!schoolAddress || !schoolPhone) {
+  if (!schoolAddress || !schoolPhone || !schoolLogoB64) {
     try {
       const { app } = require('electron');
       const fs = require('fs');
@@ -2322,6 +2340,7 @@ async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null
         const parsed = JSON.parse(fs.readFileSync(idPath, 'utf8'));
         if (parsed.address && !schoolAddress) schoolAddress = parsed.address;
         if (parsed.phone && !schoolPhone) schoolPhone = parsed.phone;
+        if (parsed.logoBase64 && !schoolLogoB64) schoolLogoB64 = parsed.logoBase64;
       }
     } catch (_) {}
   }
@@ -2360,6 +2379,7 @@ async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null
     term,
     school_address: schoolAddress,
     school_phone: schoolPhone,
+    school_logo: schoolLogoB64,
     allocations: receiptRecords,
   }).catch(() => {});
 
@@ -2479,9 +2499,18 @@ async function sendManualReceiptHelper(db, { student_id, academic_session, term,
     if (pRow?.value) schoolPhone = pRow.value;
     const lRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_logo_b64'").get();
     if (lRow?.value) schoolLogoB64 = lRow.value;
+    if (!schoolLogoB64) {
+      const identRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_identity'").get();
+      if (identRow?.value) {
+        try {
+          const parsed = JSON.parse(identRow.value);
+          if (parsed.logoBase64) schoolLogoB64 = parsed.logoBase64;
+        } catch (_) {}
+      }
+    }
   } catch (_) {}
 
-  if (!schoolAddress || !schoolPhone) {
+  if (!schoolAddress || !schoolPhone || !schoolLogoB64) {
     try {
       const { app } = require('electron');
       const fs = require('fs');
@@ -2491,6 +2520,7 @@ async function sendManualReceiptHelper(db, { student_id, academic_session, term,
         const parsed = JSON.parse(fs.readFileSync(idPath, 'utf8'));
         if (parsed.address && !schoolAddress) schoolAddress = parsed.address;
         if (parsed.phone && !schoolPhone) schoolPhone = parsed.phone;
+        if (parsed.logoBase64 && !schoolLogoB64) schoolLogoB64 = parsed.logoBase64;
       }
     } catch (_) {}
   }
@@ -2526,6 +2556,7 @@ async function sendManualReceiptHelper(db, { student_id, academic_session, term,
     term: receiptData.term,
     school_address: schoolAddress,
     school_phone: schoolPhone,
+    school_logo: schoolLogoB64,
     allocations: receiptData.allocations,
   }).catch(() => {});
 

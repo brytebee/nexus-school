@@ -6,12 +6,32 @@
 
 const PDFDocument = require('pdfkit');
 
+async function resolveLogoBuffer(logoSource) {
+  if (!logoSource || typeof logoSource !== 'string' || !logoSource.trim()) return null;
+  const trimmed = logoSource.trim();
+  try {
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      const res = await fetch(trimmed, { signal: AbortSignal.timeout(4000) });
+      if (!res.ok) return null;
+      const arrayBuf = await res.arrayBuffer();
+      return Buffer.from(arrayBuf);
+    }
+    const rawB64 = trimmed.includes(',') ? trimmed.split(',')[1] : trimmed;
+    const buf = Buffer.from(rawB64, 'base64');
+    return buf.length > 0 ? buf : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 /**
  * Generates an in-memory PDF buffer for a payment receipt.
  * @param {Object} data 
  * @returns {Promise<Buffer>}
  */
-function generateReceiptPdf(data) {
+async function generateReceiptPdf(data) {
+  const logoBuffer = await resolveLogoBuffer(data.schoolLogoB64);
+
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({ size: 'A4', margin: 40 });
@@ -26,14 +46,8 @@ function generateReceiptPdf(data) {
 
       // School Branding Header
       let headerY = 35;
-      if (data.schoolLogoB64) {
+      if (logoBuffer) {
         try {
-          // Strip the data URI prefix ("data:image/...;base64,") if present —
-          // Buffer.from() requires raw base64, not a data URI string.
-          const rawB64 = data.schoolLogoB64.includes(',') 
-            ? data.schoolLogoB64.split(',')[1] 
-            : data.schoolLogoB64;
-          const logoBuffer = Buffer.from(rawB64, 'base64');
           doc.image(logoBuffer, 40, headerY, { width: 60, height: 60 });
           doc.fillColor('#0f172a') // Slate 900
              .fontSize(18)

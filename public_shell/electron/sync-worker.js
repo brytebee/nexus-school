@@ -297,19 +297,21 @@ async function pushSchoolDelta() {
     } catch (_) {}
   }
 
-  // 6b. Gather School Address and Phone
+  // 6b. Gather School Address, Phone, and Logo
   let schoolAddress = null;
   let schoolPhone = null;
+  let schoolLogo = null;
   try {
     const identRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_identity'").get();
     if (identRow?.value) {
       const parsed = JSON.parse(identRow.value);
       if (parsed.address) schoolAddress = parsed.address;
       if (parsed.phone) schoolPhone = parsed.phone;
+      if (parsed.logoBase64) schoolLogo = parsed.logoBase64;
     }
   } catch (_) {}
 
-  if (!schoolAddress || !schoolPhone) {
+  if (!schoolAddress || !schoolPhone || !schoolLogo) {
     try {
       const { app } = require('electron');
       const fs = require('fs');
@@ -319,6 +321,7 @@ async function pushSchoolDelta() {
         const parsed = JSON.parse(fs.readFileSync(idPath, 'utf8'));
         if (parsed.address && !schoolAddress) schoolAddress = parsed.address;
         if (parsed.phone && !schoolPhone) schoolPhone = parsed.phone;
+        if (parsed.logoBase64 && !schoolLogo) schoolLogo = parsed.logoBase64;
       }
     } catch (_) {}
   }
@@ -334,6 +337,13 @@ async function pushSchoolDelta() {
     try {
       const phoneRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_phone'").get();
       if (phoneRow?.value) schoolPhone = phoneRow.value;
+    } catch (_) {}
+  }
+
+  if (!schoolLogo) {
+    try {
+      const logoRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_logo_b64'").get();
+      if (logoRow?.value) schoolLogo = logoRow.value;
     } catch (_) {}
   }
 
@@ -357,7 +367,8 @@ async function pushSchoolDelta() {
         portal_slug: portalSlug,
         school_name: schoolName,
         school_address: schoolAddress,
-        school_phone: schoolPhone
+        school_phone: schoolPhone,
+        school_logo: schoolLogo
       }
     })
   });
