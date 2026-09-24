@@ -260,7 +260,7 @@ export function FinancialHub() {
   const [refundReason, setRefundReason] = useState('');
   const [submittingRefund, setSubmittingRefund] = useState(false);
 
-  const [receiptTarget, setReceiptTarget] = useState<{ studentId: string; txRef: string; isOnline: boolean }|null>(null);
+  const [receiptTarget, setReceiptTarget] = useState<{ studentId: string; txRef: string; txId?: number; isOnline: boolean }|null>(null);
   const [sendingReceipt, setSendingReceipt] = useState(false);
   const [printingReceipt, setPrintingReceipt] = useState(false);
 
@@ -2178,7 +2178,8 @@ export function FinancialHub() {
     try {
       const res = await window.electronAPI.fees.sendReceiptPdf({
         studentId: receiptTarget.studentId,
-        txRef: receiptTarget.txRef
+        txRef: receiptTarget.txRef,
+        txId: receiptTarget.txId
       });
       if (res?.ok) {
         showIndicator(res.fallback ? 'ℹ️ Receipt sent via WhatsApp (Text Fallback)' : '✅ PDF Receipt dispatched to WhatsApp!');
@@ -2209,6 +2210,7 @@ export function FinancialHub() {
       const res = await window.electronAPI.fees.printReceipt({
         studentId: receiptTarget.studentId,
         txRef: receiptTarget.txRef,
+        txId: receiptTarget.txId,
         format
       });
       if (res?.ok) {
@@ -4358,7 +4360,7 @@ export function FinancialHub() {
                           {isPositive ? (
                             <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
                               <button 
-                                onClick={() => setReceiptTarget({ studentId: ledgerStudent.id, txRef: tx.reference_number, isOnline: !!isPaystack })}
+                                onClick={() => setReceiptTarget({ studentId: ledgerStudent.id, txRef: tx.reference_number, txId: tx.id, isOnline: !!isPaystack })}
                                 className="small-btn"
                                 style={{ fontSize: '10px', padding: '3px 6px', background: 'rgba(76,175,80,0.1)', color: '#4CAF50', borderColor: 'rgba(76,175,80,0.3)' }}
                                 title="Print / Send Receipt"

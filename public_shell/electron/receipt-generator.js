@@ -40,11 +40,20 @@ function generateReceiptPdf(data) {
              .font('Helvetica-Bold')
              .text(data.schoolName || "The School", 115, headerY);
           
+          const contactParts = [];
+          if (data.schoolPhone && data.schoolPhone !== "—") contactParts.push(`Tel: ${data.schoolPhone}`);
+          contactParts.push('Official School Receipt');
+
           doc.fillColor('#475569') // Slate 600
              .fontSize(9)
-             .font('Helvetica')
-             .text(data.schoolAddress || "School Address", 115, headerY + 22, { width: 440 })
-             .text(`Phone: ${data.schoolPhone || "—"} | Email: Support`, 115, headerY + 42);
+             .font('Helvetica');
+
+          if (data.schoolAddress && data.schoolAddress !== "School Address") {
+            doc.text(data.schoolAddress, 115, headerY + 22, { width: 440 });
+            doc.text(contactParts.join('  ·  '), 115, headerY + 38, { width: 440 });
+          } else {
+            doc.text(contactParts.join('  ·  '), 115, headerY + 24, { width: 440 });
+          }
         } catch (_) {
           // Fallback if logo corrupt
           drawDefaultHeader(doc, data, headerY);
@@ -54,38 +63,61 @@ function generateReceiptPdf(data) {
       }
 
       // Receipt Title Banner
+      const isOnline = data.paymentMethod && (data.paymentMethod.toLowerCase().includes('online') || data.paymentMethod.toLowerCase().includes('paystack'));
+      const bannerTitle = isOnline ? 'OFFICIAL ONLINE PAYMENT RECEIPT' : 'OFFICIAL PAYMENT RECEIPT';
+
       doc.rect(40, 115, 515, 30).fill('#0f172a');
       doc.fillColor('#ffffff')
          .fontSize(11)
          .font('Helvetica-Bold')
-         .text('OFFICIAL ONLINE PAYMENT RECEIPT', 50, 124);
+         .text(bannerTitle, 50, 124);
 
       // Metainfo sections
       doc.fillColor('#0f172a').font('Helvetica');
 
-      // Left Column: Bill To / Student info
-      let infoY = 160;
-      doc.fontSize(10).font('Helvetica-Bold').fillColor('#64748b').text('BILL TO:', 40, infoY);
-      doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text(data.studentName || "Student Name", 40, infoY + 15);
+      // Left Column: Bill To (Parent/Guardian) & Beneficiary info
+      let infoY = 155;
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#64748b').text('BILL TO:', 40, infoY);
+
+      const billToName = data.parentName?.trim() || 'Dear Parent';
+      doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a')
+         .text(billToName, 40, infoY + 14, { width: 260 });
+
+      let currentLeftY = infoY + 30;
+      if (data.studentName && data.studentName !== billToName) {
+        const isMulti = (data.studentName || '').includes(',');
+        const studentLabel = isMulti
+          ? `Wards: ${data.studentName.split(',').length} Students (See Details Below)`
+          : `Student: ${data.studentName}`;
+        doc.fontSize(9).font('Helvetica-Bold').fillColor('#334155')
+           .text(studentLabel, 40, currentLeftY, { width: 260 });
+        currentLeftY += 13;
+      }
+
       doc.fontSize(9).font('Helvetica').fillColor('#475569')
-         .text(`Class: ${data.studentClass || "—"}`, 40, infoY + 30)
-         .text(`Session: ${data.academicSession || "—"} | Term: ${data.term || "—"}`, 40, infoY + 43)
-         .text(`Email: ${data.parentEmail || "—"}`, 40, infoY + 56);
+         .text(`Class: ${data.studentClass || "—"}`, 40, currentLeftY, { width: 260 });
+      currentLeftY += 13;
+      doc.text(`Session: ${data.academicSession || "—"} | Term: ${data.term || "—"}`, 40, currentLeftY, { width: 260 });
+      currentLeftY += 13;
+      if (data.parentEmail && data.parentEmail !== "—") {
+        doc.text(`Email: ${data.parentEmail}`, 40, currentLeftY, { width: 260 });
+      }
 
       // Right Column: Payment Details
-      doc.fontSize(10).font('Helvetica-Bold').fillColor('#64748b').text('TRANSACTION DETAILS:', 320, infoY);
-      doc.fontSize(9).font('Helvetica').fillColor('#475569')
-         .text(`Receipt Reference:`, 320, infoY + 15)
-         .font('Helvetica-Bold').fillColor('#0f172a').text(data.reference || "—", 420, infoY + 15)
-         .font('Helvetica').fillColor('#475569')
-         .text(`Date Paid:`, 320, infoY + 28)
-         .fillColor('#0f172a').text(data.paymentDate || new Date().toLocaleDateString('en-NG'), 420, infoY + 28)
-         .fillColor('#475569')
-         .text(`Payment Method:`, 320, infoY + 41)
-         .fillColor('#0f172a').text(data.paymentMethod || "Paystack Online", 420, infoY + 41);
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#64748b').text('TRANSACTION DETAILS:', 320, infoY);
+      doc.fontSize(8.5).font('Helvetica').fillColor('#64748b').text(`Receipt Reference:`, 320, infoY + 14);
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#0f172a').text(data.reference || "—", 320, infoY + 26, { width: 235 });
+
+      const dateY = infoY + 44;
+      doc.fontSize(9).font('Helvetica').fillColor('#475569').text(`Date Paid:`, 320, dateY);
+      doc.font('Helvetica-Bold').fillColor('#0f172a').text(data.paymentDate || new Date().toLocaleDateString('en-NG'), 405, dateY, { width: 150 });
+
+      const methodY = infoY + 58;
+      doc.font('Helvetica').fillColor('#475569').text(`Payment Method:`, 320, methodY);
+      doc.font('Helvetica-Bold').fillColor('#0f172a').text(data.paymentMethod || "Paystack Online", 405, methodY, { width: 150 });
 
       // Allocation Table Header
-      let tableY = 230;
+      let tableY = 235;
       doc.rect(40, tableY, 515, 20).fill('#f8fafc');
       doc.fillColor('#475569').fontSize(9).font('Helvetica-Bold')
         .text('Student / Item Allocation', 50, tableY + 6)
@@ -113,16 +145,17 @@ function generateReceiptPdf(data) {
       });
 
       // Total summary block
-      currentY += 10;
+      currentY += 12;
       doc.rect(320, currentY, 235, 45).fill('#0f172a');
       doc.fillColor('#ffffff').fontSize(11).font('Helvetica-Bold')
          .text('TOTAL PAID (NGN)', 335, currentY + 16)
          .fontSize(13).text(Number(data.amountPaid || 0).toLocaleString('en-NG'), 415, currentY + 15, { width: 130, align: 'right' });
+      currentY += 45;
 
       // ── Phase 8: Fee Breakdown Section ──────────────────────────────────────
       const feeItems = data.feeItems || [];
       if (feeItems.length > 0) {
-        currentY += 60;
+        currentY += 24;
 
         // Section header
         doc.rect(40, currentY, 515, 20).fill('#1e293b');
@@ -176,12 +209,12 @@ function generateReceiptPdf(data) {
       }
 
       // Footer notice / Seal
-      currentY += 30;
+      currentY += 35;
       doc.moveTo(40, currentY).lineTo(555, currentY).strokeColor('#e2e8f0').lineWidth(0.5).stroke();
       
       doc.fillColor('#64748b').fontSize(8).font('Helvetica')
-         .text('This receipt was generated automatically by Nexus School OS.', 40, currentY + 10, { align: 'center' })
-         .text('Thank you for your payment. For inquiries, please contact the school administration.', 40, currentY + 22, { align: 'center' });
+         .text('This receipt was generated automatically by Nexus School OS.', 40, currentY + 12, { align: 'center', width: 515 })
+         .text('Thank you for your payment. For inquiries, please contact the school administration.', 40, currentY + 24, { align: 'center', width: 515 });
 
       doc.end();
 
@@ -195,13 +228,22 @@ function drawDefaultHeader(doc, data, headerY) {
   doc.fillColor('#0f172a')
      .fontSize(18)
      .font('Helvetica-Bold')
-     .text(data.schoolName || "The School", 40, headerY);
+     .text(data.schoolName || "The School", 40, headerY, { width: 515 });
   
+  const contactParts = [];
+  if (data.schoolPhone && data.schoolPhone !== "—") contactParts.push(`Tel: ${data.schoolPhone}`);
+  contactParts.push('Official School Receipt');
+
   doc.fillColor('#475569')
      .fontSize(9)
-     .font('Helvetica')
-     .text(data.schoolAddress || "School Address", 40, headerY + 22, { width: 515 })
-     .text(`Phone: ${data.schoolPhone || "—"}`, 40, headerY + 42);
+     .font('Helvetica');
+
+  if (data.schoolAddress && data.schoolAddress !== "School Address") {
+    doc.text(data.schoolAddress, 40, headerY + 22, { width: 515 });
+    doc.text(contactParts.join('  ·  '), 40, headerY + 38, { width: 515 });
+  } else {
+    doc.text(contactParts.join('  ·  '), 40, headerY + 24, { width: 515 });
+  }
 }
 
 module.exports = {

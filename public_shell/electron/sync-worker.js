@@ -297,6 +297,46 @@ async function pushSchoolDelta() {
     } catch (_) {}
   }
 
+  // 6b. Gather School Address and Phone
+  let schoolAddress = null;
+  let schoolPhone = null;
+  try {
+    const identRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_identity'").get();
+    if (identRow?.value) {
+      const parsed = JSON.parse(identRow.value);
+      if (parsed.address) schoolAddress = parsed.address;
+      if (parsed.phone) schoolPhone = parsed.phone;
+    }
+  } catch (_) {}
+
+  if (!schoolAddress || !schoolPhone) {
+    try {
+      const { app } = require('electron');
+      const fs = require('fs');
+      const path = require('path');
+      const idPath = path.join(app.getPath('userData'), 'identity.json');
+      if (fs.existsSync(idPath)) {
+        const parsed = JSON.parse(fs.readFileSync(idPath, 'utf8'));
+        if (parsed.address && !schoolAddress) schoolAddress = parsed.address;
+        if (parsed.phone && !schoolPhone) schoolPhone = parsed.phone;
+      }
+    } catch (_) {}
+  }
+
+  if (!schoolAddress) {
+    try {
+      const addrRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_address'").get();
+      if (addrRow?.value) schoolAddress = addrRow.value;
+    } catch (_) {}
+  }
+
+  if (!schoolPhone) {
+    try {
+      const phoneRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_phone'").get();
+      if (phoneRow?.value) schoolPhone = phoneRow.value;
+    } catch (_) {}
+  }
+
   const syncToken = getSyncToken(db);
   const url = `${getApiBase()}/api/sync/push`;
   const response = await fetch(url, {
@@ -315,7 +355,9 @@ async function pushSchoolDelta() {
         extras: extrasPayload,
         paystack_subaccount_code: subaccountCode,
         portal_slug: portalSlug,
-        school_name: schoolName
+        school_name: schoolName,
+        school_address: schoolAddress,
+        school_phone: schoolPhone
       }
     })
   });
@@ -1669,6 +1711,37 @@ async function pullWebsiteBinding(force = false) {
   };
 }
 
+/**
+ * registerReceiptSession — pushes a lightweight transaction receipt record
+ * to nexus-api (/api/receipts/register) so the cloud server has the ground-truth
+ * amount, student, session, and term in its database.
+ * This keeps the parent's WhatsApp receipt URL short, clean, and minimal.
+ */
+async function registerReceiptSession(db, payload) {
+  const schoolId = getSchoolId(db);
+  if (!schoolId) return { ok: false, reason: "no_school_id" };
+  const syncToken = getSyncToken(db);
+  const url = `${getApiBase()}/api/receipts/register`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-nexus-sync-token": syncToken
+      },
+      body: JSON.stringify({
+        school_id: schoolId,
+        ...payload
+      })
+    });
+    const json = await res.json();
+    return json;
+  } catch (err) {
+    console.warn("[Sync Worker] registerReceiptSession error (non-fatal):", err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
 module.exports = {
   initSyncWorker,
   registerPaymentSettledHandler,
@@ -1691,6 +1764,7 @@ module.exports = {
   checkCloudBotStatus,
   pullWebsiteBinding,
   getSchoolId,
+  registerReceiptSession,
 };
 
 

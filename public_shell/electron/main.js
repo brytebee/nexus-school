@@ -1427,9 +1427,10 @@ ipcMain.handle('fees:refund', async (event, { studentId, txRef, amount, reason }
     }
 });
 
-ipcMain.handle('fees:send-receipt-pdf', async (event, { studentId, txRef }) => {
-    if (licenseStatus?.tier !== 'Diamond') {
-        return { ok: false, error: 'Diamond tier license required for automated receipt dispatch.' };
+ipcMain.handle('fees:send-receipt-pdf', async (event, { studentId, txRef, txId }) => {
+    const isEligibleTier = licenseStatus?.tier === 'Diamond' || licenseStatus?.tier === 'Gold';
+    if (!isEligibleTier && licenseStatus?.tier === 'Standalone') {
+        return { ok: false, error: 'Cloud connected license (Gold or Diamond) required for automated receipt dispatch.' };
     }
     const botStatus = pulseBot?.getPulseStatus?.();
     if (botStatus?.status !== 'ready') {
@@ -1438,7 +1439,10 @@ ipcMain.handle('fees:send-receipt-pdf', async (event, { studentId, txRef }) => {
     const db = database.getDb();
 
     // Path A: Paystack online payment — has a fee_payment_sessions row
-    const session = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(txRef);
+    let session = null;
+    if (txRef) {
+        session = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(txRef);
+    }
     if (session) {
         if (!session.parent_phone) {
             return { ok: false, error: 'No parent phone number recorded for this payment session.' };
@@ -1453,11 +1457,36 @@ ipcMain.handle('fees:send-receipt-pdf', async (event, { studentId, txRef }) => {
     }
 
     // Path B: Manual payment (cash / transfer / POS / bank teller) — no payment session
-    const tx = db.prepare("SELECT * FROM fee_transactions WHERE reference_number = ? AND student_id = ?").get(txRef, studentId);
+    let tx = null;
+    if (txId) {
+        tx = db.prepare("SELECT * FROM fee_transactions WHERE id = ?").get(txId);
+    }
+    if (!tx && txRef && studentId) {
+        tx = db.prepare("SELECT * FROM fee_transactions WHERE reference_number = ? AND student_id = ?").get(txRef, studentId);
+    }
+    if (!tx && txRef) {
+        tx = db.prepare("SELECT * FROM fee_transactions WHERE reference_number = ?").get(txRef);
+    }
+    if (!tx && studentId) {
+        tx = db.prepare("SELECT * FROM fee_transactions WHERE student_id = ? ORDER BY id DESC LIMIT 1").get(studentId);
+    }
+
     if (!tx) {
         return { ok: false, error: 'Transaction record not found. It may have been deleted or the reference is incorrect.' };
     }
-    const sRow = db.prepare("SELECT parent_phone FROM students WHERE id = ?").get(studentId);
+
+    // If transaction had no reference number or was empty, assign a permanent canonical reference
+    let refNum = tx.reference_number;
+    if (!refNum || !refNum.trim()) {
+        refNum = `MAN-${tx.id || Date.now()}`;
+        try {
+            db.prepare("UPDATE fee_transactions SET reference_number = ? WHERE id = ?").run(refNum, tx.id);
+            tx.reference_number = refNum;
+        } catch (_) {}
+    }
+
+    const targetStudentId = studentId || tx.student_id;
+    const sRow = db.prepare("SELECT parent_phone FROM students WHERE id = ?").get(targetStudentId);
     if (!sRow?.parent_phone) {
         return { ok: false, error: 'No parent WhatsApp number on record for this student. Please update the student profile first.' };
     }
@@ -1468,7 +1497,7 @@ ipcMain.handle('fees:send-receipt-pdf', async (event, { studentId, txRef }) => {
             term:             tx.term,
             amount:           tx.amount,
             payment_method:   tx.payment_method,
-            reference_number: tx.reference_number,
+            reference_number: refNum,
             note:             tx.note,
         });
         if (typeof result === 'object') return result;
@@ -1478,20 +1507,31 @@ ipcMain.handle('fees:send-receipt-pdf', async (event, { studentId, txRef }) => {
     }
 });
 
-ipcMain.handle('fees:print-receipt', async (event, { txRef, studentId, format }) => {
+ipcMain.handle('fees:print-receipt', async (event, { txRef, studentId, txId, format }) => {
     const db = database.getDb();
     
-    const tx = db.prepare("SELECT * FROM fee_transactions WHERE reference_number = ? AND student_id = ?").get(txRef, studentId);
+    let tx = null;
+    if (txId) {
+        tx = db.prepare("SELECT * FROM fee_transactions WHERE id = ?").get(txId);
+    }
+    if (!tx && txRef && studentId) {
+        tx = db.prepare("SELECT * FROM fee_transactions WHERE reference_number = ? AND student_id = ?").get(txRef, studentId);
+    }
+    if (!tx && txRef) {
+        tx = db.prepare("SELECT * FROM fee_transactions WHERE reference_number = ?").get(txRef);
+    }
     if (!tx) {
         return { ok: false, error: 'Transaction record not found.' };
     }
 
-    const sRow = db.prepare("SELECT name, class_name, parent_email FROM students WHERE id = ?").get(studentId);
+    const targetStudentId = studentId || tx.student_id;
+    const sRow = db.prepare("SELECT name, class_name, parent_email, parent_name FROM students WHERE id = ?").get(targetStudentId);
     const studentName = sRow?.name || "Student";
     const studentClass = sRow?.class_name || "—";
     const parentEmail = sRow?.parent_email || "—";
+    const parentName = sRow?.parent_name?.trim() || null;
 
-    const session = db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(txRef);
+    const session = txRef ? db.prepare("SELECT * FROM fee_payment_sessions WHERE paystack_ref = ?").get(txRef) : null;
     const amountPaid = tx.amount;
 
     let allocations = [];
@@ -1619,6 +1659,7 @@ ipcMain.handle('fees:print-receipt', async (event, { txRef, studentId, format })
         schoolAddress,
         schoolPhone,
         schoolLogoB64,
+        parentName,
         studentName,
         studentClass,
         parentEmail,
@@ -2156,15 +2197,17 @@ async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null
   let studentName = "Student";
   let studentClass = "—";
   let parentEmail = "—";
+  let parentName = null;
   let amountPaid = session.total_amount;
   let receiptRecords = [];
   const primaryStudentId = targetStudentId || studentIds[0];
 
   if (targetStudentId) {
-    const sRow = db.prepare("SELECT name, class_name, parent_email FROM students WHERE id = ?").get(targetStudentId);
+    const sRow = db.prepare("SELECT name, class_name, parent_email, parent_name FROM students WHERE id = ?").get(targetStudentId);
     studentName = sRow?.name || "Student";
     studentClass = sRow?.class_name || "—";
     parentEmail = sRow?.parent_email || "—";
+    parentName = sRow?.parent_name?.trim() || null;
 
     const allocRow = db.prepare("SELECT amount FROM fee_transactions WHERE student_id = ? AND reference_number = ?").get(targetStudentId, ref);
     amountPaid = allocRow?.amount || session.total_amount;
@@ -2182,10 +2225,11 @@ async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null
     const names = [];
     const classes = [];
     for (const studentId of studentIds) {
-      const sRow = db.prepare("SELECT name, class_name, parent_email FROM students WHERE id = ?").get(studentId);
+      const sRow = db.prepare("SELECT name, class_name, parent_email, parent_name FROM students WHERE id = ?").get(studentId);
       if (sRow?.name) names.push(sRow.name);
       if (sRow?.class_name && !classes.includes(sRow.class_name)) classes.push(sRow.class_name);
       if (sRow?.parent_email && parentEmail === "—") parentEmail = sRow.parent_email;
+      if (sRow?.parent_name && !parentName) parentName = sRow.parent_name.trim();
 
       const allocRow = db.prepare("SELECT amount FROM fee_transactions WHERE student_id = ? AND reference_number = ?").get(studentId, ref);
       const amount = allocRow?.amount || 0;
@@ -2268,11 +2312,26 @@ async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null
     if (logoRow?.value) schoolLogoB64 = logoRow.value;
   } catch (_) {}
 
+  if (!schoolAddress || !schoolPhone) {
+    try {
+      const { app } = require('electron');
+      const fs = require('fs');
+      const path = require('path');
+      const idPath = path.join(app.getPath('userData'), 'identity.json');
+      if (fs.existsSync(idPath)) {
+        const parsed = JSON.parse(fs.readFileSync(idPath, 'utf8'));
+        if (parsed.address && !schoolAddress) schoolAddress = parsed.address;
+        if (parsed.phone && !schoolPhone) schoolPhone = parsed.phone;
+      }
+    } catch (_) {}
+  }
+
   const receiptData = {
     schoolName,
     schoolAddress,
     schoolPhone,
     schoolLogoB64,
+    parentName,
     studentName,
     studentClass,
     parentEmail,
@@ -2288,6 +2347,21 @@ async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null
 
   // ── Construct canonical portal receipt download URL ──────────────────────
   const downloadUrl = getPortalReceiptUrl(db, ref, session.parent_phone);
+
+  // Prime nexus-api so cloud has ground truth for online/branded payment
+  syncWorker.registerReceiptSession(db, {
+    reference: ref,
+    student_ids: studentIds,
+    parent_name: parentName,
+    parent_phone: session.parent_phone,
+    amount: amountPaid,
+    payment_method: "Paystack Online",
+    academic_session: academicSession,
+    term,
+    school_address: schoolAddress,
+    school_phone: schoolPhone,
+    allocations: receiptRecords,
+  }).catch(() => {});
 
   // ── Background non-blocking PDF generation & optional Cloudinary archive ──
   try {
@@ -2373,12 +2447,13 @@ async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null
  * @returns {Promise<boolean>}
  */
 async function sendManualReceiptHelper(db, { student_id, academic_session, term, amount, payment_method, reference_number, note }) {
-  const sRow = db.prepare("SELECT name, class_name, parent_phone, parent_email FROM students WHERE id = ?").get(student_id);
+  const sRow = db.prepare("SELECT name, class_name, parent_phone, parent_email, parent_name FROM students WHERE id = ?").get(student_id);
   if (!sRow?.parent_phone) {
     console.warn("[Manual Receipt] No parent phone for student", student_id, "— skipping WhatsApp dispatch");
     return false;
   }
 
+  const parentName = sRow?.parent_name?.trim() || null;
   const termConfig = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get() || {};
   const feeRow = db.prepare(
     "SELECT total_billed, total_paid FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?"
@@ -2406,8 +2481,23 @@ async function sendManualReceiptHelper(db, { student_id, academic_session, term,
     if (lRow?.value) schoolLogoB64 = lRow.value;
   } catch (_) {}
 
+  if (!schoolAddress || !schoolPhone) {
+    try {
+      const { app } = require('electron');
+      const fs = require('fs');
+      const path = require('path');
+      const idPath = path.join(app.getPath('userData'), 'identity.json');
+      if (fs.existsSync(idPath)) {
+        const parsed = JSON.parse(fs.readFileSync(idPath, 'utf8'));
+        if (parsed.address && !schoolAddress) schoolAddress = parsed.address;
+        if (parsed.phone && !schoolPhone) schoolPhone = parsed.phone;
+      }
+    } catch (_) {}
+  }
+
   const receiptData = {
     schoolName, schoolAddress, schoolPhone, schoolLogoB64,
+    parentName,
     studentName:   sRow.name,
     studentClass:  sRow.class_name || "—",
     parentEmail:   sRow.parent_email || "—",
@@ -2423,6 +2513,21 @@ async function sendManualReceiptHelper(db, { student_id, academic_session, term,
 
   // ── Step 1: Construct canonical portal receipt download URL ──────────────
   const downloadUrl = getPortalReceiptUrl(db, ref, sRow.parent_phone);
+
+  // Prime nexus-api so cloud has ground truth for manual/offline payment
+  syncWorker.registerReceiptSession(db, {
+    reference: ref,
+    student_id,
+    parent_name: parentName,
+    parent_phone: sRow.parent_phone,
+    amount,
+    payment_method: methodLabel,
+    academic_session: receiptData.academicSession,
+    term: receiptData.term,
+    school_address: schoolAddress,
+    school_phone: schoolPhone,
+    allocations: receiptData.allocations,
+  }).catch(() => {});
 
   // Background non-blocking PDF generation & optional Cloudinary archive
   try {
