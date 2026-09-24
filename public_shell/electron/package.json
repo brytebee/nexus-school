@@ -114,7 +114,10 @@
       "maintainer": "Nexus Infrastructure Ltd <support@nexusos.com.ng>",
       "synopsis": "High-End School Management System",
       "executableArgs": [
-        "--no-sandbox"
+        "--no-sandbox",
+        "--disable-gpu-sandbox",
+        "--disable-font-subpixel-positioning",
+        "--force-color-profile=srgb"
       ],
       "desktop": {
         "Name": "Nexus School OS",
