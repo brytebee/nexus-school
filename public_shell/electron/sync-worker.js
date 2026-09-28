@@ -1147,6 +1147,35 @@ async function gatherSyncPackage() {
     console.error("[Sync Worker] Error gathering CBT question banks for sync:", err);
   }
 
+  // 8. Optional Fee Extras (Financial Hub extras/optional catalog → shop_items on website)
+  let extras = [];
+  try {
+    const extrasTableExists = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='fee_extras'")
+      .get();
+    if (extrasTableExists) {
+      const rows = db.prepare(`
+        SELECT fe.id, fe.class_name, fe.item_name, fe.amount, fe.term,
+               ba.subaccount_code, ba.bank_name
+        FROM fee_extras fe
+        LEFT JOIN bank_accounts ba ON ba.id = fe.bank_account_id
+        WHERE fe.is_active = 1
+        ORDER BY fe.class_name ASC, fe.item_name ASC
+      `).all();
+      extras = rows.map((r) => ({
+        id: r.id,
+        itemName: r.item_name,
+        className: r.class_name || 'All Classes',
+        amount: r.amount,          // Naira — website converts to kobo (× 100)
+        term: r.term || 'All Terms',
+        bankName: r.bank_name || null,
+        subaccountCode: r.subaccount_code || null,
+      }));
+    }
+  } catch (err) {
+    console.error("[Sync Worker] Error gathering extras for sync:", err);
+  }
+
   return {
     ok: true,
     schoolCloudId: schoolId,
@@ -1162,6 +1191,7 @@ async function gatherSyncPackage() {
       customSubjects,
       cbtExams,
       cbtQuestionBanks,
+      extras,
     },
   };
 }

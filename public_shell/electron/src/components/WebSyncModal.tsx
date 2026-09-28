@@ -5,7 +5,7 @@ interface WebSyncModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
-  defaultTab?: 'overview' | 'classes' | 'branding' | 'calendar' | 'fees' | 'cbt';
+  defaultTab?: 'overview' | 'classes' | 'branding' | 'calendar' | 'fees' | 'cbt' | 'extras';
 }
 
 export function WebSyncModal({
@@ -14,7 +14,7 @@ export function WebSyncModal({
   onSuccess,
   defaultTab = 'overview',
 }: WebSyncModalProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'classes' | 'branding' | 'calendar' | 'fees' | 'cbt'>(defaultTab);
+  const [activeTab, setActiveTab] = useState<'overview' | 'classes' | 'branding' | 'calendar' | 'fees' | 'cbt' | 'extras'>(defaultTab);
   const [loading, setLoading] = useState(false);
   const [testingImpact, setTestingImpact] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -28,10 +28,12 @@ export function WebSyncModal({
   const [syncCustomSubjects, setSyncCustomSubjects] = useState(true);
   const [syncCbtQuestionBanks, setSyncCbtQuestionBanks] = useState(true);
   const [syncCbtExams, setSyncCbtExams] = useState(false);
+  const [syncExtras, setSyncExtras] = useState(false);
 
   // Granular Item Selection Sets
   const [selectedFeeIndices, setSelectedFeeIndices] = useState<Set<number>>(new Set());
   const [selectedBankIds, setSelectedBankIds] = useState<Set<number>>(new Set());
+  const [selectedExtraIds, setSelectedExtraIds] = useState<Set<number>>(new Set());
 
   const toggleFeeItem = (idx: number) => {
     setSelectedFeeIndices((prev) => {
@@ -66,6 +68,24 @@ export function WebSyncModal({
       setSelectedBankIds(new Set());
     } else {
       setSelectedBankIds(new Set(banks.map((b) => b.id)));
+    }
+  };
+
+  const toggleExtraItem = (id: number) => {
+    setSelectedExtraIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllExtras = () => {
+    const items: any[] = snapshot?.modules?.extras || [];
+    if (selectedExtraIds.size === items.length) {
+      setSelectedExtraIds(new Set());
+    } else {
+      setSelectedExtraIds(new Set(items.map((e: any) => e.id)));
     }
   };
 
@@ -123,6 +143,9 @@ export function WebSyncModal({
         if (Array.isArray(res.modules.cbtQuestionBanks)) {
           setSelectedBankIds(new Set(res.modules.cbtQuestionBanks.map((bk: any) => bk.id)));
         }
+        if (Array.isArray(res.modules.extras)) {
+          setSelectedExtraIds(new Set(res.modules.extras.map((ex: any) => ex.id)));
+        }
       }
     } catch (err: any) {
       console.error('Failed to load sync package:', err);
@@ -171,6 +194,10 @@ export function WebSyncModal({
 
     if (syncCbtQuestionBanks && snapshot?.modules?.cbtQuestionBanks) {
       activeModules.cbtQuestionBanks = snapshot.modules.cbtQuestionBanks.filter((b: any) => selectedBankIds.has(b.id));
+    }
+
+    if (syncExtras && snapshot?.modules?.extras) {
+      activeModules.extras = snapshot.modules.extras.filter((e: any) => selectedExtraIds.has(e.id));
     }
 
     return {
@@ -270,6 +297,7 @@ export function WebSyncModal({
       0
     ) || 0;
   const subjectsCount = snapshot?.modules?.customSubjects?.length || 0;
+  const extrasCount = snapshot?.modules?.extras?.length || 0;
 
   return (
     <Modal
@@ -349,6 +377,7 @@ export function WebSyncModal({
             { id: 'calendar', label: '📅 Calendar' },
             { id: 'fees', label: `💳 Fees (${feesCount})` },
             { id: 'cbt', label: `🧠 CBT (${cbtBanksCount > 0 ? `${cbtBanksCount} Banks` : `${cbtCount} Exams`})` },
+            { id: 'extras', label: `🎒 Extras / Shop (${extrasCount})` },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -417,6 +446,12 @@ export function WebSyncModal({
                 <span>
                   Banks: <strong>+{impactResult.cbtQuestionBanks.banksWillAdd}</strong> new,{' '}
                   <strong>~{impactResult.cbtQuestionBanks.banksWillUpdate}</strong> updated ({impactResult.cbtQuestionBanks.totalIncomingQuestions} Qs)
+                </span>
+              )}
+              {impactResult.shopItems && (
+                <span>
+                  Shop Items: <strong>+{impactResult.shopItems.willAdd}</strong> new,{' '}
+                  <strong>~{impactResult.shopItems.willUpdate}</strong> updated
                 </span>
               )}
             </div>
@@ -518,6 +553,16 @@ export function WebSyncModal({
                   <strong>Deployed Entrance Exams</strong>
                   <span style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
                     {cbtCount} deployed exam templates
+                  </span>
+                </div>
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', padding: '10px', borderRadius: '8px', background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)' }}>
+                <input type="checkbox" checked={syncExtras} onChange={(e) => setSyncExtras(e.target.checked)} />
+                <div>
+                  <strong style={{ color: '#fbbf24' }}>🎒 Optional Extras → School Shop</strong>
+                  <span style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
+                    {selectedExtraIds.size} of {extrasCount} selected — see Extras tab
                   </span>
                 </div>
               </label>
@@ -1026,6 +1071,106 @@ export function WebSyncModal({
                   })}
                 </div>
               </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 7: OPTIONAL EXTRAS & SCHOOL SHOP CATALOG */}
+        {activeTab === 'extras' && (
+          <div style={{ maxHeight: '380px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <strong style={{ fontSize: '13px', color: '#fff' }}>Optional Extras &amp; Shop Catalog ({extrasCount})</strong>
+                <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', display: 'block', marginTop: '2px' }}>
+                  Extracted from Financial Hub optional billing. Synced extras will publish directly to the School Website Shop (<span style={{ fontFamily: 'monospace', color: '#38bdf8' }}>/shop</span>).
+                </span>
+              </div>
+              {extrasCount > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                  <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', background: 'rgba(245,158,11,0.15)', color: '#fbbf24', fontWeight: 600 }}>
+                    {selectedExtraIds.size} of {extrasCount} Selected
+                  </span>
+                  <button
+                    onClick={toggleAllExtras}
+                    style={{ fontSize: '10px', padding: '3px 8px', borderRadius: '4px', background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.7)', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer' }}
+                  >
+                    {selectedExtraIds.size === extrasCount ? 'Deselect All' : 'Select All'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {extrasCount === 0 ? (
+              <div style={{ padding: '16px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px dashed rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.4)', fontStyle: 'italic', fontSize: '12px', textAlign: 'center' }}>
+                No active extras found in Financial Hub. Add items in Financial Hub &gt; Student Extras &amp; Optional Billing to stage them here.
+              </div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', textAlign: 'left', color: 'rgba(255,255,255,0.5)' }}>
+                    <th style={{ padding: '6px 8px', width: '32px' }}>
+                      <input
+                        type="checkbox"
+                        title="Select / deselect all extras"
+                        checked={selectedExtraIds.size === extrasCount && extrasCount > 0}
+                        onChange={toggleAllExtras}
+                      />
+                    </th>
+                    <th style={{ padding: '6px 8px' }}>Item Name</th>
+                    <th style={{ padding: '6px 8px' }}>Class Target</th>
+                    <th style={{ padding: '6px 8px' }}>Term</th>
+                    <th style={{ padding: '6px 8px' }}>Amount (₦)</th>
+                    <th style={{ padding: '6px 8px' }}>Settlement Route</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {snapshot?.modules?.extras?.map((ex: any) => (
+                    <tr
+                      key={ex.id}
+                      style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', opacity: selectedExtraIds.has(ex.id) ? 1 : 0.4, cursor: 'pointer' }}
+                      onClick={() => toggleExtraItem(ex.id)}
+                    >
+                      <td style={{ padding: '6px 8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedExtraIds.has(ex.id)}
+                          onChange={() => toggleExtraItem(ex.id)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </td>
+                      <td style={{ padding: '6px 8px', fontWeight: 600, color: '#fff' }}>
+                        {ex.itemName}
+                      </td>
+                      <td style={{ padding: '6px 8px' }}>
+                        <span style={{ fontSize: '11px', padding: '1px 6px', borderRadius: '4px', background: ex.className === 'All Classes' ? 'rgba(56,189,248,0.15)' : 'rgba(255,255,255,0.08)', color: ex.className === 'All Classes' ? '#38bdf8' : '#e2e8f0' }}>
+                          {ex.className}
+                        </span>
+                      </td>
+                      <td style={{ padding: '6px 8px', color: 'rgba(255,255,255,0.6)' }}>
+                        {ex.term || 'All Terms'}
+                      </td>
+                      <td style={{ padding: '6px 8px', fontWeight: 700, color: '#34d399' }}>
+                        ₦{Number(ex.amount || 0).toLocaleString()}
+                      </td>
+                      <td style={{ padding: '6px 8px' }}>
+                        {ex.subaccountCode ? (
+                          <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(16,185,129,0.15)', color: '#34d399', fontFamily: 'monospace' }}>
+                            {ex.subaccountCode}
+                          </span>
+                        ) : ex.bankName ? (
+                          <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.7)' }}>
+                            {ex.bankName}
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' }}>
+                            Default School Account
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
         )}
