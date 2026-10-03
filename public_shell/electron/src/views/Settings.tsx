@@ -1161,6 +1161,68 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
     alert('Terminal architecture mode applied. Please restart the application.');
   };
 
+  // Standalone Database Backup helper (without reset)
+  const handleBackupDatabase = async () => {
+    if (!currentAdminUser || currentAdminUser.role_level < 9) {
+      const Swal = (window as any).Swal;
+      if (Swal) {
+        Swal.fire({
+          title: 'Access Denied',
+          text: 'Superadmin access is required to backup database.',
+          icon: 'error',
+          background: '#0d1235',
+          color: '#fff',
+        });
+      } else {
+        alert('Superadmin access is required.');
+      }
+      return;
+    }
+
+    const Swal = (window as any).Swal;
+    try {
+      const backupRes = await (window as any).electronAPI?.backupDatabase?.();
+      if (backupRes?.ok) {
+        if (Swal) {
+          await Swal.fire({
+            title: 'Backup Successful',
+            text: `Database backup saved successfully at:\n${backupRes.path}`,
+            icon: 'success',
+            background: '#0d1235',
+            color: '#fff',
+          });
+        } else {
+          alert(`Database backup saved successfully at:\n${backupRes.path}`);
+        }
+      } else if (backupRes?.reason !== 'cancelled') {
+        if (Swal) {
+          await Swal.fire({
+            title: 'Backup Failed',
+            text: `Could not save database backup: ${backupRes?.error || backupRes?.reason || 'Unknown error'}`,
+            icon: 'error',
+            background: '#0d1235',
+            color: '#fff',
+          });
+        } else {
+          alert(`Backup failed: ${backupRes?.error || backupRes?.reason || 'Unknown error'}`);
+        }
+      }
+    } catch (err: any) {
+      console.error('Backup error:', err);
+      if (Swal) {
+        await Swal.fire({
+          title: 'Backup Error',
+          text: `An unexpected error occurred: ${err.message}`,
+          icon: 'error',
+          background: '#0d1235',
+          color: '#fff',
+        });
+      } else {
+        alert(`An unexpected error occurred: ${err.message}`);
+      }
+    }
+  };
+
   // Restore Database Backup helper
   const handleRestoreDatabase = async () => {
     if (!currentAdminUser || currentAdminUser.role_level < 9) {
@@ -1424,6 +1486,42 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
           >
             🎓
           </button>
+
+          {/* 💾 Backup Database (without reset) */}
+          {(!currentAdminUser || currentAdminUser.role_level >= 9) && (
+            <button
+              onClick={handleBackupDatabase}
+              id="backup-btn"
+              style={{
+                background: 'rgba(0,229,255,0.05)',
+                border: '1px solid rgba(0,229,255,0.2)',
+                borderRadius: '50%',
+                width: '34px',
+                height: '34px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                boxShadow: '0 0 10px rgba(0,0,0,0.2)',
+                fontSize: '16px',
+                color: '#00e5ff'
+              }}
+              title="Backup Database (.sqlite)"
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(0,229,255,0.6)';
+                e.currentTarget.style.boxShadow = '0 0 12px rgba(0,229,255,0.3)';
+                e.currentTarget.style.background = 'rgba(0,229,255,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(0,229,255,0.2)';
+                e.currentTarget.style.boxShadow = '0 0 10px rgba(0,0,0,0.2)';
+                e.currentTarget.style.background = 'rgba(0,229,255,0.05)';
+              }}
+            >
+              💾
+            </button>
+          )}
 
           {(!currentAdminUser || currentAdminUser.role_level >= 9) && (
             <button
@@ -2345,6 +2443,49 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
             Apply Mode
           </button>
         </div>
+
+        {/* Database Backup */}
+        {(!currentAdminUser || currentAdminUser.role_level >= 9) && (
+          <div
+            className="form-group"
+            style={{
+              background: 'rgba(0, 229, 255, 0.05)',
+              padding: '16px',
+              borderRadius: '8px',
+              border: '1px dashed rgba(0, 229, 255, 0.3)',
+              marginTop: '8px',
+            }}
+          >
+            <label style={{ color: '#00e5ff', fontSize: '13px', marginBottom: '8px', display: 'block' }}>
+              💾 Backup Database
+            </label>
+            <p style={{ fontSize: '11px', color: '#aaa', marginBottom: '10px' }}>
+              Save an unencrypted <code>.sqlite</code> snapshot of your database to your local machine without resetting or altering any data.
+            </p>
+            <button
+              onClick={handleBackupDatabase}
+              id="backup-db-drawer-btn"
+              className="secondary-btn"
+              style={{
+                width: '100%',
+                fontSize: '12px',
+                padding: '8px',
+                borderColor: '#00e5ff',
+                color: '#00e5ff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                background: 'transparent',
+                cursor: 'pointer',
+                border: '1px solid',
+                borderRadius: '6px',
+              }}
+            >
+              💾 Save Database Backup
+            </button>
+          </div>
+        )}
 
         {/* Database Restore */}
         {(!currentAdminUser || currentAdminUser.role_level >= 9) ? (
