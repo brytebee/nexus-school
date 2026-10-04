@@ -10,7 +10,7 @@ const os   = require("os");
 const fs   = require("fs");
 const QRCode = require("qrcode");
 const paystackService = require("./paystack-service");
-const { calculatePaystackCharge, formatNaira } = require("./src/lib/paystackUtils");
+const { calculatePaystackCharge, calculatePaymentBreakdown, formatNaira } = require("./src/lib/paystackUtils");
 
 // Suppress Puppeteer "Execution context was destroyed" noise that fires
 // when WhatsApp LOGOUT causes a page navigation mid-inject. This is expected
@@ -52,6 +52,7 @@ const STATE = Object.freeze({
   AWAITING_PARTIAL_PLAN:   "AWAITING_PARTIAL_PLAN",
   AWAITING_CUSTOM_AMOUNT:  "AWAITING_CUSTOM_AMOUNT",
   AWAITING_EMAIL_INPUT:    "AWAITING_EMAIL_INPUT",
+  AWAITING_PAYMENT_CHANNEL:"AWAITING_PAYMENT_CHANNEL",
   AWAITING_EXTRAS_SELECTION: "AWAITING_EXTRAS_SELECTION",
 });
 
@@ -1270,6 +1271,8 @@ async function handleMessage(msg) {
       isBotHandled = true;
     } else if (session.state === STATE.AWAITING_EMAIL_INPUT) {
       isBotHandled = true;
+    } else if (session.state === STATE.AWAITING_PAYMENT_CHANNEL && (text === '0' || numericInput !== null)) {
+      isBotHandled = true;
     } else if (session.state === STATE.AWAITING_EXTRAS_SELECTION &&
                (text === '0' || numericInput !== null || /^\d[\d,\s]*$/.test(text))) {
       // Covers single "1", numeric "9", and comma-separated "1,2,3"
@@ -2080,10 +2083,67 @@ async function handleMessage(msg) {
       }
     }
 
-    // Direct checkout initialization
-    await generatePaystackLink(msg, session, matchable, txContext.amount, txContext.paymentType, emailToUse, txContext.percentage);
+    // Show channel selection prompt instead of going straight to Paystack
+    session.paymentContext.resolvedEmail = emailToUse;
+    session.state = STATE.AWAITING_PAYMENT_CHANNEL;
+    setSession(matchable, session);
+
+    const breakdown = calculatePaymentBreakdown(txContext.amount);
+    const platformFeeStr = formatNaira(breakdown.platformFeeNaira);
+    let channelMsg = `💳 *Choose Payment Method for ${formatNaira(txContext.amount)}*\n${DIV}\n\n`;
+    if (breakdown.cheapestChannel === 'bank_transfer') {
+      channelMsg += `Reply *1* for *Instant Bank Transfer / USSD* 🟢 *(Cheapest · Save ${formatNaira(breakdown.savingsNaira)})*\n`;
+      channelMsg += `   • Platform Fee (0.99%): ${platformFeeStr}\n`;
+      channelMsg += `   • Network Fee: ${formatNaira(breakdown.transfer.gatewayFeeNaira)}\n`;
+      channelMsg += `   • Total to Pay: *${formatNaira(breakdown.transfer.grossNaira)}*\n\n`;
+      channelMsg += `Reply *2* for *Debit / Credit Card*\n`;
+      channelMsg += `   • Platform Fee (0.99%): ${platformFeeStr}\n`;
+      channelMsg += `   • Gateway Fee: ${formatNaira(breakdown.card.gatewayFeeNaira)}\n`;
+      channelMsg += `   • Total to Pay: *${formatNaira(breakdown.card.grossNaira)}*\n\n`;
+    } else {
+      channelMsg += `Reply *1* for *Debit / Credit Card* 🟢 *(Cheapest · Save ${formatNaira(breakdown.savingsNaira)})*\n`;
+      channelMsg += `   • Platform Fee (0.99%): ${platformFeeStr}\n`;
+      channelMsg += `   • Gateway Fee: ${formatNaira(breakdown.card.gatewayFeeNaira)}\n`;
+      channelMsg += `   • Total to Pay: *${formatNaira(breakdown.card.grossNaira)}*\n\n`;
+      channelMsg += `Reply *2* for *Instant Bank Transfer / USSD*\n`;
+      channelMsg += `   • Platform Fee (0.99%): ${platformFeeStr}\n`;
+      channelMsg += `   • Network Fee: ${formatNaira(breakdown.transfer.gatewayFeeNaira)}\n`;
+      channelMsg += `   • Total to Pay: *${formatNaira(breakdown.transfer.grossNaira)}*\n\n`;
+    }
+    channelMsg += `_Reply 0 to cancel and return to main menu_`;
+    await msg.reply(channelMsg);
     return;
   }
+
+  // ── STATE: AWAITING_PAYMENT_CHANNEL ─────────────────────────────────────────
+  if (session.state === STATE.AWAITING_PAYMENT_CHANNEL) {
+    if (text === '0') {
+      clearSession(matchable);
+      await msg.reply(buildMainMenu(session.schoolName));
+      return;
+    }
+
+    const txContext = session.paymentContext?.pendingTx;
+    const parentEmail = session.paymentContext?.resolvedEmail;
+    if (!txContext || !parentEmail) {
+      clearSession(matchable);
+      await msg.reply("⚠️ Session error. Please request your fees menu again to start over.");
+      return;
+    }
+
+    const breakdown = calculatePaymentBreakdown(txContext.amount);
+    let chosenChannel;
+    if (breakdown.cheapestChannel === 'bank_transfer') {
+      chosenChannel = numericInput === 1 ? 'bank_transfer' : 'card';
+    } else {
+      chosenChannel = numericInput === 1 ? 'card' : 'bank_transfer';
+    }
+
+    await generatePaystackLink(msg, session, matchable, txContext.amount, txContext.paymentType, parentEmail, txContext.percentage, chosenChannel);
+    return;
+  }
+
+
 }
 
 // ─── Paystack Email Validation / Collection Hook ──────────────────────────────
@@ -2126,7 +2186,7 @@ async function checkOrPromptEmail(msg, session, matchable, amount, paymentType, 
 }
 
 // ─── Paystack Transaction Link Generator ───────────────────────────────────────
-async function generatePaystackLink(msg, session, matchable, amount, paymentType, parentEmail, percentage = null) {
+async function generatePaystackLink(msg, session, matchable, amount, paymentType, parentEmail, percentage = null, chosenChannel = 'bank_transfer') {
   const db = database.getDb();
 
   // 2. Query active collection subaccount code
@@ -2158,12 +2218,23 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
   try {
     await msg.reply("⏳ _Generating your secure checkout link..._");
 
-    // Calculate 0.99% platform fee split
-    const baseKobo = Math.round(amount * 100);
-    const platformFeeKobo = Math.round(baseKobo * 0.0099); // 0.99% enabling fee
-    const grossKobo = baseKobo + platformFeeKobo;
-    const grossNaira = grossKobo / 100;
-    const platformFeeNaira = platformFeeKobo / 100;
+    // Use the unified fee engine to compute correct amounts per channel
+    const breakdown = calculatePaymentBreakdown(amount);
+    const isCard = chosenChannel === 'card';
+    const channelData = isCard ? breakdown.card : breakdown.transfer;
+
+    const baseKobo = breakdown.baseKobo;
+    const platformFeeKobo = breakdown.platformFeeKobo;
+    const gatewayFeeKobo  = channelData.gatewayFeeKobo;
+    const grossKobo       = channelData.grossKobo;      // base + platform + gateway
+    const grossNaira      = channelData.grossNaira;
+    const platformFeeNaira = breakdown.platformFeeNaira;
+    const gatewayFeeNaira  = channelData.gatewayFeeNaira;
+
+    // Restrict Paystack to only the chosen channel
+    const paystackChannels = isCard
+      ? ['card']
+      : ['bank_transfer', 'ussd'];
 
     const tx = await paystackService.initializeTransaction({
       email: parentEmail,
@@ -2171,15 +2242,19 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
       transactionCharge: platformFeeKobo,
       reference: reference,
       subaccountCode: subaccountCode,
+      channels: paystackChannels,
       callbackUrl: "https://nexusos.com.ng/payment-complete",
       metadata: {
         base_amount:           amount,
         platform_enabling_fee: platformFeeNaira,
+        gateway_fee:           gatewayFeeNaira,
+        gateway_channel:       chosenChannel,
         gross_amount:          grossNaira,
         custom_fields: [
-          { display_name: 'School Fee',                 variable_name: 'base_amount',   value: formatNaira(amount) },
+          { display_name: 'School Fee',                    variable_name: 'base_amount',   value: formatNaira(amount) },
           { display_name: 'Platform Enabling Fee (0.99%)', variable_name: 'platform_fee',  value: formatNaira(platformFeeNaira) },
-          { display_name: 'Total Charged',              variable_name: 'gross',         value: formatNaira(grossNaira) },
+          { display_name: isCard ? 'Card Gateway Fee' : 'Network (NIP) Fee', variable_name: 'gateway_fee', value: formatNaira(gatewayFeeNaira) },
+          { display_name: 'Total Charged',                 variable_name: 'gross',         value: formatNaira(grossNaira) },
         ]
       }
     });
@@ -2193,13 +2268,17 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
       `).run(matchable, studentIds, amount, paymentType, percentage, reference, tx.access_code);
 
-      // Show itemised breakdown so the parent is never surprised
+      // Show full itemised breakdown so the parent is never surprised
+      const channelLabel = isCard ? '💳 Debit / Credit Card' : '🏦 Bank Transfer / USSD';
       let payLinkMsg = `🔗 *Secure Checkout Link*\n\n`;
       payLinkMsg += `Plan: *${paymentType}*\n`;
-      payLinkMsg += `School Fee:               *${formatNaira(amount)}*\n`;
-      payLinkMsg += `Platform Enabling Fee (0.99%): *${formatNaira(platformFeeNaira)}*\n`;
+      payLinkMsg += `Payment Method: *${channelLabel}*\n`;
       payLinkMsg += `─────────────────────────\n`;
-      payLinkMsg += `Total to Pay:             *${formatNaira(grossNaira)}*\n\n`;
+      payLinkMsg += `School Fee:                   *${formatNaira(amount)}*\n`;
+      payLinkMsg += `Platform Enabling Fee (0.99%): *${formatNaira(platformFeeNaira)}*\n`;
+      payLinkMsg += `${isCard ? 'Card Gateway Fee' : 'Network (NIP) Fee'}:        *${formatNaira(gatewayFeeNaira)}*\n`;
+      payLinkMsg += `─────────────────────────\n`;
+      payLinkMsg += `Total to Pay:                 *${formatNaira(grossNaira)}*\n\n`;
       payLinkMsg += `Click the link below to complete your payment:\n`;
       payLinkMsg += `${tx.authorization_url}\n\n`;
       payLinkMsg += `_Once payment is successful, your school records will update automatically._`;

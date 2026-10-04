@@ -71,4 +71,73 @@ function formatNaira(amount) {
   return `₦${Number(amount).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-module.exports = { calculatePaystackCharge, formatNaira };
+/**
+ * Calculates the full fee breakdown for both Card and Bank Transfer / USSD channels,
+ * identifying which is cheaper and by how much. Mirrors the cloud fee-calculator engine.
+ *
+ * Paystack Nigeria rules (as of 2025):
+ *   Card: 1.5% of gross-before-gateway; + ₦100 flat if gross ≥ ₦2,500; max ₦2,000
+ *   Bank Transfer / USSD: flat ₦150 NIP fee
+ *   Platform Enabling Fee: 0.99% of base, capped at ₦1,500
+ *   Crossover: Card cheaper below ~₦3,333; Transfer cheaper above.
+ *
+ * @param {number} amountNaira  - Base fee amount in Naira
+ * @returns {object}            - Full breakdown object
+ */
+function calculatePaymentBreakdown(amountNaira) {
+  const MAX_PLATFORM_FEE_KOBO = 150000; // ₦1,500 cap
+  const MAX_CARD_FEE_KOBO     = 200000; // ₦2,000 cap
+  const FLAT_NIP_FEE_KOBO     = 15000;  // ₦150 NIP fee
+  const CARD_WAIVER_THRESHOLD = 250000; // ₦2,500 threshold (kobo)
+
+  const baseKobo = Math.max(0, Math.round(amountNaira * 100));
+
+  const platformFeeKobo = Math.min(MAX_PLATFORM_FEE_KOBO, Math.round(baseKobo * 0.0099));
+  const platformFeeNaira = platformFeeKobo / 100;
+
+  const grossBeforeGatewayKobo = baseKobo + platformFeeKobo;
+
+  // Card gateway fee
+  let cardFeeKobo;
+  if (grossBeforeGatewayKobo < CARD_WAIVER_THRESHOLD) {
+    cardFeeKobo = Math.round(grossBeforeGatewayKobo * 0.015);
+  } else {
+    cardFeeKobo = Math.min(MAX_CARD_FEE_KOBO, Math.round(grossBeforeGatewayKobo * 0.015) + 10000);
+  }
+
+  // Transfer / USSD fee
+  const transferFeeKobo = FLAT_NIP_FEE_KOBO;
+
+  const cardGrossKobo     = grossBeforeGatewayKobo + cardFeeKobo;
+  const transferGrossKobo = grossBeforeGatewayKobo + transferFeeKobo;
+
+  const isCardCheaper    = cardFeeKobo < transferFeeKobo;
+  const cheapestChannel  = isCardCheaper ? 'card' : 'bank_transfer';
+  const savingsNaira     = Math.abs(cardFeeKobo - transferFeeKobo) / 100;
+
+  return {
+    baseKobo,
+    baseNaira: baseKobo / 100,
+    platformFeeKobo,
+    platformFeeNaira,
+    grossBeforeGatewayKobo,
+    cheapestChannel,
+    savingsNaira,
+    card: {
+      gatewayFeeKobo: cardFeeKobo,
+      gatewayFeeNaira: cardFeeKobo / 100,
+      grossKobo: cardGrossKobo,
+      grossNaira: cardGrossKobo / 100,
+      isCheapest: isCardCheaper,
+    },
+    transfer: {
+      gatewayFeeKobo: transferFeeKobo,
+      gatewayFeeNaira: transferFeeKobo / 100,
+      grossKobo: transferGrossKobo,
+      grossNaira: transferGrossKobo / 100,
+      isCheapest: !isCardCheaper,
+    },
+  };
+}
+
+module.exports = { calculatePaystackCharge, calculatePaymentBreakdown, formatNaira };
