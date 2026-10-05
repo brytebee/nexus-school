@@ -717,6 +717,11 @@
         <button id="lock-activate-btn" class="key" style="width:100%;height:44px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.45);font-size:13px;margin-top:8px;">
           🌐&nbsp; Activate Online
         </button>
+        ${reasonCode === 'hardware_mismatch' ? `
+        <button id="lock-migrate-btn" class="key" style="width:100%;height:44px;background:rgba(0,180,216,0.15);border:1px solid rgba(0,180,216,0.45);color:#00e5ff;font-weight:700;font-size:13px;margin-top:8px;display:flex;align-items:center;justify-content:center;gap:6px;">
+          🔑&nbsp; Enter Migration PIN
+        </button>
+        ` : ''}
         <button id="lock-reload-btn" class="key" style="width:100%;height:40px;background:rgba(0,229,255,0.05);border:1px solid rgba(0,229,255,0.15);color:rgba(0,229,255,0.6);font-size:12px;margin-top:6px;display:flex;align-items:center;justify-content:center;gap:6px;">
           🔄&nbsp; Already activated? Reload App
         </button>
@@ -766,6 +771,11 @@
           }
         };
 
+        const migrateBtn = document.getElementById('lock-migrate-btn');
+        if (migrateBtn) {
+          migrateBtn.onclick = () => renderMigrationPrompt();
+        }
+
         document.getElementById('lock-activate-btn').onclick = () => {
           api.invoke('license:activate-online');
           // After opening browser, show a subtle "waiting" hint on the reload btn
@@ -776,6 +786,77 @@
       } else {
         document.getElementById('lock-action-btn').onclick = () => api.openExternal(reason.buttonUrl);
       }
+    }
+
+    function renderMigrationPrompt() {
+      const card = document.querySelector('.admin-card');
+      card.innerHTML = `
+        <div style="text-align:center;display:flex;flex-direction:column;align-items:center;gap:14px;width:100%;">
+          <div style="font-size:48px;filter:drop-shadow(0 0 15px rgba(0,229,255,0.4));line-height:1;">🔑</div>
+          <h2 style="font-size:17px;font-weight:700;color:#fff;letter-spacing:0.05em;text-transform:uppercase;">Disaster Recovery</h2>
+          <p style="font-size:12px;color:rgba(255,255,255,0.7);line-height:1.5;margin-bottom:4px;">
+            Enter the 6-digit Migration PIN provided by your Nexus Sovereign partner:
+          </p>
+
+          <input id="migration-pin-input" type="text" maxlength="6" placeholder="######"
+            style="width:80%;height:52px;text-align:center;font-size:26px;font-weight:800;letter-spacing:8px;border-radius:10px;background:rgba(0,180,216,0.08);border:1.5px solid #00b4d8;color:#00e5ff;font-family:monospace;outline:none;" />
+
+          <div id="migration-error" style="color:#ff5c5c;font-size:12px;display:none;margin-top:2px;"></div>
+
+          <button id="migration-submit-btn" class="key"
+            style="width:100%;height:46px;background:#00b4d8;border:none;color:#070b13;font-weight:700;font-size:13px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:6px;border-radius:10px;cursor:pointer;">
+            🚀&nbsp; Verify &amp; Re-bind Device
+          </button>
+
+          <button id="migration-back-btn" class="key"
+            style="width:100%;height:38px;background:transparent;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.4);font-size:12px;border-radius:8px;cursor:pointer;">
+            ← Back
+          </button>
+        </div>
+      `;
+
+      const input = document.getElementById('migration-pin-input');
+      const submitBtn = document.getElementById('migration-submit-btn');
+      const backBtn = document.getElementById('migration-back-btn');
+      const errorDiv = document.getElementById('migration-error');
+
+      input.focus();
+
+      backBtn.onclick = () => renderLockScreen('hardware_mismatch');
+
+      submitBtn.onclick = async () => {
+        const pin = input.value.trim();
+        if (pin.length !== 6) {
+          errorDiv.textContent = 'Please enter a valid 6-digit PIN.';
+          errorDiv.style.display = 'block';
+          return;
+        }
+
+        errorDiv.style.display = 'none';
+        submitBtn.innerHTML = '⏳&nbsp; Verifying PIN with cloud…';
+        submitBtn.disabled = true;
+
+        try {
+          const res = await api.invoke('license:migrate-hardware', { pin });
+          if (res.ok) {
+            showActivationSuccess();
+          } else {
+            errorDiv.textContent = res.message || 'Invalid or expired Migration PIN.';
+            errorDiv.style.display = 'block';
+            submitBtn.innerHTML = '🚀&nbsp; Verify &amp; Re-bind Device';
+            submitBtn.disabled = false;
+          }
+        } catch (e) {
+          errorDiv.textContent = e.message || 'Connection error. Check internet connection.';
+          errorDiv.style.display = 'block';
+          submitBtn.innerHTML = '🚀&nbsp; Verify &amp; Re-bind Device';
+          submitBtn.disabled = false;
+        }
+      };
+
+      input.addEventListener('keyup', (e) => {
+        if (e.key === 'Enter') submitBtn.click();
+      });
     }
 
     function showActivationSuccess() {

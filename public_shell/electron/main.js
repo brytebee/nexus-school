@@ -9730,6 +9730,74 @@ function createWindow() {
     }
   });
 
+  // ── Disaster Recovery: Migrate hardware binding via Migration PIN ───────────
+  ipcMain.handle('license:migrate-hardware', async (_event, { pin } = {}) => {
+    if (!pin || typeof pin !== 'string') {
+      return { ok: false, message: 'Migration PIN is required.' };
+    }
+    const cleanPin = pin.trim();
+    const userDataPath = app.getPath('userData');
+    const licensePath = path.join(userDataPath, 'license.nexus');
+    if (!fs.existsSync(licensePath)) {
+      return { ok: false, message: 'No license.nexus file found. Import your license file first.' };
+    }
+    let token = '';
+    let payload = null;
+    try {
+      token = fs.readFileSync(licensePath, 'utf-8').trim();
+      payload = verifyNexusToken(token);
+    } catch (parseErr) {
+      return { ok: false, message: 'License file is invalid or tampered.' };
+    }
+
+    if (!payload || !payload.school_id) {
+      return { ok: false, message: 'License file is invalid.' };
+    }
+
+    const API_BASE = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
+    try {
+      const res = await fetch(`${API_BASE}/api/license/migrate-hardware`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token,
+          hardware_id: hardwareId,
+          migration_pin: cleanPin,
+          school_id: payload.school_id,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        return { ok: false, message: data.message || 'Invalid or expired Migration PIN.' };
+      }
+
+      // Successful re-binding!
+      try {
+        const db = database.getDb();
+        db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_sys_is_activated', 'true')").run();
+        db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('hardware_id', ?)").run(hardwareId);
+        licenseStatus.is_activated = true;
+        licenseStatus.locked = false;
+        licenseStatus.payment_hard_locked = false;
+        recheckQuota();
+        if (typeof setActivationStatus === 'function') {
+          setActivationStatus({ is_activated: true, registration_ts: licenseStatus.registration_ts });
+        }
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('license-status', licenseStatus);
+        }
+      } catch (dbErr) {
+        console.warn('[Disaster Recovery] DB update warning:', dbErr.message);
+      }
+
+      return { ok: true, message: 'Device successfully migrated and activated.' };
+    } catch (netErr) {
+      return { ok: false, message: `Network error: ${netErr.message || 'Could not connect to activation server'}` };
+    }
+  });
+
   // ── Activate online — opens browser with hardware ID pre-filled ───────────────
   ipcMain.handle('license:activate-online', async () => {
     const { shell } = require('electron');
