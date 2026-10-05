@@ -7,6 +7,41 @@ const path = require('path');
 const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
 const ALGORITHM = 'aes-256-gcm';
 
+let electronApp = null;
+try {
+    electronApp = require('electron').app;
+} catch (_) {}
+
+function getUserDataPath() {
+    if (electronApp && typeof electronApp.getPath === 'function') {
+        return electronApp.getPath('userData');
+    }
+    return process.env.APPDATA || process.env.HOME || '.';
+}
+
+function getSchoolLicenseToken() {
+    try {
+        const licensePath = path.join(getUserDataPath(), 'license.nexus');
+        if (fs.existsSync(licensePath)) {
+            return fs.readFileSync(licensePath, 'utf-8').trim();
+        }
+    } catch (_) {}
+    return null;
+}
+
+function decodeTokenSchoolId(token) {
+    if (!token) return null;
+    try {
+        const parts = token.split('.');
+        if (parts.length !== 2) return null;
+        const payloadJson = Buffer.from(parts[0], 'base64url').toString('utf8');
+        const parsed = JSON.parse(payloadJson);
+        return parsed.school_id || null;
+    } catch (_) {
+        return null;
+    }
+}
+
 class PulseExporter {
     constructor() {
         this.oAuth2Client = null;
@@ -283,44 +318,127 @@ class PulseExporter {
     }
 
     /**
-     * Encrypts and uploads the raw nexus.sqlite file to Google Drive
+     * Executes the Weekly 3-Pillar Database Backup:
+     * 1. Google Drive Weekly Rolling Substitute: Uploads new encrypted snapshot, deletes previous backups.
+     * 2. Cloud Vault (nexus-api + Cloudinary): Uploads encrypted snapshot to cloud vault.
+     * Guarded by a 7-day timestamp in system_settings.
      */
     async backupDatabaseToDrive(drive, key, folders) {
+        const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
         try {
-            // Resolve the live DB path dynamically from the open connection
-            // instead of using a hardcoded __dirname-relative path that breaks
-            // in production where the DB lives in Electron's userData directory.
             const { database } = require('@nexus/engine');
-            const dbPath = database.getDb().name;
+            const db = database.getDb();
+
+            // ── 7-Day Weekly Cadence Guard ─────────────────────────────────
+            let lastTs = 0;
+            try {
+                const row = db.prepare("SELECT value FROM system_settings WHERE key = 'last_weekly_backup_ts'").get();
+                if (row && row.value) lastTs = parseInt(row.value, 10);
+            } catch (_) {}
+
+            const now = Date.now();
+            if (lastTs && (now - lastTs) < SEVEN_DAYS_MS) {
+                const hoursAgo = Math.round((now - lastTs) / (3600 * 1000));
+                console.log(`[Pulse Exporter] Weekly DB backup skipped: last backup was ${hoursAgo}h ago (weekly cadence active)`);
+                return;
+            }
+
+            const dbPath = db.name;
             if (!fs.existsSync(dbPath)) {
                 console.warn('[Pulse Exporter] DB backup skipped: file not found at', dbPath);
                 return;
             }
 
             const dbContent = fs.readFileSync(dbPath);
-            // Encrypt the base64 string of the binary DB
             const encrypted = this.encrypt(dbContent.toString('base64'), key);
-
             const fileName = `nexus_backup_${new Date().toISOString().split('T')[0]}.enc`;
 
-            // Check if backup for today already exists to avoid clutter
-            const existing = await drive.files.list({
-                q: `name = '${fileName}' and '${folders.backups}' in parents and trashed = false`,
-                fields: 'files(id)',
+            // ── Pillar 1: Google Drive Weekly Rolling Substitution ──────────
+            if (drive && folders && folders.backups) {
+                try {
+                    // Query existing backups in the folder to delete after substitution
+                    const existing = await drive.files.list({
+                        q: `'${folders.backups}' in parents and trashed = false`,
+                        fields: 'files(id, name, createdTime)',
+                    });
+                    const oldFileIds = (existing.data.files || []).map(f => f.id);
+
+                    // Upload new backup
+                    const createdFile = await drive.files.create({
+                        resource: { name: fileName, mimeType: 'text/plain', parents: [folders.backups] },
+                        media: { body: encrypted },
+                        fields: 'id',
+                    });
+                    console.log(`[Pulse Exporter] Google Drive backup uploaded: ${fileName} (${createdFile.data.id})`);
+
+                    // Substitute: Delete previous backups now that new upload is confirmed
+                    for (const oldId of oldFileIds) {
+                        try {
+                            await drive.files.delete({ fileId: oldId });
+                            console.log(`[Pulse Exporter] Substituted: deleted previous Drive backup ${oldId}`);
+                        } catch (delErr) {
+                            console.warn(`[Pulse Exporter] Could not delete old backup ${oldId}:`, delErr.message);
+                        }
+                    }
+                } catch (driveErr) {
+                    console.error("[Pulse Exporter] Google Drive backup error:", driveErr.message);
+                }
+            }
+
+            // ── Pillar 2: Cloud Vault (nexus-api + Cloudinary) ──────────────
+            await this.backupDatabaseToCloudVault(encrypted);
+
+            // ── Record Timestamp ───────────────────────────────────────────
+            try {
+                db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('last_weekly_backup_ts', ?)").run(String(now));
+            } catch (_) {}
+
+            console.log(`[Pulse Exporter] Weekly 3-Pillar Backup cycle completed.`);
+        } catch (err) {
+            console.error("[Pulse Exporter] DB Backup cycle failed:", err);
+        }
+    }
+
+    /**
+     * Uploads the encrypted database snapshot to the Central Cloud Vault (nexus-api / Cloudinary)
+     */
+    async backupDatabaseToCloudVault(encryptedData) {
+        try {
+            const token = getSchoolLicenseToken();
+            if (!token) {
+                console.warn('[Pulse Exporter] Cloud Vault backup skipped: no license file found');
+                return;
+            }
+            const schoolId = decodeTokenSchoolId(token);
+            if (!schoolId) {
+                console.warn('[Pulse Exporter] Cloud Vault backup skipped: invalid school_id in token');
+                return;
+            }
+
+            const API_BASE = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
+            const res = await fetch(`${API_BASE}/api/sync/backup-snapshot`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-nexus-sync-token': token,
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    school_id: schoolId,
+                    encrypted_data: encryptedData,
+                    timestamp: Date.now(),
+                }),
+                signal: AbortSignal.timeout(30000),
             });
 
-            if (existing.data.files.length > 0) {
-                await drive.files.update({ fileId: existing.data.files[0].id, media: { body: encrypted } });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data.ok) {
+                console.log(`[Pulse Exporter] ✅ Cloud Vault backup uploaded successfully: ${data.snapshot_url || 'saved'}`);
             } else {
-                await drive.files.create({
-                    resource: { name: fileName, mimeType: 'text/plain', parents: [folders.backups] },
-                    media: { body: encrypted },
-                    fields: 'id',
-                });
+                console.warn(`[Pulse Exporter] Cloud Vault backup response warning:`, data.error || res.statusText);
             }
-            console.log(`[Pulse Exporter] Full DB Backup successful: ${fileName}`);
-        } catch (err) {
-            console.error("[Pulse Exporter] DB Backup failed:", err);
+        } catch (cloudErr) {
+            console.warn('[Pulse Exporter] Cloud Vault upload warning (offline or unreachable):', cloudErr.message);
         }
     }
 
