@@ -21,12 +21,12 @@
     "videos:transcode": "node scripts/transcode-videos.js",
     "test:all": "npm run test && npm run test:e2e",
     "sync-engine": "node scripts/sync-engine.js",
-    "predist:mac": "npm run build && npm run test",
-    "predist:win": "npm run build && npm run test",
-    "predist:linux": "npm run build && npm run test",
-    "predist:all": "npm run build && npm run test",
-    "prepublish:mac": "npm run build && npm run test",
-    "prepublish:win": "npm run build && npm run test",
+    "predist:mac": "node scripts/ensure-release-apk.js && npm run build && npm run test",
+    "predist:win": "node scripts/ensure-release-apk.js && npm run build && npm run test",
+    "predist:linux": "node scripts/ensure-release-apk.js && npm run build && npm run test",
+    "predist:all": "node scripts/ensure-release-apk.js && npm run build && npm run test",
+    "prepublish:mac": "node scripts/ensure-release-apk.js && npm run build && npm run test",
+    "prepublish:win": "node scripts/ensure-release-apk.js && npm run build && npm run test",
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
     "dist:linux": "mkdir -p .build-snapshot && cp node_modules/better-sqlite3/build/Release/better_sqlite3.node .build-snapshot/better_sqlite3.node && (docker run --rm -v \"${PWD}\":/project -v \"${HOME}/.cache/electron\":/root/.cache/electron -v \"${HOME}/.cache/electron-builder\":/root/.cache/electron-builder -w /project electronuserland/builder:20 /bin/bash -c 'npm ci --prefer-offline 2>/dev/null || npm ci; npx electron-builder --linux --publish never'; status=$?; cp .build-snapshot/better_sqlite3.node node_modules/better-sqlite3/build/Release/better_sqlite3.node; rm -rf .build-snapshot; exit $status)",
@@ -186,6 +186,10 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "../android/build/outputs/apk/release/Nexus-release.apk",
+        "to": "Nexus-release.apk"
       }
     ]
   },

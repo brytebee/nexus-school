@@ -18,13 +18,18 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    signingConfigs {
-        create("release") {
-            storeFile     = file(project.findProperty("NEXUS_STORE_FILE")   as String)
-            storePassword =      project.findProperty("NEXUS_STORE_PASSWORD") as String
-            keyAlias      =      project.findProperty("NEXUS_KEY_ALIAS")      as String
-            keyPassword   =      project.findProperty("NEXUS_KEY_PASSWORD")   as String
-            storeType     = "PKCS12"
+    val keystorePath = project.findProperty("NEXUS_STORE_FILE") as? String
+    val hasReleaseKeystore = !keystorePath.isNullOrBlank() && file(keystorePath).exists()
+
+    if (hasReleaseKeystore) {
+        signingConfigs {
+            create("release") {
+                storeFile     = file(keystorePath!!)
+                storePassword = project.findProperty("NEXUS_STORE_PASSWORD") as? String ?: ""
+                keyAlias      = project.findProperty("NEXUS_KEY_ALIAS") as? String ?: ""
+                keyPassword   = project.findProperty("NEXUS_KEY_PASSWORD") as? String ?: ""
+                storeType     = "PKCS12"
+            }
         }
     }
 
@@ -32,7 +37,11 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                signingConfig = signingConfigs.getByName("debug")
+            }
         }
     }
     buildFeatures {

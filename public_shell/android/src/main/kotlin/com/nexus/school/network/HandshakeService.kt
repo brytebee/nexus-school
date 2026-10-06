@@ -67,6 +67,8 @@ data class HandshakeResponse(
     val status: String,
     val message: String,
     val role: String? = null,
+    val teacher_id: String? = null,
+    val teacher_name: String? = null,
     val school_config: SchoolConfig,
     val server_timestamp: String,
     val students: List<com.nexus.school.data.Student> = emptyList(),
@@ -85,6 +87,15 @@ data class DeviceResponse(
     val public_key: String,
     val thermal_status: String,
     val device_model: String
+)
+
+@Serializable
+data class PinHandshakeRequest(
+    val pin: String,
+    val device_id: String,
+    val device_model: String,
+    val public_key: String,
+    val thermal_status: String
 )
 
 class HandshakeService {
@@ -116,6 +127,53 @@ class HandshakeService {
                 val errorText = httpResponse.bodyAsText()
                 var errCode = "HANDSHAKE_ERROR"
                 var errMsg = "Handshake failed."
+                try {
+                    val json = org.json.JSONObject(errorText)
+                    errCode = json.optString("error", "HANDSHAKE_ERROR")
+                    errMsg = json.optString("message", json.optString("error", "Handshake failed."))
+                } catch (_: Exception) {}
+                throw HandshakeException(errCode, errMsg)
+            }
+        } catch (e: HandshakeException) {
+            throw e
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    suspend fun performHandshakeWithPin(
+        ip: String,
+        port: Int,
+        pin: String,
+        response: DeviceResponse
+    ): HandshakeResponse? {
+        return try {
+            val req = PinHandshakeRequest(
+                pin = pin,
+                device_id = response.device_id,
+                device_model = response.device_model,
+                public_key = response.public_key,
+                thermal_status = response.thermal_status
+            )
+            val httpResponse: HttpResponse = client.post("http://$ip:$port/api/handshake-pin") {
+                contentType(ContentType.Application.Json)
+                setBody(req)
+            }
+            if (httpResponse.status == HttpStatusCode.OK) {
+                val contentEncoding = httpResponse.headers[HttpHeaders.ContentEncoding]
+                val responseBody = if (contentEncoding?.contains("gzip", ignoreCase = true) == true) {
+                    val bytes = httpResponse.readBytes()
+                    val gzipInputStream = GZIPInputStream(ByteArrayInputStream(bytes))
+                    gzipInputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                } else {
+                    httpResponse.bodyAsText()
+                }
+                Json { ignoreUnknownKeys = true }.decodeFromString<HandshakeResponse>(responseBody)
+            } else {
+                val errorText = httpResponse.bodyAsText()
+                var errCode = "HANDSHAKE_ERROR"
+                var errMsg = "Handshake with PIN failed."
                 try {
                     val json = org.json.JSONObject(errorText)
                     errCode = json.optString("error", "HANDSHAKE_ERROR")

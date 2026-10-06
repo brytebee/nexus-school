@@ -32,7 +32,17 @@
             </intent-filter>
         </activity>
         <activity android:name=".ui.LockActivity" />
-        <activity android:name=".ui.HandshakeActivity" />
+        <activity
+            android:name=".ui.HandshakeActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nexus" android:host="pair" />
+            </intent-filter>
+        </activity>
         <activity android:name=".ui.StudentRosterActivity" />
         <activity android:name=".ui.AppLaunchActivity" />
         <!-- DemoResetActivity retained for historical reference — no longer routed to -->

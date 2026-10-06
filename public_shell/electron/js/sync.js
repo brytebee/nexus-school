@@ -44,6 +44,17 @@
 
         if (payload.config) applyIdentityToUI(payload.config);
 
+        const pinPanel = document.getElementById("pin-pairing-panel");
+        const pinDisplay = document.getElementById("pairing-pin-display");
+        const urlDisplay = document.getElementById("pairing-url-display");
+        if (payload.pairing_pin && pinPanel) {
+          pinPanel.style.display = "block";
+          if (pinDisplay) pinDisplay.textContent = payload.pairing_pin_formatted || payload.pairing_pin;
+          if (urlDisplay) urlDisplay.textContent = payload.pairing_url || `http://${payload.ip}:${payload.port}/pair`;
+        } else if (pinPanel) {
+          pinPanel.style.display = "none";
+        }
+
         const copyBtn = document.getElementById("copy-payload-btn");
         if (copyBtn) {
           copyBtn.onclick = () => {

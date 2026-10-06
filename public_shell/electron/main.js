@@ -3392,9 +3392,19 @@ ipcMain.handle("set-teacher", (event, { id, name }) => {
   if (!qrPayload) return false;
   qrPayload.teacher_id = id;
   qrPayload.teacher_name = name;
+  if (server.generatePairingPin) {
+    try {
+      const pinInfo = server.generatePairingPin(id, name);
+      qrPayload.pairing_pin = pinInfo.pin;
+      qrPayload.pairing_pin_formatted = pinInfo.formatted_pin;
+      qrPayload.pairing_url = `http://${qrPayload.ip}:${qrPayload.port}/pair`;
+    } catch (e) {
+      console.warn('[SyncHub] Failed to generate pairing PIN:', e.message);
+    }
+  }
   if (mainWindow) {
     mainWindow.webContents.send("qr-payload", qrPayload);
-    console.log(`[Electron] QR updated for teacher: ${name} [${id}]`);
+    console.log(`[Electron] QR updated for teacher: ${name} [${id}] (PIN: ${qrPayload.pairing_pin_formatted || 'none'})`);
   }
   return true;
 });
@@ -3403,9 +3413,19 @@ ipcMain.handle("generateAdminQR", () => {
   if (!qrPayload) return false;
   qrPayload.teacher_id = 'STANDALONE_ADMIN';
   qrPayload.teacher_name = 'Admin';
+  if (server.generatePairingPin) {
+    try {
+      const pinInfo = server.generatePairingPin('STANDALONE_ADMIN', 'Admin');
+      qrPayload.pairing_pin = pinInfo.pin;
+      qrPayload.pairing_pin_formatted = pinInfo.formatted_pin;
+      qrPayload.pairing_url = `http://${qrPayload.ip}:${qrPayload.port}/pair`;
+    } catch (e) {
+      console.warn('[SyncHub] Failed to generate admin pairing PIN:', e.message);
+    }
+  }
   if (mainWindow) {
     mainWindow.webContents.send("qr-payload", qrPayload);
-    console.log(`[Electron] QR updated for Standalone Admin`);
+    console.log(`[Electron] QR updated for Standalone Admin (PIN: ${qrPayload.pairing_pin_formatted || 'none'})`);
   }
   return true;
 });
@@ -8309,6 +8329,16 @@ function createWindow() {
 
   portalApp.get('/portal', (req, res) => {
     res.sendFile(path.join(__dirname, 'portal.html'));
+  });
+
+  // Bridge: Forward /pair and /pair/apk from Sovereign Portal (port 3002 / mDNS) to Sync Engine (port 3000)
+  portalApp.get('/pair', (req, res) => {
+    const host = req.hostname || 'localhost';
+    res.redirect(`http://${host}:3000/pair`);
+  });
+  portalApp.get('/pair/apk', (req, res) => {
+    const host = req.hostname || 'localhost';
+    res.redirect(`http://${host}:3000/pair/apk`);
   });
 
   // Identity for self-branding (The Nexus Mask — portal.html calls this on load)

@@ -18,6 +18,9 @@ interface QrPayload {
   port: string;
   teacher_id: string;
   config?: any;
+  pairing_pin?: string;
+  pairing_pin_formatted?: string;
+  pairing_url?: string;
 }
 
 interface Admin {
@@ -640,6 +643,41 @@ export function SyncHub() {
                   boxShadow: '0 8px 32px rgba(0,229,255,0.08)',
                 }}
               />
+              {/* Camera-Free PIN & Web Link Panel */}
+              {qrPayload.pairing_pin && (
+                <div style={{
+                  width: '100%',
+                  maxWidth: '252px',
+                  background: 'rgba(0, 180, 216, 0.08)',
+                  border: '1px solid rgba(0, 180, 216, 0.3)',
+                  borderRadius: '12px',
+                  padding: '12px 14px',
+                  textAlign: 'center',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#00e5ff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      🔑 Pairing PIN
+                    </span>
+                    <span style={{ fontSize: '10px', color: '#f59e0b', fontWeight: 600 }}>⏳ 30m</span>
+                  </div>
+                  <div style={{
+                    fontFamily: 'var(--font-mono, monospace)',
+                    fontSize: '24px',
+                    fontWeight: 800,
+                    color: '#fff',
+                    letterSpacing: '4px',
+                    margin: '6px 0',
+                  }}>
+                    {qrPayload.pairing_pin_formatted || qrPayload.pairing_pin}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.4, textAlign: 'left', marginTop: '6px' }}>
+                    Can't scan? Open phone browser to:<br />
+                    <code style={{ color: '#00b4d8', fontWeight: 700, fontSize: '11px', wordBreak: 'break-all' }}>
+                      {qrPayload.pairing_url || `http://${qrPayload.ip}:${qrPayload.port}/pair`}
+                    </code>
+                  </div>
+                </div>
+              )}
               <button
                 onClick={handleCopyPayload}
                 className="secondary-btn"

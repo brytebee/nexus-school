@@ -12,6 +12,7 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.nexus.school.network.DeviceResponse
+import com.nexus.school.network.HandshakeResponse
 import com.nexus.school.network.HandshakeService
 import com.nexus.school.security.IdentityManager
 import kotlinx.coroutines.MainScope
@@ -57,26 +58,80 @@ class HandshakeActivity : AppCompatActivity() {
         previewView = findViewById(R.id.previewView)
         identityManager = IdentityManager(this)
         
-        findViewById<android.widget.Button>(R.id.manual_setup_btn).setOnClickListener {
-            showManualSetupDialog()
+        findViewById<android.widget.Button>(R.id.manual_setup_btn).apply {
+            text = "Can't Scan? Connect with PIN"
+            setOnClickListener {
+                showPinSetupDialog()
+            }
         }
 
+        handleIncomingIntent(intent)
         checkCameraPermission()
     }
 
-    private fun showManualSetupDialog() {
-        val input = android.widget.EditText(this).apply {
-            hint = "Paste School Payload Here"
-            setPadding(48, 48, 48, 48)
+    override fun onNewIntent(intent: android.content.Intent?) {
+        super.onNewIntent(intent)
+        intent?.let { handleIncomingIntent(it) }
+    }
+
+    private fun handleIncomingIntent(intent: android.content.Intent?) {
+        val uri = intent?.data ?: return
+        if (uri.scheme == "nexus" && uri.host == "pair") {
+            val ip = uri.getQueryParameter("ip")
+            val port = uri.getQueryParameter("port")?.toIntOrNull() ?: 3000
+            val pin = uri.getQueryParameter("pin")
+            if (!ip.isNullOrEmpty() && !pin.isNullOrEmpty()) {
+                Log.d("Handshake", "Deep link pairing requested: $ip:$port PIN: $pin")
+                connectWithPin(ip, port, pin)
+            }
         }
+    }
+
+    private fun showPinSetupDialog() {
+        val layout = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(64, 32, 64, 16)
+        }
+
+        val lastServer = identityManager.getServerInfo()
+        val ipInput = android.widget.EditText(this).apply {
+            hint = "Hub IP (e.g. 192.168.1.100)"
+            setText(lastServer?.first ?: "")
+            inputType = android.text.InputType.TYPE_CLASS_PHONE
+        }
+
+        val pinInput = android.widget.EditText(this).apply {
+            hint = "6-Digit Pairing PIN"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            filters = arrayOf(android.text.InputFilter.LengthFilter(7))
+        }
+
+        layout.addView(android.widget.TextView(this).apply {
+            text = "School Hub IP Address:"
+            textSize = 12f
+            setTextColor(android.graphics.Color.LTGRAY)
+        })
+        layout.addView(ipInput)
+
+        layout.addView(android.widget.TextView(this).apply {
+            text = "Pairing PIN (shown on PC screen):"
+            textSize = 12f
+            setTextColor(android.graphics.Color.LTGRAY)
+            setPadding(0, 24, 0, 0)
+        })
+        layout.addView(pinInput)
+
         android.app.AlertDialog.Builder(this)
-            .setTitle("Manual Setup")
-            .setMessage("If your camera is broken, ask the Admin to copy the raw payload text from the Dashboard and send it to you.")
-            .setView(input)
+            .setTitle("🔑 Connect with PIN")
+            .setMessage("Look at the School PC screen to get the Hub IP and 6-digit PIN.")
+            .setView(layout)
             .setPositiveButton("Connect") { _, _ ->
-                val payloadText = input.text.toString()
-                if (payloadText.isNotEmpty()) {
-                    onQrScanned(payloadText, identityManager)
+                val ip = ipInput.text.toString().trim()
+                val pin = pinInput.text.toString().trim().replace(" ", "")
+                if (ip.isNotEmpty() && pin.length >= 6) {
+                    connectWithPin(ip, 3000, pin)
+                } else {
+                    android.widget.Toast.makeText(this, "Please enter both Hub IP and 6-digit PIN", android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -247,12 +302,80 @@ class HandshakeActivity : AppCompatActivity() {
                     handshakeService.performHandshake(payload.ip, payload.port, response)
                 }
                 
+                if (result != null) {
+                    onHandshakeSuccess(result)
+                } else {
+                    isHandshaking = false
+                    runOnUiThread {
+                        android.widget.Toast.makeText(this@HandshakeActivity, "Handshake failed. Check Hub IP.", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                isHandshaking = false
+                Log.e("Handshake", "QR Handshake error", e)
                 runOnUiThread {
-                    if (result != null) {
-                        android.widget.Toast.makeText(this@HandshakeActivity, "Marriage Successful! 🎉", android.widget.Toast.LENGTH_LONG).show()
-                        Log.d("Handshake", "Marriage Successful: $result")
-                        
-                        setContent {
+                    android.widget.Toast.makeText(this@HandshakeActivity, e.message ?: "Handshake error", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun connectWithPin(ip: String, port: Int, pin: String) {
+        if (isHandshaking) return
+        isHandshaking = true
+
+        scope.launch {
+            try {
+                runOnUiThread {
+                    android.widget.Toast.makeText(this@HandshakeActivity, "Connecting with PIN to $ip:$port...", android.widget.Toast.LENGTH_SHORT).show()
+                }
+
+                identityManager.saveServerInfo(ip, port)
+
+                val deviceModel = "${android.os.Build.BRAND} ${android.os.Build.MODEL}"
+                identityManager.saveDeviceModel(deviceModel)
+
+                val response = DeviceResponse(
+                    device_id = identityManager.getDeviceId(),
+                    teacher_id = "",
+                    teacher_name = "",
+                    public_key = identityManager.getPublicKey(),
+                    thermal_status = identityManager.getThermalStatus(),
+                    device_model = deviceModel
+                )
+
+                val result = kotlinx.coroutines.withTimeout(15_000L) {
+                    handshakeService.performHandshakeWithPin(ip, port, pin, response)
+                }
+
+                if (result != null) {
+                    onHandshakeSuccess(result)
+                } else {
+                    isHandshaking = false
+                    runOnUiThread {
+                        android.widget.Toast.makeText(this@HandshakeActivity, "Handshake failed. Check Hub IP & PIN.", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                isHandshaking = false
+                Log.e("Handshake", "PIN Handshake error", e)
+                runOnUiThread {
+                    android.widget.Toast.makeText(this@HandshakeActivity, e.message ?: "Connection failed", android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun onHandshakeSuccess(result: HandshakeResponse) {
+        runOnUiThread {
+            if (result.teacher_id != null && result.teacher_name != null) {
+                identityManager.saveTeacherIdentity(result.teacher_id, result.teacher_name)
+                Log.d("Handshake", "Adopted Identity: ${result.teacher_name} [${result.teacher_id}]")
+            }
+            android.widget.Toast.makeText(this@HandshakeActivity, "Marriage Successful! 🎉", android.widget.Toast.LENGTH_LONG).show()
+            Log.d("Handshake", "Marriage Successful: $result")
+            
+            setContent {
                             val config = result.school_config
                             val students = result.students
                             // Server normalises the field to primary_color; fall back to themePrimary
@@ -551,31 +674,7 @@ class HandshakeActivity : AppCompatActivity() {
                                             }
                                         }
                                     }
-                                }
-                            }
-                        }
-                    } else {
-                        android.widget.Toast.makeText(this@HandshakeActivity, "Handshake Failed. Check Server.", android.widget.Toast.LENGTH_LONG).show()
-                        isHandshaking = false
                     }
-                }
-            } catch (e: com.nexus.school.network.HandshakeException) {
-                Log.e("Handshake", "Handshake rejected: ${e.errorCode}", e)
-                runOnUiThread {
-                    android.widget.Toast.makeText(this@HandshakeActivity, e.message, android.widget.Toast.LENGTH_LONG).show()
-                    isHandshaking = false
-                }
-            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                Log.e("Handshake", "Handshake timed out", e)
-                runOnUiThread {
-                    android.widget.Toast.makeText(this@HandshakeActivity, "Server unreachable. Check WiFi.", android.widget.Toast.LENGTH_LONG).show()
-                    isHandshaking = false
-                }
-            } catch (e: Exception) {
-                Log.e("Handshake", "Failed to parse or send handshake", e)
-                runOnUiThread {
-                    android.widget.Toast.makeText(this@HandshakeActivity, "Invalid QR Code Pattern", android.widget.Toast.LENGTH_SHORT).show()
-                    isHandshaking = false
                 }
             }
         }

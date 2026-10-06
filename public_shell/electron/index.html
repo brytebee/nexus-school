@@ -1751,6 +1751,66 @@
                   <code id="server-port">3000</code>
                 </div>
               </div>
+
+              <!-- Camera-Free PIN & Web Link Panel -->
+              <div
+                id="pin-pairing-panel"
+                style="
+                  display: none;
+                  margin-bottom: 16px;
+                  background: rgba(0, 180, 216, 0.08);
+                  border: 1px solid rgba(0, 180, 216, 0.3);
+                  border-radius: 12px;
+                  padding: 14px 16px;
+                "
+              >
+                <div
+                  style="
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    margin-bottom: 6px;
+                  "
+                >
+                  <span
+                    style="
+                      font-size: 11px;
+                      font-weight: 700;
+                      color: #00e5ff;
+                      text-transform: uppercase;
+                      letter-spacing: 0.5px;
+                    "
+                    >🔑 Phone Pairing PIN</span
+                  >
+                  <span style="font-size: 10px; color: #f59e0b; font-weight: 600;">⏳ 30m</span>
+                </div>
+                <div
+                  id="pairing-pin-display"
+                  style="
+                    font-family: monospace;
+                    font-size: 26px;
+                    font-weight: 800;
+                    color: #fff;
+                    letter-spacing: 5px;
+                    margin-bottom: 8px;
+                  "
+                >
+                  --- ---
+                </div>
+                <div style="font-size: 12px; color: var(--text-dim); line-height: 1.45;">
+                  Can't scan? Open phone browser to:<br />
+                  <code
+                    id="pairing-url-display"
+                    style="
+                      color: #00b4d8;
+                      font-weight: 700;
+                      font-size: 12px;
+                    "
+                    >http://0.0.0.0:3000/pair</code
+                  >
+                </div>
+              </div>
+
               <button
                 id="copy-payload-btn"
                 class="primary-btn"
