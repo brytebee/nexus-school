@@ -9,8 +9,27 @@ console.log('🔍 [Release Guard] Checking Android release APK for electron pack
 
 if (!fs.existsSync(apkPath)) {
   console.log('⚠️ [Release Guard] Nexus-release.apk not found. Compiling signed release APK...');
+  
+  // Ensure gradle.properties exists with android.useAndroidX
+  const gradleProps = path.resolve(androidDir, 'gradle.properties');
+  if (!fs.existsSync(gradleProps)) {
+    fs.writeFileSync(
+      gradleProps,
+      'android.useAndroidX=true\nandroid.nonTransitiveRClass=true\norg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8\n'
+    );
+    console.log('📝 [Release Guard] Created fallback gradle.properties with android.useAndroidX=true');
+  }
+
+  const isWin = process.platform === 'win32';
+  const gradlewCmd = isWin ? 'gradlew.bat' : './gradlew';
+  if (!isWin) {
+    try {
+      fs.chmodSync(path.join(androidDir, 'gradlew'), 0o755);
+    } catch (_) {}
+  }
+
   try {
-    execSync('./gradlew assembleRelease', { cwd: androidDir, stdio: 'inherit' });
+    execSync(`${gradlewCmd} assembleRelease`, { cwd: androidDir, stdio: 'inherit' });
   } catch (err) {
     console.error('❌ [Release Guard] Failed to compile Android release APK.');
     process.exit(1);
