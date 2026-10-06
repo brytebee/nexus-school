@@ -69,6 +69,13 @@ jobs:
           fi
         working-directory: public_shell/electron
 
+      - name: Set up JDK 17 for Android build
+        # Ensure the Android Gradle build uses JDK 17 (required by AGP 8.x).
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
       - name: Build Windows NSIS installer
         run: npm run dist:win -- --publish never
         working-directory: public_shell/electron

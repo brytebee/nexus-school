@@ -29,7 +29,15 @@ if (!fs.existsSync(apkPath)) {
   }
 
   try {
-    execSync(`${gradlewCmd} assembleRelease`, { cwd: androidDir, stdio: 'inherit' });
+    // shell:true is required on Windows so cmd.exe can interpret gradlew.bat.
+    // Pass through JAVA_HOME so Gradle respects the setup-java JDK 17 pin from CI.
+    const env = { ...process.env };
+    execSync(`${gradlewCmd} assembleRelease`, {
+      cwd: androidDir,
+      stdio: 'inherit',
+      shell: isWin,
+      env
+    });
   } catch (err) {
     console.error('❌ [Release Guard] Failed to compile Android release APK.');
     process.exit(1);

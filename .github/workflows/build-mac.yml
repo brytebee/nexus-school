@@ -71,6 +71,18 @@ jobs:
           fi
         working-directory: public_shell/electron
 
+      - name: Set up JDK 17 for Android build
+        # macos-latest runners default to JDK 21 (ARM64). Android Gradle Plugin 8.x
+        # targets JavaVersion.VERSION_17 and the jlink transform is broken under
+        # JDK 21 on ARM64. Pin to JDK 17 before dist:mac triggers assembleRelease.
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Make Android gradlew executable
+        run: chmod +x public_shell/android/gradlew
+
       - name: Build macOS DMG
         run: npm run dist:mac -- --publish never
         working-directory: public_shell/electron
