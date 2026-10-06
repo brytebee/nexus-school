@@ -143,8 +143,7 @@ class AppLaunchActivity : AppCompatActivity() {
                         val buttonText = when (roleString.lowercase()) {
                             "result_clerk" -> "Open Result Clerk Portal  →"
                             "bursar" -> "Open Finance Hub  →"
-                            "it_admin" -> "Open Security Center  →"
-                            "principal" -> "Open Principal Portal  →"
+                            "it_admin", "super_admin", "principal" -> "Open Executive Overview  →"
                             else -> "Open Class Roster  →"
                         }
 
@@ -154,8 +153,7 @@ class AppLaunchActivity : AppCompatActivity() {
                                 val targetClass = when (roleString.lowercase()) {
                                     "result_clerk" -> ResultClerkActivity::class.java
                                     "bursar" -> BursarActivity::class.java
-                                    "it_admin" -> ItAdminActivity::class.java
-                                    "principal" -> PrincipalActivity::class.java
+                                    "it_admin", "super_admin", "principal" -> PrincipalActivity::class.java
                                     else -> StudentRosterActivity::class.java
                                 }
                                 val nextIntent = Intent(this@AppLaunchActivity, targetClass)

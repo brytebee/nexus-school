@@ -1,10 +1,12 @@
 package com.nexus.school.ui
 
+import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -109,8 +111,10 @@ class PrincipalActivity : AppCompatActivity() {
                                     .fillMaxWidth()
                                     .padding(vertical = 16.dp)
                             ) {
+                                val currentRole = identityManager.getRole() ?: "principal"
+                                val headerTitle = if (currentRole in listOf("it_admin", "super_admin")) "Executive Portal" else "Principal Portal"
                                 Text(
-                                    text = "Principal Portal",
+                                    text = headerTitle,
                                     color = Color.White,
                                     fontSize = 24.sp,
                                     fontWeight = FontWeight.Bold,
@@ -146,14 +150,14 @@ class PrincipalActivity : AppCompatActivity() {
                                     modifier = Modifier.padding(bottom = 16.dp)
                                 )
 
-                                // Principal KPI Dashboard Grid
+                                // Principal / Owner KPI Dashboard Grid
                                 StatCard(title = "Total Enrolled Students", count = students, icon = "👥", color = primaryColor)
                                 Spacer(modifier = Modifier.height(16.dp))
                                 StatCard(title = "Total Active Staff/Teachers", count = teachers, icon = "👨‍🏫", color = Color(0xFF4ADE80))
                                 Spacer(modifier = Modifier.height(16.dp))
                                 StatCard(title = "Configured Classes & Arms", count = classes, icon = "🏫", color = Color(0xFFFFB300))
                                 
-                                Spacer(modifier = Modifier.height(32.dp))
+                                Spacer(modifier = Modifier.height(24.dp))
                                 Card(
                                     shape = RoundedCornerShape(12.dp),
                                     colors = CardDefaults.cardColors(containerColor = Color(0xFF0C192E).copy(alpha = 0.4f)),
@@ -168,6 +172,62 @@ class PrincipalActivity : AppCompatActivity() {
                                             Text("Last Roster/Grades Sync Event", color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
                                             Text(lastSync, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                         }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(28.dp))
+                                Text(
+                                    text = "Executive Controls",
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.padding(bottom = 12.dp)
+                                )
+
+                                // Card 1: Companion Devices
+                                Card(
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0C192E)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            startActivity(Intent(this@PrincipalActivity, ItAdminActivity::class.java))
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(18.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("🛡️", fontSize = 22.sp, modifier = Modifier.padding(end = 14.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Companion Devices & Security", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                            Text("Inspect paired tablets & manage security", color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
+                                        }
+                                        Text("→", color = primaryColor, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // Card 2: Finance Hub
+                                Card(
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0C192E)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            startActivity(Intent(this@PrincipalActivity, BursarActivity::class.java))
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(18.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("💰", fontSize = 22.sp, modifier = Modifier.padding(end = 14.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Fee Collections & Finance Hub", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                            Text("Live school revenue & outstanding debt", color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
+                                        }
+                                        Text("→", color = primaryColor, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }

@@ -5,6 +5,7 @@ import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -135,6 +136,14 @@ class ItAdminActivity : AppCompatActivity() {
                                 .fillMaxWidth()
                                 .padding(vertical = 16.dp)
                         ) {
+                            Text(
+                                text = "← ",
+                                color = Color.White,
+                                fontSize = 22.sp,
+                                modifier = Modifier
+                                    .clickable { finish() }
+                                    .padding(end = 8.dp)
+                            )
                             Text(
                                 text = "IT Security Center",
                                 color = Color.White,
