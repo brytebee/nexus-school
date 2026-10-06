@@ -404,6 +404,9 @@ class HandshakeActivity : AppCompatActivity() {
                             var showProgress by remember { mutableStateOf(students.isNotEmpty()) }
                             var progressAmount by remember { mutableStateOf(0f) }
                             var isTorchEnabled by remember { mutableStateOf(false) }
+                            // Management roles (IT Admin, Principal, Bursar) receive no student
+                            // grading matrix — auto-navigate immediately after branding is saved.
+                            val isManagementRole = result.role in listOf("it_admin", "principal", "bursar")
 
                             LaunchedEffect(Unit) {
                                 // Save Master Subject List and per-class subject map
@@ -608,25 +611,47 @@ class HandshakeActivity : AppCompatActivity() {
                                                         Text("View Class Roster  →", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                                                     }
                                                 } else {
-                                                    // Fallback: handshake succeeded but no students assigned yet
-                                                    Spacer(modifier = Modifier.height(16.dp))
-                                                    Text(
-                                                        "⚠️ No students assigned to you yet.",
-                                                        color = Color(0xFFFFCC80),
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        textAlign = TextAlign.Center
-                                                    )
-                                                    Spacer(modifier = Modifier.height(24.dp))
-                                                    OutlinedButton(
-                                                        onClick = navigateToRoster,
-                                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
-                                                        modifier = Modifier
-                                                            .fillMaxWidth(0.8f)
-                                                            .height(56.dp),
-                                                        shape = RoundedCornerShape(14.dp)
-                                                    ) {
-                                                        Text("Continue Anyway  →", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                                    if (isManagementRole) {
+                                                        // Management role (IT Admin, Principal, Bursar):
+                                                        // auto-navigate without requiring a button tap.
+                                                        LaunchedEffect(Unit) {
+                                                            delay(800) // brief splash so the success screen is visible
+                                                            navigateToRoster()
+                                                        }
+                                                        Spacer(modifier = Modifier.height(24.dp))
+                                                        Text(
+                                                            "Opening your dashboard...",
+                                                            color = Color.White.copy(alpha = 0.7f),
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            textAlign = TextAlign.Center
+                                                        )
+                                                        Spacer(modifier = Modifier.height(12.dp))
+                                                        CircularProgressIndicator(
+                                                            color = Color.White,
+                                                            modifier = Modifier.size(32.dp),
+                                                            strokeWidth = 3.dp
+                                                        )
+                                                    } else {
+                                                        // Regular teacher with no student allocation yet
+                                                        Spacer(modifier = Modifier.height(16.dp))
+                                                        Text(
+                                                            "⚠️ No students assigned to you yet.",
+                                                            color = Color(0xFFFFCC80),
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            textAlign = TextAlign.Center
+                                                        )
+                                                        Spacer(modifier = Modifier.height(24.dp))
+                                                        OutlinedButton(
+                                                            onClick = navigateToRoster,
+                                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
+                                                            modifier = Modifier
+                                                                .fillMaxWidth(0.8f)
+                                                                .height(56.dp),
+                                                            shape = RoundedCornerShape(14.dp)
+                                                        ) {
+                                                            Text("Continue Anyway  →", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                                        }
                                                     }
                                                 }
                                             }

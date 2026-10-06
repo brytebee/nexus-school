@@ -99,11 +99,15 @@ data class PinHandshakeRequest(
 )
 
 class HandshakeService {
+    private val jsonParser = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        coerceInputValues = true
+    }
+
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
-            json(Json {
-                ignoreUnknownKeys = true
-            })
+            json(jsonParser)
         }
     }
 
@@ -122,7 +126,7 @@ class HandshakeService {
                 } else {
                     httpResponse.bodyAsText()
                 }
-                Json { ignoreUnknownKeys = true }.decodeFromString<HandshakeResponse>(responseBody)
+                jsonParser.decodeFromString<HandshakeResponse>(responseBody)
             } else {
                 val errorText = httpResponse.bodyAsText()
                 var errCode = "HANDSHAKE_ERROR"
@@ -137,8 +141,8 @@ class HandshakeService {
         } catch (e: HandshakeException) {
             throw e
         } catch (e: Exception) {
-            e.printStackTrace()
-            null
+            android.util.Log.e("HandshakeService", "Handshake QR processing error: ${e.message}", e)
+            throw HandshakeException("PROCESSING_ERROR", e.message ?: "Handshake error")
         }
     }
 
@@ -169,7 +173,7 @@ class HandshakeService {
                 } else {
                     httpResponse.bodyAsText()
                 }
-                Json { ignoreUnknownKeys = true }.decodeFromString<HandshakeResponse>(responseBody)
+                jsonParser.decodeFromString<HandshakeResponse>(responseBody)
             } else {
                 val errorText = httpResponse.bodyAsText()
                 var errCode = "HANDSHAKE_ERROR"
@@ -184,8 +188,8 @@ class HandshakeService {
         } catch (e: HandshakeException) {
             throw e
         } catch (e: Exception) {
-            e.printStackTrace()
-            null
+            android.util.Log.e("HandshakeService", "PIN Handshake processing error: ${e.message}", e)
+            throw HandshakeException("PROCESSING_ERROR", e.message ?: "PIN Handshake error")
         }
     }
 }
