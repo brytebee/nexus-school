@@ -1,3 +1,21 @@
+## What's New in v1.1.91
+
+This release delivers **Camera-Free Teacher Pairing, Offline Local Web Bridge, and Release Guard Automation** — solving the barrier for teachers with older Android devices who cannot scan dense monitor QR codes.
+
+### 🔑 Camera-Free PIN Pairing & Local Web Bridge (`/pair`)
+- **Direct LAN APK Download (`GET /pair/apk`)**: Teachers connect to school local Wi-Fi, open `http://<hub-ip>:3000/pair`, and download the Android companion app directly from the PC hard drive with **zero cellular data** and no third-party transfer apps (Xender/Bluetooth).
+- **Single-Use 6-Digit Pairing PIN**: Replaces manual payload copy-paste with rolling 6-digit OTP codes. Stamped with a 30-minute rolling TTL and automatically consumed and deleted on successful marriage.
+- **Per-Teacher PIN Rollover**: Selecting a teacher from the dropdown immediately regenerates and recycles their active PIN code.
+- **Android Chrome Intent Deep Linking**: One-tap "Launch & Pair" button dispatches `intent://pair?ip=...&port=...&pin=...#Intent;scheme=nexus;package=com.nexus.school;end` with direct anchor fallback to open the app and trigger auto-marriage without Chrome navigation blocking.
+- **Sovereign Portal (Port 3002) Forwarding Bridge**: Port 3002 automatically redirects `/pair` and `/pair/apk` requests to port 3000.
+
+### 🛡️ Release Guard & Build Automation
+- **Auto-Signed Android Release Builds**: Gradle automatically falls back to debug signing when release keystore credentials are not present locally, ensuring release builds always produce installable `Nexus-release.apk` packages.
+- **Pre-Distribution Packaging Guard**: `scripts/ensure-release-apk.js` integrated into `predist:*` scripts in `package.json` to verify the Android APK is compiled and signed before packaging the desktop app.
+- **Version Bumps**: Electron shell bumped to `v1.1.91`; Android companion app bumped to `v1.0.4` (`versionCode = 5`).
+
+---
+
 ## What's New in v1.0.4
 
 This release delivers the **Phase 11 Activation Security Gate** — a server-authoritative activation layer that protects all value outputs across every license tier. PDF report generation, result dispatch, portal publishing, Nexus Pulse, and CBT are now hard-locked until a school's device is confirmed as activated in the central Nexus database. This update spans all four repositories.
