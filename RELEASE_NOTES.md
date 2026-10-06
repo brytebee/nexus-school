@@ -1,3 +1,25 @@
+## What's New in v1.1.92
+
+This release delivers the **Executive Portal for Superadmin / School Owners, Persistent SQLite PIN Pairing, Universal Device Tracking, and Android Companion v1.0.5**.
+
+### 🏛️ Executive Portal & Management Controls
+- **Executive Overview for School Owners**: Level 9 companions (Superadmin / School Owner / Principal) launch into the Executive Portal displaying live School Performance Snapshot metrics: Total Enrolled Students, Active Teachers, Configured Classes & Arms, and Last Sync Timestamp.
+- **Executive Navigation Shortcuts**: Direct one-tap jump from Executive Overview to **Companion Devices & Security** and **Fee Collections & Finance Hub**.
+- **Back Navigation**: Added back arrow navigation (`←`) across all management views (`ItAdminActivity` and `BursarActivity`) to seamlessly return to the overview.
+- **Instant Admin Handshake (<50ms)**: Management roles omit the heavy student grading roster matrix during handshake, preventing massive 15MB gzipped payloads and eliminating client connection timeouts.
+
+### 🔑 Persistent SQLite PIN Pairing & Universal Device Tracking
+- **Restart-Resilient PINs**: Pairing PINs are now stored in SQLite (`pairing_pins` table). PINs survive desktop app and engine restarts with full 30-minute rolling TTL and single-use security.
+- **Universal Connected Device Tracking**: All paired devices across all license tiers (Standalone, Silver, Gold, Diamond) are now automatically registered in `connected_devices`, eliminating `403 Forbidden` errors on `/api/devices`, `/api/dashboard-summary`, and `/api/fees/summary`.
+- **String-Safe Type Casting**: All teacher and admin IDs are strictly cast to strings, resolving Kotlin deserialization type mismatches.
+
+### 📱 Android Companion v1.0.5 (`versionCode = 6`)
+- Auto-navigates management roles straight to the Executive Portal on marriage.
+- Lenient JSON parser with graceful error surfacing.
+- Compiled, signed, and bundled into the desktop release payload.
+
+---
+
 ## What's New in v1.1.91
 
 This release delivers **Camera-Free Teacher Pairing, Offline Local Web Bridge, and Release Guard Automation** — solving the barrier for teachers with older Android devices who cannot scan dense monitor QR codes.
