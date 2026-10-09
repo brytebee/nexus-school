@@ -73,6 +73,58 @@ suspend fun saveGradeEvent(
     }
 }
 
+suspend fun savePacGradeEvent(
+    context: Context,
+    studentId: String,
+    subject: String,
+    packNumber: Int,
+    score: Double
+) {
+    val identityManager = IdentityManager(context)
+    if (identityManager.isGradesLocked()) {
+        Log.w("SyncEventsHelper", "savePacGradeEvent blocked: Mobile grades are locked.")
+        return
+    }
+
+    val db = SyncDatabase.getDatabase(context)
+    val compKey = "PAC_$packNumber"
+
+    // Save to local offline persistence
+    db.studentDao().insertScore(com.nexus.school.data.StudentScore(
+        student_id = studentId,
+        subject = subject,
+        component_key = compKey,
+        score = score
+    ))
+
+    // Build the sync_queue payload for pushing to the Hub
+    val payload = """{"student_id": "$studentId", "subject": "$subject", "pack_number": $packNumber, "score": $score}"""
+    val eventId = "PAC_${studentId}_${subject}_$packNumber"
+    db.syncDao().insertEvent(
+        SyncEvent(event_id = eventId, event_type = "UPDATE_PAC_SCORE", payload = payload, is_synced = 0)
+    )
+
+    withContext(Dispatchers.IO) {
+        try {
+            val serverInfo = IdentityManager(context).getServerInfo()
+            if (serverInfo != null) {
+                val ip = serverInfo.first
+                val manager = IdentityManager(context)
+                val teacherName = if (manager.getTeacherId() == "STANDALONE_ADMIN") "Admin" else manager.getTeacherName()
+                val msg = """{"teacher": "$teacherName", "action": "Graded $subject (PAC $packNumber: $score)", "event": "UPDATE_PAC_SCORE"}"""
+                DatagramSocket().use { socket ->
+                    val bytes = msg.toByteArray()
+                    val packet = DatagramPacket(bytes, bytes.size, InetAddress.getByName(ip), 3001)
+                    socket.send(packet)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("NexusPulse", "Failed to burst PAC UDP heartbeat.", e)
+        }
+        Unit
+    }
+}
+
 /**
  * Enqueues an ADD_STUDENT sync event for each enrolled [subjects] entry.
  * A single [localId] is shared across all subject rows so the Hub can

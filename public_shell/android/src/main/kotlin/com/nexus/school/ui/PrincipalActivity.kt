@@ -48,6 +48,36 @@ class PrincipalActivity : AppCompatActivity() {
         setContent {
             var isLoading by remember { mutableStateOf(true) }
             var dashboardData by remember { mutableStateOf<JSONObject?>(null) }
+            var teacherScope by remember { mutableStateOf(identityManager.getAttendanceScope()) }
+            var scopeSaving by remember { mutableStateOf(false) }
+
+            suspend fun saveTeacherScope(newScope: String) {
+                scopeSaving = true
+                try {
+                    val serverInfo = identityManager.getServerInfo() ?: return
+                    val (ip, port) = serverInfo
+                    withContext(Dispatchers.IO) {
+                        val url = java.net.URL("http://$ip:$port/api/system/settings")
+                        val conn = url.openConnection() as java.net.HttpURLConnection
+                        conn.requestMethod = "PATCH"
+                        conn.doOutput = true
+                        conn.setRequestProperty("Content-Type", "application/json")
+                        conn.setRequestProperty("X-Device-ID", identityManager.getDeviceId())
+                        val body = "{\"key\":\"teacher_attendance_scope\",\"value\":\"$newScope\"}"
+                        conn.outputStream.write(body.toByteArray())
+                        if (conn.responseCode == 200) {
+                            identityManager.saveAttendanceScope(newScope)
+                        }
+                        conn.disconnect()
+                    }
+                    teacherScope = newScope
+                    android.widget.Toast.makeText(this@PrincipalActivity, "✅ Scope saved", android.widget.Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    android.widget.Toast.makeText(this@PrincipalActivity, "Failed to save scope: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                } finally {
+                    scopeSaving = false
+                }
+            }
 
             fun loadDashboardStats() {
                 isLoading = true
@@ -72,6 +102,29 @@ class PrincipalActivity : AppCompatActivity() {
                         } else {
                             Toast.makeText(this@PrincipalActivity, "Failed to load summary stats", Toast.LENGTH_SHORT).show()
                         }
+
+                        // Fetch system settings to sync teacher attendance scope
+                        val settingsJson = withContext(Dispatchers.IO) {
+                            try {
+                                val url = URL("http://$ip:$port/api/system/settings")
+                                val conn = url.openConnection() as HttpURLConnection
+                                conn.requestMethod = "GET"
+                                conn.setRequestProperty("X-Device-ID", identityManager.getDeviceId())
+                                if (conn.responseCode == 200) {
+                                    conn.inputStream.bufferedReader().use { it.readText() }
+                                } else null
+                            } catch (_: Exception) { null }
+                        }
+                        if (settingsJson != null) {
+                            try {
+                                val sObj = JSONObject(settingsJson)
+                                val s = sObj.optString("teacher_attendance_scope", "")
+                                if (s.isNotBlank()) {
+                                    teacherScope = s
+                                    identityManager.saveAttendanceScope(s)
+                                }
+                            } catch (_: Exception) {}
+                        }
                     } catch (e: Exception) {
                         Toast.makeText(this@PrincipalActivity, "Network Error: ${e.message}", Toast.LENGTH_SHORT).show()
                     } finally {
@@ -91,7 +144,7 @@ class PrincipalActivity : AppCompatActivity() {
                     try {
                         val info = identityManager.getServerInfo() ?: continue
                         val (ip, port) = info
-                        val code = withContext(Dispatchers.IO) {
+                        val syncResponseText = withContext(Dispatchers.IO) {
                             val url = URL("http://$ip:$port/api/sync")
                             val conn = url.openConnection() as HttpURLConnection
                             conn.requestMethod = "POST"
@@ -99,9 +152,23 @@ class PrincipalActivity : AppCompatActivity() {
                             conn.setRequestProperty("Content-Type", "application/json")
                             conn.setRequestProperty("X-Device-ID", identityManager.getDeviceId())
                             conn.outputStream.write("{}".toByteArray())
-                            conn.responseCode
+                            if (conn.responseCode == 200) {
+                                conn.inputStream.bufferedReader().use { it.readText() }
+                            } else null
                         }
-                        if (code == 200) {
+                        if (syncResponseText != null) {
+                            try {
+                                val syncObj = JSONObject(syncResponseText)
+                                val s = syncObj.optString("teacher_attendance_scope", "")
+                                if (s.isNotBlank()) {
+                                    teacherScope = s
+                                    identityManager.saveAttendanceScope(s)
+                                }
+                                val curriculumObj = syncObj.optJSONObject("class_curriculum_types")
+                                if (curriculumObj != null) {
+                                    identityManager.saveClassCurriculumJson(curriculumObj.toString())
+                                }
+                            } catch (_: Exception) {}
                             Toast.makeText(this@PrincipalActivity, "☁️ Auto-sync complete", Toast.LENGTH_SHORT).show()
                         }
                     } catch (_: Exception) {
@@ -344,6 +411,65 @@ class PrincipalActivity : AppCompatActivity() {
                                         }
                                         Text("→", color = primaryColor, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                                     }
+                                }
+
+                                Spacer(modifier = Modifier.height(24.dp))
+
+                                // ── Teacher Access Controls ────────────────────────
+                                Text(
+                                    "Teacher Access Controls",
+                                    color = Color.White.copy(alpha = 0.55f),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(bottom = 10.dp),
+                                    letterSpacing = 1.sp
+                                )
+
+                                listOf(
+                                    "form_class_only" to Pair("🏫 Form Class Only", "Teachers can only record attendance for their assigned form class."),
+                                    "any_taught_class" to Pair("📚 Any Taught Class", "Teachers can record attendance for any class they are assigned to teach.")
+                                ).forEach { (scopeValue, labels) ->
+                                    val isActive = teacherScope == scopeValue
+                                    Card(
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (isActive) primaryColor.copy(alpha = 0.12f) else Color(0xFF0C192E)
+                                        ),
+                                        border = if (isActive) androidx.compose.foundation.BorderStroke(1.dp, primaryColor.copy(alpha = 0.5f)) else null,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(bottom = 8.dp)
+                                            .clickable(enabled = !scopeSaving) {
+                                                if (!isActive) {
+                                                    scope.launch { saveTeacherScope(scopeValue) }
+                                                }
+                                            }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(14.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(16.dp)
+                                                    .background(
+                                                        color = if (isActive) primaryColor else Color.White.copy(alpha = 0.15f),
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    )
+                                            )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(labels.first, color = if (isActive) Color.White else Color.White.copy(alpha = 0.7f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                                Text(labels.second, color = Color.White.copy(alpha = 0.4f), fontSize = 10.sp, modifier = Modifier.padding(top = 2.dp))
+                                            }
+                                            if (isActive) {
+                                                Text("✓", color = primaryColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
+                                if (scopeSaving) {
+                                    Text("Saving…", color = primaryColor, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                                 }
                             }
                         }

@@ -424,6 +424,143 @@ class IdentityManager(context: Context) {
         return false
     }
 
+    fun saveAttendanceScope(scope: String) {
+        prefs.edit().putString("teacher_attendance_scope", scope).apply()
+    }
+
+    fun getAttendanceScope(): String {
+        return prefs.getString("teacher_attendance_scope", "form_class_only") ?: "form_class_only"
+    }
+
+    fun canTakeAttendanceFor(className: String): Boolean {
+        val role = getRole()
+        if (role.equals("Admin", ignoreCase = true) || role.equals("Superadmin", ignoreCase = true) || role.equals("Principal", ignoreCase = true)) {
+            return true
+        }
+        val scope = getAttendanceScope()
+        if (scope == "any_taught_class") {
+            return true
+        }
+        return isFormTeacherOf(className)
+    }
+
+    data class ArmCurriculumConfig(
+        val type: String = "STANDARD_NIGERIAN",
+        val pacCount: Int = 12,
+        val pacLabels: List<String> = emptyList()
+    )
+
+    fun saveClassCurriculumJson(json: String) {
+        prefs.edit().putString("class_curriculum_json", json).apply()
+    }
+
+    fun getClassCurriculumJson(): String {
+        return prefs.getString("class_curriculum_json", "") ?: ""
+    }
+
+    fun resolveArmCurriculum(className: String, classArm: String?): ArmCurriculumConfig {
+        val jsonStr = getClassCurriculumJson()
+        if (jsonStr.isBlank()) return ArmCurriculumConfig()
+        try {
+            val root = org.json.JSONObject(jsonStr)
+
+            // Find matching class object (exact, case-insensitive, or prefix decomposition)
+            var matchedClassKey: String? = null
+            var inferredArm = classArm?.trim()
+
+            if (root.has(className)) {
+                matchedClassKey = className
+            } else {
+                val cleanClass = className.trim()
+                val keys = root.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    if (k.equals(cleanClass, ignoreCase = true)) {
+                        matchedClassKey = k
+                        break
+                    } else if (cleanClass.startsWith(k, ignoreCase = true)) {
+                        matchedClassKey = k
+                        val remainder = cleanClass.substring(k.length).trim()
+                        if (remainder.isNotBlank() && inferredArm.isNullOrBlank()) {
+                            inferredArm = remainder
+                        }
+                        break
+                    }
+                }
+                // Try splitting e.g. "Grade 5 ACE" -> "Grade 5" + "ACE"
+                if (matchedClassKey == null && cleanClass.contains(" ")) {
+                    val lastSpace = cleanClass.lastIndexOf(' ')
+                    val candClass = cleanClass.substring(0, lastSpace).trim()
+                    val candArm = cleanClass.substring(lastSpace + 1).trim()
+                    val keys2 = root.keys()
+                    while (keys2.hasNext()) {
+                        val k = keys2.next()
+                        if (k.equals(candClass, ignoreCase = true)) {
+                            matchedClassKey = k
+                            if (inferredArm.isNullOrBlank()) inferredArm = candArm
+                            break
+                        }
+                    }
+                }
+            }
+
+            if (matchedClassKey != null) {
+                val classObj = root.optJSONObject(matchedClassKey)
+                if (classObj != null) {
+                    // Check arm override if student has an arm or inferred arm
+                    val targetArm = if (!inferredArm.isNullOrBlank()) inferredArm else classArm?.trim()
+                    if (!targetArm.isNullOrBlank()) {
+                        val armsObj = classObj.optJSONObject("arms")
+                        if (armsObj != null) {
+                            var armConfig = armsObj.optJSONObject(targetArm)
+                            if (armConfig == null) {
+                                val armKeys = armsObj.keys()
+                                while (armKeys.hasNext()) {
+                                    val ak = armKeys.next()
+                                    if (ak.equals(targetArm, ignoreCase = true)) {
+                                        armConfig = armsObj.optJSONObject(ak)
+                                        break
+                                    }
+                                }
+                            }
+                            if (armConfig != null) {
+                                val type = armConfig.optString("type", "STANDARD_NIGERIAN")
+                                val pacCount = armConfig.optInt("pac_count", 12)
+                                val labelsArr = armConfig.optJSONArray("pac_labels")
+                                val labels = mutableListOf<String>()
+                                if (labelsArr != null) {
+                                    for (i in 0 until labelsArr.length()) {
+                                        labels.add(labelsArr.optString(i, ""))
+                                    }
+                                }
+                                return ArmCurriculumConfig(type, pacCount, labels)
+                            }
+                        }
+                    }
+
+                    // Fallback to class default
+                    val defaultType = classObj.optString("_default", classObj.optString("type", "STANDARD_NIGERIAN"))
+                    val pacCount = classObj.optInt("_pac_count", 12)
+                    val labelsArr = classObj.optJSONArray("_pac_labels")
+                    val labels = mutableListOf<String>()
+                    if (labelsArr != null) {
+                        for (i in 0 until labelsArr.length()) {
+                            labels.add(labelsArr.optString(i, ""))
+                        }
+                    }
+                    return ArmCurriculumConfig(defaultType, pacCount, labels)
+                }
+            } else {
+                // If flat key-value string was sent
+                val directType = root.optString(className, "")
+                if (directType.isNotBlank()) {
+                    return ArmCurriculumConfig(directType, 12, emptyList())
+                }
+            }
+        } catch (_: Exception) {}
+        return ArmCurriculumConfig()
+    }
+
     fun clearData() {
         val deviceId = prefs.getString("device_id", null)
         prefs.edit().clear().apply()

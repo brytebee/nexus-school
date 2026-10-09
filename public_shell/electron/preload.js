@@ -401,6 +401,14 @@ const nexusAPI = {
         getPacScores:      (studentId)               => ipcRenderer.invoke('ils:get-pac-scores', studentId),
         getVerseCount:     (studentId)               => ipcRenderer.invoke('ils:get-verse-count', studentId),
         setVerseCount:     (studentId, count)        => ipcRenderer.invoke('ils:set-verse-count', { studentId, count }),
+        getArmTypes:       (className)               => ipcRenderer.invoke('ils:get-arm-types', className),
+        setArmType:        (payload)                 => ipcRenderer.invoke('ils:set-arm-type', payload),
+    },
+
+    // ── School-wide Settings ──────────────────────────────────────────
+    schoolSettings: {
+        getTeacherScope: ()      => ipcRenderer.invoke('settings:get-teacher-scope'),
+        setTeacherScope: (scope) => ipcRenderer.invoke('settings:set-teacher-scope', scope),
     },
 
     // ── Standalone Pack ───────────────────────────────────────────────

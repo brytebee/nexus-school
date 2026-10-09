@@ -22,6 +22,14 @@ export default function Classes() {
   const [ilsPacLabels, setIlsPacLabels] = useState<string[]>([]);
   const [ilsTypeLoading, setIlsTypeLoading] = useState(false);
 
+  // ── Phase 11: Arm-level curriculum configs (ACE / ILS per Arm) ─────────
+  const [armCurriculumMap, setArmCurriculumMap] = useState<Record<string, { type: 'STANDARD_NIGERIAN' | 'ILS', pacCount: number, pacLabels: string[] }>>({});
+  const [editingArmName, setEditingArmName] = useState<string | null>(null);
+  const [armCurriculumType, setArmCurriculumType] = useState<'STANDARD_NIGERIAN' | 'ILS'>('STANDARD_NIGERIAN');
+  const [armPacCount, setArmPacCount] = useState<number>(12);
+  const [armPacLabels, setArmPacLabels] = useState<string[]>([]);
+  const [armConfigSaving, setArmConfigSaving] = useState(false);
+
   // Manual Class Creation Form states
   const [createClassName, setCreateClassName] = useState('');
   const [createMaxSubjects, setCreateMaxSubjects] = useState('10');
@@ -912,6 +920,54 @@ export default function Classes() {
         }
       }).catch(() => {});
     }
+    setEditingArmName(null);
+    setArmCurriculumMap({});
+    if (api?.ils?.getArmTypes) {
+      api.ils.getArmTypes(c.hierarchy_class).then((res: any) => {
+        if (res?.ok && res.armConfigs) {
+          setArmCurriculumMap(res.armConfigs);
+        }
+      }).catch(() => {});
+    }
+  };
+
+  const handleSaveArmCurriculum = async (arm: string) => {
+    if (!selectedClass) return;
+    setArmConfigSaving(true);
+    try {
+      const api = (window as any).electronAPI;
+      if (api?.ils?.setArmType) {
+        const res = await api.ils.setArmType({
+          className: selectedClass.hierarchy_class,
+          arm,
+          type: armCurriculumType,
+          pacCount: armPacCount,
+          pacLabels: armPacLabels
+        });
+        if (res?.ok) {
+          setArmCurriculumMap(prev => ({
+            ...prev,
+            [arm]: { type: armCurriculumType, pacCount: armPacCount, pacLabels: armPacLabels }
+          }));
+          setEditingArmName(null);
+          const Swal = (window as any).Swal;
+          Swal?.fire({
+            toast: true,
+            position: 'top-end',
+            icon: 'success',
+            title: `${selectedClass.hierarchy_class} ${arm} curriculum saved`,
+            showConfirmButton: false,
+            timer: 2500,
+            background: '#0d1235',
+            color: '#fff'
+          });
+        } else {
+          alert(res?.error || 'Failed to save arm curriculum');
+        }
+      }
+    } finally {
+      setArmConfigSaving(false);
+    }
   };
 
 
@@ -1699,29 +1755,159 @@ A Principal or Superadmin (Level 7+) must authorize this change.`;
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
-                  {selectedClass.arms.map(arm => (
-                    <div 
-                      key={arm} 
-                      style={{
-                        background: 'rgba(255, 255, 255, 0.03)',
-                        border: '1px solid var(--glass-border)',
-                        borderRadius: '6px',
-                        padding: '8px 12px',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        fontSize: '13px'
-                      }}
-                    >
-                      <span style={{ fontWeight: 600 }}>{selectedClass.hierarchy_class} {arm}</span>
-                      <button 
-                        onClick={() => handleRemoveArm(selectedClass.hierarchy_class, arm)}
-                        style={{ background: 'none', border: 'none', color: '#EF4444', fontSize: '18px', cursor: 'pointer', padding: 0 }}
+                  {selectedClass.arms.map(arm => {
+                    const armConfig = armCurriculumMap[arm];
+                    const isIls = armConfig?.type === 'ILS';
+                    const isEditingThisArm = editingArmName === arm;
+
+                    return (
+                      <div
+                        key={arm}
+                        style={{
+                          background: isEditingThisArm ? 'rgba(0, 229, 255, 0.05)' : 'rgba(255, 255, 255, 0.03)',
+                          border: isEditingThisArm ? '1px solid #00E5FF' : '1px solid var(--glass-border)',
+                          borderRadius: '8px',
+                          padding: '10px 14px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '10px',
+                          fontSize: '13px'
+                        }}
                       >
-                        &times;
-                      </button>
-                    </div>
-                  ))}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 700 }}>{selectedClass.hierarchy_class} {arm}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (isEditingThisArm) {
+                                  setEditingArmName(null);
+                                } else {
+                                  setEditingArmName(arm);
+                                  setArmCurriculumType(armConfig?.type || 'STANDARD_NIGERIAN');
+                                  setArmPacCount(armConfig?.pacCount || 12);
+                                  setArmPacLabels(armConfig?.pacLabels || []);
+                                }
+                              }}
+                              style={{
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                border: 'none',
+                                cursor: 'pointer',
+                                background: isIls ? 'rgba(0, 229, 255, 0.15)' : 'rgba(255, 255, 255, 0.08)',
+                                color: isIls ? '#00E5FF' : '#94a3b8'
+                              }}
+                            >
+                              {isIls ? `📚 ILS (PAC: ${armConfig?.pacCount || 12})` : '🇳🇬 Standard'} ⚙️
+                            </button>
+                          </div>
+
+                          <button 
+                            onClick={() => handleRemoveArm(selectedClass.hierarchy_class, arm)}
+                            style={{ background: 'none', border: 'none', color: '#EF4444', fontSize: '18px', cursor: 'pointer', padding: 0 }}
+                            title="Remove arm"
+                          >
+                            &times;
+                          </button>
+                        </div>
+
+                        {/* Arm Curriculum Configuration Panel */}
+                        {isEditingThisArm && (
+                          <div style={{ background: 'rgba(0,0,0,0.25)', borderRadius: '6px', padding: '12px', border: '1px solid rgba(0,229,255,0.2)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            <span style={{ fontSize: '11px', color: '#00E5FF', fontWeight: 700, textTransform: 'uppercase' }}>
+                              Arm Curriculum Mode: {arm}
+                            </span>
+
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              {(['STANDARD_NIGERIAN', 'ILS'] as const).map(mode => (
+                                <button
+                                  key={mode}
+                                  type="button"
+                                  onClick={() => setArmCurriculumType(mode)}
+                                  style={{
+                                    flex: 1,
+                                    padding: '7px 12px',
+                                    borderRadius: '6px',
+                                    fontSize: '12px',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                    border: armCurriculumType === mode ? '1.5px solid #00E5FF' : '1px solid rgba(255,255,255,0.1)',
+                                    background: armCurriculumType === mode ? 'rgba(0,229,255,0.15)' : 'rgba(255,255,255,0.02)',
+                                    color: armCurriculumType === mode ? '#00E5FF' : '#94a3b8'
+                                  }}
+                                >
+                                  {mode === 'STANDARD_NIGERIAN' ? '🇳🇬 Standard Nigerian' : '📚 ILS (ACE PAC)'}
+                                </button>
+                              ))}
+                            </div>
+
+                            {armCurriculumType === 'ILS' && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                  <label style={{ fontSize: '11px', color: '#94a3b8' }}>PAC Count per Subject (5–25):</label>
+                                  <input
+                                    type="number"
+                                    min={5}
+                                    max={25}
+                                    value={armPacCount}
+                                    onChange={(e) => setArmPacCount(Math.min(25, Math.max(5, parseInt(e.target.value) || 12)))}
+                                    className="modern-input"
+                                    style={{ width: '70px', padding: '4px 8px', textAlign: 'center', fontSize: '12px' }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <label style={{ fontSize: '11px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>
+                                    PAC Labels (e.g. ILS 101, 102… or leave blank for P1, P2…)
+                                  </label>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(70px, 1fr))', gap: '4px' }}>
+                                    {Array.from({ length: armPacCount }, (_, i) => (
+                                      <input
+                                        key={i}
+                                        type="text"
+                                        placeholder={`P${i + 1}`}
+                                        value={armPacLabels[i] || ''}
+                                        maxLength={10}
+                                        className="modern-input"
+                                        style={{ fontSize: '10.5px', padding: '4px', textAlign: 'center' }}
+                                        onChange={(e) => {
+                                          const updated = [...armPacLabels];
+                                          while (updated.length <= i) updated.push('');
+                                          updated[i] = e.target.value;
+                                          setArmPacLabels(updated);
+                                        }}
+                                      />
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px' }}>
+                              <button
+                                type="button"
+                                onClick={() => setEditingArmName(null)}
+                                style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: '#94a3b8', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', cursor: 'pointer' }}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                disabled={armConfigSaving}
+                                onClick={() => handleSaveArmCurriculum(arm)}
+                                className="primary-btn"
+                                style={{ marginTop: 0, padding: '5px 14px', fontSize: '12px' }}
+                              >
+                                {armConfigSaving ? 'Saving…' : '💾 Save Arm Config'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                   {selectedClass.arms.length === 0 && (
                     <span style={{ fontSize: '11px', color: '#475569', fontStyle: 'italic', textAlign: 'center', padding: '12px 0' }}>No arms defined for this class.</span>
                   )}

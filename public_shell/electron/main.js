@@ -4326,6 +4326,20 @@ function ensureIlsSchema(db) {
         PRIMARY KEY (student_id, academic_session, term)
       );
     `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS class_arm_configs (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        hierarchy_class  TEXT NOT NULL,
+        arm              TEXT NOT NULL,
+        curriculum_type  TEXT NOT NULL DEFAULT 'STANDARD_NIGERIAN',
+        pac_count        INTEGER DEFAULT 12,
+        pac_labels       TEXT DEFAULT NULL,
+        created_at       TEXT DEFAULT (datetime('now')),
+        updated_at       TEXT DEFAULT (datetime('now')),
+        UNIQUE(hierarchy_class, arm),
+        FOREIGN KEY (hierarchy_class) REFERENCES class_configs(hierarchy_class) ON DELETE CASCADE
+      );
+    `);
   } catch (err) {
     console.error('[Phase 10] ensureIlsSchema error:', err.message);
   }
@@ -4448,6 +4462,95 @@ ipcMain.handle('ils:set-class-type', (event, { className, type, pacCount, pacLab
     switchTransaction();
 
     return { ok: true, purgedCount, prevType, type, pacCount: validatedPacCount };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+/** ils:get-arm-types — returns arm-level curriculum configs for all arms of a class */
+ipcMain.handle('ils:get-arm-types', (event, className) => {
+  try {
+    const db = database.getDb();
+    ensureIlsSchema(db);
+    const rows = db.prepare("SELECT arm, curriculum_type, pac_count, pac_labels FROM class_arm_configs WHERE hierarchy_class = ?").all(className);
+    const armConfigs = {};
+    for (const r of rows) {
+      let labels = [];
+      try { if (r.pac_labels) labels = JSON.parse(r.pac_labels); } catch (_) {}
+      armConfigs[r.arm] = {
+        type: r.curriculum_type || 'STANDARD_NIGERIAN',
+        pacCount: r.pac_count || 12,
+        pacLabels: labels
+      };
+    }
+    return { ok: true, armConfigs };
+  } catch (err) {
+    return { ok: false, armConfigs: {}, error: err.message };
+  }
+});
+
+/** ils:set-arm-type — sets curriculum_type, pacCount, and pacLabels for a specific class arm (Principal+ required) */
+ipcMain.handle('ils:set-arm-type', (event, { className, arm, type, pacCount, pacLabels }) => {
+  try {
+    if (!currentAdminSession || currentAdminSession.role_level < 7) {
+      return { ok: false, error: 'Principal or Superadmin access required (Level 7+).' };
+    }
+    const _ilsTier = licenseStatus?.tier || 'Standalone';
+    if (type === 'ILS' && (_ilsTier === 'Standalone' || _ilsTier === 'Silver')) {
+      return { ok: false, error: `ILS/ACE PAC curriculum mode requires a Gold or Diamond plan. Your current plan is ${_ilsTier}.` };
+    }
+    const allowed = ['STANDARD_NIGERIAN', 'ILS'];
+    if (!allowed.includes(type)) return { ok: false, error: `Invalid curriculum_type: ${type}` };
+    const db = database.getDb();
+    ensureIlsSchema(db);
+
+    const validatedPacCount = Math.min(25, Math.max(5, parseInt(pacCount) || 12));
+    const labelsJson = Array.isArray(pacLabels) && pacLabels.length > 0 ? JSON.stringify(pacLabels) : null;
+
+    db.prepare(`
+      INSERT INTO class_arm_configs (hierarchy_class, arm, curriculum_type, pac_count, pac_labels, updated_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(hierarchy_class, arm) DO UPDATE SET
+        curriculum_type = excluded.curriculum_type,
+        pac_count = excluded.pac_count,
+        pac_labels = excluded.pac_labels,
+        updated_at = excluded.updated_at
+    `).run(className, arm, type, validatedPacCount, labelsJson);
+
+    try {
+      const details = `Configured arm ${className} ${arm} to ${type} (PAC count: ${validatedPacCount}).`;
+      db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'ARM_CURRICULUM_CHANGED', 'class_arm_configs', ?)").run(currentAdminSession.id, details);
+    } catch (_) {}
+
+    return { ok: true, type, pacCount: validatedPacCount };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+/** settings:get-teacher-scope — reads teacher_attendance_scope from system_settings */
+ipcMain.handle('settings:get-teacher-scope', () => {
+  try {
+    const db = database.getDb();
+    const row = db.prepare("SELECT value FROM system_settings WHERE key = 'teacher_attendance_scope'").get();
+    return { ok: true, scope: row?.value ?? 'form_class_only' };
+  } catch (err) {
+    return { ok: false, scope: 'form_class_only', error: err.message };
+  }
+});
+
+/** settings:set-teacher-scope — writes teacher_attendance_scope; requires Superadmin (level 9) */
+ipcMain.handle('settings:set-teacher-scope', (event, scope) => {
+  try {
+    if (!currentAdminSession || currentAdminSession.role_level < 9) {
+      return { ok: false, error: 'Superadmin access required to change teacher scope.' };
+    }
+    if (scope !== 'form_class_only' && scope !== 'any_taught_class') {
+      return { ok: false, error: 'Invalid scope value.' };
+    }
+    const db = database.getDb();
+    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('teacher_attendance_scope', ?)").run(scope);
+    return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
   }

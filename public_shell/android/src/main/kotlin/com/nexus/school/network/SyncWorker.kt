@@ -145,6 +145,18 @@ class SyncWorker(private val context: Context) {
                         Log.d("SyncWorker", "Score components refreshed: ${scoreArr.length()} components")
                     }
 
+                    // ── Refresh class curriculum types (Standard vs ACE/ILS per Arm) ──
+                    val classCurriculumObj = jsonObject.optJSONObject("class_curriculum_types")
+                    if (classCurriculumObj != null) {
+                        identityManager.saveClassCurriculumJson(classCurriculumObj.toString())
+                        Log.d("SyncWorker", "Class curriculum configurations refreshed: ${classCurriculumObj.length()} classes")
+                    }
+
+                    val attendanceScope = jsonObject.optString("teacher_attendance_scope", "form_class_only")
+                    if (attendanceScope.isNotBlank()) {
+                        identityManager.saveAttendanceScope(attendanceScope)
+                    }
+
                     val registrationLocked = jsonObject.optBoolean("registration_locked", false)
                     val gradesLocked       = jsonObject.optBoolean("grades_locked", false)
                     val attendanceLocked   = jsonObject.optBoolean("attendance_locked", false)

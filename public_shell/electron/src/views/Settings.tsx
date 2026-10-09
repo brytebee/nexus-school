@@ -91,6 +91,10 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
   const [terminalMode, setTerminalMode] = useState('master');
   const [masterIp, setMasterIp] = useState('');
 
+  // Teacher Access Controls
+  const [teacherAttendanceScope, setTeacherAttendanceScope] = useState<'form_class_only' | 'any_taught_class'>('form_class_only');
+  const [scopeSaving, setScopeSaving] = useState(false);
+
   // Department Managers State (Phase 5)
   // (DepartmentManagerItem defined at module scope above)
 
@@ -117,7 +121,34 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
 
   useEffect(() => {
     loadDeptManagers();
+    // Load teacher attendance scope via IPC (reads SQLite directly)
+    (async () => {
+      try {
+        const api = (window as any).electronAPI;
+        const res = await api?.schoolSettings?.getTeacherScope?.();
+        if (res?.ok && (res.scope === 'any_taught_class' || res.scope === 'form_class_only')) {
+          setTeacherAttendanceScope(res.scope);
+        }
+      } catch (_) { /* ignore */ }
+    })();
   }, []);
+
+  const handleSaveAttendanceScope = async (newScope: 'form_class_only' | 'any_taught_class') => {
+    setScopeSaving(true);
+    try {
+      const api = (window as any).electronAPI;
+      const res = await api?.schoolSettings?.setTeacherScope?.(newScope);
+      if (res?.ok) {
+        setTeacherAttendanceScope(newScope);
+      } else {
+        alert(res?.error ?? 'Failed to save attendance scope.');
+      }
+    } catch (e) {
+      alert('Error saving attendance scope.');
+    } finally {
+      setScopeSaving(false);
+    }
+  };
 
   const handleSaveDeptManager = async () => {
     if (!deptSectionName.trim()) {
@@ -1696,6 +1727,70 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
               </div>
             </div>
           </div>
+
+          {/* ── Teacher Access Controls Card (Underneath Stamp) ── */}
+          <div
+            className="form-group"
+            style={{
+              marginTop: '20px',
+              padding: '16px',
+              borderRadius: '10px',
+              background: 'rgba(0,229,255,0.03)',
+              border: '1px solid rgba(0,229,255,0.15)',
+            }}
+          >
+            <label style={{ fontSize: '15px', fontWeight: '700', color: '#00e5ff', display: 'block', marginBottom: '6px' }}>
+              🎓 Teacher Access Controls
+            </label>
+            <p style={{ fontSize: '12px', color: 'var(--text-dim)', margin: '0 0 14px 0', lineHeight: 1.6 }}>
+              Control which classes a teacher can record attendance for. Changes take effect after the next device sync.
+            </p>
+            {/* Scope Toggle */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {(['form_class_only', 'any_taught_class'] as const).map((opt) => {
+                const active = teacherAttendanceScope === opt;
+                return (
+                  <div
+                    key={opt}
+                    onClick={() => !scopeSaving && handleSaveAttendanceScope(opt)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      cursor: scopeSaving ? 'not-allowed' : 'pointer',
+                      background: active ? 'rgba(0,229,255,0.08)' : 'rgba(255,255,255,0.02)',
+                      border: `1px solid ${active ? 'rgba(0,229,255,0.4)' : 'rgba(255,255,255,0.07)'}`,
+                      transition: 'all 0.2s',
+                      opacity: scopeSaving ? 0.6 : 1,
+                    }}
+                  >
+                    <div style={{
+                      width: '16px', height: '16px', borderRadius: '50%',
+                      border: `2px solid ${active ? '#00e5ff' : 'rgba(255,255,255,0.3)'}`,
+                      background: active ? '#00e5ff' : 'transparent',
+                      flexShrink: 0,
+                      transition: 'all 0.2s',
+                    }} />
+                    <div>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: active ? '#fff' : 'var(--text-dim)' }}>
+                        {opt === 'form_class_only' ? '🏫 Form Class Only' : '📚 Any Taught Class'}
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '2px' }}>
+                        {opt === 'form_class_only'
+                          ? 'Teacher can only take attendance for the class they are form master of.'
+                          : 'Teacher can take attendance for any class they have been assigned to teach.'}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {scopeSaving && (
+              <p style={{ fontSize: '11px', color: '#00e5ff', marginTop: '8px', textAlign: 'center' }}>⌛ Saving…</p>
+            )}
+          </div>
         </div>
 
         {/* Column 2: School Metadata */}
@@ -2136,6 +2231,7 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
               </div>
             </div>
           )}
+
 
           <div
             className="form-group"

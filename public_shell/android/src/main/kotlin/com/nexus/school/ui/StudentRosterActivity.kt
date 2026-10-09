@@ -63,6 +63,7 @@ import com.nexus.school.network.ScoreComponent
 import com.nexus.school.network.saveAddStudentEvent
 import com.nexus.school.network.saveDeleteStudentEvent
 import com.nexus.school.network.saveGradeEvent
+import com.nexus.school.network.savePacGradeEvent
 import com.nexus.school.security.IdentityManager
 import com.nexus.school.NexusApp
 import kotlinx.coroutines.Dispatchers
@@ -275,12 +276,24 @@ class StudentRosterActivity : AppCompatActivity() {
                                                     android.widget.Toast.LENGTH_SHORT
                                                 ).show()
                                             } else {
-                                                val intent = Intent(this@StudentRosterActivity, AttendanceActivity::class.java).apply {
-                                                    putExtra(AttendanceActivity.EXTRA_CLASS_NAME, selectedTab?.first ?: "")
-                                                    putExtra(AttendanceActivity.EXTRA_SCHOOL_NAME, schoolName)
-                                                    putExtra(AttendanceActivity.EXTRA_PRIMARY_COLOR, primaryColorHex)
+                                                val targetClass = selectedTab?.first ?: ""
+                                                val identity = IdentityManager(this@StudentRosterActivity)
+                                                if (!identity.canTakeAttendanceFor(targetClass)) {
+                                                    val formClass = identity.getFormClass()
+                                                    val msg = if (formClass != null) {
+                                                        "Attendance restricted: You are Form Master for $formClass only."
+                                                    } else {
+                                                        "Attendance restricted: School policy allows Form Masters only to take attendance."
+                                                    }
+                                                    android.widget.Toast.makeText(this@StudentRosterActivity, msg, android.widget.Toast.LENGTH_LONG).show()
+                                                } else {
+                                                    val intent = Intent(this@StudentRosterActivity, AttendanceActivity::class.java).apply {
+                                                        putExtra(AttendanceActivity.EXTRA_CLASS_NAME, targetClass)
+                                                        putExtra(AttendanceActivity.EXTRA_SCHOOL_NAME, schoolName)
+                                                        putExtra(AttendanceActivity.EXTRA_PRIMARY_COLOR, primaryColorHex)
+                                                    }
+                                                    startActivity(intent)
                                                 }
-                                                startActivity(intent)
                                             }
                                         },
                                         containerColor = if (isAttendanceLocked) Color(0xFF757575) else Color(0xFF1B5E20),
@@ -526,16 +539,27 @@ class StudentRosterActivity : AppCompatActivity() {
                     val student = studentToEdit!!
                     val enrolledSubjects = students.filter { it.id == student.id }.map { it.subject }
                     val studentFullClass = if (student.class_arm.isNullOrBlank()) student.class_name else "${student.class_name} ${student.class_arm}"
-                    val masterSubjectsList = IdentityManager(this@StudentRosterActivity)
+                    val identityMgr = IdentityManager(this@StudentRosterActivity)
+                    val masterSubjectsList = identityMgr
                         .getSubjectsForClass(studentFullClass)
                         .ifEmpty {
                             tabs.filter { it.first == studentFullClass }.map { it.second }.distinct()
                         }
 
+                    val armCurriculum = identityMgr.resolveArmCurriculum(student.class_name, student.class_arm)
+                    val effectiveComponents = if (armCurriculum.type == "ILS") {
+                        (1..armCurriculum.pacCount).map { i ->
+                            val lbl = armCurriculum.pacLabels.getOrNull(i - 1)?.ifBlank { null } ?: "P$i"
+                            ScoreComponent(key = "PAC_$i", label = lbl, max = 100)
+                        }
+                    } else {
+                        scoreComponents
+                    }
+
                     EditStudentRecordSheet(
                         primaryColor = primaryColor,
                         student = student,
-                        scoreComponents = scoreComponents,
+                        scoreComponents = effectiveComponents,
                         allEnrolledSubjects = enrolledSubjects,
                         masterSubjectsList = masterSubjectsList,
                         onDismiss = { studentToEdit = null },
@@ -557,13 +581,29 @@ class StudentRosterActivity : AppCompatActivity() {
                                     existingStudentId = student.id
                                 )
 
-                                saveGradeEvent(
-                                    context = this@StudentRosterActivity,
-                                    studentId = student.id,
-                                    subject = student.subject,
-                                    compValues = scores,
-                                    components = scoreComponents
-                                )
+                                if (armCurriculum.type == "ILS") {
+                                    scores.forEach { (compKey, valueStr) ->
+                                        val packNum = compKey.removePrefix("PAC_").toIntOrNull()
+                                        val scoreNum = valueStr.toDoubleOrNull()
+                                        if (packNum != null && scoreNum != null) {
+                                            savePacGradeEvent(
+                                                context = this@StudentRosterActivity,
+                                                studentId = student.id,
+                                                subject = student.subject,
+                                                packNumber = packNum,
+                                                score = scoreNum
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    saveGradeEvent(
+                                        context = this@StudentRosterActivity,
+                                        studentId = student.id,
+                                        subject = student.subject,
+                                        compValues = scores,
+                                        components = effectiveComponents
+                                    )
+                                }
 
                                 dbStateRef++
                                 studentToEdit = null
@@ -1013,7 +1053,22 @@ fun FocusModePager(
                 val studentId  = student.id
                 val subjectKey = "${studentId}_${student.subject}"
 
-                val compValues: Map<String, String> = scoreComponents.associate { comp ->
+                val armCurriculum = remember(student.class_name, student.class_arm) {
+                    identityManager.resolveArmCurriculum(student.class_name, student.class_arm)
+                }
+
+                val effectiveComponents = remember(armCurriculum, scoreComponents) {
+                    if (armCurriculum.type == "ILS") {
+                        (1..armCurriculum.pacCount).map { i ->
+                            val lbl = armCurriculum.pacLabels.getOrNull(i - 1)?.ifBlank { null } ?: "P$i"
+                            ScoreComponent(key = "PAC_$i", label = lbl, max = 100)
+                        }
+                    } else {
+                        scoreComponents
+                    }
+                }
+
+                val compValues: Map<String, String> = effectiveComponents.associate { comp ->
                     comp.key to (gradeState["${subjectKey}_${comp.key}"] ?: "")
                 }
 
@@ -1022,7 +1077,7 @@ fun FocusModePager(
                     student         = student,
                     selectedTab     = selectedTab,
                     primaryColor    = primaryColor,
-                    scoreComponents = scoreComponents,
+                    scoreComponents = effectiveComponents,
                     compValues      = compValues,
                     isLocked        = isGradesLocked,
                     onValueChange   = { compKey, value ->
@@ -1033,11 +1088,21 @@ fun FocusModePager(
                     onAutoSave = {
                         if (!isGradesLocked) {
                             scope.launch(Dispatchers.IO) {
-                                saveGradeEvent(
-                                    context, studentId, student.subject,
-                                    scoreComponents.associate { it.key to (gradeState["${subjectKey}_${it.key}"] ?: "") },
-                                    scoreComponents
-                                )
+                                if (armCurriculum.type == "ILS") {
+                                    effectiveComponents.forEach { comp ->
+                                        val packNum = comp.key.removePrefix("PAC_").toIntOrNull() ?: 0
+                                        val score = (gradeState["${subjectKey}_${comp.key}"] ?: "").toDoubleOrNull()
+                                        if (packNum > 0 && score != null) {
+                                            savePacGradeEvent(context, studentId, student.subject, packNum, score)
+                                        }
+                                    }
+                                } else {
+                                    saveGradeEvent(
+                                        context, studentId, student.subject,
+                                        effectiveComponents.associate { it.key to (gradeState["${subjectKey}_${it.key}"] ?: "") },
+                                        effectiveComponents
+                                    )
+                                }
                                 launch(Dispatchers.Main) { onLogSave(studentId, student.subject, true) }
                             }
                         }
@@ -1050,11 +1115,21 @@ fun FocusModePager(
                             }
                         } else {
                             scope.launch(Dispatchers.IO) {
-                                saveGradeEvent(
-                                    context, studentId, student.subject,
-                                    scoreComponents.associate { it.key to (gradeState["${subjectKey}_${it.key}"] ?: "") },
-                                    scoreComponents
-                                )
+                                if (armCurriculum.type == "ILS") {
+                                    effectiveComponents.forEach { comp ->
+                                        val packNum = comp.key.removePrefix("PAC_").toIntOrNull() ?: 0
+                                        val score = (gradeState["${subjectKey}_${comp.key}"] ?: "").toDoubleOrNull()
+                                        if (packNum > 0 && score != null) {
+                                            savePacGradeEvent(context, studentId, student.subject, packNum, score)
+                                        }
+                                    }
+                                } else {
+                                    saveGradeEvent(
+                                        context, studentId, student.subject,
+                                        effectiveComponents.associate { it.key to (gradeState["${subjectKey}_${it.key}"] ?: "") },
+                                        effectiveComponents
+                                    )
+                                }
                                 launch(Dispatchers.Main) {
                                     onLogSave(studentId, student.subject, true)
                                     if (page < students.size - 1) pagerState.animateScrollToPage(page + 1)
@@ -1108,6 +1183,8 @@ fun StudentFocusCard(
         pct >  0f   -> primaryColor
         else        -> Color(0xFFEF4444)   // red
     }
+
+    val isPacMode = scoreComponents.any { it.key.startsWith("PAC_") }
 
     Column(
         modifier = Modifier
@@ -1194,14 +1271,27 @@ fun StudentFocusCard(
                 }
 
                 // Live total badge
+                val pacsPassed = if (isPacMode) scoreComponents.count { (compValues[it.key]?.toDoubleOrNull() ?: 0.0) >= 85.0 } else 0
+                val totalPacs = scoreComponents.size
+
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        if (total % 1.0 == 0.0) total.toInt().toString() else total.toString(),
-                        color = totalColor,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                    Text("/ $maxTotal", color = TextMuted, fontSize = 11.sp)
+                    if (isPacMode) {
+                        Text(
+                            "$pacsPassed",
+                            color = if (pacsPassed > 0) Color(0xFF22C55E) else primaryColor,
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text("/ $totalPacs PACs (≥85)", color = TextMuted, fontSize = 10.sp)
+                    } else {
+                        Text(
+                            if (total % 1.0 == 0.0) total.toInt().toString() else total.toString(),
+                            color = totalColor,
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text("/ $maxTotal", color = TextMuted, fontSize = 11.sp)
+                    }
                 }
             }
         }
@@ -1214,7 +1304,7 @@ fun StudentFocusCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "GRADES — ${student.subject.uppercase()}",
+                if (isPacMode) "📚 ACE PAC GRADES — ${student.subject.uppercase()}" else "GRADES — ${student.subject.uppercase()}",
                 color = primaryColor,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.ExtraBold,
@@ -1229,8 +1319,8 @@ fun StudentFocusCard(
         }
         Spacer(Modifier.height(8.dp))
 
-        // ── Score input grid (2-column, matches EditStudentRecordSheet card style) ─
-        val rows = scoreComponents.chunked(2)
+        // ── Score input grid (matches EditStudentRecordSheet card style) ─
+        val rows = scoreComponents.chunked(if (isPacMode && scoreComponents.size > 8) 3 else 2)
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -1653,9 +1743,8 @@ fun EditStudentRecordSheet(
                 Surface(shape = RoundedCornerShape(14.dp), color = Color(0xFF1A1F3A),
                     border = BorderStroke(1.dp, GlassBorder), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("Grades: ${student.subject.uppercase()}", color = primaryColor,
-                            fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
-                        scoreComponents.chunked(2).forEach { row ->
+                        val chunkSize = if (scoreComponents.size > 8) 3 else 2
+                        scoreComponents.chunked(chunkSize).forEach { row ->
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 row.forEach { comp ->
                                     Column(Modifier.weight(1f)) {
@@ -2719,6 +2808,34 @@ fun SettingsScreen(onDisconnect: () -> Unit) {
     var editPhone  by remember { mutableStateOf(identity.getStaffPhone()) }
     var isSavingProfile by remember { mutableStateOf(false) }
     var profileMsg by remember { mutableStateOf("") }
+
+    // Pre-fill profile from server on load
+    LaunchedEffect(teacherId) {
+        val info = identity.getServerInfo() ?: return@LaunchedEffect
+        val (ip, port) = info
+        try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val url = java.net.URL("http://$ip:$port/api/staff/profile?teacher_id=${java.net.URLEncoder.encode(teacherId, "UTF-8")}")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.requestMethod = "GET"
+                conn.setRequestProperty("X-Device-ID", identity.getDeviceId())
+                if (conn.responseCode == 200) {
+                    val body = conn.inputStream.bufferedReader().readText()
+                    val json = org.json.JSONObject(body)
+                    val sEmail = json.optString("email", "").takeIf { it != "null" } ?: ""
+                    val sPhone = json.optString("phone", "").takeIf { it != "null" } ?: ""
+                    if (sEmail.isNotBlank()) {
+                        editEmail = sEmail
+                        identity.saveStaffEmail(sEmail)
+                    }
+                    if (sPhone.isNotBlank()) {
+                        editPhone = sPhone
+                        identity.saveStaffPhone(sPhone)
+                    }
+                }
+            }
+        } catch (_: Exception) { /* offline fallback — retain cached values */ }
+    }
 
     val scope = rememberCoroutineScope()
 

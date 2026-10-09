@@ -416,6 +416,9 @@ class HandshakeActivity : AppCompatActivity() {
                                 if (result.class_subjects.isNotEmpty()) {
                                     identityManager.saveClassSubjectsMap(result.class_subjects)
                                 }
+                                if (!config.teacher_attendance_scope.isNullOrBlank()) {
+                                    identityManager.saveAttendanceScope(config.teacher_attendance_scope)
+                                }
                                 val assignedSubjects = students.map { it.subject }.distinct()
                                 identityManager.saveTeacherAssignedSubjects(assignedSubjects)
 

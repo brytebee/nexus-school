@@ -47,6 +47,7 @@ data class SchoolConfig(
     val signature: String? = null,
     val modules: List<String> = emptyList(),
     val plan_tier: String? = null,       // "Standalone", "Silver", "Gold", "Diamond"
+    val teacher_attendance_scope: String? = null,
     val registration_locked: Boolean? = null,
     val grades_locked: Boolean? = null,
     val attendance_locked: Boolean? = null,
