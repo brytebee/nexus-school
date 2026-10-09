@@ -36,6 +36,65 @@ export default function Classes() {
   const [webSyncModalOpen, setWebSyncModalOpen] = useState(false);
   const [isPullingBinding, setIsPullingBinding] = useState(false);
 
+  // Custom Subjects Management State
+  const [subjectsModalOpen, setSubjectsModalOpen] = useState(false);
+  const [customSubjectsList, setCustomSubjectsList] = useState<string[]>([]);
+  const [newSubjectInput, setNewSubjectInput] = useState('');
+  const [isAddingSubject, setIsAddingSubject] = useState(false);
+
+  const loadCustomSubjects = async () => {
+    const api = (window as any).electronAPI?.subjects;
+    if (api?.getCustomList) {
+      try {
+        const res = await api.getCustomList();
+        if (res?.ok && Array.isArray(res.data)) {
+          setCustomSubjectsList(res.data);
+        }
+      } catch (_) {}
+    }
+  };
+
+  const handleAddSubject = async () => {
+    const trimmed = newSubjectInput.trim();
+    if (!trimmed) return;
+    setIsAddingSubject(true);
+    try {
+      const api = (window as any).electronAPI?.subjects;
+      if (api?.addToCanonical) {
+        const res = await api.addToCanonical({ name: trimmed });
+        if (res?.ok) {
+          setNewSubjectInput('');
+          await loadCustomSubjects();
+        }
+      }
+    } finally {
+      setIsAddingSubject(false);
+    }
+  };
+
+  const handleDeleteSubject = async (name: string) => {
+    const Swal = (window as any).Swal;
+    if (Swal) {
+      const confirm = await Swal.fire({
+        title: `Delete "${name}"?`,
+        text: 'This will remove this subject from the school custom subjects catalog.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Yes, delete',
+        cancelButtonText: 'Cancel',
+        confirmButtonColor: '#ef4444',
+        background: '#0d1235',
+        color: '#fff'
+      });
+      if (!confirm.isConfirmed) return;
+    }
+    const api = (window as any).electronAPI?.subjects;
+    if (api?.deleteCustom) {
+      await api.deleteCustom({ name });
+      await loadCustomSubjects();
+    }
+  };
+
   const handlePullWebsiteBinding = async () => {
     setIsPullingBinding(true);
     const Swal = (window as any).Swal;
@@ -943,6 +1002,35 @@ export default function Classes() {
             }}
           >
             {isSyncingWeb ? '⏳ Syncing...' : '🌐 Sync to Website'}
+          </button>
+          <button
+            onClick={() => {
+              setSubjectsModalOpen(true);
+              loadCustomSubjects();
+            }}
+            title="Manage school custom subjects catalog and cached subjects"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'rgba(168, 85, 247, 0.15)',
+              border: '1px solid rgba(168, 85, 247, 0.4)',
+              borderRadius: '6px',
+              color: '#d8b4fe',
+              fontSize: '12px',
+              fontWeight: 600,
+              padding: '6px 14px',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.background = 'rgba(168, 85, 247, 0.25)';
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.background = 'rgba(168, 85, 247, 0.15)';
+            }}
+          >
+            📚 Custom Subjects
           </button>
           <button
             onClick={handlePullWebsiteBinding}
@@ -2274,6 +2362,204 @@ A Principal or Superadmin (Level 7+) must authorize this change.`;
         }}
         defaultTab="classes"
       />
+
+      {/* Custom Subjects Management Modal */}
+      {subjectsModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(5, 7, 20, 0.75)',
+            backdropFilter: 'blur(8px)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSubjectsModalOpen(false);
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '560px',
+              background: '#0d1235',
+              border: '1px solid rgba(168, 85, 247, 0.35)',
+              borderRadius: '16px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 30px rgba(168, 85, 247, 0.15)',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              maxHeight: '85vh',
+            }}
+          >
+            {/* Header */}
+            <div
+              style={{
+                padding: '20px 24px',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'rgba(168, 85, 247, 0.05)',
+              }}
+            >
+              <div>
+                <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700, color: '#f3e8ff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>📚</span> Custom Subjects Catalog
+                </h3>
+                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#94a3b8' }}>
+                  Manage subjects cached in the school database for teachers, classes, and admissions.
+                </p>
+              </div>
+              <button
+                onClick={() => setSubjectsModalOpen(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#94a3b8',
+                  fontSize: '20px',
+                  cursor: 'pointer',
+                  padding: '4px 8px',
+                  lineHeight: 1,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Add Subject Row */}
+            <div style={{ padding: '16px 24px', borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <input
+                  type="text"
+                  value={newSubjectInput}
+                  onChange={(e) => setNewSubjectInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddSubject();
+                    }
+                  }}
+                  placeholder="e.g. Further Mathematics, Diction, Robotics..."
+                  style={{
+                    flex: 1,
+                    background: 'rgba(0, 0, 0, 0.3)',
+                    border: '1px solid rgba(168, 85, 247, 0.3)',
+                    borderRadius: '8px',
+                    color: '#fff',
+                    padding: '9px 14px',
+                    fontSize: '13px',
+                    outline: 'none',
+                  }}
+                />
+                <button
+                  onClick={handleAddSubject}
+                  disabled={isAddingSubject || !newSubjectInput.trim()}
+                  style={{
+                    background: 'linear-gradient(135deg, #a855f7 0%, #7c3aed 100%)',
+                    border: 'none',
+                    borderRadius: '8px',
+                    color: '#fff',
+                    padding: '9px 18px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    cursor: (isAddingSubject || !newSubjectInput.trim()) ? 'not-allowed' : 'pointer',
+                    opacity: (isAddingSubject || !newSubjectInput.trim()) ? 0.6 : 1,
+                    whiteSpace: 'nowrap',
+                    boxShadow: '0 4px 12px rgba(168, 85, 247, 0.3)',
+                  }}
+                >
+                  {isAddingSubject ? 'Adding...' : '➕ Add Subject'}
+                </button>
+              </div>
+            </div>
+
+            {/* List */}
+            <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 600, color: '#a855f7', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
+                Active School Subjects ({customSubjectsList.length})
+              </div>
+              {customSubjectsList.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '36px 12px', color: '#64748b', fontSize: '13px' }}>
+                  No custom subjects in the catalog yet. Add subjects above or import them via admissions/teachers.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {customSubjectsList.map((subj) => (
+                    <div
+                      key={subj}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        background: 'rgba(168, 85, 247, 0.1)',
+                        border: '1px solid rgba(168, 85, 247, 0.25)',
+                        borderRadius: '20px',
+                        padding: '6px 14px',
+                        fontSize: '12px',
+                        color: '#f3e8ff',
+                        fontWeight: 500,
+                      }}
+                    >
+                      <span>{subj}</span>
+                      <button
+                        onClick={() => handleDeleteSubject(subj)}
+                        title={`Delete ${subj}`}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#f87171',
+                          cursor: 'pointer',
+                          padding: 0,
+                          fontSize: '12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          opacity: 0.8,
+                          transition: 'opacity 0.2s',
+                        }}
+                        onMouseOver={(e) => (e.currentTarget.style.opacity = '1')}
+                        onMouseOut={(e) => (e.currentTarget.style.opacity = '0.8')}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div
+              style={{
+                padding: '14px 24px',
+                borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                background: 'rgba(0, 0, 0, 0.15)',
+              }}
+            >
+              <button
+                onClick={() => setSubjectsModalOpen(false)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  borderRadius: '6px',
+                  color: '#cbd5e1',
+                  padding: '7px 16px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

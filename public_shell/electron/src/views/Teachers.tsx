@@ -387,7 +387,13 @@ export function Teachers() {
         }
       } catch (_) {}
     }
-    setEditTeacherId(null); resetForm(); setIsDrawerOpen(true);
+    setEditTeacherId(null); resetForm();
+    if (api?.subjects?.getCustomList) {
+      api.subjects.getCustomList().then((res: any) => {
+        if (res?.ok && Array.isArray(res.data)) setCustomSubjects(res.data);
+      }).catch(() => {});
+    }
+    setIsDrawerOpen(true);
   };
 
   // Open View Detail Modal
@@ -407,7 +413,20 @@ export function Teachers() {
       grouped[a.class_name].push(a.subject);
     });
     setStagedAllocations(Object.entries(grouped).map(([class_name, subjects]) => ({ class_name, subjects })));
-    setCheckedSubjects([]); setCustomSubjects([]);
+    setCheckedSubjects([]);
+    const api = (window as any).electronAPI;
+    if (api?.subjects?.getCustomList) {
+      api.subjects.getCustomList().then((res: any) => {
+        if (res?.ok && Array.isArray(res.data)) {
+          // Merge with any custom subjects already in teacher's allocations
+          const allocatedCustom = Object.values(grouped).flat();
+          const merged = Array.from(new Set([...res.data, ...allocatedCustom]));
+          setCustomSubjects(merged);
+        }
+      }).catch(() => {});
+    } else {
+      setCustomSubjects([]);
+    }
     setCustomSubjectInput(''); setClassAllocationInput([]); setFormLog(null);
     setIsDrawerOpen(true);
   };
@@ -422,6 +441,11 @@ export function Teachers() {
     if (!customSubjects.includes(val)) {
       setCustomSubjects(prev => [...prev, val]);
       setCheckedSubjects(prev => [...prev, val]);
+      // Persist to custom_subjects SQLite database
+      const api = (window as any).electronAPI;
+      if (api?.subjects?.addToCanonical) {
+        api.subjects.addToCanonical({ name: val }).catch(() => {});
+      }
     }
     setCustomSubjectInput('');
   };

@@ -96,6 +96,22 @@ class IdentityManager(context: Context) {
             .apply()
     }
 
+    fun saveStaffEmail(email: String) {
+        prefs.edit().putString("staff_email", email).apply()
+    }
+
+    fun getStaffEmail(): String {
+        return prefs.getString("staff_email", "") ?: ""
+    }
+
+    fun saveStaffPhone(phone: String) {
+        prefs.edit().putString("staff_phone", phone).apply()
+    }
+
+    fun getStaffPhone(): String {
+        return prefs.getString("staff_phone", "") ?: ""
+    }
+
     fun saveRole(role: String) {
         prefs.edit().putString("staff_role", role).apply()
     }

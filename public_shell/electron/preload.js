@@ -318,6 +318,7 @@ const nexusAPI = {
         getCanonicalList:      ()           => ipcRenderer.invoke('subjects:get-canonical-list'),
         getCustomList:         ()           => ipcRenderer.invoke('subjects:get-custom-list'),
         addToCanonical:        (args)       => ipcRenderer.invoke('subjects:add-to-canonical', args),
+        deleteCustom:          (args)       => ipcRenderer.invoke('subjects:delete-custom', args),
         getClassSubjects:      (args)       => ipcRenderer.invoke('subjects:get-class-subjects', args),
         getSyncWarnings:       ()           => ipcRenderer.invoke('subjects:get-sync-warnings'),
         clearSyncWarnings:     ()           => ipcRenderer.invoke('subjects:clear-sync-warnings'),

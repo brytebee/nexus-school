@@ -4190,6 +4190,17 @@ ipcMain.handle("subjects:add-to-canonical", (event, { name }) => {
   }
 });
 
+ipcMain.handle("subjects:delete-custom", (event, { name }) => {
+  try {
+    if (!name || typeof name !== 'string' || !name.trim()) return { ok: false, error: 'Subject name required' };
+    const db = database.getDb();
+    db.prepare("DELETE FROM custom_subjects WHERE UPPER(name) = UPPER(?)").run(name.trim());
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 // ── F1: Class Subject Caching ─────────────────────────────────────────────────
 // Returns the distinct subjects already enrolled for any active student in a
 // given class, so the form can pre-select them for the next enrolment.

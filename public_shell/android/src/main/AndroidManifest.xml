@@ -58,6 +58,7 @@
         <activity android:name=".ui.BursarActivity" />
         <activity android:name=".ui.ItAdminActivity" />
         <activity android:name=".ui.PrincipalActivity" />
+        <activity android:name=".ui.DirectoryActivity" />
 
         <!-- FileProvider for camera capture intents (API 24+) -->
         <provider

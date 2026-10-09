@@ -84,6 +84,32 @@ class PrincipalActivity : AppCompatActivity() {
                 loadDashboardStats()
             }
 
+            // ── 10-minute background sync loop ────────────────────────────────
+            LaunchedEffect(Unit) {
+                while (true) {
+                    kotlinx.coroutines.delay(10L * 60L * 1000L) // 10 minutes
+                    try {
+                        val info = identityManager.getServerInfo() ?: continue
+                        val (ip, port) = info
+                        val code = withContext(Dispatchers.IO) {
+                            val url = URL("http://$ip:$port/api/sync")
+                            val conn = url.openConnection() as HttpURLConnection
+                            conn.requestMethod = "POST"
+                            conn.doOutput = true
+                            conn.setRequestProperty("Content-Type", "application/json")
+                            conn.setRequestProperty("X-Device-ID", identityManager.getDeviceId())
+                            conn.outputStream.write("{}".toByteArray())
+                            conn.responseCode
+                        }
+                        if (code == 200) {
+                            Toast.makeText(this@PrincipalActivity, "☁️ Auto-sync complete", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (_: Exception) {
+                        // Silent — do not interrupt UX for background sync failures
+                    }
+                }
+            }
+
             MaterialTheme {
                 Box(
                     modifier = Modifier
@@ -226,6 +252,95 @@ class PrincipalActivity : AppCompatActivity() {
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text("Fee Collections & Finance Hub", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                                             Text("Live school revenue & outstanding debt", color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
+                                        }
+                                        Text("→", color = primaryColor, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                // ── Directory Hub section ──────────────────────
+                                Text(
+                                    text = "Directory Hub",
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.padding(bottom = 12.dp)
+                                )
+
+                                // Card 3: Parent Directory
+                                Card(
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0C192E)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            startActivity(Intent(this@PrincipalActivity, DirectoryActivity::class.java).apply {
+                                                putExtra("tab", "parents")
+                                            })
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(18.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("👨‍👩‍👧", fontSize = 22.sp, modifier = Modifier.padding(end = 14.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Parent Directory", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                            Text("Search parents & view their children", color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
+                                        }
+                                        Text("→", color = primaryColor, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // Card 4: Staff Directory
+                                Card(
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0C192E)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            startActivity(Intent(this@PrincipalActivity, DirectoryActivity::class.java).apply {
+                                                putExtra("tab", "staff")
+                                            })
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(18.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("👩‍🏫", fontSize = 22.sp, modifier = Modifier.padding(end = 14.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Staff Directory", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                            Text("Search and view staff profiles", color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
+                                        }
+                                        Text("→", color = primaryColor, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // Card 5: Student Directory
+                                Card(
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0C192E)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            startActivity(Intent(this@PrincipalActivity, DirectoryActivity::class.java).apply {
+                                                putExtra("tab", "students")
+                                            })
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(18.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("🎓", fontSize = 22.sp, modifier = Modifier.padding(end = 14.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Student Directory", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                            Text("Search & edit student bio, subjects & fees", color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
                                         }
                                         Text("→", color = primaryColor, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                                     }

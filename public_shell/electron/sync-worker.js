@@ -667,12 +667,25 @@ async function pullOnlineAdmissions() {
           enrollment_status: "active",
         });
 
-        // Insert enrolled subjects
+        // Insert enrolled subjects & cache into custom_subjects
         if (Array.isArray(cand.selectedSubjects) && cand.selectedSubjects.length > 0) {
+          try {
+            db.exec(`
+              CREATE TABLE IF NOT EXISTS custom_subjects (
+                name TEXT PRIMARY KEY COLLATE NOCASE,
+                created_at TEXT DEFAULT (datetime('now'))
+              )
+            `);
+          } catch (_) {}
           const insertSubj = db.prepare("INSERT OR IGNORE INTO student_subjects (student_id, subject) VALUES (?, ?)");
+          const insertCustom = db.prepare("INSERT INTO custom_subjects (name) VALUES (?) ON CONFLICT(name) DO NOTHING");
           for (const subj of cand.selectedSubjects) {
             if (typeof subj === "string" && subj.trim().length > 0) {
-              insertSubj.run(studentId, subj.trim());
+              const cleanSubj = subj.trim();
+              insertSubj.run(studentId, cleanSubj);
+              try {
+                insertCustom.run(cleanSubj);
+              } catch (_) {}
             }
           }
         }
@@ -700,35 +713,70 @@ async function pullOnlineAdmissions() {
               }
             }
           }
-
-          // Recalculate student_fees state
-          const totalPaidRow = db.prepare(`
-            SELECT COALESCE(SUM(amount), 0) AS total_paid FROM fee_transactions
-            WHERE student_id = ? AND academic_session = ? AND term = ?
-          `).get(studentId, termConfig.academic_session, termConfig.term);
-
-          const feeRow = db.prepare(`
-            SELECT COALESCE(total_billed, 0) AS total_billed FROM student_fees
-            WHERE student_id = ? AND academic_session = ? AND term = ?
-          `).get(studentId, termConfig.academic_session, termConfig.term) || { total_billed: 0 };
-
-          const paidAmt = totalPaidRow?.total_paid || 0;
-          let feeStatus = "unpaid";
-          if (paidAmt >= feeRow.total_billed && feeRow.total_billed > 0) {
-            feeStatus = "cleared";
-          } else if (paidAmt > 0) {
-            feeStatus = "partial";
-          }
-
-          db.prepare(`
-            INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-            ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
-              total_paid = excluded.total_paid,
-              status     = excluded.status,
-              updated_at = datetime('now')
-          `).run(studentId, termConfig.academic_session, termConfig.term, feeRow.total_billed, paidAmt, feeStatus);
         }
+
+        // Calculate and initialize student_fees (Total Billed from fee_structures)
+        const classCandidates = [
+          cand.classApplied,
+          `${cand.className || ''} ${cand.classArm || ''}`.trim(),
+          `${cand.className || ''}-${cand.classArm || ''}`.trim(),
+          cand.className,
+        ].filter(Boolean);
+
+        let classTotalBilled = 0;
+        const feeQuery = db.prepare(`
+          SELECT COALESCE(SUM(amount), 0) AS total FROM fee_structures
+          WHERE (UPPER(REPLACE(class_name, ' ', '')) = UPPER(REPLACE(?, ' ', '')))
+            AND (LOWER(TRIM(term)) IN ('all terms', 'all term') OR term = ?)
+        `);
+
+        for (const cls of classCandidates) {
+          const row = feeQuery.get(cls, termConfig.term);
+          if (row && row.total > 0) {
+            classTotalBilled = row.total;
+            break;
+          }
+          if (cls.includes('-')) {
+            const baseCls = cls.split('-')[0].trim();
+            const baseRow = feeQuery.get(baseCls, termConfig.term);
+            if (baseRow && baseRow.total > 0) {
+              classTotalBilled = baseRow.total;
+              break;
+            }
+          }
+        }
+
+        const existingFeeRow = db.prepare(`
+          SELECT COALESCE(total_billed, 0) AS total_billed FROM student_fees
+          WHERE student_id = ? AND academic_session = ? AND term = ?
+        `).get(studentId, termConfig.academic_session, termConfig.term);
+
+        const finalTotalBilled = (existingFeeRow && existingFeeRow.total_billed > 0)
+          ? existingFeeRow.total_billed
+          : classTotalBilled;
+
+        const totalPaidRow = db.prepare(`
+          SELECT COALESCE(SUM(amount), 0) AS total_paid FROM fee_transactions
+          WHERE student_id = ? AND academic_session = ? AND term = ?
+        `).get(studentId, termConfig.academic_session, termConfig.term);
+        const paidAmt = totalPaidRow?.total_paid || 0;
+
+        let feeStatus = "unpaid";
+        if (finalTotalBilled > 0 && paidAmt >= finalTotalBilled) {
+          feeStatus = "cleared";
+        } else if (paidAmt > 0) {
+          feeStatus = "partial";
+        }
+
+        db.prepare(`
+          INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+          ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
+            total_billed = CASE WHEN student_fees.total_billed > 0 THEN student_fees.total_billed ELSE excluded.total_billed END,
+            total_paid   = excluded.total_paid,
+            status       = excluded.status,
+            updated_at   = datetime('now')
+        `).run(studentId, termConfig.academic_session, termConfig.term, finalTotalBilled, paidAmt, feeStatus);
 
         ackIds.push(cand.id);
       })();

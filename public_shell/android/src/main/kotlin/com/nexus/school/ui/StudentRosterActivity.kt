@@ -2701,6 +2701,8 @@ fun SettingsScreen(onDisconnect: () -> Unit) {
     val identity = remember { IdentityManager(context) }
     val schoolName  = remember { identity.getSchoolName() }
     val teacherName = remember { identity.getTeacherName() }
+    val teacherId   = remember { identity.getTeacherId() }
+    val role        = remember { identity.getRole() ?: "Teacher" }
     val serverInfo  = remember { identity.getServerInfo() }
 
     val tierRaw = remember { identity.getPlanTier() }
@@ -2710,6 +2712,52 @@ fun SettingsScreen(onDisconnect: () -> Unit) {
         "silver"     -> "🥈 Silver"
         "standalone" -> "📦 Standalone"
         else         -> "⭐ $tierRaw"
+    }
+
+    // Staff Profile editable state
+    var editEmail  by remember { mutableStateOf(identity.getStaffEmail()) }
+    var editPhone  by remember { mutableStateOf(identity.getStaffPhone()) }
+    var isSavingProfile by remember { mutableStateOf(false) }
+    var profileMsg by remember { mutableStateOf("") }
+
+    val scope = rememberCoroutineScope()
+
+    fun saveProfile() {
+        scope.launch {
+            isSavingProfile = true
+            profileMsg = ""
+            try {
+                val info = identity.getServerInfo()
+                if (info == null) { profileMsg = "Not connected to hub"; return@launch }
+                val (ip, port) = info
+                val body = org.json.JSONObject().apply {
+                    put("teacher_id", teacherId)
+                    put("email", editEmail)
+                    put("phone", editPhone)
+                }
+                val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val url = java.net.URL("http://$ip:$port/api/staff/profile")
+                    val conn = url.openConnection() as java.net.HttpURLConnection
+                    conn.requestMethod = "PATCH"
+                    conn.doOutput = true
+                    conn.setRequestProperty("Content-Type", "application/json")
+                    conn.setRequestProperty("X-Device-ID", identity.getDeviceId())
+                    conn.outputStream.write(body.toString().toByteArray())
+                    conn.responseCode == 200
+                }
+                if (result) {
+                    identity.saveStaffEmail(editEmail)
+                    identity.saveStaffPhone(editPhone)
+                    profileMsg = "✅ Profile saved"
+                } else {
+                    profileMsg = "❌ Save failed — check connection"
+                }
+            } catch (e: Exception) {
+                profileMsg = "❌ ${e.message}"
+            } finally {
+                isSavingProfile = false
+            }
+        }
     }
 
     LazyColumn(
@@ -2724,13 +2772,95 @@ fun SettingsScreen(onDisconnect: () -> Unit) {
             Spacer(Modifier.height(6.dp))
         }
 
+        // ── Staff Profile Card ────────────────────────────────────────────────
         item {
+            Text("My Profile", color = TextMuted, fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+            Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp),
+                color = GlassWhite, border = BorderStroke(1.dp, GlassBorder)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // Read-only rows
+                    SettingsInfoRow(emoji = "🪪", label = "Staff ID", value = teacherId)
+                    Divider(color = GlassBorder)
+                    SettingsInfoRow(emoji = "👤", label = "Name", value = teacherName)
+                    Divider(color = GlassBorder)
+                    SettingsInfoRow(emoji = "🎭", label = "Role", value = role)
+                    Divider(color = GlassBorder)
+
+                    // Editable Email
+                    Column {
+                        Text("📧  Email", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(4.dp))
+                        OutlinedTextField(
+                            value = editEmail,
+                            onValueChange = { editEmail = it },
+                            placeholder = { Text("your@email.com", color = TextMuted, fontSize = 13.sp) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF7C3AED),
+                                unfocusedBorderColor = GlassBorder,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                    }
+
+                    // Editable Phone
+                    Column {
+                        Text("📱  Phone", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(4.dp))
+                        OutlinedTextField(
+                            value = editPhone,
+                            onValueChange = { editPhone = it },
+                            placeholder = { Text("08012345678", color = TextMuted, fontSize = 13.sp) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF7C3AED),
+                                unfocusedBorderColor = GlassBorder,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                    }
+
+                    if (profileMsg.isNotEmpty()) {
+                        Text(profileMsg, color = if (profileMsg.startsWith("✅")) Color(0xFF4CAF50) else Color(0xFFFF5252),
+                            fontSize = 12.sp)
+                    }
+
+                    Button(
+                        onClick = { saveProfile() },
+                        enabled = !isSavingProfile,
+                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED))
+                    ) {
+                        if (isSavingProfile) {
+                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text("Save Profile", fontSize = 14.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── School & Connection Info ──────────────────────────────────────────
+        item {
+            Text("School Info", color = TextMuted, fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
             Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp),
                 color = GlassWhite, border = BorderStroke(1.dp, GlassBorder)) {
                 Column {
                     SettingsInfoRow(emoji = "🏫", label = "School", value = schoolName)
-                    Divider(color = GlassBorder)
-                    SettingsInfoRow(emoji = "👩\u200D🏫", label = "Teacher", value = teacherName)
                     Divider(color = GlassBorder)
                     SettingsInfoRow(emoji = "⭐", label = "License Tier", value = tier)
                 }
@@ -2768,6 +2898,7 @@ fun SettingsScreen(onDisconnect: () -> Unit) {
         }
     }
 }
+
 
 @Composable
 private fun SettingsInfoRow(emoji: String, label: String, value: String) {
