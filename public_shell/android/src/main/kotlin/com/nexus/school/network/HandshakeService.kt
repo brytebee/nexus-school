@@ -9,6 +9,7 @@ import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import java.io.ByteArrayInputStream
 import java.util.zip.GZIPInputStream
 
@@ -77,7 +78,8 @@ data class HandshakeResponse(
     val all_subjects: List<String> = emptyList(),
     val class_subjects: Map<String, List<String>> = emptyMap(),
     val form_class: String? = null,
-    val scores: List<com.nexus.school.data.StudentScore> = emptyList()  // pre-existing Hub scores
+    val scores: List<com.nexus.school.data.StudentScore> = emptyList(),  // pre-existing Hub scores
+    val class_curriculum_types: JsonObject? = null
 )
 
 @Serializable

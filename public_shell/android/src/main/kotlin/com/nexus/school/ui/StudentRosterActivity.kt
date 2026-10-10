@@ -264,9 +264,9 @@ class StudentRosterActivity : AppCompatActivity() {
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
                                 modifier = Modifier.padding(bottom = 24.dp)
                             ) {
-                                // Take Attendance FAB — only visible to the form teacher of this class
+                                // Take Attendance FAB — visible if teacher can take attendance (form master or Any Taught Class policy)
                                 if (selectedTab != null &&
-                                    IdentityManager(this@StudentRosterActivity).isFormTeacherOf(selectedTab?.first ?: "")) {
+                                    IdentityManager(this@StudentRosterActivity).canTakeAttendanceFor(selectedTab?.first ?: "")) {
                                     FloatingActionButton(
                                         onClick = {
                                             if (isAttendanceLocked) {
