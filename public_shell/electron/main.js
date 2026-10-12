@@ -71,6 +71,33 @@ if (process.platform === "linux") {
   app.setName("NexusSchoolOS");
 }
 
+// ── Clean up stale single-instance locks if the previous process crashed/died ──
+try {
+  const userDataPath = app.getPath('userData');
+  const lockLink = path.join(userDataPath, 'SingletonLock');
+  if (fs.existsSync(lockLink)) {
+    try {
+      const target = fs.readlinkSync(lockLink);
+      const lockPid = parseInt(target.split('-').pop(), 10);
+      let isAlive = false;
+      if (lockPid && !isNaN(lockPid)) {
+        try {
+          process.kill(lockPid, 0);
+          isAlive = true;
+        } catch (_) {
+          isAlive = false;
+        }
+      }
+      if (!isAlive) {
+        console.log(`[Nexus] Cleaning up stale SingletonLock from terminated PID ${lockPid}...`);
+        try { fs.unlinkSync(lockLink); } catch (_) {}
+        try { fs.unlinkSync(path.join(userDataPath, 'SingletonSocket')); } catch (_) {}
+        try { fs.unlinkSync(path.join(userDataPath, 'SingletonCookie')); } catch (_) {}
+      }
+    } catch (_) {}
+  }
+} catch (_) {}
+
 // ── Single-instance lock: prevents duplicate processes fighting over ports ──
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
