@@ -13,6 +13,8 @@ build/
 *.jks
 
 public_shell/android/local.properties
+public_shell/android/gradle.properties
+*.apk
 
 # ── IDE & Tool Artifacts (never commit) ───────────────────────────────────────
 .aider*

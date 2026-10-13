@@ -143,10 +143,10 @@ async function pushSchoolDelta() {
   }
 
   // 1. Gather Students + Fees + Results Summaries + Attendance Stats
-  // Belt-and-suspenders: ensure parent_phone_2 column exists before the query.
-  // database.init() runs this via alterSafe at every boot, but this guard
-  // protects against any future boot-order reordering or direct sync-worker use.
+  // Belt-and-suspenders: ensure parent_phone_2, admission_no, and parent_name columns exist
   try { db.exec(`ALTER TABLE students ADD COLUMN parent_phone_2 TEXT DEFAULT NULL`); } catch (_) {}
+  try { db.exec(`ALTER TABLE students ADD COLUMN admission_no TEXT DEFAULT ''`); } catch (_) {}
+  try { db.exec(`ALTER TABLE students ADD COLUMN parent_name TEXT DEFAULT NULL`); } catch (_) {}
 
   const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get() || {
     academic_session: "2025/2026",
@@ -154,7 +154,10 @@ async function pushSchoolDelta() {
   };
 
   const students = db.prepare(`
-    SELECT s.id, s.name, s.class_name, s.class_arm, s.parent_phone,
+    SELECT s.id, s.name, s.class_name, s.class_arm,
+           COALESCE(s.admission_no, '') as admission_no,
+           COALESCE(s.parent_name, NULL) as parent_name,
+           s.parent_phone,
            COALESCE(s.parent_phone_2, NULL) as parent_phone_2,
            s.parent_email,
            COALESCE(sf.total_billed, 0) as total_billed,
@@ -198,6 +201,8 @@ async function pushSchoolDelta() {
       name: st.name,
       class_name: st.class_name,
       class_arm: st.class_arm,
+      admission_no: st.admission_no || null,
+      parent_name: st.parent_name || null,
       parent_phone: st.parent_phone,
       parent_phone_2: st.parent_phone_2 || null,
       parent_email: st.parent_email || null,
