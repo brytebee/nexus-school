@@ -128,6 +128,37 @@ function App() {
     }
   }, [licenseLoading]);
 
+  // ── Focus recovery hook for Windows Electron input freeze ───────────────
+  React.useEffect(() => {
+    const handleFocusRecovery = (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        if ((window as any).nexusAPI?.ensureFocus) {
+          (window as any).nexusAPI.ensureFocus();
+        } else if ((window as any).electronAPI?.ensureFocus) {
+          (window as any).electronAPI.ensureFocus();
+        }
+      }
+    };
+
+    const handleWindowFocus = () => {
+      if ((window as any).nexusAPI?.ensureFocus) {
+        (window as any).nexusAPI.ensureFocus();
+      } else if ((window as any).electronAPI?.ensureFocus) {
+        (window as any).electronAPI.ensureFocus();
+      }
+    };
+
+    document.addEventListener('focusin', handleFocusRecovery, true);
+    document.addEventListener('click', handleFocusRecovery, true);
+    window.addEventListener('focus', handleWindowFocus);
+    return () => {
+      document.removeEventListener('focusin', handleFocusRecovery, true);
+      document.removeEventListener('click', handleFocusRecovery, true);
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, []);
+
   const navigateTo = (tab: string, pushToHistory = true) => {
     setActiveTab(tab);
     localStorage.setItem("nexus_nav_activeTab", tab);

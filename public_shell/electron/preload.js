@@ -48,6 +48,7 @@ const nexusAPI = {
     backupDatabase: () => ipcRenderer.invoke('database:backup'),
     restoreDatabase: () => ipcRenderer.invoke('database:restore'),
     uiReady: () => ipcRenderer.send('ui-ready'),
+    ensureFocus: () => ipcRenderer.send('window:ensure-focus'),
     getIdentity: () => ipcRenderer.invoke('get-identity'),
     saveIdentity: (packet) => ipcRenderer.invoke('save-identity', packet),
     generateReports: (payload) => ipcRenderer.invoke('generate-reports', payload),

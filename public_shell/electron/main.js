@@ -9,7 +9,7 @@ console.log("\n\n*******************************************");
 console.log("*       NEXUS DEMO HUB - VERSION 2.3      *");
 console.log("*******************************************\n");
 
-const { app, BrowserWindow, ipcMain, shell, Menu, dialog, nativeImage, clipboard, globalShortcut, powerSaveBlocker } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, Menu, dialog, nativeImage, clipboard, globalShortcut, powerSaveBlocker, powerMonitor } = require("electron");
 
 const path = require("path");
 // Guard: reset CWD to home dir before dotenv runs.
@@ -1258,6 +1258,12 @@ ipcMain.on('auth:lock', () => {
     console.log(`[Auth] System locked due to idle timeout.`);
 });
 
+ipcMain.on('window:ensure-focus', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.focus();
+    }
+});
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FEE STRUCTURE (Class-Level Billing + Adjustments) — Gold Phase B
@@ -1761,12 +1767,14 @@ ipcMain.on('print:ready-to-print', () => {
         }, (success, errorType) => {
             if (!success) {
                 console.warn('[Print Hub] Local print dialog canceled/failed:', errorType);
-            } else {
-                // Only destroy the preview window automatically on successful print
-                if (printWindow) {
-                    printWindow.destroy();
-                    printWindow = null;
-                }
+            }
+            if (printWindow) {
+                printWindow.destroy();
+                printWindow = null;
+            }
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.focus();
+                mainWindow.webContents.focus();
             }
         });
     }
@@ -8220,6 +8228,7 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       nodeIntegration: false,
       contextIsolation: true,
+      backgroundThrottling: false,
     },
     // On macOS: keep native traffic lights inset in the top-left corner
     // On Windows/Linux: fully frameless, we draw custom chrome in HTML
@@ -8231,8 +8240,11 @@ function createWindow() {
 
   mainWindow.once("ready-to-show", () => mainWindow.show());
 
-  // Immediately check activation state when app window receives focus
+  // Immediately check activation state and ensure webContents text-input focus when app window receives focus
   mainWindow.on("focus", async () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.focus();
+    }
     if (typeof _silverActivationCreds !== "undefined" && _silverActivationCreds && !licenseStatus.is_activated) {
       const done = await _doSilverActivationCheck(_silverActivationCreds);
       if (done && typeof _silverActivationPollHandle !== "undefined" && _silverActivationPollHandle) {
@@ -8240,6 +8252,27 @@ function createWindow() {
         _silverActivationPollHandle = null;
       }
     }
+  });
+
+  // Re-engage Chromium text-input hook on system wake/unlock (prevents Windows input freeze)
+  const refreshWindowFocus = () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (process.platform === "win32") {
+        mainWindow.blur();
+        mainWindow.focus();
+      }
+      mainWindow.webContents.focus();
+    }
+  };
+
+  powerMonitor.on("resume", () => {
+    console.log("[PowerMonitor] System resumed from sleep/suspend — refreshing window focus");
+    refreshWindowFocus();
+  });
+
+  powerMonitor.on("unlock-screen", () => {
+    console.log("[PowerMonitor] Screen unlocked — refreshing window focus");
+    refreshWindowFocus();
   });
 
   // Fix YouTube Error 153 in Electron's file:// protocol context by spoofing referrer/origin headers
