@@ -1007,6 +1007,197 @@ async function pushStaffRosterToWebsite() {
 }
 
 /**
+ * 2d. Inbound Cloud Staff-Data Pull: Fetches grades, attendance, ILS PAC scores,
+ * and subject grading scopes from the cloud website into local SQLite.
+ * Uses a LWW (last-write-wins) watermark stored in app_settings.
+ */
+async function pullStaffGradesFromWebsite() {
+  const db = database.getDb();
+  const schoolId = getSchoolId(db);
+  if (!schoolId) return { ok: false, reason: "no_school_id" };
+
+  const websiteUrl = getSchoolWebsiteUrl(db);
+  if (!websiteUrl) return { ok: false, reason: "no_school_website_url" };
+
+  let syncToken = "";
+  try {
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'school_website_sync_token'").get();
+    if (row && row.value) syncToken = row.value.trim();
+  } catch (_) {}
+  if (!syncToken) syncToken = process.env.SCHOOL_WEBSITE_SYNC_TOKEN || getSyncToken(db);
+  if (!syncToken) return { ok: false, reason: "no_sync_token" };
+
+  // Read last pull watermark
+  let since = "";
+  try {
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'last_cloud_grades_pull_at'").get();
+    if (row && row.value) since = row.value.trim();
+  } catch (_) {}
+
+  const url = `${websiteUrl}/api/sync/staff/pull?schoolCloudId=${encodeURIComponent(schoolId)}${since ? `&since=${encodeURIComponent(since)}` : ""}`;
+
+  try {
+    const res = await fetch(url, { headers: { "x-sync-token": syncToken } });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => res.statusText);
+      console.warn(`[Sync Worker] pullStaffGradesFromWebsite HTTP ${res.status}: ${errText}`);
+      return { ok: false, reason: `http_${res.status}` };
+    }
+    const data = await res.json();
+    if (!data.ok) {
+      console.warn("[Sync Worker] pullStaffGradesFromWebsite remote error:", data.error);
+      return { ok: false, reason: data.error };
+    }
+
+    // ── 1. Reconcile student_records (grades) ──────────────────────────────
+    if (Array.isArray(data.grades) && data.grades.length > 0) {
+      let upsertGrade;
+      try {
+        upsertGrade = db.prepare(`
+          INSERT INTO student_records
+            (student_id, subject, assessment, score, breakdown, teacher_id, academic_session, term)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(student_id, subject, assessment, academic_session, term)
+          DO UPDATE SET
+            score       = CASE WHEN excluded.score IS NOT NULL THEN excluded.score ELSE score END,
+            breakdown   = CASE WHEN excluded.breakdown IS NOT NULL THEN excluded.breakdown ELSE breakdown END,
+            teacher_id  = CASE WHEN excluded.teacher_id IS NOT NULL THEN excluded.teacher_id ELSE teacher_id END
+        `);
+      } catch (_) {}
+
+      if (upsertGrade) {
+        const insertMany = db.transaction((grades) => {
+          for (const g of grades) {
+            try {
+              upsertGrade.run(
+                g.studentId || g.student_id,
+                g.subject,
+                g.assessment,
+                g.score ?? null,
+                g.breakdown ? (typeof g.breakdown === "string" ? g.breakdown : JSON.stringify(g.breakdown)) : null,
+                g.teacherId || g.teacher_id || null,
+                g.academicSession || g.academic_session || null,
+                g.term || null
+              );
+            } catch (_) {}
+          }
+        });
+        insertMany(data.grades);
+      }
+    }
+
+    // ── 2. Reconcile daily_attendance ──────────────────────────────────────
+    if (Array.isArray(data.attendance) && data.attendance.length > 0) {
+      let upsertAttendance;
+      try {
+        upsertAttendance = db.prepare(`
+          INSERT INTO daily_attendance
+            (student_id, class_name, date, status, academic_session, term, recorded_by_teacher_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(student_id, date)
+          DO UPDATE SET
+            status                  = excluded.status,
+            class_name              = excluded.class_name,
+            recorded_by_teacher_id  = CASE WHEN excluded.recorded_by_teacher_id IS NOT NULL THEN excluded.recorded_by_teacher_id ELSE recorded_by_teacher_id END
+        `);
+      } catch (_) {}
+
+      if (upsertAttendance) {
+        const insertMany = db.transaction((rows) => {
+          for (const a of rows) {
+            try {
+              upsertAttendance.run(
+                a.studentId || a.student_id,
+                a.className || a.class_name || null,
+                a.date,
+                a.status,
+                a.academicSession || a.academic_session || null,
+                a.term || null,
+                a.markedBy || a.recorded_by_teacher_id || null
+              );
+            } catch (_) {}
+          }
+        });
+        insertMany(data.attendance);
+      }
+    }
+
+    // ── 3. Reconcile ils_records (ACE PAC scores) ──────────────────────────
+    if (Array.isArray(data.ilsGrades) && data.ilsGrades.length > 0) {
+      let upsertIls;
+      try {
+        upsertIls = db.prepare(`
+          INSERT INTO ils_records
+            (student_id, academic_session, term, subject, pack_number, score, passed)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(student_id, academic_session, term, subject, pack_number)
+          DO UPDATE SET
+            score  = CASE WHEN excluded.score IS NOT NULL THEN excluded.score ELSE score END,
+            passed = CASE WHEN excluded.passed IS NOT NULL THEN excluded.passed ELSE passed END
+        `);
+      } catch (_) {}
+
+      if (upsertIls) {
+        const insertMany = db.transaction((rows) => {
+          for (const r of rows) {
+            try {
+              upsertIls.run(
+                r.studentId || r.student_id,
+                r.academicSession || r.academic_session || null,
+                r.term || null,
+                r.subject,
+                r.packNumber || r.pack_number,
+                r.score ?? null,
+                r.passed ?? null
+              );
+            } catch (_) {}
+          }
+        });
+        insertMany(data.ilsGrades);
+      }
+    }
+
+    // ── 4. Reconcile custom_subjects grading_scope ─────────────────────────
+    if (Array.isArray(data.subjects) && data.subjects.length > 0) {
+      let upsertScope;
+      try {
+        upsertScope = db.prepare(`
+          INSERT INTO custom_subjects (name, grading_scope)
+          VALUES (?, ?)
+          ON CONFLICT(name) DO UPDATE SET grading_scope = excluded.grading_scope
+        `);
+      } catch (_) {}
+
+      if (upsertScope) {
+        const insertMany = db.transaction((rows) => {
+          for (const s of rows) {
+            try {
+              if (s.name && s.grading_scope) {
+                upsertScope.run(s.name, s.grading_scope);
+              }
+            } catch (_) {}
+          }
+        });
+        insertMany(data.subjects);
+      }
+    }
+
+    // ── 5. Update pull watermark ───────────────────────────────────────────
+    if (data.serverTime) {
+      try {
+        db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_cloud_grades_pull_at', ?)").run(data.serverTime);
+      } catch (_) {}
+    }
+
+    console.log(`[Sync Worker] pullStaffGradesFromWebsite: grades=${data.counts?.grades ?? 0}, attendance=${data.counts?.attendance ?? 0}, ils=${data.counts?.ilsGrades ?? 0}, subjects=${data.counts?.subjects ?? 0}`);
+    return { ok: true, pulled: data.counts };
+  } catch (err) {
+    console.warn("[Sync Worker] pullStaffGradesFromWebsite error (non-fatal):", err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
  * Gathers a complete snapshot of local school data ready for staging, preview, and sync.
  */
 async function gatherSyncPackage() {
@@ -1428,6 +1619,13 @@ async function performSyncCycle() {
       await pushStaffRosterToWebsite();
     } catch (staffErr) {
       console.warn("[Sync Worker] Staff roster push error (non-fatal):", staffErr.message);
+    }
+
+    // 2d. Inbound cloud staff data pull: reconcile cloud grades, attendance, ILS, and grading scopes into SQLite
+    try {
+      await pullStaffGradesFromWebsite();
+    } catch (pullErr) {
+      console.warn("[Sync Worker] Staff data pull error (non-fatal):", pullErr.message);
     }
 
     // 3. Outbound push third: push fresh local state (including newly reconciled balances)
@@ -1950,6 +2148,8 @@ module.exports = {
   pullPendingSyncEvents,
   pullOnlineAdmissions,
   pushClassesToWebsite,
+  pushStaffRosterToWebsite,
+  pullStaffGradesFromWebsite,
   gatherSyncPackage,
   dispatchSyncPackage,
   performSyncCycle,
