@@ -907,6 +907,106 @@ async function pushClassesToWebsite() {
 }
 
 /**
+ * Pushes active teachers, allocations, and enrolled students roster to school-website.
+ * Enables the online /staff portal to mirror local staff portal grading and attendance.
+ */
+async function pushStaffRosterToWebsite() {
+  const db = database.getDb();
+  const schoolId = getSchoolId(db);
+  if (!schoolId) return { ok: false, reason: "no_school_id" };
+
+  const websiteUrl = getSchoolWebsiteUrl(db);
+  if (!websiteUrl) return { ok: false, reason: "no_school_website_url" };
+
+  let syncToken = "";
+  try {
+    const row = db
+      .prepare("SELECT value FROM app_settings WHERE key = 'school_website_sync_token'")
+      .get();
+    if (row && row.value) syncToken = row.value.trim();
+  } catch (_) {}
+
+  if (!syncToken) {
+    syncToken = process.env.SCHOOL_WEBSITE_SYNC_TOKEN || getSyncToken(db);
+  }
+
+  try {
+    // 1. Gather teachers
+    let teachers = [];
+    try {
+      teachers = db.prepare(`
+        SELECT t.id, t.name, t.email, t.phone, t.password_hash,
+               COALESCE(t.is_active, 1) as is_active,
+               f.class_name as form_class
+        FROM teachers t
+        LEFT JOIN form_teachers f ON f.teacher_id = t.id
+      `).all();
+    } catch (_) {
+      try {
+        teachers = db.prepare("SELECT id, name, email, phone, password_hash, is_active FROM teachers").all();
+      } catch (_) {}
+    }
+
+    // 2. Gather teacher allocations
+    let allocations = [];
+    try {
+      allocations = db.prepare("SELECT teacher_id, class_name, subject FROM teacher_allocations").all();
+    } catch (_) {}
+
+    // 3. Gather active students
+    let students = [];
+    try {
+      students = db.prepare(`
+        SELECT id, name, class_name,
+               COALESCE(class_arm, '') as class_arm,
+               COALESCE(admission_no, '') as admission_no,
+               COALESCE(is_active, 1) as is_active
+        FROM students
+        WHERE is_active = 1
+      `).all();
+    } catch (_) {}
+
+    // 4. Gather custom subjects with grading_scope
+    let customSubjects = [];
+    try {
+      customSubjects = db.prepare("SELECT name, grading_scope FROM custom_subjects").all();
+    } catch (_) {}
+
+    if (teachers.length === 0 && students.length === 0) {
+      return { ok: true, skipped: true, reason: "no_staff_or_students" };
+    }
+
+    const res = await fetch(`${websiteUrl}/api/sync/staff`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-sync-token": syncToken,
+      },
+      body: JSON.stringify({
+        schoolCloudId: schoolId,
+        teachers,
+        allocations,
+        students,
+        customSubjects,
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.warn(`[Sync Worker] Staff roster push returned HTTP ${res.status}: ${errText}`);
+      return { ok: false, error: `HTTP ${res.status}` };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    console.log(`[Sync Worker] Successfully pushed staff roster (${teachers.length} teachers, ${allocations.length} allocations, ${students.length} students) to school website.`);
+    return { ok: true, synced: data.synced };
+  } catch (err) {
+    console.warn("[Sync Worker] Failed to push staff roster to website:", err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
  * Gathers a complete snapshot of local school data ready for staging, preview, and sync.
  */
 async function gatherSyncPackage() {
@@ -1321,6 +1421,13 @@ async function performSyncCycle() {
       await pushClassesToWebsite();
     } catch (clsErr) {
       console.warn("[Sync Worker] Classes push error (non-fatal):", clsErr.message);
+    }
+
+    // 2c. Outbound staff & student roster sync: push teachers, allocations, and students to website
+    try {
+      await pushStaffRosterToWebsite();
+    } catch (staffErr) {
+      console.warn("[Sync Worker] Staff roster push error (non-fatal):", staffErr.message);
     }
 
     // 3. Outbound push third: push fresh local state (including newly reconciled balances)
