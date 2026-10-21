@@ -632,6 +632,30 @@ async function pullOnlineAdmissions() {
           ? existing.id
           : (cand.id || `STU-${Date.now().toString(36).toUpperCase()}`);
 
+        // Decompose incoming class and arm if arm is missing or combined
+        let incomingClassName = (cand.className || cand.classApplied || "").trim();
+        let incomingClassArm = (cand.classArm || "").trim();
+
+        if (!incomingClassArm && incomingClassName) {
+          const match = incomingClassName.match(/^((?:(?:JSS|SSS|SS|JS|Basic|Grade|Primary|Nursery|KG|Kindergarten)\s*\d+)|Creche|Beginners)\s*[- ]\s*(.+)$/i);
+          if (match) {
+            incomingClassName = match[1].trim();
+            incomingClassArm = match[2].trim();
+          }
+        }
+
+        if (!incomingClassArm && cand.classApplied && cand.classApplied !== incomingClassName) {
+          const match = cand.classApplied.match(/^((?:(?:JSS|SSS|SS|JS|Basic|Grade|Primary|Nursery|KG|Kindergarten)\s*\d+)|Creche|Beginners)\s*[- ]\s*(.+)$/i);
+          if (match) {
+            incomingClassArm = match[2].trim();
+          }
+        }
+
+        let incomingGender = (cand.gender || "").trim();
+        if (incomingGender) {
+          incomingGender = incomingGender.toUpperCase().startsWith("F") ? "Female" : "Male";
+        }
+
         // Insert or update student
         db.prepare(`
           INSERT INTO students (
@@ -644,9 +668,9 @@ async function pullOnlineAdmissions() {
           ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             class_name = excluded.class_name,
-            class_arm = COALESCE(NULLIF(excluded.class_arm, ''), students.class_arm),
+            class_arm = CASE WHEN excluded.class_arm != '' THEN excluded.class_arm ELSE students.class_arm END,
             admission_no = COALESCE(NULLIF(excluded.admission_no, ''), students.admission_no),
-            gender = COALESCE(NULLIF(excluded.gender, ''), students.gender),
+            gender = CASE WHEN excluded.gender != '' THEN excluded.gender ELSE students.gender END,
             dob = COALESCE(NULLIF(excluded.dob, ''), students.dob),
             photo = COALESCE(excluded.photo, students.photo),
             parent_email = COALESCE(NULLIF(excluded.parent_email, ''), students.parent_email),
@@ -657,11 +681,11 @@ async function pullOnlineAdmissions() {
         `).run({
           id: studentId,
           name: cand.studentName,
-          class_name: cand.className || cand.classApplied,
-          class_arm: cand.classArm || "",
+          class_name: incomingClassName,
+          class_arm: incomingClassArm,
           reg_no: cand.admissionNo || "",
           admission_no: cand.admissionNo || "",
-          gender: cand.gender || "",
+          gender: incomingGender || existing?.gender || "",
           dob: cand.dob || "",
           photo: photoDataUri,
           parent_email: cand.parentEmail || "",
@@ -671,6 +695,16 @@ async function pullOnlineAdmissions() {
           fee_status: cand.totalPaidKobo > 0 ? "cleared" : "owing",
           enrollment_status: "active",
         });
+
+        // Ensure newly observed class arm is registered in class_arms
+        if (incomingClassName && incomingClassArm) {
+          try {
+            db.prepare(`
+              INSERT OR IGNORE INTO class_arms (hierarchy_class, arm)
+              VALUES (?, ?)
+            `).run(incomingClassName, incomingClassArm);
+          } catch (_) {}
+        }
 
         // Insert enrolled subjects & cache into custom_subjects
         if (Array.isArray(cand.selectedSubjects) && cand.selectedSubjects.length > 0) {
