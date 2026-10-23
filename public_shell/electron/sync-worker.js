@@ -872,8 +872,24 @@ async function pushClassesToWebsite() {
   try {
     const setting = db.prepare("SELECT value FROM system_settings WHERE key = 'class_hierarchy'").get();
     const hierarchy = setting ? JSON.parse(setting.value) : [];
-    const configs = db.prepare("SELECT hierarchy_class, max_subjects, pass_mark_override FROM class_configs").all();
+    const configs = db.prepare("SELECT hierarchy_class, max_subjects, pass_mark_override, curriculum_type FROM class_configs").all();
     const arms = db.prepare("SELECT hierarchy_class, arm FROM class_arms ORDER BY arm ASC").all();
+
+    let armConfigsList = [];
+    try {
+      armConfigsList = db.prepare("SELECT hierarchy_class, arm, curriculum_type, pac_count, pac_labels FROM class_arm_configs").all();
+    } catch (_) {}
+    const armConfigsMap = {};
+    armConfigsList.forEach(ac => {
+      if (!armConfigsMap[ac.hierarchy_class]) armConfigsMap[ac.hierarchy_class] = {};
+      let labels = [];
+      try { labels = ac.pac_labels ? JSON.parse(ac.pac_labels) : []; } catch (_) {}
+      armConfigsMap[ac.hierarchy_class][ac.arm] = {
+        type: ac.curriculum_type || 'STANDARD_NIGERIAN',
+        pacCount: ac.pac_count || 12,
+        pacLabels: labels,
+      };
+    });
 
     const armsMap = {};
     arms.forEach(r => {
@@ -891,7 +907,10 @@ async function pushClassesToWebsite() {
       return {
         hierarchyClass: cls,
         maxSubjects: c.max_subjects || 0,
-        arms: armsMap[cls] || []
+        passMarkOverride: c.pass_mark_override || null,
+        curriculumType: c.curriculum_type || 'STANDARD_NIGERIAN',
+        arms: armsMap[cls] || [],
+        armConfigs: armConfigsMap[cls] || {},
       };
     });
 
@@ -1216,14 +1235,72 @@ async function pullStaffGradesFromWebsite() {
       }
     }
 
-    // ── 5. Update pull watermark ───────────────────────────────────────────
+    // ── 5. Reconcile teachers & allocations ───────────────────────────────
+    if (Array.isArray(data.teachers) && data.teachers.length > 0) {
+      let upsertTeacher;
+      try {
+        upsertTeacher = db.prepare(`
+          INSERT INTO teachers (id, name, email, phone, is_active, password_hash)
+          VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            name = COALESCE(excluded.name, teachers.name),
+            email = COALESCE(excluded.email, teachers.email),
+            phone = COALESCE(excluded.phone, teachers.phone),
+            is_active = COALESCE(excluded.is_active, teachers.is_active),
+            password_hash = CASE WHEN excluded.password_hash IS NOT NULL THEN excluded.password_hash ELSE teachers.password_hash END
+        `);
+      } catch (_) {}
+
+      if (upsertTeacher) {
+        const insertTeachers = db.transaction((rows) => {
+          for (const t of rows) {
+            try {
+              upsertTeacher.run(
+                t.teacherId || t.id,
+                t.name,
+                t.email || null,
+                t.phone || null,
+                t.isActive !== false ? 1 : 0,
+                t.passwordHash || null
+              );
+            } catch (_) {}
+          }
+        });
+        insertTeachers(data.teachers);
+      }
+    }
+
+    if (Array.isArray(data.allocations) && data.allocations.length > 0) {
+      let insertAlloc;
+      try {
+        insertAlloc = db.prepare(`
+          INSERT OR IGNORE INTO teacher_allocations (teacher_id, class_name, subject)
+          VALUES (?, ?, ?)
+        `);
+      } catch (_) {}
+
+      if (insertAlloc) {
+        const insertAllocs = db.transaction((rows) => {
+          for (const a of rows) {
+            try {
+              if (a.teacherId && a.className && a.subject) {
+                insertAlloc.run(a.teacherId, a.className, a.subject);
+              }
+            } catch (_) {}
+          }
+        });
+        insertAllocs(data.allocations);
+      }
+    }
+
+    // ── 6. Update pull watermark ───────────────────────────────────────────
     if (data.serverTime) {
       try {
         db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_cloud_grades_pull_at', ?)").run(data.serverTime);
       } catch (_) {}
     }
 
-    console.log(`[Sync Worker] pullStaffGradesFromWebsite: grades=${data.counts?.grades ?? 0}, attendance=${data.counts?.attendance ?? 0}, ils=${data.counts?.ilsGrades ?? 0}, subjects=${data.counts?.subjects ?? 0}`);
+    console.log(`[Sync Worker] pullStaffGradesFromWebsite: grades=${data.counts?.grades ?? 0}, attendance=${data.counts?.attendance ?? 0}, ils=${data.counts?.ilsGrades ?? 0}, subjects=${data.counts?.subjects ?? 0}, teachers=${data.counts?.teachers ?? 0}`);
     return { ok: true, pulled: data.counts };
   } catch (err) {
     console.warn("[Sync Worker] pullStaffGradesFromWebsite error (non-fatal):", err.message);
@@ -1246,8 +1323,24 @@ async function gatherSyncPackage() {
   try {
     const setting = db.prepare("SELECT value FROM system_settings WHERE key = 'class_hierarchy'").get();
     hierarchy = setting ? JSON.parse(setting.value) : [];
-    const configs = db.prepare("SELECT hierarchy_class, max_subjects, pass_mark_override FROM class_configs").all();
+    const configs = db.prepare("SELECT hierarchy_class, max_subjects, pass_mark_override, curriculum_type FROM class_configs").all();
     const arms = db.prepare("SELECT hierarchy_class, arm FROM class_arms ORDER BY arm ASC").all();
+
+    let armConfigsList = [];
+    try {
+      armConfigsList = db.prepare("SELECT hierarchy_class, arm, curriculum_type, pac_count, pac_labels FROM class_arm_configs").all();
+    } catch (_) {}
+    const armConfigsMap = {};
+    armConfigsList.forEach(ac => {
+      if (!armConfigsMap[ac.hierarchy_class]) armConfigsMap[ac.hierarchy_class] = {};
+      let labels = [];
+      try { labels = ac.pac_labels ? JSON.parse(ac.pac_labels) : []; } catch (_) {}
+      armConfigsMap[ac.hierarchy_class][ac.arm] = {
+        type: ac.curriculum_type || 'STANDARD_NIGERIAN',
+        pacCount: ac.pac_count || 12,
+        pacLabels: labels,
+      };
+    });
 
     const armsMap = {};
     arms.forEach((r) => {
@@ -1267,7 +1360,10 @@ async function gatherSyncPackage() {
         return {
           hierarchyClass: cls,
           maxSubjects: c.max_subjects || 0,
+          passMarkOverride: c.pass_mark_override || null,
+          curriculumType: c.curriculum_type || 'STANDARD_NIGERIAN',
           arms: armsMap[cls] || [],
+          armConfigs: armConfigsMap[cls] || {},
         };
       });
 

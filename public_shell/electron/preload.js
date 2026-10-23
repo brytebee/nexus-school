@@ -395,7 +395,7 @@ const nexusAPI = {
 
     // ── Phase 10: ILS (Individualized Learning System) ────────────────
     ils: {
-        getClassType:      (className)               => ipcRenderer.invoke('ils:get-class-type', className),
+        getClassType:      (className, classArm)     => ipcRenderer.invoke('ils:get-class-type', className, classArm),
         setClassType:      (payload)                  => ipcRenderer.invoke('ils:set-class-type', payload),
         checkClassRecords: (className)               => ipcRenderer.invoke('ils:check-class-records', className),
         insertPacScore:    (data)                    => ipcRenderer.invoke('ils:insert-pac-score', data),

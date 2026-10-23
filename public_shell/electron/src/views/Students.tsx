@@ -976,7 +976,7 @@ export function Students() {
     try {
       const api = (window as any).electronAPI;
       if (detailStudent?.class_name && api?.ils?.getClassType) {
-        const clsRes = await api.ils.getClassType(detailStudent.class_name);
+        const clsRes = await api.ils.getClassType(detailStudent.class_name, detailStudent.class_arm);
         if (clsRes?.type === 'ILS') {
           setStudentClassType('ILS');
           setIlsPacCount(clsRes.pacCount || 12);

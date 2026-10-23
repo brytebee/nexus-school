@@ -4382,16 +4382,54 @@ function ensureIlsSchema(db) {
 
 // ── Phase 10: ILS IPC Handlers ────────────────────────────────────────────────
 
-/** ils:get-class-type — returns 'STANDARD_NIGERIAN' | 'ILS', pacCount, and pacLabels for a class name */
-ipcMain.handle('ils:get-class-type', (event, className) => {
+/** ils:get-class-type — returns 'STANDARD_NIGERIAN' | 'ILS', pacCount, and pacLabels for a class name and optional arm */
+ipcMain.handle('ils:get-class-type', (event, className, classArm) => {
   try {
     const db = database.getDb();
     ensureIlsSchema(db);
-    const baseClassName = (className || '').split(' ').slice(0, -1).join(' ') || className;
-    const row = db.prepare("SELECT curriculum_type, pac_count, pac_labels FROM class_configs WHERE hierarchy_class = ? OR hierarchy_class = ?").get(className, baseClassName);
+
+    const cName = (className || '').trim();
+    const cArm = (classArm || '').trim();
+
+    let row = null;
+
+    // 1. Check class_arm_configs if arm is provided
+    if (cArm && cName) {
+      row = db.prepare("SELECT curriculum_type, pac_count, pac_labels FROM class_arm_configs WHERE hierarchy_class = ? AND arm = ?").get(cName, cArm);
+    }
+
+    // 2. If composite class name e.g. "Grade 5 ACE"
+    if (!row && cName && cName.includes(' ')) {
+      const parts = cName.split(' ');
+      const possibleArm = parts[parts.length - 1];
+      const possibleClass = parts.slice(0, -1).join(' ');
+      row = db.prepare("SELECT curriculum_type, pac_count, pac_labels FROM class_arm_configs WHERE hierarchy_class = ? AND arm = ?").get(possibleClass, possibleArm);
+    }
+
+    // 3. Fallback to class_configs
+    if (!row) {
+      const baseClassName = cName.split(' ').slice(0, -1).join(' ') || cName;
+      row = db.prepare("SELECT curriculum_type, pac_count, pac_labels FROM class_configs WHERE hierarchy_class = ? OR hierarchy_class = ?").get(cName, baseClassName);
+    }
+
     let pacLabels = null;
     try { if (row?.pac_labels) pacLabels = JSON.parse(row.pac_labels); } catch (_) {}
-    return { ok: true, type: row?.curriculum_type || 'STANDARD_NIGERIAN', pacCount: row?.pac_count || 12, pacLabels };
+
+    // 4. Opt-in curriculum resolution
+    let resolvedType = row?.curriculum_type;
+    if (!resolvedType) {
+      const isAceNamed = (cArm && /(?:^|[\s\-_])(ACE|ILS|PAC)(?:$|[\s\-_])/i.test(cArm)) ||
+                         (cName && /(?:^|[\s\-_])(ACE|ILS|PAC)(?:$|[\s\-_])/i.test(cName)) ||
+                         /(?:readiness|learning to read)/i.test(cName);
+      resolvedType = isAceNamed ? 'ILS' : 'STANDARD_NIGERIAN';
+    }
+
+    return {
+      ok: true,
+      type: resolvedType,
+      pacCount: row?.pac_count || 12,
+      pacLabels
+    };
   } catch (err) {
     return { ok: false, error: err.message, type: 'STANDARD_NIGERIAN', pacCount: 12, pacLabels: null };
   }
