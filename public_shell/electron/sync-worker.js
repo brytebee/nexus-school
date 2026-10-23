@@ -697,13 +697,19 @@ async function pullOnlineAdmissions() {
         });
 
         // Ensure newly observed class arm is registered in class_arms
+        // Guard: only register arms for classes that exist in this tenant's local DB
         if (incomingClassName && incomingClassArm) {
-          try {
-            db.prepare(`
-              INSERT OR IGNORE INTO class_arms (hierarchy_class, arm)
-              VALUES (?, ?)
-            `).run(incomingClassName, incomingClassArm);
-          } catch (_) {}
+          const isLocalClass = db.prepare('SELECT 1 FROM class_configs WHERE hierarchy_class = ? LIMIT 1').get(incomingClassName);
+          if (isLocalClass) {
+            try {
+              db.prepare(`
+                INSERT OR IGNORE INTO class_arms (hierarchy_class, arm)
+                VALUES (?, ?)
+              `).run(incomingClassName, incomingClassArm);
+            } catch (_) {}
+          } else {
+            console.warn(`[Sync Worker] Skipping class_arm registration for foreign class: ${incomingClassName}`);
+          }
         }
 
         // Insert enrolled subjects & cache into custom_subjects
@@ -1236,6 +1242,11 @@ async function pullStaffGradesFromWebsite() {
     }
 
     // ── 5. Reconcile teachers & allocations ───────────────────────────────
+    // Build local valid-class allowlist to prevent cross-tenant contamination
+    const validLocalClasses = new Set(
+      db.prepare('SELECT hierarchy_class FROM class_configs').all().map(r => r.hierarchy_class)
+    );
+
     if (Array.isArray(data.teachers) && data.teachers.length > 0) {
       let upsertTeacher;
       try {
@@ -1283,6 +1294,13 @@ async function pullStaffGradesFromWebsite() {
         const insertAllocs = db.transaction((rows) => {
           for (const a of rows) {
             try {
+              // Guard: only accept allocations for classes that exist in this tenant's local DB
+              // (class_name in allocations may be the arm composite e.g. "JSS 1 Gold" — check base class)
+              const classMatches = a.className && [...validLocalClasses].some(lc => a.className === lc || a.className.startsWith(lc + ' '));
+              if (!classMatches) {
+                console.warn(`[Sync Worker] Skipping allocation for foreign class: ${a.className}`);
+                continue;
+              }
               if (a.teacherId && a.className && a.subject) {
                 insertAlloc.run(a.teacherId, a.className, a.subject);
               }
