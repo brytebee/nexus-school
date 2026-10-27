@@ -1812,7 +1812,7 @@ export function Students() {
           onChange={(e) => {
             setSearchVal(e.target.value);
           }}
-          placeholder="Search students by name, Student ID, or registration number..."
+          placeholder="Search by name, ID, admission no, parent name, or phone..."
           className="modern-input"
           style={{ width: '100%', padding: '12px 16px 12px 42px', fontSize: '13px', borderRadius: 'var(--radius-md)' }}
         />

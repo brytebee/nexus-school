@@ -2298,8 +2298,8 @@ export function FinancialHub() {
               type="text"
               value={searchVal}
               onChange={e => setSearchVal(e.target.value)}
-              placeholder="Search students by name or ID..."
-              style={{ background:'none', border:'none', color:'var(--text-main)', fontSize:'12px', width:'200px', outline:'none' }}
+              placeholder="Search by name, ID, admission no, parent, or phone..."
+              style={{ background:'none', border:'none', color:'var(--text-main)', fontSize:'12px', width:'250px', outline:'none' }}
             />
           </div>
           <button
@@ -3089,7 +3089,7 @@ export function FinancialHub() {
               </label>
               <div style={{ display:'flex', gap:'8px' }}>
                 <input
-                  placeholder="Search student by name or ID (e.g. Ada, STU-1234)..."
+                  placeholder="Search student by name, ID, admission no, parent, or phone..."
                   value={seSearch}
                   onChange={e => {
                     setSeSearch(e.target.value);
@@ -4072,7 +4072,7 @@ export function FinancialHub() {
                         list="adj-students-datalist"
                         value={adjStudentStr}
                         onChange={e => { setAdjStudentStr(e.target.value); const m=adjMatchedStudents.find(s=>s.name===e.target.value||s.id===e.target.value); if(m) setAdjStudentId(m.id); else setAdjStudentId(''); }}
-                        placeholder="Type name or ID..."
+                        placeholder="Search name, ID, admission no, parent, or phone..."
                         className="modern-input"
                         style={{ width:'100%', paddingLeft:'34px', fontSize:'13px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:'10px', color:'#fff', height:'42px', boxSizing:'border-box' }}
                       />

@@ -4061,8 +4061,8 @@ ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = ""
     const query = search ? `%${search}%` : "%";
 
     // Base WHERE clause (always present)
-    let conditions = "(s.name LIKE ? OR s.id LIKE ? OR s.reg_no LIKE ?)";
-    const params = [query, query, query];
+    let conditions = "(s.name LIKE ? OR s.id LIKE ? OR s.admission_no LIKE ? OR s.reg_no LIKE ? OR s.parent_name LIKE ? OR s.parent_phone LIKE ? OR s.parent_phone_2 LIKE ?)";
+    const params = [query, query, query, query, query, query, query];
     // F3: overflow removed — include all active enrollment statuses (active, null, or empty).
     // include_overflow param retained for API compatibility but no longer changes query.
     if (!include_inactive) {
@@ -4987,7 +4987,7 @@ ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, 
       ? `AND (UPPER(replace(s.class_name, ' ', '')) = ? OR UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', '')) = ?)`
       : '';
 
-    const countParams = [academic_session, term, query, query, filter, filter];
+    const countParams = [academic_session, term, query, query, query, query, query, query, query, filter, filter];
     if (classNorm) countParams.push(classNorm, classNorm);
 
     const total = db.prepare(`
@@ -4997,13 +4997,13 @@ ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, 
         ON  f.student_id       = s.id
         AND f.academic_session = ?
         AND f.term             = ?
-      WHERE (s.name LIKE ? OR s.id LIKE ?)
+      WHERE (s.name LIKE ? OR s.id LIKE ? OR s.admission_no LIKE ? OR s.reg_no LIKE ? OR s.parent_name LIKE ? OR s.parent_phone LIKE ? OR s.parent_phone_2 LIKE ?)
         AND COALESCE(s.is_active, 1) = 1
         AND (? = 'all' OR COALESCE(f.status, 'unpaid') = ?)
         ${classClause}
     `).get(...countParams).total;
 
-    const rowParams = [academic_session, term, query, query, filter, filter];
+    const rowParams = [academic_session, term, query, query, query, query, query, query, query, filter, filter];
     if (classNorm) rowParams.push(classNorm, classNorm);
     rowParams.push(limit, offset);
 
@@ -5011,8 +5011,10 @@ ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, 
       SELECT
         s.id              AS student_id,
         s.name,
+        s.admission_no,
         s.class_name,
         s.class_arm,
+        s.parent_name,
         s.parent_phone,
         COALESCE(f.total_billed, 0)                              AS total_billed,
         COALESCE(f.total_paid,   0)                              AS total_paid,
@@ -5025,7 +5027,7 @@ ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, 
         ON  f.student_id       = s.id
         AND f.academic_session = ?
         AND f.term             = ?
-      WHERE (s.name LIKE ? OR s.id LIKE ?)
+      WHERE (s.name LIKE ? OR s.id LIKE ? OR s.admission_no LIKE ? OR s.reg_no LIKE ? OR s.parent_name LIKE ? OR s.parent_phone LIKE ? OR s.parent_phone_2 LIKE ?)
         AND COALESCE(s.is_active, 1) = 1
         AND (? = 'all' OR COALESCE(f.status, 'unpaid') = ?)
         ${classClause}
@@ -5053,7 +5055,7 @@ ipcMain.handle("fees:get-summary", (event, { academic_session, term, search = ""
       ? `AND (UPPER(replace(s.class_name, ' ', '')) = ? OR UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', '')) = ?)`
       : '';
 
-    const sumParams = [academic_session, term, query, query];
+    const sumParams = [academic_session, term, query, query, query, query, query, query, query];
     if (classNorm) sumParams.push(classNorm, classNorm);
 
     const summary = db.prepare(`
@@ -5068,7 +5070,7 @@ ipcMain.handle("fees:get-summary", (event, { academic_session, term, search = ""
         ON  f.student_id       = s.id
         AND f.academic_session = ?
         AND f.term             = ?
-      WHERE (s.name LIKE ? OR s.id LIKE ?)
+      WHERE (s.name LIKE ? OR s.id LIKE ? OR s.admission_no LIKE ? OR s.reg_no LIKE ? OR s.parent_name LIKE ? OR s.parent_phone LIKE ? OR s.parent_phone_2 LIKE ?)
         ${classClause}
     `).get(...sumParams);
 
