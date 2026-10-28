@@ -1,6 +1,60 @@
 const { ipcMain } = require('electron');
 const { normalizePhone } = require('./phone-utils');
 
+// ── Local helpers (mirrors server.js equivalents) ──────────────────────────
+function generateCbtToken(length = 8) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let token = '';
+    for (let i = 0; i < length; i++) {
+        token += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return token;
+}
+
+function parseTargetClasses(rawClassName, rawTargetClasses) {
+    const list = new Set();
+    const parse = (val) => {
+        if (!val) return;
+        if (typeof val === 'string') {
+            val = val.trim();
+            if (val.startsWith('[') && val.endsWith(']')) {
+                try {
+                    const parsed = JSON.parse(val);
+                    if (Array.isArray(parsed)) { parsed.forEach(p => parse(p)); return; }
+                } catch(e) {}
+            }
+            val.split(',').forEach(item => {
+                let cleaned = item.trim();
+                if (cleaned.endsWith('(All Arms)')) cleaned = cleaned.replace(/\(All Arms\)/i, '').trim();
+                if (cleaned) list.add(cleaned);
+            });
+        } else if (Array.isArray(val)) {
+            val.forEach(p => parse(p));
+        }
+    };
+    parse(rawTargetClasses);
+    if (list.size === 0) parse(rawClassName);
+    return Array.from(list);
+}
+
+function buildTargetClassesFilter(targetClasses, tablePrefix = '') {
+    const p = tablePrefix ? `${tablePrefix}.` : '';
+    const conditions = [];
+    const params = [];
+    for (const tc of targetClasses) {
+        conditions.push(`
+            TRIM(${p}class_name || ' ' || COALESCE(${p}class_arm, '')) = ?
+            OR ${p}class_name = ?
+            OR (${p}class_arm IS NOT NULL AND ${p}class_arm != '' AND ${p}class_arm = ?)
+            OR ${p}class_name LIKE ? || ' %'
+            OR TRIM(${p}class_name || ' ' || COALESCE(${p}class_arm, '')) LIKE ? || ' %'
+        `);
+        params.push(tc, tc, tc, tc, tc);
+    }
+    return { conditionSql: conditions.join(' OR '), params };
+}
+// ──────────────────────────────────────────────────────────────────────────
+
 module.exports = function registerCBTHandlers(database) {
     // --------------------------------------------------------
     // QUESTION BANKS
@@ -219,6 +273,148 @@ module.exports = function registerCBTHandlers(database) {
         return { success: true };
     });
 
+    ipcMain.handle("cbt:auto-schedule-batches", (event, { exam_id, exam_date, start_time, duration_minutes, inter_batch_buffer_minutes, pc_count: overridePcCount }) => {
+        const db = database.getDb();
+        const exam = db.prepare('SELECT * FROM cbt_exams WHERE id = ?').get(exam_id);
+        if (!exam) throw new Error('Exam not found');
+
+        const pcCount = Number(overridePcCount) || Number(exam.pc_count) || 30;
+        const durationMins = Number(duration_minutes) || Number(exam.duration_minutes) || 60;
+        const bufferMins = Number(inter_batch_buffer_minutes) || 15;
+
+        // Fetch tokens for this exam
+        let tokens = db.prepare(`
+            SELECT t.id AS token_id, t.student_id, t.external_candidate_id, t.question_seed,
+                   COALESCE(s.name, ec.name) AS name,
+                   COALESCE(s.class_name, ec.target_class, 'Default') AS class_name,
+                   COALESCE(s.class_arm, '') AS class_arm
+            FROM cbt_tokens t
+            LEFT JOIN students s ON s.id = t.student_id
+            LEFT JOIN cbt_external_candidates ec ON ec.id = t.external_candidate_id
+            WHERE t.exam_id = ?
+            ORDER BY COALESCE(s.class_arm, ''), COALESCE(s.name, ec.name)
+        `).all(exam_id);
+
+        if (tokens.length === 0) {
+            // ── Auto-generate tokens from enrolled students if none exist yet ──
+            const targetClasses = parseTargetClasses(exam.class_name, exam.target_classes);
+            let autoGenCount = 0;
+            if (targetClasses.length > 0) {
+                const { conditionSql, params: filterParams } = buildTargetClassesFilter(targetClasses, 's');
+                const eligible = conditionSql
+                    ? db.prepare(`SELECT id FROM students s WHERE (${conditionSql}) AND (s.enrollment_status = 'active' OR s.enrollment_status IS NULL OR s.enrollment_status = '')`).all(...filterParams)
+                    : [];
+                if (eligible.length > 0) {
+                    const insertToken = db.prepare(`INSERT OR IGNORE INTO cbt_tokens (exam_id, student_id, token, status) VALUES (?, ?, ?, 'unused')`);
+                    db.transaction(() => {
+                        for (const stu of eligible) {
+                            let tok;
+                            let attempts = 0;
+                            do {
+                                tok = generateCbtToken(8);
+                                attempts++;
+                            } while (attempts < 20 && db.prepare('SELECT 1 FROM cbt_tokens WHERE token = ?').get(tok));
+                            insertToken.run(exam_id, stu.id, tok);
+                            autoGenCount++;
+                        }
+                    })();
+                }
+            }
+            if (autoGenCount === 0) {
+                return { success: true, batches_created: 0, total_candidates: 0, message: 'No tokens found. Generate tokens first.' };
+            }
+            // Re-fetch now that tokens have been auto-generated
+            tokens = db.prepare(`
+                SELECT t.id AS token_id, t.student_id, t.external_candidate_id, t.question_seed,
+                       COALESCE(s.name, ec.name) AS name,
+                       COALESCE(s.class_name, ec.target_class, 'Default') AS class_name,
+                       COALESCE(s.class_arm, '') AS class_arm
+                FROM cbt_tokens t
+                LEFT JOIN students s ON s.id = t.student_id
+                LEFT JOIN cbt_external_candidates ec ON ec.id = t.external_candidate_id
+                WHERE t.exam_id = ?
+                ORDER BY COALESCE(s.class_arm, ''), COALESCE(s.name, ec.name)
+            `).all(exam_id);
+        }
+
+        // Round-robin interleave by class_arm or class_name to prevent collusion
+        const byArm = {};
+        for (const t of tokens) {
+            const arm = (t.class_arm || t.class_name || 'DEFAULT').trim();
+            if (!byArm[arm]) byArm[arm] = [];
+            byArm[arm].push(t);
+        }
+        const arms = Object.keys(byArm).sort();
+        const interleaved = [];
+        const maxLen = Math.max(...arms.map(a => byArm[a].length));
+        for (let i = 0; i < maxLen; i++) {
+            for (const arm of arms) {
+                if (byArm[arm][i]) interleaved.push(byArm[arm][i]);
+            }
+        }
+
+        const batchCount = Math.ceil(interleaved.length / pcCount);
+        const [startH, startM] = (start_time || '08:00').split(':').map(Number);
+        const startMinutes = (isNaN(startH) ? 8 : startH) * 60 + (isNaN(startM) ? 0 : startM);
+
+        const createdBatches = [];
+
+        db.transaction(() => {
+            // Remove previous auto-generated batches
+            const oldBatches = db.prepare("SELECT id FROM cbt_batches WHERE exam_id = ? AND name LIKE 'Batch %'").all(exam_id);
+            for (const ob of oldBatches) {
+                db.prepare("DELETE FROM cbt_batches WHERE id = ?").run(ob.id);
+            }
+            db.prepare("UPDATE cbt_tokens SET batch_id = NULL, seat_number = NULL, station_id = NULL WHERE exam_id = ?").run(exam_id);
+
+            for (let b = 0; b < batchCount; b++) {
+                const slice = interleaved.slice(b * pcCount, (b + 1) * pcCount);
+                const batchStartMins = startMinutes + b * (durationMins + bufferMins);
+                const batchEndMins = batchStartMins + durationMins;
+
+                const toTime = (mins) => {
+                    const h = Math.floor(mins / 60) % 24;
+                    const m = mins % 60;
+                    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                };
+
+                const batchName = `Batch ${b + 1}`;
+                const batchResult = db.prepare(`
+                    INSERT INTO cbt_batches (exam_id, name, exam_date, start_time, end_time, status)
+                    VALUES (?, ?, ?, ?, ?, 'pending')
+                `).run(exam_id, batchName, exam_date || exam.exam_date, toTime(batchStartMins), toTime(batchEndMins));
+
+                const batchId = batchResult.lastInsertRowid;
+                createdBatches.push({ id: batchId, name: batchName, candidate_count: slice.length });
+
+                for (let s = 0; s < slice.length; s++) {
+                    const seatNumber = s + 1;
+                    const stationId = `S${seatNumber}`;
+                    const candidate = slice[s];
+
+                    const useAlternateSeed = seatNumber % 2 === 0;
+                    const finalSeed = useAlternateSeed
+                        ? String(candidate.question_seed || candidate.token_id) + '_B'
+                        : (candidate.question_seed || String(candidate.token_id));
+
+                    db.prepare(`
+                        UPDATE cbt_tokens
+                        SET batch_id = ?, seat_number = ?, station_id = ?, question_seed = ?
+                        WHERE id = ?
+                    `).run(batchId, seatNumber, stationId, finalSeed, candidate.token_id);
+                }
+            }
+        })();
+
+        return {
+            success: true,
+            batches_created: createdBatches.length,
+            pc_count: pcCount,
+            total_candidates: interleaved.length,
+            batches: createdBatches
+        };
+    });
+
     // --------------------------------------------------------
     // EXTERNAL CANDIDATES & TOKENS
     // --------------------------------------------------------
@@ -268,6 +464,11 @@ module.exports = function registerCBTHandlers(database) {
             SELECT t.*, 
                    COALESCE(s.name, e.name) as candidate_name,
                    COALESCE(s.class_name, e.target_class) as class_name,
+                   s.id as student_id,
+                   s.class_arm,
+                   s.admission_no,
+                   s.parent_name,
+                   COALESCE(s.parent_phone, s.parent_phone_2) as parent_phone,
                    b.name as batch_name
             FROM cbt_tokens t
             LEFT JOIN students s ON t.student_id = s.id
@@ -452,7 +653,60 @@ module.exports = function registerCBTHandlers(database) {
     });
 
     ipcMain.handle("cbt:delete-exam", (event, { exam_id }) => {
-        database.getDb().prepare("DELETE FROM cbt_exams WHERE id = ?").run(exam_id);
+        const db = database.getDb();
+        db.transaction(() => {
+            db.prepare("DELETE FROM cbt_answers WHERE token_id IN (SELECT id FROM cbt_tokens WHERE exam_id = ?)").run(exam_id);
+            db.prepare("DELETE FROM cbt_tokens WHERE exam_id = ?").run(exam_id);
+            db.prepare("DELETE FROM cbt_batches WHERE exam_id = ?").run(exam_id);
+            db.prepare("DELETE FROM cbt_exams WHERE id = ?").run(exam_id);
+        })();
+        return { success: true };
+    });
+
+    ipcMain.handle("cbt:update-exam", (event, examData) => {
+        const {
+            id, title, class_name, target_classes, question_count, duration_minutes,
+            pass_mark_percentage, exam_date, start_time, end_time,
+            shuffle_questions, shuffle_options, allow_mobile_clients,
+            result_release_policy, pc_count, negative_marks, instructions, calculator_type
+        } = examData;
+        const db = database.getDb();
+        const exam = db.prepare("SELECT * FROM cbt_exams WHERE id = ?").get(id);
+        if (!exam) throw new Error("Exam not found");
+
+        const targetClassesJson = target_classes !== undefined
+            ? (Array.isArray(target_classes) ? JSON.stringify(target_classes) : String(target_classes))
+            : exam.target_classes;
+
+        db.prepare(`
+            UPDATE cbt_exams
+            SET title = ?, class_name = ?, target_classes = ?,
+                question_count = ?, duration_minutes = ?, pass_mark_percentage = ?,
+                exam_date = ?, start_time = ?, end_time = ?,
+                shuffle_questions = ?, shuffle_options = ?, allow_mobile_clients = ?,
+                result_release_policy = ?, pc_count = ?, negative_marks = ?, instructions = ?,
+                calculator_type = ?
+            WHERE id = ?
+        `).run(
+            title || exam.title,
+            class_name || exam.class_name,
+            targetClassesJson,
+            Number(question_count) || exam.question_count,
+            Number(duration_minutes) || exam.duration_minutes,
+            Number(pass_mark_percentage) || exam.pass_mark_percentage,
+            exam_date || null,
+            start_time || null,
+            end_time || null,
+            shuffle_questions !== undefined ? (shuffle_questions ? 1 : 0) : exam.shuffle_questions,
+            shuffle_options !== undefined ? (shuffle_options ? 1 : 0) : exam.shuffle_options,
+            allow_mobile_clients !== undefined ? (allow_mobile_clients ? 1 : 0) : exam.allow_mobile_clients,
+            result_release_policy || exam.result_release_policy,
+            Number(pc_count) || exam.pc_count,
+            Number(negative_marks) || exam.negative_marks,
+            instructions !== undefined ? String(instructions) : exam.instructions,
+            calculator_type !== undefined ? calculator_type : (exam.calculator_type || 'none'),
+            id
+        );
         return { success: true };
     });
 

@@ -299,9 +299,11 @@ const nexusAPI = {
         deleteBank:     (data)   => ipcRenderer.invoke('cbt:delete-bank', data),
         deleteQuestion: (data)   => ipcRenderer.invoke('cbt:delete-question', data),
         deleteExam:     (data)   => ipcRenderer.invoke('cbt:delete-exam', data),
+        updateExam:     (data)   => ipcRenderer.invoke('cbt:update-exam', data),
         updateBank:     (data)   => ipcRenderer.invoke('cbt:update-bank', data),
         updateQuestion: (data)   => ipcRenderer.invoke('cbt:update-question', data),
         dispatchPulseNotifications: (data) => ipcRenderer.invoke('cbt:dispatch-pulse-notifications', data),
+        autoScheduleBatches: (data) => ipcRenderer.invoke('cbt:auto-schedule-batches', data),
     },
     // ── Attendance Engine (V2.3) ─────────────────────────────────────────
     attendance: {

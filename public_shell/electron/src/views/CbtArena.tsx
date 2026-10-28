@@ -3,7 +3,8 @@ import { generateSessionsList } from '../lib/sessions';
 import { useTermConfig } from '../hooks/useTermConfig';
 import { 
   BookOpen, Upload, Search, FileText, Trash2, Edit2, Database, Settings, HelpCircle, 
-  QrCode, CheckCircle, XCircle, ShieldAlert, Plus, ArrowLeft, RefreshCw, Key, Info, Play
+  QrCode, CheckCircle, XCircle, ShieldAlert, Plus, ArrowLeft, RefreshCw, Key, Info, Play,
+  Copy, Check, ChevronDown, ChevronUp, X
 } from 'lucide-react';
 import { useSudoAuth } from '../context/SudoAuthContext';
 import { useClassArms } from '../hooks/useClassArms';
@@ -29,6 +30,28 @@ const splitClass = (selected: string, configs: { hierarchy_class: string }[]) =>
   }
   return { class_name: selected, class_arm: '' };
 };
+
+function calculateEndTime(start: string, durationMinutes: number): string {
+  if (!start || isNaN(durationMinutes) || durationMinutes <= 0) return '';
+  const [h, m] = start.split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return '';
+  const total = h * 60 + m + Number(durationMinutes);
+  const endH = Math.floor(total / 60) % 24;
+  const endM = total % 60;
+  return `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+}
+
+function calculateDuration(start: string, end: string): number {
+  if (!start || !end) return 60;
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) return 60;
+  let startMinutes = sh * 60 + sm;
+  let endMinutes = eh * 60 + em;
+  if (endMinutes < startMinutes) endMinutes += 24 * 60;
+  const diff = endMinutes - startMinutes;
+  return diff > 0 ? diff : 60;
+}
 
 interface CbtArenaProps {
   onOpenHelp?: () => void;
@@ -171,6 +194,11 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
   const [selectedLiveExam, setSelectedLiveExam] = useState<any | null>(null);
   const [liveBatches, setLiveBatches] = useState<any[]>([]);
   const [liveTokens, setLiveTokens] = useState<any[]>([]);
+  const [invigilationSearch, setInvigilationSearch] = useState('');
+  const [selectedInvigilationToken, setSelectedInvigilationToken] = useState<any | null>(null);
+  const [showAllInvigilation, setShowAllInvigilation] = useState(false);
+  const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [showDropdown, setShowDropdown] = useState(false);
   
   // Exam Clearance Tab States (Copied from ExamClearance.tsx)
   const [scanData, setScanData] = useState('');
@@ -197,6 +225,25 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
   // Edit Bank modal (native React modal)
   const [showEditBankModal, setShowEditBankModal] = useState(false);
   const [editBankData, setEditBankData] = useState<any | null>(null);
+
+  // Edit Exam modal (native React modal)
+  const [showEditExamModal, setShowEditExamModal] = useState(false);
+  const [editExamData, setEditExamData] = useState<any | null>(null);
+
+  // Auto-Schedule Batches modal (native React modal)
+  const [showAutoScheduleModal, setShowAutoScheduleModal] = useState(false);
+  const [autoScheduleExamId, setAutoScheduleExamId] = useState<number | null>(null);
+  const [autoScheduleDate, setAutoScheduleDate] = useState('');
+  const [autoScheduleStart, setAutoScheduleStart] = useState('08:00');
+  const [autoScheduleDuration, setAutoScheduleDuration] = useState('60');
+  const [autoScheduleBuffer, setAutoScheduleBuffer] = useState('15');
+  const [autoSchedulePcOverride, setAutoSchedulePcOverride] = useState('');
+  const [autoScheduleLoading, setAutoScheduleLoading] = useState(false);
+  const [autoScheduleInferredCount, setAutoScheduleInferredCount] = useState(0);
+
+  // Auto-conceal timer for full candidate roster (5 minutes)
+  const [rosterAutoConcealSeconds, setRosterAutoConcealSeconds] = useState(300);
+  const rosterTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const Swal = (window as any).Swal;
 
@@ -1155,6 +1202,10 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
 
   const handleSelectLiveExam = async (ex: any) => {
     setSelectedLiveExam(ex);
+    setInvigilationSearch('');
+    setSelectedInvigilationToken(null);
+    setShowAllInvigilation(false);
+    setShowDropdown(false);
     refreshLiveDashboard(ex.id);
   };
 
@@ -1189,6 +1240,94 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
     }, 'Delete Deployed Exam', `Permanently delete exam "${exam.title}"? This will invalidate and delete all generated candidate tokens and answers.`);
   };
 
+  const handleOpenEditExam = (e: React.MouseEvent, ex: any) => {
+    e.stopPropagation();
+    setEditExamData({
+      ...ex,
+      duration_minutes: ex.duration_minutes || 60,
+      pc_count: ex.pc_count || 30,
+      negative_marks: ex.negative_marks || 0,
+      instructions: ex.instructions || '',
+      calculator_type: ex.calculator_type || 'none'
+    });
+    setShowEditExamModal(true);
+  };
+
+  const handleSaveEditExam = async () => {
+    if (!editExamData) return;
+    try {
+      await window.electronAPI.cbt.updateExam({
+        id: editExamData.id,
+        title: editExamData.title,
+        class_name: editExamData.class_name,
+        question_count: editExamData.question_count,
+        duration_minutes: editExamData.duration_minutes,
+        pass_mark_percentage: editExamData.pass_mark_percentage,
+        pc_count: editExamData.pc_count,
+        negative_marks: editExamData.negative_marks,
+        instructions: editExamData.instructions,
+        allow_mobile_clients: editExamData.allow_mobile_clients,
+        result_release_policy: editExamData.result_release_policy,
+        calculator_type: editExamData.calculator_type || 'none',
+        exam_date: editExamData.exam_date || null,
+        start_time: editExamData.start_time || null,
+        end_time: editExamData.end_time || null
+      });
+      setShowEditExamModal(false);
+      loadLiveExams();
+      Swal?.fire({
+        title: "Exam Updated",
+        text: `"${editExamData.title}" has been updated successfully.`,
+        icon: "success",
+        timer: 1500,
+        showConfirmButton: false,
+        background: '#0b0f19',
+        color: '#fff'
+      });
+    } catch (err: any) {
+      Swal?.fire({
+        title: "Error",
+        text: err.message,
+        icon: "error",
+        background: '#0b0f19',
+        color: '#fff'
+      });
+    }
+  };
+
+  // 5-minute auto-conceal timer hook for full candidate roster
+  useEffect(() => {
+    if (showAllInvigilation) {
+      setRosterAutoConcealSeconds(300);
+      rosterTimerRef.current = setInterval(() => {
+        setRosterAutoConcealSeconds(prev => {
+          if (prev <= 1) {
+            setShowAllInvigilation(false);
+            return 300;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      if (rosterTimerRef.current) clearInterval(rosterTimerRef.current);
+    }
+    return () => {
+      if (rosterTimerRef.current) clearInterval(rosterTimerRef.current);
+    };
+  }, [showAllInvigilation]);
+
+  const handleToggleRoster = () => {
+    if (!showAllInvigilation) {
+      requireSudo(async () => {
+        setShowAllInvigilation(true);
+        setRosterAutoConcealSeconds(300);
+      }, 'Reveal Full Candidate Roster', 'Revealing unmasked candidate exam tokens is a high-value action. Enter your admin PIN to proceed.', false);
+    } else {
+      setShowAllInvigilation(false);
+      if (rosterTimerRef.current) clearInterval(rosterTimerRef.current);
+    }
+  };
+
   const refreshLiveDashboard = async (examId: number) => {
     try {
       const batches = await window.electronAPI.cbt.getBatches(examId);
@@ -1198,6 +1337,99 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
       setLiveTokens(tokens || []);
     } catch (e) {
       console.error("Failed to refresh live invigilation dashboard", e);
+    }
+  };
+
+  const handleOpenAutoSchedule = async () => {
+    const exam = selectedLiveExam || (liveExams.length > 0 ? liveExams[0] : null);
+    if (!exam) return;
+    setAutoScheduleExamId(exam.id);
+    setAutoScheduleDate(exam.exam_date || new Date().toISOString().split('T')[0]);
+    setAutoScheduleStart(exam.start_time || '08:00');
+    setAutoScheduleDuration(String(exam.duration_minutes || 60));
+    setAutoScheduleBuffer('15');
+    setAutoSchedulePcOverride(String(exam.pc_count || 30));
+    setAutoScheduleInferredCount(0);
+    // If no tokens yet, infer candidate count from enrolled students
+    if (liveTokens.length === 0) {
+      try {
+        const targetClasses: Array<{ class_name: string; class_arm: string | null }> = [];
+        const rawTarget = exam.target_classes;
+        let parsed: any[] = [];
+        if (rawTarget) {
+          try { parsed = JSON.parse(rawTarget); } catch { parsed = []; }
+        }
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          for (const tc of parsed) {
+            if (typeof tc === 'string') {
+              const trimmed = tc.replace(/\(All Arms\)/i, '').trim();
+              targetClasses.push({ class_name: trimmed, class_arm: null });
+            } else if (tc && typeof tc === 'object') {
+              targetClasses.push({ class_name: tc.class_name || exam.class_name, class_arm: tc.class_arm || null });
+            }
+          }
+        } else {
+          targetClasses.push({ class_name: exam.class_name, class_arm: null });
+        }
+        const seenIds = new Set<number>();
+        for (const tc of targetClasses) {
+          const students = await window.electronAPI.cbt.getStudentsForClass({
+            class_name: tc.class_name,
+            class_arm: tc.class_arm || 'all'
+          });
+          for (const s of (students || [])) {
+            seenIds.add(s.id);
+          }
+        }
+        setAutoScheduleInferredCount(seenIds.size);
+      } catch {
+        // non-critical
+      }
+    }
+    setShowAutoScheduleModal(true);
+  };
+
+  const handleExecuteAutoSchedule = async () => {
+    const exam = liveExams.find(e => e.id === autoScheduleExamId) || selectedLiveExam;
+    if (!exam) return;
+    if (!autoScheduleDate || !autoScheduleStart) {
+      Swal?.fire({ title: 'Validation Error', text: 'Exam date and start time are required.', icon: 'warning', background: '#0b0f19', color: '#fff' });
+      return;
+    }
+    setAutoScheduleLoading(true);
+    try {
+      const res = await window.electronAPI.cbt.autoScheduleBatches({
+        exam_id: exam.id,
+        exam_date: autoScheduleDate,
+        start_time: autoScheduleStart,
+        duration_minutes: Number(autoScheduleDuration) || Number(exam.duration_minutes) || 60,
+        inter_batch_buffer_minutes: Number(autoScheduleBuffer) || 15,
+        pc_count: autoSchedulePcOverride ? Number(autoSchedulePcOverride) : undefined
+      });
+      if (res.success) {
+        setShowAutoScheduleModal(false);
+        refreshLiveDashboard(exam.id);
+        Swal?.fire({
+          title: 'Batches Scheduled!',
+          text: `Created ${res.batches_created} batch${res.batches_created !== 1 ? 'es' : ''} for ${res.total_candidates} candidates (${res.pc_count} PCs each) with alternating anti-collusion seeds.`,
+          icon: 'success',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#10b981'
+        });
+      } else {
+        throw new Error(res.message || 'Auto-scheduling failed');
+      }
+    } catch (err: any) {
+      Swal?.fire({
+        title: 'Error',
+        text: err.message,
+        icon: 'error',
+        background: '#0b0f19',
+        color: '#fff'
+      });
+    } finally {
+      setAutoScheduleLoading(false);
     }
   };
 
@@ -1892,9 +2124,12 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                             <span style={{ fontWeight: 700, color: 'var(--text-main)', fontSize: '15px', lineHeight: 1.3 }}>{b.name}</span>
                             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-                              {b.is_premium && (
+                              {Boolean(b.is_premium) && (
                                 <span style={{ fontSize: '10px', background: 'rgba(255,193,7,0.1)', border: '1px solid rgba(255,193,7,0.3)', color: '#FFC107', fontWeight: 700, padding: '2px 7px', borderRadius: '8px', whiteSpace: 'nowrap' }}>🔒 PREMIUM</span>
                               )}
+                              <span style={{ fontSize: '11px', color: 'var(--accent)', fontWeight: 700, background: 'rgba(0,229,255,0.08)', padding: '2px 8px', borderRadius: '10px', border: '1px solid rgba(0,229,255,0.2)' }}>
+                                {b.question_count ?? 0} Qs
+                              </span>
                               <button 
                                 onClick={(e) => handleEditBank(e, b)}
                                 style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center' }}
@@ -2676,10 +2911,25 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', alignItems: 'flex-start' }}>
                           <strong style={{ color: '#fff', fontSize: '13px', flex: 1, marginRight: '8px' }}>{ex.title}</strong>
                           <div style={{ display: 'flex', gap: '5px', alignItems: 'center', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-                            {ex.is_promotional && (
+                            {Boolean(ex.is_promotional) && (
                               <span style={{ fontSize: '10px', color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '2px 6px', borderRadius: '12px', fontWeight: 'bold' }}>PROMOTIONAL</span>
                             )}
                             <span style={{ fontSize: '10px', color: badgeColor, border: `1px solid ${badgeColor}`, padding: '2px 6px', borderRadius: '12px', textTransform: 'uppercase', fontWeight: 'bold' }}>{ex.exam_type}</span>
+                            <button
+                              onClick={(e) => handleOpenEditExam(e, ex)}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: '#38bdf8',
+                                cursor: 'pointer',
+                                padding: '2px',
+                                display: 'flex',
+                                alignItems: 'center'
+                              }}
+                              title="Edit Exam"
+                            >
+                              <Edit2 size={13} style={{ transition: 'color 0.2s' }} onMouseEnter={e => (e.target as any).style.color = '#7dd3fc'} onMouseLeave={e => (e.target as any).style.color = '#38bdf8'} />
+                            </button>
                             <button
                               onClick={(e) => handleDeleteExam(e, ex)}
                               style={{
@@ -2743,6 +2993,13 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                         <span>📢</span> Notify Pulse
                       </button>
                       <button 
+                        onClick={handleOpenAutoSchedule}
+                        className="primary-btn"
+                        style={{ background: 'rgba(20, 184, 166, 0.15)', border: '1px solid #14b8a6', color: '#14b8a6', padding: '6px 12px', fontSize: '12px', boxShadow: 'none', display: 'flex', alignItems: 'center', gap: '5px' }}
+                      >
+                        <span>⚡</span> Auto-Schedule Batches
+                      </button>
+                      <button 
                         onClick={handleOpenBatch}
                         className="primary-btn"
                         style={{ background: 'transparent', border: '1px solid #10b981', color: '#10b981', padding: '6px 12px', fontSize: '12px', boxShadow: 'none' }}
@@ -2802,10 +3059,15 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                     )}
                   </div>
 
-                  {/* Candidates table */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {/* Candidates table & search */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <h4 style={{ fontSize: '13px', color: 'var(--text-dim)', margin: 0 }}>Candidate Tokens</h4>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <h4 style={{ fontSize: '13px', color: '#fff', margin: 0, fontWeight: 600 }}>Candidate Tokens & Invigilation</h4>
+                        <span style={{ fontSize: '11px', color: 'var(--text-dim)', background: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: '10px' }}>
+                          {liveTokens.length} total
+                        </span>
+                      </div>
                       <button 
                         onClick={handleGenerateTokens}
                         style={{ background: 'transparent', border: '1px solid var(--glass-border)', color: 'var(--text-dim)', borderRadius: '4px', cursor: 'pointer', padding: '4px 8px', fontSize: '12px' }}
@@ -2814,39 +3076,373 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                       </button>
                     </div>
 
-                    <table style={{ width: '100%', textAlign: 'left', fontSize: '13px', borderCollapse: 'collapse' }}>
-                      <thead>
-                        <tr style={{ borderBottom: '1px solid var(--glass-border)', color: 'var(--text-dim)' }}>
-                          <th style={{ padding: '10px' }}>Candidate</th>
-                          <th>Class/Target</th>
-                          <th>Token</th>
-                          <th>Batch</th>
-                          <th>Status</th>
-                          <th style={{ textAlign: 'right' }}>Score</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {liveTokens.length === 0 ? (
-                          <tr>
-                            <td colSpan={6} style={{ padding: '20px 10px', textAlign: 'center', color: 'var(--text-dim)', fontStyle: 'italic' }}>No candidates assigned.</td>
-                          </tr>
-                        ) : (
-                          liveTokens.map(t => {
-                            const statusColor = t.status === 'unused' ? 'var(--text-dim)' : (t.status === 'active' ? '#60a5fa' : '#34d399');
-                            return (
-                              <tr key={t.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                                <td style={{ padding: '10px', color: '#fff', fontWeight: 'semibold' }}>{t.candidate_name || 'Unknown'}</td>
-                                <td style={{ color: 'var(--text-dim)' }}>{t.class_name || '-'}</td>
-                                <td style={{ fontFamily: 'monospace', fontWeight: 'bold', color: '#f59e0b' }}>{t.token}</td>
-                                <td style={{ color: 'var(--text-dim)' }}>{t.batch_name || 'Unassigned'}</td>
-                                <td style={{ fontWeight: 'bold', textTransform: 'uppercase', fontSize: '11px', color: statusColor }}>{t.status}</td>
-                                <td style={{ textAlign: 'right', fontWeight: 'bold', color: '#fff' }}>{t.score !== null ? `${t.score}%` : '-'}</td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
+                    {(() => {
+                      const q = invigilationSearch.trim().toLowerCase();
+                      const matchingCandidates = q ? liveTokens.filter(t => {
+                        const name = (t.candidate_name || '').toLowerCase();
+                        const adm = (t.admission_no || '').toLowerCase();
+                        const stId = String(t.student_id || t.id || '').toLowerCase();
+                        const pName = (t.parent_name || '').toLowerCase();
+                        const pPhone = (t.parent_phone || '').toLowerCase();
+                        const tok = (t.token || '').toLowerCase();
+                        return name.includes(q) || adm.includes(q) || stId.includes(q) || pName.includes(q) || pPhone.includes(q) || tok.includes(q);
+                      }).slice(0, 8) : [];
+                      
+                      const activeCandidate = selectedInvigilationToken 
+                        ? (liveTokens.find(t => t.id === selectedInvigilationToken.id) || selectedInvigilationToken)
+                        : null;
+
+                      return (
+                        <>
+                          {/* Search Bar with live match dropdown */}
+                          <div style={{ position: 'relative', width: '100%' }}>
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              background: 'rgba(0,0,0,0.3)',
+                              border: '1px solid var(--glass-border)',
+                              borderRadius: '8px',
+                              padding: '8px 12px'
+                            }}>
+                              <Search size={16} color="var(--text-dim)" />
+                              <input
+                                type="text"
+                                value={invigilationSearch}
+                                onChange={(e) => {
+                                  setInvigilationSearch(e.target.value);
+                                  setShowDropdown(true);
+                                }}
+                                onFocus={() => setShowDropdown(true)}
+                                placeholder="Search candidate by name, admission no, student ID, parent name or phone..."
+                                style={{
+                                  background: 'transparent',
+                                  border: 'none',
+                                  outline: 'none',
+                                  color: '#fff',
+                                  fontSize: '13px',
+                                  width: '100%'
+                                }}
+                              />
+                              {invigilationSearch && (
+                                <button
+                                  onClick={() => {
+                                    setInvigilationSearch('');
+                                    setShowDropdown(false);
+                                  }}
+                                  style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: 'var(--text-dim)',
+                                    cursor: 'pointer',
+                                    padding: '2px',
+                                    display: 'flex',
+                                    alignItems: 'center'
+                                  }}
+                                >
+                                  <X size={15} />
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Dropdown matches */}
+                            {showDropdown && invigilationSearch.trim().length > 0 && (
+                              <div style={{
+                                position: 'absolute',
+                                top: '100%',
+                                left: 0,
+                                right: 0,
+                                marginTop: '6px',
+                                background: '#0f172a',
+                                border: '1px solid rgba(255,255,255,0.15)',
+                                borderRadius: '8px',
+                                boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)',
+                                zIndex: 50,
+                                maxHeight: '340px',
+                                overflowY: 'auto'
+                              }}>
+                                {matchingCandidates.length === 0 ? (
+                                  <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-dim)', fontSize: '12px' }}>
+                                    No candidate matching "{invigilationSearch}"
+                                  </div>
+                                ) : (
+                                  matchingCandidates.map(c => {
+                                    const statusColor = c.status === 'unused' ? 'var(--text-dim)' : (c.status === 'active' ? '#60a5fa' : '#34d399');
+                                    return (
+                                      <div
+                                        key={c.id}
+                                        onClick={() => {
+                                          setSelectedInvigilationToken(c);
+                                          setShowDropdown(false);
+                                        }}
+                                        style={{
+                                          padding: '10px 14px',
+                                          borderBottom: '1px solid rgba(255,255,255,0.06)',
+                                          cursor: 'pointer',
+                                          display: 'flex',
+                                          justifyContent: 'space-between',
+                                          alignItems: 'center',
+                                          transition: 'background 0.15s ease'
+                                        }}
+                                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                      >
+                                        <div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <span style={{ fontWeight: 600, color: '#fff', fontSize: '13px' }}>{c.candidate_name || 'Unknown'}</span>
+                                            <span style={{ fontSize: '11px', color: 'var(--text-dim)', background: 'rgba(255,255,255,0.06)', padding: '1px 6px', borderRadius: '4px' }}>
+                                              {c.class_name || '-'}{c.class_arm ? ` • ${c.class_arm}` : ''}
+                                            </span>
+                                          </div>
+                                          <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '2px', display: 'flex', gap: '10px' }}>
+                                            <span>Adm: <strong style={{ color: '#cbd5e1' }}>{c.admission_no || `ID#${c.student_id || c.id}`}</strong></span>
+                                            {c.parent_name && <span>Parent: <strong style={{ color: '#cbd5e1' }}>{c.parent_name}</strong></span>}
+                                            {c.parent_phone && <span>Phone: <strong style={{ color: '#cbd5e1' }}>{c.parent_phone}</strong></span>}
+                                          </div>
+                                        </div>
+                                        <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                          <span style={{ fontFamily: 'monospace', fontWeight: 'bold', color: '#f59e0b', fontSize: '13px' }}>{c.token}</span>
+                                          <span style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', color: statusColor }}>{c.status}</span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* FOCUSED CANDIDATE VIEW */}
+                          {activeCandidate ? (
+                            <div style={{
+                              background: 'linear-gradient(135deg, rgba(30,41,59,0.7) 0%, rgba(15,23,42,0.85) 100%)',
+                              border: '1px solid rgba(255,255,255,0.12)',
+                              borderRadius: '10px',
+                              padding: '16px 20px',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '14px'
+                            }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                <div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    <h3 style={{ margin: 0, fontSize: '16px', color: '#fff', fontWeight: 700 }}>
+                                      {activeCandidate.candidate_name || 'Candidate'}
+                                    </h3>
+                                    <span style={{
+                                      fontSize: '11px',
+                                      padding: '2px 8px',
+                                      borderRadius: '4px',
+                                      background: 'rgba(99,102,241,0.15)',
+                                      color: '#a5b4fc',
+                                      border: '1px solid rgba(99,102,241,0.3)',
+                                      fontWeight: 600
+                                    }}>
+                                      {activeCandidate.class_name || '-'}{activeCandidate.class_arm ? ` • ${activeCandidate.class_arm}` : ''}
+                                    </span>
+                                    <span style={{
+                                      fontSize: '10px',
+                                      padding: '2px 8px',
+                                      borderRadius: '12px',
+                                      textTransform: 'uppercase',
+                                      fontWeight: 700,
+                                      background: activeCandidate.status === 'active' ? 'rgba(59,130,246,0.15)' : (activeCandidate.status === 'submitted' ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.06)'),
+                                      color: activeCandidate.status === 'active' ? '#60a5fa' : (activeCandidate.status === 'submitted' ? '#34d399' : 'var(--text-dim)'),
+                                      border: `1px solid ${activeCandidate.status === 'active' ? 'rgba(59,130,246,0.3)' : (activeCandidate.status === 'submitted' ? 'rgba(16,185,129,0.3)' : 'rgba(255,255,255,0.1)')}`
+                                    }}>
+                                      {activeCandidate.status}
+                                    </span>
+                                  </div>
+                                  <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '6px', display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
+                                    <span>Adm No: <strong style={{ color: '#e2e8f0' }}>{activeCandidate.admission_no || 'N/A'}</strong></span>
+                                    <span>Student ID: <strong style={{ color: '#e2e8f0' }}>#{activeCandidate.student_id || activeCandidate.id}</strong></span>
+                                    {activeCandidate.parent_name && <span>Parent: <strong style={{ color: '#e2e8f0' }}>{activeCandidate.parent_name}</strong></span>}
+                                    {activeCandidate.parent_phone && <span>Phone: <strong style={{ color: '#e2e8f0' }}>{activeCandidate.parent_phone}</strong></span>}
+                                    <span>Batch: <strong style={{ color: '#e2e8f0' }}>{activeCandidate.batch_name || 'Unassigned'}</strong></span>
+                                    {activeCandidate.score !== null && <span>Score: <strong style={{ color: '#34d399' }}>{activeCandidate.score}%</strong></span>}
+                                  </div>
+                                </div>
+                                <button
+                                  onClick={() => setSelectedInvigilationToken(null)}
+                                  style={{
+                                    background: 'transparent',
+                                    border: '1px solid var(--glass-border)',
+                                    color: 'var(--text-dim)',
+                                    borderRadius: '6px',
+                                    padding: '4px 10px',
+                                    fontSize: '11px',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  Clear / Close
+                                </button>
+                              </div>
+
+                              {/* Large Token Callout Banner */}
+                              <div style={{
+                                background: 'rgba(0,0,0,0.35)',
+                                border: '1px dashed rgba(245, 158, 11, 0.4)',
+                                borderRadius: '8px',
+                                padding: '12px 18px',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center'
+                              }}>
+                                <div>
+                                  <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#f59e0b', fontWeight: 700 }}>
+                                    Candidate Login Access Token
+                                  </div>
+                                  <div style={{ fontSize: '26px', fontWeight: 800, fontFamily: 'monospace', color: '#fbbf24', letterSpacing: '3px', marginTop: '2px' }}>
+                                    {activeCandidate.token}
+                                  </div>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(activeCandidate.token);
+                                    setCopiedToken(activeCandidate.token);
+                                    setTimeout(() => setCopiedToken(null), 2000);
+                                  }}
+                                  style={{
+                                    background: copiedToken === activeCandidate.token ? '#10b981' : '#f59e0b',
+                                    color: '#000',
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    padding: '8px 16px',
+                                    fontSize: '12px',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                >
+                                  {copiedToken === activeCandidate.token ? <Check size={15} /> : <Copy size={15} />}
+                                  {copiedToken === activeCandidate.token ? 'Copied!' : 'Copy Token'}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Empty state prompt */
+                            <div style={{
+                              padding: '34px 20px',
+                              textAlign: 'center',
+                              background: 'rgba(255,255,255,0.02)',
+                              border: '1px dashed var(--glass-border)',
+                              borderRadius: '10px',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '10px'
+                            }}>
+                              <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'rgba(99,102,241,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#818cf8' }}>
+                                <Search size={20} />
+                              </div>
+                              <div style={{ fontWeight: 600, color: '#fff', fontSize: '13px' }}>
+                                Search Candidate to Reveal Access Token
+                              </div>
+                              <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-dim)', maxWidth: '420px', lineHeight: 1.5 }}>
+                                Type a candidate's name, admission number, student ID, parent name, or parent phone number above to inspect their unique token.
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Toggle Full Roster Table */}
+                          <div style={{ marginTop: '4px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <button
+                                onClick={handleToggleRoster}
+                                style={{
+                                  background: showAllInvigilation ? 'rgba(99,102,241,0.15)' : 'transparent',
+                                  border: showAllInvigilation ? '1px solid rgba(99,102,241,0.4)' : 'none',
+                                  borderRadius: showAllInvigilation ? '6px' : '0',
+                                  color: showAllInvigilation ? '#818cf8' : 'var(--text-dim)',
+                                  fontSize: '12px',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  padding: showAllInvigilation ? '4px 10px' : '4px 0'
+                                }}
+                              >
+                                {showAllInvigilation ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                {showAllInvigilation ? 'Hide Full Candidate Roster' : `Show Full Candidate Roster (${liveTokens.length})`}
+                              </button>
+
+                              {showAllInvigilation && rosterAutoConcealSeconds !== null && (
+                                <span style={{
+                                  fontSize: '11px',
+                                  color: '#f59e0b',
+                                  background: 'rgba(245,158,11,0.1)',
+                                  border: '1px solid rgba(245,158,11,0.25)',
+                                  padding: '3px 8px',
+                                  borderRadius: '6px',
+                                  fontFamily: 'monospace'
+                                }}>
+                                  ⏳ Auto-conceals in {Math.floor(rosterAutoConcealSeconds / 60)}:{String(rosterAutoConcealSeconds % 60).padStart(2, '0')}
+                                </span>
+                              )}
+                            </div>
+
+                            {showAllInvigilation && (
+                              <div style={{ marginTop: '10px', border: '1px solid var(--glass-border)', borderRadius: '8px', overflow: 'hidden' }}>
+                                <table style={{ width: '100%', textAlign: 'left', fontSize: '12px', borderCollapse: 'collapse' }}>
+                                  <thead>
+                                    <tr style={{ borderBottom: '1px solid var(--glass-border)', color: 'var(--text-dim)', background: 'rgba(0,0,0,0.2)' }}>
+                                      <th style={{ padding: '8px 10px' }}>Candidate</th>
+                                      <th>Class / Arm</th>
+                                      <th>Admission / ID</th>
+                                      <th>Parent Details</th>
+                                      <th>Token</th>
+                                      <th>Batch</th>
+                                      <th>Status</th>
+                                      <th style={{ textAlign: 'right', paddingRight: '10px' }}>Score</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {liveTokens.length === 0 ? (
+                                      <tr>
+                                        <td colSpan={8} style={{ padding: '20px 10px', textAlign: 'center', color: 'var(--text-dim)', fontStyle: 'italic' }}>No candidates assigned.</td>
+                                      </tr>
+                                    ) : (
+                                      liveTokens.map(t => {
+                                        const statusColor = t.status === 'unused' ? 'var(--text-dim)' : (t.status === 'active' ? '#60a5fa' : '#34d399');
+                                        const isSelected = activeCandidate?.id === t.id;
+                                        return (
+                                          <tr 
+                                            key={t.id} 
+                                            onClick={() => setSelectedInvigilationToken(t)}
+                                            style={{ 
+                                              borderBottom: '1px solid rgba(255,255,255,0.05)', 
+                                              cursor: 'pointer',
+                                              background: isSelected ? 'rgba(99,102,241,0.1)' : 'transparent'
+                                            }}
+                                            onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
+                                            onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                                          >
+                                            <td style={{ padding: '8px 10px', color: '#fff', fontWeight: 600 }}>{t.candidate_name || 'Unknown'}</td>
+                                            <td style={{ color: 'var(--text-dim)' }}>{t.class_name || '-'}{t.class_arm ? ` • ${t.class_arm}` : ''}</td>
+                                            <td style={{ color: 'var(--text-dim)' }}>{t.admission_no || (t.student_id ? `#${t.student_id}` : '-')}</td>
+                                            <td style={{ color: 'var(--text-dim)', fontSize: '11px' }}>
+                                              {t.parent_name ? `${t.parent_name}${t.parent_phone ? ` (${t.parent_phone})` : ''}` : '-'}
+                                            </td>
+                                            <td style={{ fontFamily: 'monospace', fontWeight: 'bold', color: '#f59e0b' }}>{t.token}</td>
+                                            <td style={{ color: 'var(--text-dim)' }}>{t.batch_name || 'Unassigned'}</td>
+                                            <td style={{ fontWeight: 'bold', textTransform: 'uppercase', fontSize: '10px', color: statusColor }}>{t.status}</td>
+                                            <td style={{ textAlign: 'right', fontWeight: 'bold', color: '#fff', paddingRight: '10px' }}>{t.score !== null ? `${t.score}%` : '-'}</td>
+                                          </tr>
+                                        );
+                                      })
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               )}
@@ -3355,6 +3951,457 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
           </div>
         </>
       )}
+
+      {/* ── Edit Exam Modal ── */}
+      {showEditExamModal && editExamData && (
+        <>
+          <div
+            onClick={() => setShowEditExamModal(false)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)', zIndex: 200 }}
+          />
+          <div style={{
+            position: 'fixed', top: '50%', left: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: '640px', maxWidth: '95vw',
+            background: '#0d1235',
+            border: '1px solid var(--glass-border)',
+            borderRadius: '16px',
+            boxShadow: '0 24px 80px rgba(0,0,0,0.8)',
+            zIndex: 201,
+            display: 'flex', flexDirection: 'column',
+            maxHeight: '90vh',
+          }}>
+            {/* Header */}
+            <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-main)' }}>Edit Exam Configuration</h3>
+                <p style={{ margin: '2px 0 0', fontSize: '11px', color: 'var(--text-dim)' }}>Update exam parameters, duration, schedule, and lab capacity</p>
+              </div>
+              <button onClick={() => setShowEditExamModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-dim)', fontSize: '22px', cursor: 'pointer', lineHeight: 1 }}>&times;</button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Exam Title *</label>
+                  <input
+                    value={editExamData.title || ''}
+                    onChange={e => setEditExamData((d: any) => ({ ...d, title: e.target.value }))}
+                    placeholder="e.g. 2026 First Term Mock Exam"
+                    className="modern-input"
+                    style={{ width: '100%', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Target Class *</label>
+                  <input
+                    value={editExamData.class_name || ''}
+                    onChange={e => setEditExamData((d: any) => ({ ...d, class_name: e.target.value }))}
+                    placeholder="e.g. JSS 1"
+                    className="modern-input"
+                    style={{ width: '100%', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Questions *</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={editExamData.question_count || 1}
+                      onChange={e => setEditExamData((d: any) => ({ ...d, question_count: parseInt(e.target.value) || 1 }))}
+                      className="modern-input"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Duration (min) *</label>
+                    <input
+                      type="number"
+                      min="5"
+                      value={editExamData.duration_minutes || 60}
+                      onChange={e => {
+                        const dur = parseInt(e.target.value) || 0;
+                        setEditExamData((d: any) => ({
+                          ...d,
+                          duration_minutes: dur,
+                          end_time: d.start_time && dur > 0 ? calculateEndTime(d.start_time, dur) : d.end_time
+                        }));
+                      }}
+                      className="modern-input"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Pass Mark %</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={editExamData.pass_mark_percentage || 50}
+                      onChange={e => setEditExamData((d: any) => ({ ...d, pass_mark_percentage: parseInt(e.target.value) || 0 }))}
+                      className="modern-input"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                </div>
+
+                {/* Scheduling Trio */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Exam Date</label>
+                    <input
+                      type="date"
+                      value={editExamData.exam_date || ''}
+                      onChange={e => setEditExamData((d: any) => ({ ...d, exam_date: e.target.value }))}
+                      className="modern-input"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Start Time</label>
+                    <input
+                      type="time"
+                      value={editExamData.start_time || ''}
+                      onChange={e => {
+                        const st = e.target.value;
+                        setEditExamData((d: any) => ({
+                          ...d,
+                          start_time: st,
+                          end_time: st && Number(d.duration_minutes) > 0 ? calculateEndTime(st, Number(d.duration_minutes)) : d.end_time
+                        }));
+                      }}
+                      className="modern-input"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>End Time</label>
+                    <input
+                      type="time"
+                      value={editExamData.end_time || ''}
+                      onChange={e => {
+                        const et = e.target.value;
+                        setEditExamData((d: any) => ({
+                          ...d,
+                          end_time: et,
+                          duration_minutes: d.start_time && et ? calculateDuration(d.start_time, et) : d.duration_minutes
+                        }));
+                      }}
+                      className="modern-input"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Lab Capacity (PCs)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={editExamData.pc_count || 30}
+                      onChange={e => setEditExamData((d: any) => ({ ...d, pc_count: parseInt(e.target.value) || 1 }))}
+                      className="modern-input"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Negative Marking</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="5"
+                      step="0.25"
+                      value={editExamData.negative_marks || 0}
+                      onChange={e => setEditExamData((d: any) => ({ ...d, negative_marks: parseFloat(e.target.value) || 0 }))}
+                      className="modern-input"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Result Release Policy</label>
+                  <select
+                    value={editExamData.result_release_policy || 'immediate'}
+                    onChange={e => setEditExamData((d: any) => ({ ...d, result_release_policy: e.target.value }))}
+                    className="modern-input"
+                    style={{ width: '100%', background: '#0d1235', color: '#fff', boxSizing: 'border-box' }}
+                  >
+                    <option value="immediate">Immediate (Show results upon submission)</option>
+                    <option value="delayed_30m">After 30 minutes</option>
+                    <option value="delayed_1h">After 1 hour</option>
+                    <option value="delayed_12h">After 12 hours</option>
+                    <option value="delayed_24h">After 24 hours</option>
+                    <option value="manual">Manual Release (Admin clearance required)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Candidate Calculator Mode</label>
+                  <select
+                    value={editExamData.calculator_type || 'none'}
+                    onChange={e => setEditExamData((d: any) => ({ ...d, calculator_type: e.target.value }))}
+                    className="modern-input"
+                    style={{ width: '100%', background: '#0d1235', color: '#fff', boxSizing: 'border-box' }}
+                  >
+                    <option value="none">No Calculator (Locked)</option>
+                    <option value="basic">Basic Calculator (+ - × ÷ %)</option>
+                    <option value="scientific">Scientific Calculator (Trig, Logs, Powers, Roots)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#fff', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={!!editExamData.allow_mobile_clients}
+                      onChange={e => setEditExamData((d: any) => ({ ...d, allow_mobile_clients: e.target.checked ? 1 : 0 }))}
+                    />
+                    <span>Allow Mobile Clients (Tablets & Phones)</span>
+                  </label>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Exam Instructions</label>
+                  <textarea
+                    value={editExamData.instructions || ''}
+                    onChange={e => setEditExamData((d: any) => ({ ...d, instructions: e.target.value }))}
+                    rows={3}
+                    placeholder="Instructions shown to candidates before beginning the exam…"
+                    className="modern-input"
+                    style={{ width: '100%', resize: 'vertical', boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div style={{ padding: '14px 24px', borderTop: '1px solid var(--glass-border)', display: 'flex', gap: '10px', justifyContent: 'flex-end', flexShrink: 0 }}>
+              <button onClick={() => setShowEditExamModal(false)} className="secondary-btn" style={{ padding: '9px 20px', fontSize: '13px' }}>Cancel</button>
+              <button onClick={handleSaveEditExam} className="primary-btn" style={{ padding: '9px 22px', fontSize: '13px' }}>
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Auto-Schedule Batches Modal ── */}
+      {showAutoScheduleModal && (() => {
+        const curExam = liveExams.find(e => e.id === autoScheduleExamId) || selectedLiveExam;
+        if (!curExam) return null;
+
+        const pc = Number(autoSchedulePcOverride) || Number(curExam.pc_count) || 30;
+        const totalCandidates = liveTokens.length || autoScheduleInferredCount;
+        const willAutoGenTokens = liveTokens.length === 0 && autoScheduleInferredCount > 0;
+        const numBatches = totalCandidates > 0 ? Math.ceil(totalCandidates / pc) : 0;
+        const dur = Number(autoScheduleDuration) || Number(curExam.duration_minutes) || 60;
+        const buf = Number(autoScheduleBuffer) || 15;
+
+        const projection: Array<{ name: string; count: number; time: string }> = [];
+        let totalWindowStr = '';
+        if (autoScheduleStart && numBatches > 0) {
+          const [sh, sm] = autoScheduleStart.split(':').map(Number);
+          const startMins = (isNaN(sh) ? 8 : sh) * 60 + (isNaN(sm) ? 0 : sm);
+          const toTime = (m: number) => {
+            const hh = Math.floor(m / 60) % 24;
+            const mm = m % 60;
+            return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+          };
+          for (let b = 0; b < numBatches; b++) {
+            const bStartMins = startMins + b * (dur + buf);
+            const bEndMins = bStartMins + dur;
+            const count = b === numBatches - 1 ? (totalCandidates - b * pc) : pc;
+            projection.push({ name: `Batch ${b + 1}`, count, time: `${toTime(bStartMins)} - ${toTime(bEndMins)}` });
+          }
+          if (projection.length > 0) {
+            const finalEndMins = startMins + (numBatches - 1) * (dur + buf) + dur;
+            totalWindowStr = `${toTime(startMins)} → ${toTime(finalEndMins)}`;
+          }
+        }
+
+        return (
+          <>
+            <div
+              onClick={() => setShowAutoScheduleModal(false)}
+              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)', zIndex: 200 }}
+            />
+            <div style={{
+              position: 'fixed', top: '50%', left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '600px', maxWidth: '95vw',
+              background: '#0d1235',
+              border: '1px solid var(--glass-border)',
+              borderRadius: '16px',
+              boxShadow: '0 24px 80px rgba(0,0,0,0.8)',
+              zIndex: 201,
+              display: 'flex', flexDirection: 'column',
+              maxHeight: '90vh',
+            }}>
+              {/* Header */}
+              <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: '#14b8a6' }}>⚡</span> Auto-Schedule Batches
+                  </h3>
+                  <p style={{ margin: '2px 0 0', fontSize: '11px', color: 'var(--text-dim)' }}>
+                    {curExam.title} · {curExam.class_name}
+                  </p>
+                </div>
+                <button onClick={() => setShowAutoScheduleModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-dim)', fontSize: '22px', cursor: 'pointer', lineHeight: 1 }}>&times;</button>
+              </div>
+
+              {/* Modal Body */}
+              <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {/* Exam Blueprint Card */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '12px', border: '1px solid var(--glass-border)', textAlign: 'center' }}>
+                  <div style={{ background: 'rgba(0,0,0,0.2)', padding: '8px', borderRadius: '8px' }}>
+                    <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase' }}>Sitting Dur</div>
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: '#14b8a6', marginTop: '2px' }}>{dur} min</div>
+                  </div>
+                  <div style={{ background: 'rgba(0,0,0,0.2)', padding: '8px', borderRadius: '8px' }}>
+                    <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase' }}>Lab Capacity</div>
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: '#818cf8', marginTop: '2px' }}>{pc} PCs</div>
+                  </div>
+                  <div style={{ background: 'rgba(0,0,0,0.2)', padding: '8px', borderRadius: '8px' }}>
+                    <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase' }}>Candidates</div>
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: '#f59e0b', marginTop: '2px' }}>{totalCandidates}</div>
+                    {willAutoGenTokens && (
+                      <div style={{ fontSize: '9px', color: '#14b8a6', fontWeight: 600, marginTop: '2px' }}>⚡ Tokens auto-generated</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Target Exam Select */}
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Target Exam *</label>
+                  <select
+                    value={curExam.id}
+                    onChange={e => {
+                      const id = Number(e.target.value);
+                      setAutoScheduleExamId(id);
+                      const ex = liveExams.find(x => x.id === id);
+                      if (ex) {
+                        setSelectedLiveExam(ex);
+                        refreshLiveDashboard(ex.id);
+                        if (ex.exam_date) setAutoScheduleDate(ex.exam_date);
+                        if (ex.start_time) setAutoScheduleStart(ex.start_time);
+                        if (ex.duration_minutes) setAutoScheduleDuration(String(ex.duration_minutes));
+                        if (ex.pc_count) setAutoSchedulePcOverride(String(ex.pc_count));
+                      }
+                    }}
+                    className="modern-input"
+                    style={{ width: '100%', background: '#0d1235', color: '#fff', boxSizing: 'border-box' }}
+                  >
+                    {liveExams.map(ex => (
+                      <option key={ex.id} value={ex.id}>
+                        {ex.title} · {ex.class_name} ({ex.duration_minutes || 60}m, {ex.pc_count || 30} PCs)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Date & Start Time */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Exam Date *</label>
+                    <input
+                      type="date"
+                      value={autoScheduleDate}
+                      onChange={e => setAutoScheduleDate(e.target.value)}
+                      className="modern-input"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>First Batch Start Time *</label>
+                    <input
+                      type="time"
+                      value={autoScheduleStart}
+                      onChange={e => setAutoScheduleStart(e.target.value)}
+                      className="modern-input"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                </div>
+
+                {/* Duration, Buffer, PC Override */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Sitting (min) *</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={autoScheduleDuration}
+                      onChange={e => setAutoScheduleDuration(e.target.value)}
+                      className="modern-input"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Buffer (min)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={autoScheduleBuffer}
+                      onChange={e => setAutoScheduleBuffer(e.target.value)}
+                      className="modern-input"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Lab PCs</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={autoSchedulePcOverride}
+                      onChange={e => setAutoSchedulePcOverride(e.target.value)}
+                      placeholder={`Default: ${curExam.pc_count || 30}`}
+                      className="modern-input"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                </div>
+
+                {/* Live Schedule Projection */}
+                {projection.length > 0 && (
+                  <div style={{ background: 'rgba(20, 184, 166, 0.06)', border: '1px solid rgba(20, 184, 166, 0.3)', borderRadius: '12px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                      <span style={{ fontWeight: 600, color: '#14b8a6' }}>Projected Schedule ({projection.length} Batches)</span>
+                      <span style={{ fontFamily: 'monospace', color: '#10b981', fontWeight: 700 }}>{totalWindowStr}</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '140px', overflowY: 'auto' }}>
+                      {projection.map(p => (
+                        <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', padding: '6px 10px', borderRadius: '8px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--glass-border)' }}>
+                          <span style={{ fontWeight: 600, color: '#fff' }}>{p.name} <span style={{ color: 'var(--text-dim)', fontWeight: 'normal' }}>({p.count} candidates)</span></span>
+                          <span style={{ fontFamily: 'monospace', color: '#14b8a6' }}>{p.time}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ fontSize: '11px', color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', borderRadius: '10px', padding: '10px 14px' }}>
+                  ⚠️ This will <strong>replace</strong> existing auto-generated batches for this exam and assign alternating anti-collusion seeds to candidates.
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div style={{ padding: '14px 24px', borderTop: '1px solid var(--glass-border)', display: 'flex', gap: '10px', justifyContent: 'flex-end', flexShrink: 0 }}>
+                <button onClick={() => setShowAutoScheduleModal(false)} className="secondary-btn" style={{ padding: '9px 20px', fontSize: '13px' }}>Cancel</button>
+                <button onClick={handleExecuteAutoSchedule} disabled={autoScheduleLoading} className="primary-btn" style={{ padding: '9px 22px', fontSize: '13px', background: '#14b8a6', color: '#000', fontWeight: 700, border: 'none' }}>
+                  {autoScheduleLoading ? 'Scheduling…' : 'Generate Batches'}
+                </button>
+              </div>
+            </div>
+          </>
+        );
+      })()}
 
       {/* CBT Sliding Drawer settings Panel (Slide-in) */}
       {isSettingsOpen && (
