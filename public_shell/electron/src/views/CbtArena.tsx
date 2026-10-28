@@ -10,6 +10,34 @@ import { useSudoAuth } from '../context/SudoAuthContext';
 import { useClassArms } from '../hooks/useClassArms';
 import { Combobox } from '../components/Combobox';
 
+function fallbackCopy(text: string): boolean {
+  try {
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.setAttribute('readonly', '');
+    el.style.position = 'fixed';
+    el.style.left = '-9999px';
+    el.style.top = '-9999px';
+    document.body.appendChild(el);
+    el.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(el);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+async function copyToClipboard(text: string): Promise<boolean> {
+  if (navigator?.clipboard?.writeText && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) {}
+  }
+  return fallbackCopy(text);
+}
+
 const splitClass = (selected: string, configs: { hierarchy_class: string }[]) => {
   const sorted = [...configs].sort((a, b) => b.hierarchy_class.length - a.hierarchy_class.length);
   for (const conf of sorted) {
@@ -238,6 +266,7 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
   const [autoScheduleDuration, setAutoScheduleDuration] = useState('60');
   const [autoScheduleBuffer, setAutoScheduleBuffer] = useState('15');
   const [autoSchedulePcOverride, setAutoSchedulePcOverride] = useState('');
+  const [autoScheduleMaxBatchesPerDay, setAutoScheduleMaxBatchesPerDay] = useState('');
   const [autoScheduleLoading, setAutoScheduleLoading] = useState(false);
   const [autoScheduleInferredCount, setAutoScheduleInferredCount] = useState(0);
 
@@ -1340,6 +1369,34 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
     }
   };
 
+  const handleToggleBatchStatus = async (batchId: number, newStatus: string) => {
+    if (!selectedLiveExam) return;
+    try {
+      await window.electronAPI.cbt.updateBatchStatus({ batch_id: batchId, status: newStatus });
+      await refreshLiveDashboard(selectedLiveExam.id);
+    } catch (err: any) {
+      Swal?.fire({ title: 'Update Failed', text: err.message, icon: 'error', background: '#0b0f19', color: '#fff' });
+    }
+  };
+
+  const handleActivateAllBatches = async () => {
+    if (!selectedLiveExam) return;
+    try {
+      await window.electronAPI.cbt.activateAllBatches(selectedLiveExam.id);
+      await refreshLiveDashboard(selectedLiveExam.id);
+      Swal?.fire({
+        title: 'All Batches Activated!',
+        text: 'All exam batches are now set to ACTIVE. Candidates in any batch may now log in.',
+        icon: 'success',
+        background: '#0b0f19',
+        color: '#fff',
+        confirmButtonColor: '#10b981'
+      });
+    } catch (err: any) {
+      Swal?.fire({ title: 'Activation Failed', text: err.message, icon: 'error', background: '#0b0f19', color: '#fff' });
+    }
+  };
+
   const handleOpenAutoSchedule = async () => {
     const exam = selectedLiveExam || (liveExams.length > 0 ? liveExams[0] : null);
     if (!exam) return;
@@ -1349,6 +1406,7 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
     setAutoScheduleDuration(String(exam.duration_minutes || 60));
     setAutoScheduleBuffer('15');
     setAutoSchedulePcOverride(String(exam.pc_count || 30));
+    setAutoScheduleMaxBatchesPerDay('');
     setAutoScheduleInferredCount(0);
     // If no tokens yet, infer candidate count from enrolled students
     if (liveTokens.length === 0) {
@@ -1404,7 +1462,8 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
         start_time: autoScheduleStart,
         duration_minutes: Number(autoScheduleDuration) || Number(exam.duration_minutes) || 60,
         inter_batch_buffer_minutes: Number(autoScheduleBuffer) || 15,
-        pc_count: autoSchedulePcOverride ? Number(autoSchedulePcOverride) : undefined
+        pc_count: autoSchedulePcOverride ? Number(autoSchedulePcOverride) : undefined,
+        max_batches_per_day: autoScheduleMaxBatchesPerDay ? Number(autoScheduleMaxBatchesPerDay) : undefined
       });
       if (res.success) {
         setShowAutoScheduleModal(false);
@@ -2880,9 +2939,9 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
 
         {/* TAB 3: LIVE INVIGILATION */}
         {activeTab === 'live' && (
-          <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
+          <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start', maxWidth: '100%', minWidth: 0, width: '100%' }}>
             {/* Left: Deployed Exams List */}
-            <div style={{ flex: 1, background: 'var(--bg-panel)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '20px', flexShrink: 0 }}>
+            <div style={{ flex: '0 0 260px', width: '260px', minWidth: '240px', background: 'var(--bg-panel)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '20px', flexShrink: 0 }}>
               <h3 style={{ fontSize: '16px', color: '#fff', margin: '0 0 15px 0', fontWeight: 600 }}>Deployed Exams</h3>
               
               {isLoadingLiveExams ? (
@@ -2978,13 +3037,13 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
             </div>
 
             {/* Right: Active Command Center Panel */}
-            <div id="live-dashboard-pane" style={{ flex: 2, background: 'var(--bg-panel)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '20px', minHeight: '400px', display: selectedLiveExam ? 'block' : 'none' }}>
+            <div id="live-dashboard-pane" style={{ flex: 1, minWidth: 0, maxWidth: '100%', overflowX: 'hidden', background: 'var(--bg-panel)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '20px', minHeight: '400px', display: selectedLiveExam ? 'block' : 'none' }}>
               {selectedLiveExam && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', minWidth: 0, maxWidth: '100%' }}>
                   {/* Dashboard Header */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--glass-border)', paddingBottom: '15px', marginBottom: '15px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--glass-border)', paddingBottom: '15px', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
                     <h3 style={{ fontSize: '16px', color: '#fff', margin: 0, fontWeight: 600 }}>{selectedLiveExam.title}</h3>
-                    <div style={{ display: 'flex', gap: '10px' }}>
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                       <button 
                         onClick={handleDispatchPulseNotifications}
                         className="primary-btn"
@@ -3017,41 +3076,88 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                   </div>
 
                   {/* Batches Workspace list */}
-                  <div style={{ marginBottom: '20px' }}>
-                    <h4 style={{ fontSize: '13px', color: 'var(--text-dim)', marginBottom: '10px', marginTop: 0 }}>Active Batches</h4>
+                  <div style={{ marginBottom: '20px', maxWidth: '100%', minWidth: 0, overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <h4 style={{ fontSize: '13px', color: 'var(--text-dim)', margin: 0 }}>Active Batches</h4>
+                      {liveBatches.length > 0 && (
+                        <button
+                          onClick={handleActivateAllBatches}
+                          style={{
+                            background: 'rgba(20, 184, 166, 0.12)',
+                            border: '1px solid rgba(20, 184, 166, 0.4)',
+                            color: '#14b8a6',
+                            borderRadius: '6px',
+                            padding: '4px 10px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                          title="Activate all batches so any candidate may log in (useful for testing or open sitting)"
+                        >
+                          ⚡ Activate All Batches (Test Mode)
+                        </button>
+                      )}
+                    </div>
                     {liveBatches.length === 0 ? (
                       <div style={{ fontSize: '12px', color: 'var(--text-dim)', fontStyle: 'italic' }}>No batches created for this exam yet.</div>
                     ) : (
-                      <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '10px' }}>
+                      <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '10px', maxWidth: '100%', minWidth: 0, WebkitOverflowScrolling: 'touch' }}>
                         {liveBatches.map(b => {
                           const isActive = b.status === 'active';
+                          const isClosed = b.status === 'closed';
                           const timeStr = b.start_time ? `${b.start_time} - ${b.end_time || ''}` : '';
                           const dateStr = b.exam_date || '';
                           return (
                             <div 
                               key={b.id}
                               style={{
-                                minWidth: '140px',
-                                padding: '12px 16px',
-                                border: isActive ? '1px solid #10b981' : '1px solid var(--glass-border)',
+                                minWidth: '150px',
+                                padding: '12px 14px',
+                                border: isActive ? '1px solid #10b981' : (isClosed ? '1px solid rgba(255,255,255,0.1)' : '1px solid var(--glass-border)'),
                                 borderRadius: '10px',
                                 textAlign: 'center',
-                                background: isActive ? 'rgba(16,185,129,0.05)' : 'rgba(0,0,0,0.1)',
-                                flexShrink: 0
+                                background: isActive ? 'rgba(16,185,129,0.08)' : (isClosed ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.15)'),
+                                flexShrink: 0,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                justifyContent: 'space-between',
+                                gap: '8px'
                               }}
                             >
-                              <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#fff' }}>{b.name}</div>
-                              {dateStr && (
-                                <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '4px' }}>
-                                  {dateStr}
+                              <div>
+                                <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#fff' }}>{b.name}</div>
+                                {dateStr && (
+                                  <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px' }}>
+                                    {dateStr}
+                                  </div>
+                                )}
+                                <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '1px' }}>
+                                  {timeStr}
                                 </div>
-                              )}
-                              <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px' }}>
-                                {timeStr}
+                                <div style={{ fontSize: '9px', fontWeight: 'bold', textTransform: 'uppercase', marginTop: '6px', color: isActive ? '#10b981' : (isClosed ? '#94a3b8' : '#f59e0b') }}>
+                                  {isActive ? '● ACTIVE' : (isClosed ? 'CLOSED' : 'PENDING')}
+                                </div>
                               </div>
-                              <div style={{ fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', marginTop: '8px', color: isActive ? '#10b981' : 'var(--text-dim)' }}>
-                                {b.status}
-                              </div>
+
+                              <button
+                                onClick={() => handleToggleBatchStatus(b.id, isActive ? 'closed' : 'active')}
+                                style={{
+                                  padding: '5px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  border: 'none',
+                                  background: isActive ? '#ef4444' : '#10b981',
+                                  color: '#fff',
+                                  transition: 'all 0.15s ease'
+                                }}
+                              >
+                                {isActive ? '■ End Batch' : '▶ Start Batch'}
+                              </button>
                             </div>
                           );
                         })}
@@ -3300,8 +3406,8 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                                   </div>
                                 </div>
                                 <button
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(activeCandidate.token);
+                                  onClick={async () => {
+                                    await copyToClipboard(activeCandidate.token);
                                     setCopiedToken(activeCandidate.token);
                                     setTimeout(() => setCopiedToken(null), 2000);
                                   }}
@@ -4206,7 +4312,8 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
         const dur = Number(autoScheduleDuration) || Number(curExam.duration_minutes) || 60;
         const buf = Number(autoScheduleBuffer) || 15;
 
-        const projection: Array<{ name: string; count: number; time: string }> = [];
+        const maxB = Number(autoScheduleMaxBatchesPerDay) > 0 ? Number(autoScheduleMaxBatchesPerDay) : 0;
+        const projection: Array<{ name: string; count: number; time: string; dayLabel?: string }> = [];
         let totalWindowStr = '';
         if (autoScheduleStart && numBatches > 0) {
           const [sh, sm] = autoScheduleStart.split(':').map(Number);
@@ -4217,14 +4324,19 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
             return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
           };
           for (let b = 0; b < numBatches; b++) {
-            const bStartMins = startMins + b * (dur + buf);
+            const dayOffset = maxB > 0 ? Math.floor(b / maxB) : 0;
+            const bIdxInDay = maxB > 0 ? (b % maxB) : b;
+            const bStartMins = startMins + bIdxInDay * (dur + buf);
             const bEndMins = bStartMins + dur;
             const count = b === numBatches - 1 ? (totalCandidates - b * pc) : pc;
-            projection.push({ name: `Batch ${b + 1}`, count, time: `${toTime(bStartMins)} - ${toTime(bEndMins)}` });
+            const dayStr = dayOffset > 0 ? `Day ${dayOffset + 1}` : (maxB > 0 ? 'Day 1' : '');
+            projection.push({ name: `Batch ${b + 1}`, count, time: `${toTime(bStartMins)} - ${toTime(bEndMins)}`, dayLabel: dayStr });
           }
           if (projection.length > 0) {
-            const finalEndMins = startMins + (numBatches - 1) * (dur + buf) + dur;
-            totalWindowStr = `${toTime(startMins)} → ${toTime(finalEndMins)}`;
+            const daysCount = maxB > 0 ? Math.ceil(numBatches / maxB) : 1;
+            totalWindowStr = daysCount > 1
+              ? `${daysCount} school days total (starts ${autoScheduleStart} daily)`
+              : `${toTime(startMins)} → ${toTime(startMins + (numBatches - 1) * (dur + buf) + dur)}`;
           }
         }
 
@@ -4333,8 +4445,8 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                   </div>
                 </div>
 
-                {/* Duration, Buffer, PC Override */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                {/* Duration, Buffer, PC Override & Multi-Day Roll */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                   <div>
                     <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Sitting (min) *</label>
                     <input
@@ -4357,14 +4469,29 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                       style={{ width: '100%', boxSizing: 'border-box' }}
                     />
                   </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                   <div>
-                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Lab PCs</label>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Lab PCs Capacity</label>
                     <input
                       type="number"
                       min="1"
                       value={autoSchedulePcOverride}
                       onChange={e => setAutoSchedulePcOverride(e.target.value)}
                       placeholder={`Default: ${curExam.pc_count || 30}`}
+                      className="modern-input"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Max Batches / Day (Multi-Day)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={autoScheduleMaxBatchesPerDay}
+                      onChange={e => setAutoScheduleMaxBatchesPerDay(e.target.value)}
+                      placeholder="e.g. 8 (Blank = single-day)"
                       className="modern-input"
                       style={{ width: '100%', boxSizing: 'border-box' }}
                     />
@@ -4381,7 +4508,14 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '140px', overflowY: 'auto' }}>
                       {projection.map(p => (
                         <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', padding: '6px 10px', borderRadius: '8px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--glass-border)' }}>
-                          <span style={{ fontWeight: 600, color: '#fff' }}>{p.name} <span style={{ color: 'var(--text-dim)', fontWeight: 'normal' }}>({p.count} candidates)</span></span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            {p.dayLabel && (
+                              <span style={{ fontSize: '9px', fontWeight: 'bold', background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.3)', padding: '1px 5px', borderRadius: '4px' }}>
+                                {p.dayLabel}
+                              </span>
+                            )}
+                            <span style={{ fontWeight: 600, color: '#fff' }}>{p.name} <span style={{ color: 'var(--text-dim)', fontWeight: 'normal' }}>({p.count} candidates)</span></span>
+                          </div>
                           <span style={{ fontFamily: 'monospace', color: '#14b8a6' }}>{p.time}</span>
                         </div>
                       ))}

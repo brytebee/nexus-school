@@ -285,6 +285,7 @@ const nexusAPI = {
         getBatches:     (examId) => ipcRenderer.invoke('cbt:get-batches', examId),
         createBatch:    (data)   => ipcRenderer.invoke('cbt:create-batch', data),
         updateBatchStatus: (data)=> ipcRenderer.invoke('cbt:update-batch-status', data),
+        activateAllBatches: (examId) => ipcRenderer.invoke('cbt:activate-all-batches', examId),
         importExternalCandidates: (data) => ipcRenderer.invoke('cbt:import-external-candidates', data),
         generateTokens: (data)   => ipcRenderer.invoke('cbt:generate-tokens', data),
         getTokens:      (examId) => ipcRenderer.invoke('cbt:get-tokens', examId),

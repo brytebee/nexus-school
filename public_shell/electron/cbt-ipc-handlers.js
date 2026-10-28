@@ -278,7 +278,12 @@ module.exports = function registerCBTHandlers(database) {
         return { success: true };
     });
 
-    ipcMain.handle("cbt:auto-schedule-batches", (event, { exam_id, exam_date, start_time, duration_minutes, inter_batch_buffer_minutes, pc_count: overridePcCount }) => {
+    ipcMain.handle("cbt:activate-all-batches", (event, exam_id) => {
+        const result = database.getDb().prepare("UPDATE cbt_batches SET status = 'active' WHERE exam_id = ?").run(exam_id);
+        return { success: true, count: result.changes };
+    });
+
+    ipcMain.handle("cbt:auto-schedule-batches", (event, { exam_id, exam_date, start_time, duration_minutes, inter_batch_buffer_minutes, pc_count: overridePcCount, max_batches_per_day }) => {
         const db = database.getDb();
         const exam = db.prepare('SELECT * FROM cbt_exams WHERE id = ?').get(exam_id);
         if (!exam) throw new Error('Exam not found');
@@ -286,6 +291,25 @@ module.exports = function registerCBTHandlers(database) {
         const pcCount = Number(overridePcCount) || Number(exam.pc_count) || 30;
         const durationMins = Number(duration_minutes) || Number(exam.duration_minutes) || 60;
         const bufferMins = Number(inter_batch_buffer_minutes) || 15;
+        const maxBatchesPerDay = Number(max_batches_per_day) > 0 ? Number(max_batches_per_day) : 0;
+
+        function addDaysSkippingWeekends(baseDateStr, daysToAdd) {
+            if (!daysToAdd) return baseDateStr;
+            const parts = baseDateStr.split('-').map(Number);
+            const d = new Date(parts[0], parts[1] - 1, parts[2]);
+            let added = 0;
+            while (added < daysToAdd) {
+                d.setDate(d.getDate() + 1);
+                const day = d.getDay();
+                if (day !== 0 && day !== 6) {
+                    added++;
+                }
+            }
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const dayOfMonth = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${dayOfMonth}`;
+        }
 
         // Fetch tokens for this exam
         let tokens = db.prepare(`
@@ -374,7 +398,15 @@ module.exports = function registerCBTHandlers(database) {
 
             for (let b = 0; b < batchCount; b++) {
                 const slice = interleaved.slice(b * pcCount, (b + 1) * pcCount);
-                const batchStartMins = startMinutes + b * (durationMins + bufferMins);
+
+                // Multi-day rolling: calculate day offset and intra-day batch index
+                const dayOffset = maxBatchesPerDay > 0 ? Math.floor(b / maxBatchesPerDay) : 0;
+                const batchIndexInDay = maxBatchesPerDay > 0 ? (b % maxBatchesPerDay) : b;
+                const baseDate = exam_date || exam.exam_date;
+                const currentBatchDate = dayOffset > 0 ? addDaysSkippingWeekends(baseDate, dayOffset) : baseDate;
+
+                // Stagger times: each batch starts after previous ends + buffer (resets to startMinutes each day)
+                const batchStartMins = startMinutes + batchIndexInDay * (durationMins + bufferMins);
                 const batchEndMins = batchStartMins + durationMins;
 
                 const toTime = (mins) => {
@@ -387,10 +419,10 @@ module.exports = function registerCBTHandlers(database) {
                 const batchResult = db.prepare(`
                     INSERT INTO cbt_batches (exam_id, name, exam_date, start_time, end_time, status)
                     VALUES (?, ?, ?, ?, ?, 'pending')
-                `).run(exam_id, batchName, exam_date || exam.exam_date, toTime(batchStartMins), toTime(batchEndMins));
+                `).run(exam_id, batchName, currentBatchDate, toTime(batchStartMins), toTime(batchEndMins));
 
                 const batchId = batchResult.lastInsertRowid;
-                createdBatches.push({ id: batchId, name: batchName, candidate_count: slice.length });
+                createdBatches.push({ id: batchId, name: batchName, exam_date: currentBatchDate, start_time: toTime(batchStartMins), end_time: toTime(batchEndMins), candidate_count: slice.length });
 
                 for (let s = 0; s < slice.length; s++) {
                     const seatNumber = s + 1;
