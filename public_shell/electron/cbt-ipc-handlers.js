@@ -259,7 +259,12 @@ module.exports = function registerCBTHandlers(database) {
     // BATCHES
     // --------------------------------------------------------
     ipcMain.handle("cbt:get-batches", (event, exam_id) => {
-        return database.getDb().prepare("SELECT * FROM cbt_batches WHERE exam_id = ?").all(exam_id);
+        return database.getDb().prepare(`
+            SELECT b.*, (SELECT COUNT(*) FROM cbt_tokens t WHERE t.batch_id = b.id) AS candidate_count
+            FROM cbt_batches b
+            WHERE b.exam_id = ?
+            ORDER BY b.id ASC
+        `).all(exam_id);
     });
 
     ipcMain.handle("cbt:create-batch", (event, { exam_id, name, exam_date, start_time, end_time }) => {
@@ -469,12 +474,16 @@ module.exports = function registerCBTHandlers(database) {
                    s.admission_no,
                    s.parent_name,
                    COALESCE(s.parent_phone, s.parent_phone_2) as parent_phone,
-                   b.name as batch_name
+                   b.name as batch_name,
+                   b.exam_date as batch_date,
+                   b.start_time as batch_start_time,
+                   b.end_time as batch_end_time
             FROM cbt_tokens t
             LEFT JOIN students s ON t.student_id = s.id
             LEFT JOIN cbt_external_candidates e ON t.external_candidate_id = e.id
             LEFT JOIN cbt_batches b ON t.batch_id = b.id
             WHERE t.exam_id = ?
+            ORDER BY CASE WHEN b.id IS NULL THEN 1 ELSE 0 END, b.id ASC, t.seat_number ASC, COALESCE(s.name, e.name) ASC
         `).all(exam_id);
     });
 

@@ -3194,8 +3194,10 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                                               {c.class_name || '-'}{c.class_arm ? ` • ${c.class_arm}` : ''}
                                             </span>
                                           </div>
-                                          <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '2px', display: 'flex', gap: '10px' }}>
+                                          <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '2px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                                             <span>Adm: <strong style={{ color: '#cbd5e1' }}>{c.admission_no || `ID#${c.student_id || c.id}`}</strong></span>
+                                            {c.batch_name && <span>Batch: <strong style={{ color: '#14b8a6' }}>{c.batch_name}</strong></span>}
+                                            {c.seat_number && <span>Seat: <strong style={{ color: '#818cf8' }}>#{c.seat_number} ({c.station_id || 'S' + c.seat_number})</strong></span>}
                                             {c.parent_name && <span>Parent: <strong style={{ color: '#cbd5e1' }}>{c.parent_name}</strong></span>}
                                             {c.parent_phone && <span>Phone: <strong style={{ color: '#cbd5e1' }}>{c.parent_phone}</strong></span>}
                                           </div>
@@ -3258,7 +3260,8 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                                     <span>Student ID: <strong style={{ color: '#e2e8f0' }}>#{activeCandidate.student_id || activeCandidate.id}</strong></span>
                                     {activeCandidate.parent_name && <span>Parent: <strong style={{ color: '#e2e8f0' }}>{activeCandidate.parent_name}</strong></span>}
                                     {activeCandidate.parent_phone && <span>Phone: <strong style={{ color: '#e2e8f0' }}>{activeCandidate.parent_phone}</strong></span>}
-                                    <span>Batch: <strong style={{ color: '#e2e8f0' }}>{activeCandidate.batch_name || 'Unassigned'}</strong></span>
+                                    <span>Batch: <strong style={{ color: '#14b8a6' }}>{activeCandidate.batch_name || 'Unassigned'}{activeCandidate.batch_start_time ? ` (${activeCandidate.batch_start_time} - ${activeCandidate.batch_end_time || ''})` : ''}</strong></span>
+                                    {activeCandidate.seat_number && <span>Seat: <strong style={{ color: '#818cf8' }}>#{activeCandidate.seat_number} ({activeCandidate.station_id || 'S' + activeCandidate.seat_number})</strong></span>}
                                     {activeCandidate.score !== null && <span>Score: <strong style={{ color: '#34d399' }}>{activeCandidate.score}%</strong></span>}
                                   </div>
                                 </div>
