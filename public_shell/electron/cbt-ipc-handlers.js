@@ -389,12 +389,14 @@ module.exports = function registerCBTHandlers(database) {
         const createdBatches = [];
 
         db.transaction(() => {
-            // Remove previous auto-generated batches
+            // CRITICAL: Unassign batch_id from all tokens FIRST so SQLite's ON DELETE CASCADE does not destroy candidate tokens when old batches are deleted!
+            db.prepare("UPDATE cbt_tokens SET batch_id = NULL, seat_number = NULL, station_id = NULL WHERE exam_id = ?").run(exam_id);
+
+            // Now safely remove previous auto-generated batches
             const oldBatches = db.prepare("SELECT id FROM cbt_batches WHERE exam_id = ? AND name LIKE 'Batch %'").all(exam_id);
             for (const ob of oldBatches) {
                 db.prepare("DELETE FROM cbt_batches WHERE id = ?").run(ob.id);
             }
-            db.prepare("UPDATE cbt_tokens SET batch_id = NULL, seat_number = NULL, station_id = NULL WHERE exam_id = ?").run(exam_id);
 
             for (let b = 0; b < batchCount; b++) {
                 const slice = interleaved.slice(b * pcCount, (b + 1) * pcCount);
@@ -440,6 +442,14 @@ module.exports = function registerCBTHandlers(database) {
                         WHERE id = ?
                     `).run(batchId, seatNumber, stationId, finalSeed, candidate.token_id);
                 }
+            }
+
+            // Sync parent exam window to span all generated batches
+            if (createdBatches.length > 0) {
+                const firstBatch = createdBatches[0];
+                const lastBatch = createdBatches[createdBatches.length - 1];
+                db.prepare(`UPDATE cbt_exams SET exam_date = ?, start_time = ?, end_time = ? WHERE id = ?`)
+                  .run(firstBatch.exam_date, firstBatch.start_time, lastBatch.end_time, exam_id);
             }
         })();
 
@@ -709,7 +719,8 @@ module.exports = function registerCBTHandlers(database) {
             id, title, class_name, target_classes, question_count, duration_minutes,
             pass_mark_percentage, exam_date, start_time, end_time,
             shuffle_questions, shuffle_options, allow_mobile_clients,
-            result_release_policy, pc_count, negative_marks, instructions, calculator_type
+            result_release_policy, pc_count, negative_marks, instructions, calculator_type,
+            security_profile, late_entry_cutoff_minutes
         } = examData;
         const db = database.getDb();
         const exam = db.prepare("SELECT * FROM cbt_exams WHERE id = ?").get(id);
@@ -719,6 +730,27 @@ module.exports = function registerCBTHandlers(database) {
             ? (Array.isArray(target_classes) ? JSON.stringify(target_classes) : String(target_classes))
             : exam.target_classes;
 
+        let secProfile = {};
+        try {
+            secProfile = typeof exam.security_profile === 'string'
+                ? JSON.parse(exam.security_profile)
+                : (exam.security_profile || {});
+        } catch (_) {}
+
+        if (security_profile !== undefined) {
+            try {
+                const incoming = typeof security_profile === 'string' ? JSON.parse(security_profile) : security_profile;
+                secProfile = { ...secProfile, ...incoming };
+            } catch (_) {}
+        }
+        if (late_entry_cutoff_minutes !== undefined) {
+            if (late_entry_cutoff_minutes === '' || late_entry_cutoff_minutes === null) {
+                delete secProfile.late_entry_cutoff_minutes;
+            } else {
+                secProfile.late_entry_cutoff_minutes = Number(late_entry_cutoff_minutes) || 0;
+            }
+        }
+
         db.prepare(`
             UPDATE cbt_exams
             SET title = ?, class_name = ?, target_classes = ?,
@@ -726,7 +758,7 @@ module.exports = function registerCBTHandlers(database) {
                 exam_date = ?, start_time = ?, end_time = ?,
                 shuffle_questions = ?, shuffle_options = ?, allow_mobile_clients = ?,
                 result_release_policy = ?, pc_count = ?, negative_marks = ?, instructions = ?,
-                calculator_type = ?
+                calculator_type = ?, security_profile = ?
             WHERE id = ?
         `).run(
             title || exam.title,
@@ -746,6 +778,7 @@ module.exports = function registerCBTHandlers(database) {
             Number(negative_marks) || exam.negative_marks,
             instructions !== undefined ? String(instructions) : exam.instructions,
             calculator_type !== undefined ? calculator_type : (exam.calculator_type || 'none'),
+            JSON.stringify(secProfile),
             id
         );
         return { success: true };

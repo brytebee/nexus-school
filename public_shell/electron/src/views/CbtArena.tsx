@@ -142,6 +142,7 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
   const [deployDeliveryMode, setDeployDeliveryMode] = useState<'on_premises' | 'online'>('on_premises');
   const [deployTargetClasses, setDeployTargetClasses] = useState<string[]>([]);
   const [enforceKiosk, setEnforceKiosk] = useState(true);
+  const [deployLateEntryCutoff, setDeployLateEntryCutoff] = useState('');
   const [releasePolicy, setReleasePolicy] = useState('immediate');
   const [isPromotional, setIsPromotional] = useState(false);
   const [deployBankMode, setDeployBankMode] = useState<'single' | 'composite'>('single');
@@ -1164,7 +1165,8 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
         calculator: deployCalculatorType !== 'none',
         calculator_type: deployCalculatorType,
         kiosk: enforceKiosk,
-        proctoring: enableProctoring
+        proctoring: enableProctoring,
+        late_entry_cutoff_minutes: deployLateEntryCutoff ? Number(deployLateEntryCutoff) : null
       }
     };
 
@@ -1271,13 +1273,20 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
 
   const handleOpenEditExam = (e: React.MouseEvent, ex: any) => {
     e.stopPropagation();
+    let secProfile: any = {};
+    try {
+      secProfile = typeof ex.security_profile === 'string'
+        ? JSON.parse(ex.security_profile)
+        : (ex.security_profile || {});
+    } catch (_) {}
     setEditExamData({
       ...ex,
       duration_minutes: ex.duration_minutes || 60,
       pc_count: ex.pc_count || 30,
       negative_marks: ex.negative_marks || 0,
       instructions: ex.instructions || '',
-      calculator_type: ex.calculator_type || 'none'
+      calculator_type: ex.calculator_type || 'none',
+      late_entry_cutoff_minutes: secProfile.late_entry_cutoff_minutes ? String(secProfile.late_entry_cutoff_minutes) : ''
     });
     setShowEditExamModal(true);
   };
@@ -1298,6 +1307,7 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
         allow_mobile_clients: editExamData.allow_mobile_clients,
         result_release_policy: editExamData.result_release_policy,
         calculator_type: editExamData.calculator_type || 'none',
+        late_entry_cutoff_minutes: editExamData.late_entry_cutoff_minutes !== '' ? Number(editExamData.late_entry_cutoff_minutes) : null,
         exam_date: editExamData.exam_date || null,
         start_time: editExamData.start_time || null,
         end_time: editExamData.end_time || null
@@ -2863,6 +2873,24 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                     <option value="scientific">Scientific & Engineering (Trigonometry, Log, Exponents, π, e)</option>
                   </select>
                 </div>
+
+                <div style={{ gridColumn: 'span 2', marginTop: '6px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                  <label className="ph-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-dim)', display: 'block', marginBottom: '6px' }}>
+                    Late Entry Cutoff (Minutes)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={deployLateEntryCutoff}
+                    onChange={(e) => setDeployLateEntryCutoff(e.target.value)}
+                    placeholder="e.g. 20 (Blank = unrestricted while sitting is active)"
+                    className="modern-input"
+                    style={{ width: '100%', background: '#0d1235', color: '#fff' }}
+                  />
+                  <p style={{ fontSize: '11px', color: 'var(--text-dim)', margin: '4px 0 0 0' }}>
+                    Candidate login is prohibited if arrival is more than N minutes after sitting start. Blank allows login anytime while active.
+                  </p>
+                </div>
               </div>
 
               <h4 style={{ fontSize: '13px', color: 'var(--text-dim)', marginBottom: '10px', marginTop: 0, fontWeight: 500 }}>Release Policy</h4>
@@ -4206,7 +4234,7 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
                   <div>
                     <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Lab Capacity (PCs)</label>
                     <input
@@ -4227,6 +4255,18 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
                       step="0.25"
                       value={editExamData.negative_marks || 0}
                       onChange={e => setEditExamData((d: any) => ({ ...d, negative_marks: parseFloat(e.target.value) || 0 }))}
+                      className="modern-input"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>Late Entry Cutoff (min)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="e.g. 20 (Blank = open)"
+                      value={editExamData.late_entry_cutoff_minutes || ''}
+                      onChange={e => setEditExamData((d: any) => ({ ...d, late_entry_cutoff_minutes: e.target.value }))}
                       className="modern-input"
                       style={{ width: '100%', boxSizing: 'border-box' }}
                     />
