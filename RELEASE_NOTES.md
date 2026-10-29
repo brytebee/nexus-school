@@ -1,3 +1,20 @@
+## What's New in v1.1.98
+
+This release delivers **CBT Security Hardening, Strict DOB 2FA Verification, Submission Resilience, and Auto-Schedule Cascade Protection**.
+
+### 🛡️ CBT Security & Authentication Hardening
+- **Strict DOB 2FA Authentication Guard**: Candidate login now requires a verified Date of Birth registered on their profile. Missing DOB entries are strictly rejected with HTTP 403, preventing blank-DOB 2FA bypass.
+- **Tab-Switch Trap Immunity Plug**: Removed the `window.isModalActive` bypass so anti-cheat tab-switch detection remains active and enforces fullscreen lockdown even when the submission confirmation modal is visible.
+- **Client Submission Resilience**: Preserves answers in local session storage and retries gracefully on transient server network errors without wiping candidate work.
+- **External Candidate Submission Fix**: Resolved SQLite query crash during external candidate submission by replacing invalid column reference with `COALESCE(ec.guardian_phone, '')`.
+
+### ⏱️ CBT Auto-Schedule & Sitting Window Expansion
+- **Cascade Deletion Guard**: Automatically unassigns `batch_id` from candidate tokens before purging old batches, preventing SQLite `ON DELETE CASCADE` from deleting candidate tokens during re-scheduling.
+- **Dynamic Sitting Window Expansion**: Automatically expands the parent exam start and end times to encompass all auto-generated batch schedules.
+- **Late Entry Cutoff Controls**: Added `Late Entry Cutoff (Minutes)` configuration in both Deploy Exam and Edit Exam dialogs to prohibit late logins while exam sittings are active.
+
+---
+
 ## What's New in v1.1.92
 
 This release delivers the **Executive Portal for Superadmin / School Owners, Persistent SQLite PIN Pairing, Universal Device Tracking, and Android Companion v1.0.5**.
