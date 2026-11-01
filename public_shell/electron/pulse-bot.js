@@ -216,7 +216,12 @@ async function startPulse() {
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
           clearStaleLocks(fullPath);
-        } else if (entry.name.startsWith("Singleton") || entry.name === "DevToolsActivePort") {
+        } else if (
+          entry.name.startsWith("Singleton") ||
+          entry.name === "DevToolsActivePort" ||
+          entry.name === "lockfile" ||
+          entry.name.endsWith(".lock")
+        ) {
           try { fs.unlinkSync(fullPath); } catch (_) {}
         }
       }
@@ -224,13 +229,24 @@ async function startPulse() {
   }
   clearStaleLocks(_authPath);
 
+  const MODERN_CHROME_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
   try {
     client = new Client({
       authStrategy: new LocalAuth({ dataPath: _authPath }),
+      userAgent: MODERN_CHROME_UA,
       puppeteer: {
         headless: true,
         executablePath: chromiumPath,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+        protocolTimeout: 120000, // 120 s — prevents Runtime.callFunctionOn timeout on slow machines
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--no-first-run",
+          "--no-default-browser-check",
+          `--user-agent=${MODERN_CHROME_UA}`,
+        ],
       },
     });
 
@@ -928,6 +944,8 @@ async function sendFeeStatus(msg, session, matchable) {
   const fmt = (n) => `₦${Number(n || 0).toLocaleString('en-NG')}`;
 
   let text = `💳 *Fee Status*\n_${termConfig.term}, ${termConfig.academic_session}_\n${DIV}\n\n`;
+  let totalSiblingBalance = 0;
+  const studentDetailsList = [];
 
   for (const student of students) {
     const studentClassNameWithArm = student.class_name + (student.class_arm ? ' ' + student.class_arm : '');
@@ -1004,50 +1022,71 @@ async function sendFeeStatus(msg, session, matchable) {
     text += `   Billed : ${fmt(totalBilled)}\n`;
     text += `   Paid   : ${fmt(totalPaid)}\n`;
 
-    if (!cleared) {
+    if (!cleared && balance > 0) {
+      totalSiblingBalance += balance;
+      studentDetailsList.push({ id: student.id, name: student.name, balance });
       text += `   *Balance: ${fmt(balance)}*\n`;
     }
 
     text += `\n`;
   }
 
-  // Show school bank accounts if configured
-  try {
-    let allowManual = true;
+  if (totalSiblingBalance > 0) {
+    let installmentPlans = [];
+    let allowCustom = true;
     try {
       const settingsRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'fee_settings'`).get();
       const settings = settingsRow ? JSON.parse(settingsRow.value) : {};
-      allowManual = settings.allow_manual_payments !== false;
+      installmentPlans = Array.isArray(settings.installment_plans)
+        ? settings.installment_plans.filter(p => p.label && Number(p.percent) > 0)
+        : [];
+      allowCustom = settings.allow_custom_payments !== false;
     } catch (_) {}
 
-    const accounts = db.prepare("SELECT id, bank_name as bank, account_number as number, account_name as name, paystack_verified FROM bank_accounts WHERE is_active = 1").all();
-    const paystackConnected = db.prepare("SELECT value FROM app_settings WHERE key = 'paystack_connected'").get()?.value === 'true';
-
-    if (paystackConnected) {
-      text += `${DIV}\n💬 *Payment Options*\n\n`;
-      text += `Reply *1* to *Pay Online* securely via Paystack\n`;
-      if (allowManual) {
-        text += `Reply *2* to *Pay via Manual Bank Transfer/Cash*\n\n`;
-      } else {
-        text += `\n`;
+    // Filter plans that have reached max occurrences
+    const activePlans = [];
+    for (const plan of installmentPlans) {
+      const limit = plan.max_occurrences !== undefined ? Number(plan.max_occurrences) : 0;
+      if (limit > 0) {
+        const mLabel = `Milestone: ${plan.label} (${plan.percent}%)`;
+        const countRow = db.prepare(`
+          SELECT COUNT(*) as count 
+          FROM fee_payment_sessions 
+          WHERE parent_phone = ? 
+            AND status = 'settled' 
+            AND payment_type = ?
+        `).get(matchable, mLabel);
+        const count = countRow?.count || 0;
+        if (count >= limit) {
+          continue;
+        }
       }
-      text += `_Reply 0 to return to the main menu_`;
-      session.state = STATE.AWAITING_PAYMENT_OPTION;
-      if (matchable) setSession(matchable, session);
-    } else if (accounts.length && allowManual) {
-      text += `${DIV}\n🏦 *Payment Accounts*\n\n`;
-      accounts.forEach(a => {
-        text += `*${a.bank}*${a.paystack_verified ? ' (✅ Verified)' : ''}\n${a.number} — ${a.name}\n\n`;
-      });
-      text += `${DIV}\n📤 *Submit Proof of Payment*\nReply to this message with a clear *photo or screenshot* of your transfer receipt and our team will verify and update your record.\n\n_Reply 0 to return to the main menu_`;
-      session.state = STATE.AWAITING_RECEIPT;
-      if (matchable) setSession(matchable, session);
-    } else {
-      text += `${DIV}\n_For payment enquiries, please contact the school office._\n_Powered by Nexus Pulse_ 🎓`;
+      activePlans.push(plan);
     }
-  } catch (err) {
-    console.error("[Pulse Bot] sendFeeStatus accounts error:", err);
-    text += `${DIV}\n_For payment enquiries, please contact the school office._\n_Powered by Nexus Pulse_ 🎓`;
+
+    text += `${DIV}\n💳 *Total Sibling Balance: ${fmt(totalSiblingBalance)}*\n\n`;
+    text += `💬 *Payment Options*\n\n`;
+    text += `Reply *1* to *Pay in Full* (${fmt(totalSiblingBalance)})\n`;
+    if (activePlans.length > 0) {
+      text += `Reply *2* to *Choose a Part Payment Milestone*\n`;
+    }
+    if (allowCustom) {
+      text += `Reply *9* for *Custom Amount*\n`;
+    }
+    text += `\n_Reply 0 to return to the main menu_`;
+
+    session.paymentContext = {
+      studentDetails: studentDetailsList,
+      totalBalance: totalSiblingBalance,
+      activePlans: activePlans
+    };
+    session.state = STATE.AWAITING_ONLINE_OPTION;
+    if (matchable) setSession(matchable, session);
+  } else {
+    text += `${DIV}\n✅ *All sibling accounts are fully cleared!*\n\n`;
+    text += `_Reply 0 to return to the main menu_`;
+    session.state = STATE.MENU;
+    if (matchable) setSession(matchable, session);
   }
 
   await msg.reply(text);
@@ -1171,7 +1210,14 @@ async function sendOptionalExtras(msg, session, matchable) {
   }
 
   const selectableExtras = Array.from(availableExtrasMap.values());
-  const paystackConnected = db.prepare("SELECT value FROM app_settings WHERE key = 'paystack_connected'").get()?.value === 'true';
+  const paystackConnected = (() => {
+    try {
+      const val = db.prepare("SELECT value FROM app_settings WHERE key = 'paystack_connected'").get()?.value;
+      if (val === 'true') return true;
+      const acc = db.prepare("SELECT subaccount_code FROM bank_accounts WHERE is_active = 1 AND subaccount_code IS NOT NULL LIMIT 1").get();
+      return !!acc?.subaccount_code;
+    } catch (_) { return false; }
+  })();
 
   if (paystackConnected && selectableExtras.length > 0) {
     text += `${DIV}\n💳 *Pay Online for Optional Extras*\n\n`;
@@ -2092,22 +2138,22 @@ async function handleMessage(msg) {
     const platformFeeStr = formatNaira(breakdown.platformFeeNaira);
     let channelMsg = `💳 *Choose Payment Method for ${formatNaira(txContext.amount)}*\n${DIV}\n\n`;
     if (breakdown.cheapestChannel === 'bank_transfer') {
-      channelMsg += `Reply *1* for *Instant Bank Transfer / USSD* 🟢 *(Cheapest · Save ${formatNaira(breakdown.savingsNaira)})*\n`;
-      channelMsg += `   • Platform Fee (0.99%): ${platformFeeStr}\n`;
-      channelMsg += `   • Network Fee: ${formatNaira(breakdown.transfer.gatewayFeeNaira)}\n`;
+      channelMsg += `Reply *1* for *Instant Bank Transfer* 🟢 *(Cheapest · Save ${formatNaira(breakdown.savingsNaira)})*\n`;
+      channelMsg += `   • Platform Fee (1%): ${platformFeeStr}\n`;
+      channelMsg += `   • Transfer Fee (DVA 1%): ${formatNaira(breakdown.transfer.gatewayFeeNaira)}\n`;
       channelMsg += `   • Total to Pay: *${formatNaira(breakdown.transfer.grossNaira)}*\n\n`;
       channelMsg += `Reply *2* for *Debit / Credit Card*\n`;
-      channelMsg += `   • Platform Fee (0.99%): ${platformFeeStr}\n`;
-      channelMsg += `   • Gateway Fee: ${formatNaira(breakdown.card.gatewayFeeNaira)}\n`;
+      channelMsg += `   • Platform Fee (1%): ${platformFeeStr}\n`;
+      channelMsg += `   • Card Fee: ${formatNaira(breakdown.card.gatewayFeeNaira)}\n`;
       channelMsg += `   • Total to Pay: *${formatNaira(breakdown.card.grossNaira)}*\n\n`;
     } else {
       channelMsg += `Reply *1* for *Debit / Credit Card* 🟢 *(Cheapest · Save ${formatNaira(breakdown.savingsNaira)})*\n`;
-      channelMsg += `   • Platform Fee (0.99%): ${platformFeeStr}\n`;
-      channelMsg += `   • Gateway Fee: ${formatNaira(breakdown.card.gatewayFeeNaira)}\n`;
+      channelMsg += `   • Platform Fee (1%): ${platformFeeStr}\n`;
+      channelMsg += `   • Card Fee: ${formatNaira(breakdown.card.gatewayFeeNaira)}\n`;
       channelMsg += `   • Total to Pay: *${formatNaira(breakdown.card.grossNaira)}*\n\n`;
-      channelMsg += `Reply *2* for *Instant Bank Transfer / USSD*\n`;
-      channelMsg += `   • Platform Fee (0.99%): ${platformFeeStr}\n`;
-      channelMsg += `   • Network Fee: ${formatNaira(breakdown.transfer.gatewayFeeNaira)}\n`;
+      channelMsg += `Reply *2* for *Instant Bank Transfer*\n`;
+      channelMsg += `   • Platform Fee (1%): ${platformFeeStr}\n`;
+      channelMsg += `   • Transfer Fee (DVA 1%): ${formatNaira(breakdown.transfer.gatewayFeeNaira)}\n`;
       channelMsg += `   • Total to Pay: *${formatNaira(breakdown.transfer.grossNaira)}*\n\n`;
     }
     channelMsg += `_Reply 0 to cancel and return to main menu_`;
@@ -2251,10 +2297,10 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
         gateway_channel:       chosenChannel,
         gross_amount:          grossNaira,
         custom_fields: [
-          { display_name: 'School Fee',                    variable_name: 'base_amount',   value: formatNaira(amount) },
-          { display_name: 'Platform Enabling Fee (0.99%)', variable_name: 'platform_fee',  value: formatNaira(platformFeeNaira) },
-          { display_name: isCard ? 'Card Gateway Fee' : 'Network (NIP) Fee', variable_name: 'gateway_fee', value: formatNaira(gatewayFeeNaira) },
-          { display_name: 'Total Charged',                 variable_name: 'gross',         value: formatNaira(grossNaira) },
+          { display_name: 'School Fee',                  variable_name: 'base_amount',   value: formatNaira(amount) },
+          { display_name: 'Platform Enabling Fee (1%)',  variable_name: 'platform_fee',  value: formatNaira(platformFeeNaira) },
+          { display_name: isCard ? 'Card Gateway Fee' : 'Bank Transfer Fee', variable_name: 'gateway_fee', value: formatNaira(gatewayFeeNaira) },
+          { display_name: 'Total Charged',               variable_name: 'gross',         value: formatNaira(grossNaira) },
         ]
       }
     });
@@ -2269,16 +2315,16 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
       `).run(matchable, studentIds, amount, paymentType, percentage, reference, tx.access_code);
 
       // Show full itemised breakdown so the parent is never surprised
-      const channelLabel = isCard ? '💳 Debit / Credit Card' : '🏦 Bank Transfer / USSD';
+      const channelLabel = isCard ? '💳 Debit / Credit Card' : '🏦 Direct Bank Transfer';
       let payLinkMsg = `🔗 *Secure Checkout Link*\n\n`;
       payLinkMsg += `Plan: *${paymentType}*\n`;
       payLinkMsg += `Payment Method: *${channelLabel}*\n`;
       payLinkMsg += `─────────────────────────\n`;
-      payLinkMsg += `School Fee:                   *${formatNaira(amount)}*\n`;
-      payLinkMsg += `Platform Enabling Fee (0.99%): *${formatNaira(platformFeeNaira)}*\n`;
-      payLinkMsg += `${isCard ? 'Card Gateway Fee' : 'Network (NIP) Fee'}:        *${formatNaira(gatewayFeeNaira)}*\n`;
+      payLinkMsg += `School Fee:                 *${formatNaira(amount)}*\n`;
+      payLinkMsg += `Platform Enabling Fee (1%): *${formatNaira(platformFeeNaira)}*\n`;
+      payLinkMsg += `${isCard ? 'Card Gateway Fee' : 'Bank Transfer Fee'}:        *${formatNaira(gatewayFeeNaira)}*\n`;
       payLinkMsg += `─────────────────────────\n`;
-      payLinkMsg += `Total to Pay:                 *${formatNaira(grossNaira)}*\n\n`;
+      payLinkMsg += `Total to Pay:               *${formatNaira(grossNaira)}*\n\n`;
       payLinkMsg += `Click the link below to complete your payment:\n`;
       payLinkMsg += `${tx.authorization_url}\n\n`;
       payLinkMsg += `_Once payment is successful, your school records will update automatically._`;

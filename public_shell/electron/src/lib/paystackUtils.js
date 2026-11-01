@@ -3,40 +3,31 @@
  * src/lib/paystackUtils.js
  *
  * Pure utility for Paystack Nigeria transaction fee calculations.
- * This module is shared by pulse-bot.js (checkout link generation),
- * main.js (optional reference), and the test suite.
+ * Shared by pulse-bot.js (checkout link generation), main.js, and the test suite.
  *
- * Paystack Nigeria local-card fee structure (as of 2025):
- *   - 1.5 % of the transaction amount
- *   - + ₦100 flat fee for transactions ≥ ₦2,500
- *   - Maximum fee: ₦2,000
+ * Paystack Nigeria fee structure:
+ *   - Platform Enabling Fee: 1.0% of base amount, capped at ₦1,500 (150,000 kobo)
+ *   - Dedicated Virtual Account (DVA) / Bank Transfer: 1.0% of transaction amount, capped at ₦300 (30,000 kobo)
+ *   - Local Card Processing Fee: 1.5% (+ ₦100 for ≥ ₦2,500), capped at ₦2,000 (200,000 kobo)
  *
  * Design goal: pass-through pricing.
- * The school registers a base amount (what they want to receive).
- * We calculate the GROSS amount the parent must pay so that after
- * Paystack deducts its fee, the school's subaccount receives exactly
- * the base amount.  The fee is therefore borne by the parent.
- *
- * The school ledger (fee_transactions, student_fees) records only the
- * base amount.  The gross and charge are stored in Paystack metadata
- * for full transparency without distorting the school's books.
+ * School receives 100% of the base fee intact.
+ * Platform receives 1% enabling fee (capped at ₦1,500).
+ * Parent pays gross-up based on their selected payment method.
  */
+
+const MAX_PLATFORM_FEE_KOBO = 150000; // ₦1,500 cap
+const MAX_CARD_FEE_KOBO     = 200000; // ₦2,000 cap
+const MAX_DVA_FEE_KOBO      = 30000;  // ₦300 cap
+const FLAT_NIP_FEE_KOBO     = 15000;  // Legacy ₦150 NIP fee (retained for backward compatibility)
+const CARD_WAIVER_THRESHOLD = 246250; // ~₦2,462.50 net threshold for gross < ₦2,500
 
 /**
  * Calculates the gross amount a parent must pay so the school receives
- * exactly `baseAmount` after Paystack deducts its standard transaction fee.
- *
- * Derivation (for the standard ₦100-flat tier):
- *   fee    = gross × 0.015 + 100
- *   gross  = fee + base
- *   gross  = gross × 0.015 + 100 + base
- *   gross  × 0.985 = base + 100
- *   gross  = (base + 100) / 0.985
+ * exactly `baseAmount` after Paystack deducts its standard card transaction fee.
  *
  * @param {number} baseAmount - Amount the school should receive (Naira, not kobo)
  * @returns {{ gross: number, charge: number }}
- *   gross  — total the parent pays (pass to Paystack `amount` × 100 for kobo)
- *   charge — Paystack processing fee borne by the parent (= gross − base)
  */
 function calculatePaystackCharge(baseAmount) {
   const base = Number(baseAmount) || 0;
@@ -72,48 +63,59 @@ function formatNaira(amount) {
 }
 
 /**
- * Calculates the full fee breakdown for both Card and Bank Transfer / USSD channels,
+ * Calculates the full fee breakdown for both DVA (Bank Transfer) and Card channels,
  * identifying which is cheaper and by how much. Mirrors the cloud fee-calculator engine.
- *
- * Paystack Nigeria rules (as of 2025):
- *   Card: 1.5% of gross-before-gateway; + ₦100 flat if gross ≥ ₦2,500; max ₦2,000
- *   Bank Transfer / USSD: flat ₦150 NIP fee
- *   Platform Enabling Fee: 0.99% of base, capped at ₦1,500
- *   Crossover: Card cheaper below ~₦3,333; Transfer cheaper above.
  *
  * @param {number} amountNaira  - Base fee amount in Naira
  * @returns {object}            - Full breakdown object
  */
 function calculatePaymentBreakdown(amountNaira) {
-  const MAX_PLATFORM_FEE_KOBO = 150000; // ₦1,500 cap
-  const MAX_CARD_FEE_KOBO     = 200000; // ₦2,000 cap
-  const FLAT_NIP_FEE_KOBO     = 15000;  // ₦150 NIP fee
-  const CARD_WAIVER_THRESHOLD = 250000; // ₦2,500 threshold (kobo)
-
   const baseKobo = Math.max(0, Math.round(amountNaira * 100));
 
-  const platformFeeKobo = Math.min(MAX_PLATFORM_FEE_KOBO, Math.round(baseKobo * 0.0099));
+  // Platform enabling fee: 1.0% capped at ₦1,500
+  const platformFeeKobo = Math.min(MAX_PLATFORM_FEE_KOBO, Math.round(baseKobo * 0.01));
   const platformFeeNaira = platformFeeKobo / 100;
 
   const grossBeforeGatewayKobo = baseKobo + platformFeeKobo;
 
-  // Card gateway fee
+  // Card gateway fee (1.5% + ₦100, capped at ₦2,000)
   let cardFeeKobo;
   if (grossBeforeGatewayKobo < CARD_WAIVER_THRESHOLD) {
-    cardFeeKobo = Math.round(grossBeforeGatewayKobo * 0.015);
+    const gross = Math.ceil(grossBeforeGatewayKobo / 0.985);
+    cardFeeKobo = gross - grossBeforeGatewayKobo;
   } else {
-    cardFeeKobo = Math.min(MAX_CARD_FEE_KOBO, Math.round(grossBeforeGatewayKobo * 0.015) + 10000);
+    const gross = Math.ceil((grossBeforeGatewayKobo + 10000) / 0.985);
+    const uncappedFee = gross - grossBeforeGatewayKobo;
+    cardFeeKobo = Math.min(MAX_CARD_FEE_KOBO, uncappedFee);
   }
 
-  // Transfer / USSD fee
-  const transferFeeKobo = FLAT_NIP_FEE_KOBO;
+  // DVA / Bank Transfer fee (1.0%, capped at ₦300)
+  const uncappedDvaGross = Math.ceil(grossBeforeGatewayKobo / 0.99);
+  const uncappedDvaFee = uncappedDvaGross - grossBeforeGatewayKobo;
+  const dvaFeeKobo = Math.min(MAX_DVA_FEE_KOBO, uncappedDvaFee);
 
   const cardGrossKobo     = grossBeforeGatewayKobo + cardFeeKobo;
-  const transferGrossKobo = grossBeforeGatewayKobo + transferFeeKobo;
+  const dvaGrossKobo      = grossBeforeGatewayKobo + dvaFeeKobo;
 
-  const isCardCheaper    = cardFeeKobo < transferFeeKobo;
-  const cheapestChannel  = isCardCheaper ? 'card' : 'bank_transfer';
-  const savingsNaira     = Math.abs(cardFeeKobo - transferFeeKobo) / 100;
+  const isDvaCheaper     = dvaFeeKobo <= cardFeeKobo;
+  const cheapestChannel  = isDvaCheaper ? 'bank_transfer' : 'card';
+  const savingsNaira     = Math.abs(cardFeeKobo - dvaFeeKobo) / 100;
+
+  const dvaQuote = {
+    gatewayFeeKobo: dvaFeeKobo,
+    gatewayFeeNaira: dvaFeeKobo / 100,
+    grossKobo: dvaGrossKobo,
+    grossNaira: dvaGrossKobo / 100,
+    isCheapest: isDvaCheaper,
+  };
+
+  const cardQuote = {
+    gatewayFeeKobo: cardFeeKobo,
+    gatewayFeeNaira: cardFeeKobo / 100,
+    grossKobo: cardGrossKobo,
+    grossNaira: cardGrossKobo / 100,
+    isCheapest: !isDvaCheaper,
+  };
 
   return {
     baseKobo,
@@ -123,21 +125,18 @@ function calculatePaymentBreakdown(amountNaira) {
     grossBeforeGatewayKobo,
     cheapestChannel,
     savingsNaira,
-    card: {
-      gatewayFeeKobo: cardFeeKobo,
-      gatewayFeeNaira: cardFeeKobo / 100,
-      grossKobo: cardGrossKobo,
-      grossNaira: cardGrossKobo / 100,
-      isCheapest: isCardCheaper,
-    },
-    transfer: {
-      gatewayFeeKobo: transferFeeKobo,
-      gatewayFeeNaira: transferFeeKobo / 100,
-      grossKobo: transferGrossKobo,
-      grossNaira: transferGrossKobo / 100,
-      isCheapest: !isCardCheaper,
-    },
+    card: cardQuote,
+    dva: dvaQuote,
+    transfer: dvaQuote, // Aliased to dva for 100% backward compatibility
   };
 }
 
-module.exports = { calculatePaystackCharge, calculatePaymentBreakdown, formatNaira };
+module.exports = {
+  calculatePaystackCharge,
+  calculatePaymentBreakdown,
+  formatNaira,
+  MAX_PLATFORM_FEE_KOBO,
+  MAX_CARD_FEE_KOBO,
+  MAX_DVA_FEE_KOBO,
+  FLAT_NIP_FEE_KOBO,
+};

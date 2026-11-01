@@ -64,6 +64,10 @@ async function initializeTransaction(params) {
     callback_url: params.callbackUrl,
     metadata: params.metadata,
   };
+
+  if (params.channels && Array.isArray(params.channels)) {
+    body.channels = params.channels;
+  }
   
   if (params.subaccountCode) {
     body.subaccount = params.subaccountCode;
