@@ -1,3 +1,24 @@
+## What's New in v1.1.99
+
+This release delivers **Direct WhatsApp Fee Payment Flow, DVA Savings Engine, and Puppeteer Stability Hardening**.
+
+### 💳 Direct WhatsApp Fee Payments & Sibling Aggregation
+- **Unified Sibling Balance & Payment Options**: Nexus Pulse now aggregates balances across all enrolled siblings for a guardian and directly surfaces **Pay in Full**, **Milestone**, and **Custom Amount** payment paths.
+- **Removed Dead-End Portal Redirection**: Eliminated fallback "For payment enquiries..." and external web portal links from the fee inquiry flow, keeping parent interactions self-contained in WhatsApp.
+- **Dynamic Payment Routing**: Supports direct bank transfer virtual accounts (DVA) and card payments with transparent fee breakdowns.
+
+### 💰 Paystack Fee Engine & DVA Savings
+- **1.0% Platform Enabling Fee**: Fair 1.0% platform fee calculation strictly capped at ₦1,500 across all fee brackets.
+- **Direct Bank Transfer (DVA) Fee**: 1.0% gateway fee capped at ₦300, providing significant savings over traditional card payments (1.5% + ₦100 capped at ₦2,000).
+- **Subaccount & Channel Splitting**: Properly structures `channels: ['bank_transfer', 'card']` and `transaction_charge` payloads while preserving exact base tuition credit for the school ledger.
+
+### 🤖 Nexus Pulse Puppeteer Stability
+- **Eliminated `TargetCloseError` & Timeout Crashes**: Modernized headless Chrome launch parameters by stripping incompatible flags (`--disable-background-networking`, `--disable-gpu`) that severed Chrome DevTools Protocol (CDP) WebSocket sessions.
+- **Modern Desktop User-Agent**: Configured genuine Chrome/131 User-Agent string to prevent WhatsApp Web headless bot detection and infinite initialization loops.
+- **Singleton Lock Cleanup**: Enhanced pre-launch cleanup to purge all stale `Singleton*` lock files and DevTools socket ports on restart.
+
+---
+
 ## What's New in v1.1.98
 
 This release delivers **CBT Security Hardening, Strict DOB 2FA Verification, Submission Resilience, and Auto-Schedule Cascade Protection**.
