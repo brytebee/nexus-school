@@ -8543,6 +8543,30 @@ function createWindow() {
   const portalSessions = new Map(); // phone -> { pin, expiry, students }
   const activeTokens = new Map();   // token -> { phone, expiry, students }
 
+  // Periodic memory sweep: evict expired portal sessions, active tokens, and rate limits
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, s] of portalSessions.entries()) {
+      if (s.expiry && now > s.expiry) portalSessions.delete(key);
+    }
+    for (const [token, s] of activeTokens.entries()) {
+      if (s.expiry && now > s.expiry) activeTokens.delete(token);
+    }
+    for (const [key, limit] of otpRateLimits.entries()) {
+      if (limit.resetAt && now > limit.resetAt) otpRateLimits.delete(key);
+    }
+  }, 15 * 60 * 1000);
+
+  // Security headers & CORS policy for local network portal
+  portalApp.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-requested-with');
+    if (req.method === 'OPTIONS') return res.sendStatus(200);
+    next();
+  });
+
   // Broadcast the portal on the local network
   function startPortalBroadcaster() {
     const schoolName = identityPacket.name || "Nexus";
@@ -8597,75 +8621,93 @@ function createWindow() {
     const now = Date.now();
     const hourLimit = 60 * 60 * 1000;
 
-    // Check rate limit
-    let limitData = otpRateLimits.get(ip);
+    const { phone } = req.body;
+    if (!phone) return res.json({ ok: false, error: 'Phone number required' });
+
+    const matchable = phone.replace(/\D/g, "").slice(-10);
+    // Rate limit per phone number + client IP so campus Wi-Fi users (NAT) do not block each other
+    const rateLimitKey = `${matchable}_${ip}`;
+    let limitData = otpRateLimits.get(rateLimitKey);
     if (!limitData || limitData.resetAt < now) {
       limitData = { count: 0, resetAt: now + hourLimit };
     }
     if (limitData.count >= 5) {
-      return res.json({ ok: false, error: 'Rate limit exceeded. Please try again in an hour.' });
+      return res.json({ ok: false, error: 'Rate limit exceeded for this phone number. Please try again in an hour.' });
     }
     limitData.count++;
-    otpRateLimits.set(ip, limitData);
-
-    const { phone } = req.body;
-    if (!phone) return res.json({ ok: false, error: 'Phone number required' });
+    otpRateLimits.set(rateLimitKey, limitData);
 
     try {
       const db = database.getDb();
-      const matchable = phone.replace(/\D/g, "").slice(-10);
+
+      // Robust phone lookup matching both parent_phone and parent_phone_2 with digit normalisation
+      const students = pulseBot.findStudentsByPhone ? pulseBot.findStudentsByPhone(db, matchable) : [];
+      const matchedStudents = students.length ? students : db.prepare("SELECT id, name, class_name FROM students WHERE parent_phone LIKE ?").all(`%${matchable}`);
+
+      if (!matchedStudents.length) {
+        return res.json({
+          ok: false,
+          error: `No students found for this number. Ensure it matches the number registered at the school (last 10 digits used: ${matchable}).`
+        });
+      }
 
       // Generate a real random 4-digit PIN
       const pin = Math.floor(1000 + Math.random() * 9000).toString();
       const expiry = Date.now() + (12 * 60 * 60 * 1000); // 12 Hours
 
-      // Query WhatsApp bot status first
-      let botActive = false;
+      // Query both Local Bot and Cloud Bot statuses
+      let localBotReady = false;
       try {
         const botStatus = await pulseBot.getPulseStatus();
         if (botStatus && botStatus.status === 'ready') {
-          botActive = true;
+          localBotReady = true;
         }
       } catch (e) {
         console.error("[Portal] Failed to query bot status:", e);
       }
 
+      const cloudBotActive = pulseBot.isCloudBotActive?.() || false;
+      const botActive = localBotReady || cloudBotActive;
+
       if (botActive) {
-        const students = db.prepare("SELECT id, name, class_name FROM students WHERE parent_phone LIKE ?").all(`%${matchable}`);
-        if (!students.length) {
-          return res.json({
-            ok: false,
-            error: `No students found for this number. Ensure it matches the number registered at the school (last 10 digits used: ${matchable}).`
-          });
-        }
-
         console.log(`[Sovereign Portal] Generated auth PIN: ${pin} for phone: ${phone} (matchable: ${matchable})`);
-        portalSessions.set(matchable, { pin, expiry, students });
+        portalSessions.set(matchable, { pin, expiry, students: matchedStudents });
 
-        try {
-          await pulseBot.sendOTP(phone, pin, identityPacket.name || "Nexus School");
-          return res.json({ ok: true, message: 'OTP sent via WhatsApp' });
-        } catch (e) {
-          console.error("[Portal] WhatsApp direct send failed. Queueing message...", e);
+        if (localBotReady) {
+          try {
+            await pulseBot.sendOTP(phone, pin, identityPacket.name || "Nexus School");
+            return res.json({ ok: true, message: 'OTP sent via WhatsApp' });
+          } catch (e) {
+            console.error("[Portal] Local WhatsApp direct send failed. Queueing message...", e);
+            try {
+              db.prepare(`
+                INSERT INTO pending_pulse_messages (phone, message, type)
+                VALUES (?, ?, 'otp')
+              `).run(phone, `Nexus Portal Login PIN: ${pin}`);
+              return res.json({ ok: true, message: 'WhatsApp message queued. Please ensure Nexus Pulse is online.' });
+            } catch (queueErr) {
+              console.error("[Portal] Failed to queue message:", queueErr);
+              return res.json({ ok: false, error: 'Failed to send or queue OTP message.' });
+            }
+          }
+        } else if (cloudBotActive) {
+          // Cloud Bot is active — queue to pending messages for sync-worker dispatch
           try {
             db.prepare(`
               INSERT INTO pending_pulse_messages (phone, message, type)
               VALUES (?, ?, 'otp')
             `).run(phone, `Nexus Portal Login PIN: ${pin}`);
-            return res.json({ ok: true, message: 'WhatsApp direct delivery failed. Message queued. Please ensure Nexus Pulse is online.' });
-          } catch (queueErr) {
-            console.error("[Portal] Failed to queue message:", queueErr);
-            return res.json({ ok: false, error: 'Failed to send or queue OTP message.' });
+            return res.json({ ok: true, message: 'OTP dispatched via Nexus Cloud Assistant.' });
+          } catch (cloudErr) {
+            console.error("[Portal] Cloud bot message queue failed:", cloudErr);
+            return res.json({ ok: false, error: 'Failed to queue message for Cloud WhatsApp assistant.' });
           }
         }
       } else {
         // Bot is not active
         if (process.env.DEV_MODE === 'true' && process.env.DEV_PORTAL_BYPASS !== 'false') {
-          const devStudents = db.prepare("SELECT id, name, class_name FROM students WHERE parent_phone LIKE ? OR parent_phone IS NULL OR parent_phone = ''").all(`%${matchable}`);
-          const fallback = devStudents.length ? devStudents : db.prepare("SELECT id, name, class_name FROM students LIMIT 2").all();
-          
           console.log(`[Sovereign Portal] [DEV_MODE] Bypassing OTP with PIN 0000 for phone: ${phone} (matchable: ${matchable})`);
-          portalSessions.set(matchable, { pin: '0000', expiry: Date.now() + 60 * 60 * 1000, students: fallback });
+          portalSessions.set(matchable, { pin: '0000', expiry: Date.now() + 60 * 60 * 1000, students: matchedStudents });
           return res.json({ ok: true, message: '[DEV_MODE] Portal PIN is 0000 — WhatsApp bypassed' });
         } else {
           return res.json({
@@ -8716,8 +8758,8 @@ function createWindow() {
       return res.json({ ok: true, students: session.students });
     }
 
-    // Ensure student belongs to this parent
-    if (studentId && !session.students.find(s => s.id === studentId)) {
+    // Ensure student belongs to this parent (coerce types so integer IDs from SQLite match string query params)
+    if (studentId && !session.students.find(s => String(s.id) === String(studentId))) {
       return res.status(403).json({ ok: false, error: 'Access denied' });
     }
 
@@ -8948,7 +8990,7 @@ function createWindow() {
       const tokenRecord = activeTokens.get(token);
       if (!tokenRecord || Date.now() > tokenRecord.expiry)
         return res.status(401).json({ ok: false, error: 'Session expired. Please log in again.' });
-      if (!tokenRecord.students.some(s => s.id === studentId))
+      if (!tokenRecord.students.some(s => String(s.id) === String(studentId)))
         return res.status(403).json({ ok: false, error: 'Unauthorised.' });
       // ~2MB base64 cap (base64 is ~4/3 of binary size)
       const maxB64 = Math.ceil(2 * 1024 * 1024 * 1.4);

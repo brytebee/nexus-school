@@ -2482,11 +2482,31 @@ module.exports = {
   isCloudBotActive: () => _cloudBotActive,
   sendOTP: async (phone, pin, schoolName) => {
     if (!client || !isReady) throw new Error("WhatsApp bot not ready");
+    if (client.pupPage?.isClosed()) {
+      isReady = false;
+      destroyPulse();
+      throw new Error('WhatsApp is reconnecting after a page reload. Please wait 30 seconds and try again.');
+    }
     // Normalize phone to E.164 robustly
     let target = phone.replace(/\D/g, "");
     if (target.length === 10) target = "234" + target;
     else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
     if (!target.includes("@c.us")) target += "@c.us";
+
+    await ensureLidSafetyPatch(client);
+
+    try {
+      const numberId = await client.getNumberId(target);
+      // NEVER overwrite with @lid — whatsapp-web.js requires @c.us for 1-on-1 sends
+      if (numberId?._serialized && !numberId._serialized.includes('@lid')) {
+        target = numberId._serialized;
+      }
+    } catch (_) {}
+
+    // Pre-warm the chat/contact in WhatsApp Web store
+    try {
+      await client.getChatById(target);
+    } catch (_) {}
     
     const message = `🔐 *Nexus Security Challenge*\n\nYour access PIN for *${schoolName}* is: *${pin}*\n\nThis PIN is valid for 12 hours. Do not share this code with anyone.`;
     await client.sendMessage(target, message);

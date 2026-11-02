@@ -278,6 +278,7 @@
             <div class="card">
                 <h2>Security Challenge</h2>
                 <p class="subtitle" id="pin-subtitle">We've sent a 4-digit PIN to your WhatsApp.</p>
+                <div id="pin-status-banner" style="display:none; margin: 12px 0; padding: 10px 14px; border-radius: 10px; font-size: 13px; font-weight: 600; text-align: center;"></div>
                 <div class="input-group">
                     <label>Enter 4-Digit PIN</label>
                     <input type="number" id="input-pin" maxlength="4" placeholder="0 0 0 0"
@@ -472,6 +473,27 @@
                     if (res.ok) {
                         state.phone = raw;
                         showView('pin');
+                        const banner = el('pin-status-banner');
+                        if (banner && res.message) {
+                            banner.style.display = 'block';
+                            if (res.message.includes('[DEV_MODE]') || res.message.includes('bypassed')) {
+                                banner.style.background = '#fef3c7';
+                                banner.style.border = '1px solid #f59e0b';
+                                banner.style.color = '#92400e';
+                                banner.textContent = '🔑 ' + res.message;
+                                if (DOM.pin) DOM.pin.value = '0000';
+                            } else if (res.message.includes('queued')) {
+                                banner.style.background = '#e0f2fe';
+                                banner.style.border = '1px solid #38bdf8';
+                                banner.style.color = '#0369a1';
+                                banner.textContent = '⏳ ' + res.message;
+                            } else {
+                                banner.style.background = '#f0fdf4';
+                                banner.style.border = '1px solid #4ade80';
+                                banner.style.color = '#15803d';
+                                banner.textContent = '✅ ' + res.message;
+                            }
+                        }
                         setTimeout(() => { if (DOM.pin) DOM.pin.focus(); }, 150);
                     } else {
                         showToast(res.error || 'Number not found. Check the number registered at school.');
