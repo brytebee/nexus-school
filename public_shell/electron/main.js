@@ -477,7 +477,12 @@ ipcMain.handle("cloud-pulse:init-bot", async () => {
 
 ipcMain.handle("cloud-pulse:get-status", async () => {
   const db = database.getDb();
-  if (db) return syncWorker.checkCloudBotStatus(db);
+  if (db) {
+    const status = await syncWorker.checkCloudBotStatus(db);
+    pulseBot.setCloudBotActive?.(status?.status === 'connected');
+    return status;
+  }
+  pulseBot.setCloudBotActive?.(false);
   return { status: 'offline' };
 });
 
@@ -491,6 +496,7 @@ ipcMain.on("cloud-pulse:request-qr", async () => {
 ipcMain.handle("cloud-pulse:reset-bot", async () => {
   const db = database.getDb();
   if (!db) return { ok: false, error: 'Database uninitialized' };
+  pulseBot.setCloudBotActive?.(false);
   return syncWorker.requestCloudBotReset(db);
 });
 
@@ -558,6 +564,19 @@ ipcMain.once("ui-ready", () => {
     console.error('[AUTOSTART-DIAG] ✗ Auto-start threw:', err.message);
     console.error(err.stack);
   }
+
+  // Proactively check cloud bot status on startup and keep pulse-bot guard aligned
+  const syncCloudStatus = async () => {
+    try {
+      const db = database.getDb();
+      if (db) {
+        const cloudStatus = await syncWorker.checkCloudBotStatus(db);
+        pulseBot.setCloudBotActive?.(cloudStatus?.status === 'connected');
+      }
+    } catch (_) {}
+  };
+  syncCloudStatus();
+  setInterval(syncCloudStatus, 60000);
 });
 
   ipcMain.handle("database:backup", async () => {

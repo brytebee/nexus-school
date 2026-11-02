@@ -28,6 +28,7 @@ let isReady         = false;
 let qrCodeData      = null;
 let _authPath       = null; // set when startPulse() runs
 let _initInProgress = false; // true while client.initialize() is pending
+let _cloudBotActive = false; // true when cloud VPS bot is connected and handling replies
 
 // ─── Conversation Session Manager ─────────────────────────────────────────────
 // Key: last-10-digit phone string  |  Value: Session object
@@ -1369,6 +1370,15 @@ async function handleMessage(msg) {
     console.error("[Pulse Bot] Failed to log incoming message to inbox:", dbErr);
   }
 
+  // ── Cloud Bot Active Guard ──────────────────────────────────────────────────
+  // If the cloud VPS bot is connected and active on the same WhatsApp account,
+  // it owns all inbound replies. We already logged the incoming message above
+  // for the desktop admin inbox UI, so exit early before sending any reply.
+  if (_cloudBotActive) {
+    console.log(`[Pulse Bot] Cloud bot is active — skipping local reply for ${matchable}`);
+    return;
+  }
+
   // ── Any non-numeric input OR new session → evaluate intent or show main menu ─
   // Exception: states that expect free-text input must bypass this gate so the
   // parent's typed email / custom amount reaches the correct handler below.
@@ -2465,6 +2475,11 @@ module.exports = {
     if (qrCodeData) return { status: "qr", data: qrCodeData };
     return { status: "starting" };
   },
+  setCloudBotActive: (active) => {
+    _cloudBotActive = !!active;
+    console.log(`[Pulse Bot] Cloud bot active status updated: ${_cloudBotActive}`);
+  },
+  isCloudBotActive: () => _cloudBotActive,
   sendOTP: async (phone, pin, schoolName) => {
     if (!client || !isReady) throw new Error("WhatsApp bot not ready");
     // Normalize phone to E.164 robustly

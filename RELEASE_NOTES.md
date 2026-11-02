@@ -1,3 +1,15 @@
+## What's New in v1.2.0
+
+This release delivers **Cloud Bot Co-Existence Guard, Pulse State Conflict Prevention, and Outbound Alert Hardening**.
+
+### 🤖 Nexus Pulse Dual-Bot Co-Existence & Reply Guard
+- **Automated Cloud Bot Active Detection**: When the cloud VPS bot is connected and active on the school's WhatsApp account, the local Electron bot automatically suppresses its own automated conversation replies while continuing to record incoming parent inquiries into the admin desktop inbox.
+- **Eliminated Spurious State Responses**: Prevents concurrent duplicate responses (e.g. term selection prompts or attendance digests firing alongside custom fee payment prompts) caused by independent session state machines on the same WhatsApp account.
+- **Proactive Cloud Status Synchronization**: Synchronizes cloud bot connection status on desktop application startup and maintains periodic 60-second background alignment, instantly restoring local bot reply functionality if the cloud bot disconnects.
+- **Preserved Outgoing Direct Alerts**: Unrestricted direct outbound delivery for automated fee reminders, attendance absence notifications, security challenge OTPs, and manual staff messages.
+
+---
+
 ## What's New in v1.1.99
 
 This release delivers **Direct WhatsApp Fee Payment Flow, DVA Savings Engine, and Puppeteer Stability Hardening**.
