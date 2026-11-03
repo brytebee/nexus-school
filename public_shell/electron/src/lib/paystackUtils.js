@@ -131,9 +131,27 @@ function calculatePaymentBreakdown(amountNaira) {
   };
 }
 
+/**
+ * Calculates Paystack split configuration for Hosted Checkout transactions.
+ * When bearer='account' and transaction_charge = platformFeeKobo + gatewayFeeKobo:
+ * 1. Parent pays grossKobo (base + platform fee + Paystack fee).
+ * 2. Paystack deducts its fee (gatewayFeeKobo) from the transaction_charge.
+ * 3. School subaccount receives: grossKobo - transaction_charge = baseKobo (100% intact).
+ * 4. Platform receives: transaction_charge - gatewayFeeKobo = platformFeeKobo (100% intact).
+ */
+function getHostedCheckoutSplitParams(breakdown, channel = 'card') {
+  const isCard = channel === 'card';
+  const gatewayFeeKobo = isCard ? breakdown.card.gatewayFeeKobo : breakdown.card.gatewayFeeKobo;
+  return {
+    bearer: 'account',
+    transactionChargeKobo: breakdown.platformFeeKobo + gatewayFeeKobo,
+  };
+}
+
 module.exports = {
   calculatePaystackCharge,
   calculatePaymentBreakdown,
+  getHostedCheckoutSplitParams,
   formatNaira,
   MAX_PLATFORM_FEE_KOBO,
   MAX_CARD_FEE_KOBO,

@@ -71,7 +71,7 @@ async function initializeTransaction(params) {
   
   if (params.subaccountCode) {
     body.subaccount = params.subaccountCode;
-    body.bearer = params.bearer || 'subaccount';
+    body.bearer = params.bearer || 'account';
     if (params.transactionCharge != null && !isNaN(Number(params.transactionCharge))) {
       body.transaction_charge = Number(params.transactionCharge);
     }

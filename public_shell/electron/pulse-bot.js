@@ -10,7 +10,7 @@ const os   = require("os");
 const fs   = require("fs");
 const QRCode = require("qrcode");
 const paystackService = require("./paystack-service");
-const { calculatePaystackCharge, calculatePaymentBreakdown, formatNaira } = require("./src/lib/paystackUtils");
+const { calculatePaystackCharge, calculatePaymentBreakdown, getHostedCheckoutSplitParams, formatNaira } = require("./src/lib/paystackUtils");
 
 // Suppress Puppeteer "Execution context was destroyed" noise that fires
 // when WhatsApp LOGOUT causes a page navigation mid-inject. This is expected
@@ -2292,12 +2292,15 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
       ? ['card']
       : ['bank_transfer', 'ussd'];
 
+    const splitParams = getHostedCheckoutSplitParams(breakdown, chosenChannel);
+
     const tx = await paystackService.initializeTransaction({
       email: parentEmail,
       amount: grossKobo,
-      transactionCharge: platformFeeKobo,
+      transactionCharge: splitParams.transactionChargeKobo,
       reference: reference,
       subaccountCode: subaccountCode,
+      bearer: 'account',
       channels: paystackChannels,
       callbackUrl: "https://nexusos.com.ng/payment-complete",
       metadata: {
@@ -2324,20 +2327,48 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
       `).run(matchable, studentIds, amount, paymentType, percentage, reference, tx.access_code);
 
-      // Show full itemised breakdown so the parent is never surprised
-      const channelLabel = isCard ? '💳 Debit / Credit Card' : '🏦 Direct Bank Transfer';
-      let payLinkMsg = `🔗 *Secure Checkout Link*\n\n`;
-      payLinkMsg += `Plan: *${paymentType}*\n`;
-      payLinkMsg += `Payment Method: *${channelLabel}*\n`;
-      payLinkMsg += `─────────────────────────\n`;
-      payLinkMsg += `School Fee:                 *${formatNaira(amount)}*\n`;
-      payLinkMsg += `Platform Enabling Fee (1%): *${formatNaira(platformFeeNaira)}*\n`;
-      payLinkMsg += `${isCard ? 'Card Gateway Fee' : 'Bank Transfer Fee'}:        *${formatNaira(gatewayFeeNaira)}*\n`;
-      payLinkMsg += `─────────────────────────\n`;
-      payLinkMsg += `Total to Pay:               *${formatNaira(grossNaira)}*\n\n`;
-      payLinkMsg += `Click the link below to complete your payment:\n`;
-      payLinkMsg += `${tx.authorization_url}\n\n`;
-      payLinkMsg += `_Once payment is successful, your school records will update automatically._`;
+      // Check if school has a Dedicated Virtual Account configured
+      let dvaInfo = null;
+      try {
+        const dvaRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_dva'").get();
+        if (dvaRow && dvaRow.value) {
+          dvaInfo = JSON.parse(dvaRow.value);
+        }
+      } catch (_) {}
+
+      let payLinkMsg = ``;
+      if (!isCard && dvaInfo && dvaInfo.account_number) {
+        payLinkMsg += `🏦 *Direct Bank Transfer (Dedicated Virtual Account)*\n`;
+        payLinkMsg += `─────────────────────────\n`;
+        payLinkMsg += `Plan: *${paymentType}*\n`;
+        payLinkMsg += `School Fee:                 *${formatNaira(amount)}*\n`;
+        payLinkMsg += `Platform Enabling Fee (1%): *${formatNaira(platformFeeNaira)}*\n`;
+        payLinkMsg += `Transfer Fee (DVA 1%, max ₦300): *${formatNaira(gatewayFeeNaira)}*\n`;
+        payLinkMsg += `─────────────────────────\n`;
+        payLinkMsg += `Total to Transfer:          *${formatNaira(grossNaira)}*\n\n`;
+        payLinkMsg += `🏦 *Bank:* ${dvaInfo.bank_name || 'Wema Bank'}\n`;
+        payLinkMsg += `🔢 *Account Number:* \`${dvaInfo.account_number}\`\n`;
+        payLinkMsg += `🏷️ *Account Name:* ${dvaInfo.account_name || 'School Settlement'}\n\n`;
+        payLinkMsg += `⚠️ *Important:* Please put your phone number (\`${matchable}\`) in the transfer remarks/narration.\n\n`;
+        payLinkMsg += `_Or tap the link below to pay online via Card / USSD:_\n`;
+        payLinkMsg += `${tx.authorization_url}\n\n`;
+        payLinkMsg += `_Once payment is successful, your school records will update automatically._`;
+      } else {
+        // Show full itemised breakdown so the parent is never surprised
+        const channelLabel = isCard ? '💳 Debit / Credit Card' : '🏦 Direct Bank Transfer';
+        payLinkMsg += `🔗 *Secure Checkout Link*\n\n`;
+        payLinkMsg += `Plan: *${paymentType}*\n`;
+        payLinkMsg += `Payment Method: *${channelLabel}*\n`;
+        payLinkMsg += `─────────────────────────\n`;
+        payLinkMsg += `School Fee:                 *${formatNaira(amount)}*\n`;
+        payLinkMsg += `Platform Enabling Fee (1%): *${formatNaira(platformFeeNaira)}*\n`;
+        payLinkMsg += `${isCard ? 'Card Gateway Fee' : 'Bank Transfer Fee'}:        *${formatNaira(gatewayFeeNaira)}*\n`;
+        payLinkMsg += `─────────────────────────\n`;
+        payLinkMsg += `Total to Pay:               *${formatNaira(grossNaira)}*\n\n`;
+        payLinkMsg += `Click the link below to complete your payment:\n`;
+        payLinkMsg += `${tx.authorization_url}\n\n`;
+        payLinkMsg += `_Once payment is successful, your school records will update automatically._`;
+      }
 
       clearSession(matchable);
       await msg.reply(payLinkMsg);
