@@ -1598,6 +1598,7 @@ export function FinancialHub() {
     setReversingTx(true);
     try {
       const res = await window.electronAPI.fees.reverseTransaction({
+        transactionId: reversalTarget.txId,
         txId: reversalTarget.txId,
         studentId: reversalTarget.studentId,
         reason: reversalReason.trim(),
@@ -1609,8 +1610,7 @@ export function FinancialHub() {
         if (Swal) Swal.fire({ title: 'Reversed', text: `Payment of ₦${fmt(reversalTarget.amount)} has been reversed. The ledger has been updated.`, icon: 'success', background: '#0b0f19', color: '#fff', confirmButtonColor: '#00E5FF' });
         // Refresh ledger if open
         if (ledgerStudent) {
-          const lr = await window.electronAPI.fees.getLedger({ studentId: ledgerStudent.id });
-          if (lr?.ok) setLedgerTx(lr.data || []);
+          await openLedger(ledgerStudent.id, ledgerStudent.name);
         }
         doLoadRoster(sessionRef.current, termRef.current, rosterPage, searchQuery, statusFilter, classFilterRef.current);
       } else {

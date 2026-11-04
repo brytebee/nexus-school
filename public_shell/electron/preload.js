@@ -186,6 +186,11 @@ const nexusAPI = {
         getAdvanceBalance:    (params) => ipcRenderer.invoke('fees:get-advance-balance', params),
         applyAdvanceCredit:   (params) => ipcRenderer.invoke('fees:apply-advance-credit', params),
         getTransactions: (params) => ipcRenderer.invoke('fees:get-transactions',  params),
+        getLedger:       (params) => ipcRenderer.invoke('fees:get-transactions',  {
+            student_id: params?.student_id || params?.studentId,
+            academic_session: params?.academic_session || params?.session,
+            term: params?.term,
+        }),
         getSettings:     ()       => ipcRenderer.invoke('fees:get-settings'),
         saveSettings:    (patch)  => ipcRenderer.invoke('fees:save-settings',     patch),
         getBanks:        ()       => ipcRenderer.invoke('paystack:get-banks'),

@@ -5292,14 +5292,30 @@ ipcMain.handle("fees:record-payment", async (event, { student_id, academic_sessi
 
 
 /** fees:get-transactions — ledger history for a student+term (Diamond). */
-ipcMain.handle("fees:get-transactions", (event, { student_id, academic_session, term }) => {
+ipcMain.handle("fees:get-transactions", (event, payload = {}) => {
   try {
     const db = database.getDb();
-    const rows = db.prepare(`
+    const student_id = payload.student_id || payload.studentId;
+    const academic_session = payload.academic_session || payload.session;
+    const term = payload.term;
+
+    let query = `
       SELECT id, amount, payment_method, reference_number, note, recorded_by, created_at
-      FROM fee_transactions WHERE student_id = ? AND academic_session = ? AND term = ?
-      ORDER BY created_at DESC
-    `).all(student_id, academic_session, term);
+      FROM fee_transactions WHERE student_id = ?
+    `;
+    const params = [student_id];
+
+    if (academic_session) {
+      query += ' AND academic_session = ?';
+      params.push(academic_session);
+    }
+    if (term) {
+      query += ' AND term = ?';
+      params.push(term);
+    }
+    query += ' ORDER BY created_at DESC';
+
+    const rows = db.prepare(query).all(...params);
     return { ok: true, data: rows };
   } catch (err) {
     console.error("[Fees] get-transactions error:", err);
@@ -5674,41 +5690,48 @@ ipcMain.handle("fees:save-settings", async (event, patch) => {
  * fees:reverse-transaction — Insert a negative reversal row (audit-safe).
  * Recalculates student_fees.total_paid and status. Requires level >= 5.
  */
-ipcMain.handle('fees:reverse-transaction', (event, { transactionId, reason }) => {
+ipcMain.handle('fees:reverse-transaction', (event, payload = {}) => {
   try {
     const db = database.getDb();
     if (!currentAdminSession || currentAdminSession.role_level < 5) {
       return { ok: false, error: 'Manager access required to reverse transactions.' };
     }
+    const transactionId = payload.transactionId || payload.txId;
+    const reason = payload.reason;
+    if (!transactionId) {
+      return { ok: false, error: 'Transaction ID is required.' };
+    }
     const tx = db.prepare('SELECT * FROM fee_transactions WHERE id = ?').get(transactionId);
     if (!tx) return { ok: false, error: 'Transaction not found.' };
     if (tx.amount < 0) return { ok: false, error: 'Cannot reverse an already-reversed entry.' };
 
-    const reversalNote = `REVERSAL of #${transactionId}: ${reason || 'Admin correction'}`;
-    db.prepare(`
-      INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note, recorded_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(tx.student_id, tx.academic_session, tx.term, -tx.amount, tx.payment_method, tx.reference_number, reversalNote, currentAdminSession.username || 'Admin');
+    db.transaction(() => {
+      const reversalNote = `REVERSAL of #${transactionId}: ${reason || 'Admin correction'}`;
+      db.prepare(`
+        INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note, recorded_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(tx.student_id, tx.academic_session, tx.term, -tx.amount, tx.payment_method, tx.reference_number, reversalNote, currentAdminSession.username || 'Admin');
 
-    // Recalculate total_paid
-    const newPaid = db.prepare(
-      'SELECT COALESCE(SUM(amount), 0) as t FROM fee_transactions WHERE student_id = ? AND academic_session = ? AND term = ?'
-    ).get(tx.student_id, tx.academic_session, tx.term).t;
+      // Recalculate total_paid
+      const newPaid = db.prepare(
+        'SELECT COALESCE(SUM(amount), 0) as t FROM fee_transactions WHERE student_id = ? AND academic_session = ? AND term = ?'
+      ).get(tx.student_id, tx.academic_session, tx.term).t;
 
-    const sf = db.prepare(
-      'SELECT total_billed FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?'
-    ).get(tx.student_id, tx.academic_session, tx.term);
+      const sf = db.prepare(
+        'SELECT total_billed FROM student_fees WHERE student_id = ? AND academic_session = ? AND term = ?'
+      ).get(tx.student_id, tx.academic_session, tx.term);
 
-    if (sf) {
-      const billed = sf.total_billed || 0;
-      const newStatus = newPaid >= billed ? 'Cleared' : newPaid > 0 ? 'Partial' : 'Unpaid';
-      db.prepare(
-        'UPDATE student_fees SET total_paid = ?, status = ?, updated_at = datetime(\'now\') WHERE student_id = ? AND academic_session = ? AND term = ?'
-      ).run(newPaid, newStatus, tx.student_id, tx.academic_session, tx.term);
-    }
+      if (sf) {
+        const billed = sf.total_billed || 0;
+        const newStatus = feeCalculator ? feeCalculator.computeFeeStatus(billed, newPaid) : (newPaid >= billed ? 'cleared' : newPaid > 0 ? 'partial' : 'unpaid');
+        db.prepare(
+          'UPDATE student_fees SET total_paid = ?, status = ?, updated_at = datetime(\'now\') WHERE student_id = ? AND academic_session = ? AND term = ?'
+        ).run(newPaid, newStatus, tx.student_id, tx.academic_session, tx.term);
+      }
 
-    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'REVERSE_TRANSACTION', 'fee_transactions', ?)")
-      .run(currentAdminSession.id, `Reversed txn #${transactionId} (₦${tx.amount}) — ${reason || 'Admin correction'}`);
+      db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'REVERSE_TRANSACTION', 'fee_transactions', ?)")
+        .run(currentAdminSession.id || 1, `Reversed txn #${transactionId} (₦${tx.amount}) — ${reason || 'Admin correction'}`);
+    })();
 
     return { ok: true };
   } catch (err) {
