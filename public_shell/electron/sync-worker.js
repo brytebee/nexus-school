@@ -516,6 +516,60 @@ async function pullPendingSyncEvents() {
       } catch (err) {
         console.warn(`[Sync Worker] Failed to reconcile payment ${paystack_ref}:`, err.message);
       }
+    } else if (ev.event_type === "STUDENT_UPDATED") {
+      const {
+        student_id,
+        parent_phone,
+        parent_phone_2,
+        parent_name,
+        parent_email,
+        address
+      } = ev.payload || {};
+
+      try {
+        if (student_id) {
+          try { db.exec(`ALTER TABLE students ADD COLUMN parent_phone_2 TEXT DEFAULT NULL`); } catch (_) {}
+          try { db.exec(`ALTER TABLE students ADD COLUMN parent_name TEXT DEFAULT NULL`); } catch (_) {}
+          try { db.exec(`ALTER TABLE students ADD COLUMN parent_email TEXT DEFAULT NULL`); } catch (_) {}
+          try { db.exec(`ALTER TABLE students ADD COLUMN address TEXT DEFAULT NULL`); } catch (_) {}
+
+          const updates = [];
+          const params = [];
+
+          if (parent_phone !== undefined) {
+            updates.push("parent_phone = ?");
+            params.push(parent_phone);
+          }
+          if (parent_phone_2 !== undefined) {
+            updates.push("parent_phone_2 = ?");
+            params.push(parent_phone_2);
+          }
+          if (parent_name !== undefined) {
+            updates.push("parent_name = ?");
+            params.push(parent_name);
+          }
+          if (parent_email !== undefined) {
+            updates.push("parent_email = ?");
+            params.push(parent_email);
+          }
+          if (address !== undefined) {
+            updates.push("address = ?");
+            params.push(address);
+          }
+
+          if (updates.length > 0) {
+            params.push(student_id);
+            db.prepare(`
+              UPDATE students
+              SET ${updates.join(", ")}
+              WHERE id = ?
+            `).run(...params);
+            console.log(`[Sync Worker] Reconciled updated student profile for ${student_id}`);
+          }
+        }
+      } catch (err) {
+        console.warn(`[Sync Worker] Failed to update student ${student_id}:`, err.message);
+      }
     }
     ackIds.push(ev.id);
   }

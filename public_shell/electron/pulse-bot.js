@@ -512,7 +512,7 @@ function findStudentsByPhone(db, matchable) {
 }
 
 // ─── Formatting Helpers ────────────────────────────────────────────────────────
-const DIV = "━━━━━━━━━━━━━━━━━━━━";
+const DIV = "";
 
 function gradeColor(score) {
   if (score >= 70) return "🟢";
@@ -2146,24 +2146,42 @@ async function handleMessage(msg) {
 
     const breakdown = calculatePaymentBreakdown(txContext.amount);
     const platformFeeStr = formatNaira(breakdown.platformFeeNaira);
-    let channelMsg = `💳 *Choose Payment Method for ${formatNaira(txContext.amount)}*\n${DIV}\n\n`;
-    if (breakdown.cheapestChannel === 'bank_transfer') {
-      channelMsg += `Reply *1* for *Instant Bank Transfer* 🟢 *(Cheapest · Save ${formatNaira(breakdown.savingsNaira)})*\n`;
-      channelMsg += `   • Platform Fee (1%): ${platformFeeStr}\n`;
-      channelMsg += `   • Transfer Fee (DVA 1%): ${formatNaira(breakdown.transfer.gatewayFeeNaira)}\n`;
+
+    let dvaInfo = null;
+    try {
+      const dvaRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_dva'").get();
+      if (dvaRow && dvaRow.value) {
+        dvaInfo = JSON.parse(dvaRow.value);
+      }
+    } catch (_) {}
+    const hasDva = !!(dvaInfo && dvaInfo.account_number);
+
+    let channelMsg = ``;
+    if (!hasDva) {
+      channelMsg += `💳 *Payment Method for ${formatNaira(txContext.amount)}*\n\n`;
+      channelMsg += `Reply *1* for *Debit / Credit Card & Online Checkout*\n`;
+      channelMsg += `   • Platform Fee: ${platformFeeStr}\n`;
+      channelMsg += `   • Processing Fee: ${formatNaira(breakdown.card.gatewayFeeNaira)}\n`;
+      channelMsg += `   • Total to Pay: *${formatNaira(breakdown.card.grossNaira)}*\n\n`;
+    } else if (breakdown.cheapestChannel === 'bank_transfer') {
+      channelMsg += `💳 *Choose Payment Method for ${formatNaira(txContext.amount)}*\n\n`;
+      channelMsg += `Reply *1* for *Direct Bank Transfer* 🟢 *(Cheapest · Save ${formatNaira(breakdown.savingsNaira)})*\n`;
+      channelMsg += `   • Platform Fee: ${platformFeeStr}\n`;
+      channelMsg += `   • Transfer Fee: ${formatNaira(breakdown.transfer.gatewayFeeNaira)}\n`;
       channelMsg += `   • Total to Pay: *${formatNaira(breakdown.transfer.grossNaira)}*\n\n`;
       channelMsg += `Reply *2* for *Debit / Credit Card*\n`;
-      channelMsg += `   • Platform Fee (1%): ${platformFeeStr}\n`;
-      channelMsg += `   • Card Fee: ${formatNaira(breakdown.card.gatewayFeeNaira)}\n`;
+      channelMsg += `   • Platform Fee: ${platformFeeStr}\n`;
+      channelMsg += `   • Card Processing Fee: ${formatNaira(breakdown.card.gatewayFeeNaira)}\n`;
       channelMsg += `   • Total to Pay: *${formatNaira(breakdown.card.grossNaira)}*\n\n`;
     } else {
+      channelMsg += `💳 *Choose Payment Method for ${formatNaira(txContext.amount)}*\n\n`;
       channelMsg += `Reply *1* for *Debit / Credit Card* 🟢 *(Cheapest · Save ${formatNaira(breakdown.savingsNaira)})*\n`;
-      channelMsg += `   • Platform Fee (1%): ${platformFeeStr}\n`;
-      channelMsg += `   • Card Fee: ${formatNaira(breakdown.card.gatewayFeeNaira)}\n`;
+      channelMsg += `   • Platform Fee: ${platformFeeStr}\n`;
+      channelMsg += `   • Card Processing Fee: ${formatNaira(breakdown.card.gatewayFeeNaira)}\n`;
       channelMsg += `   • Total to Pay: *${formatNaira(breakdown.card.grossNaira)}*\n\n`;
-      channelMsg += `Reply *2* for *Instant Bank Transfer*\n`;
-      channelMsg += `   • Platform Fee (1%): ${platformFeeStr}\n`;
-      channelMsg += `   • Transfer Fee (DVA 1%): ${formatNaira(breakdown.transfer.gatewayFeeNaira)}\n`;
+      channelMsg += `Reply *2* for *Direct Bank Transfer*\n`;
+      channelMsg += `   • Platform Fee: ${platformFeeStr}\n`;
+      channelMsg += `   • Transfer Fee: ${formatNaira(breakdown.transfer.gatewayFeeNaira)}\n`;
       channelMsg += `   • Total to Pay: *${formatNaira(breakdown.transfer.grossNaira)}*\n\n`;
     }
     channelMsg += `_Reply 0 to cancel and return to main menu_`;
@@ -2187,9 +2205,21 @@ async function handleMessage(msg) {
       return;
     }
 
+    const db = database.getDb();
+    let dvaInfo = null;
+    try {
+      const dvaRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_dva'").get();
+      if (dvaRow && dvaRow.value) {
+        dvaInfo = JSON.parse(dvaRow.value);
+      }
+    } catch (_) {}
+    const hasDva = !!(dvaInfo && dvaInfo.account_number);
+
     const breakdown = calculatePaymentBreakdown(txContext.amount);
     let chosenChannel;
-    if (breakdown.cheapestChannel === 'bank_transfer') {
+    if (!hasDva) {
+      chosenChannel = 'card';
+    } else if (breakdown.cheapestChannel === 'bank_transfer') {
       chosenChannel = numericInput === 1 ? 'bank_transfer' : 'card';
     } else {
       chosenChannel = numericInput === 1 ? 'card' : 'bank_transfer';
@@ -2277,7 +2307,20 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
     // Use the unified fee engine to compute correct amounts per channel
     const breakdown = calculatePaymentBreakdown(amount);
     const isCard = chosenChannel === 'card';
-    const channelData = isCard ? breakdown.card : breakdown.transfer;
+    // Check if school has a Dedicated Virtual Account configured
+    let dvaInfo = null;
+    try {
+      const dvaRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_dva'").get();
+      if (dvaRow && dvaRow.value) {
+        dvaInfo = JSON.parse(dvaRow.value);
+      }
+    } catch (_) {}
+    const hasDva = !!(dvaInfo && dvaInfo.account_number);
+
+    // CRITICAL RATE FIX: If no DVA configured or channel is card, ALWAYS use card rate (1.5% + ₦100)
+    // so hosted checkout bank transfer deductions match the collected amount exactly.
+    const effectiveIsCard = isCard || !hasDva;
+    const channelData = effectiveIsCard ? breakdown.card : breakdown.dva;
 
     const baseKobo = breakdown.baseKobo;
     const platformFeeKobo = breakdown.platformFeeKobo;
@@ -2287,12 +2330,13 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
     const platformFeeNaira = breakdown.platformFeeNaira;
     const gatewayFeeNaira  = channelData.gatewayFeeNaira;
 
-    // Restrict Paystack to only the chosen channel
-    const paystackChannels = isCard
-      ? ['card']
-      : ['bank_transfer', 'ussd'];
+    // If DVA is configured and direct transfer chosen: restricted to transfer
+    // If hosted checkout: allow card, bank_transfer, ussd on Paystack page
+    const paystackChannels = (hasDva && !isCard)
+      ? ['bank_transfer', 'ussd']
+      : ['card', 'bank_transfer', 'ussd'];
 
-    const splitParams = getHostedCheckoutSplitParams(breakdown, chosenChannel);
+    const splitParams = getHostedCheckoutSplitParams(breakdown, effectiveIsCard ? 'card' : 'bank_transfer');
 
     const tx = await paystackService.initializeTransaction({
       email: parentEmail,
@@ -2311,8 +2355,8 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
         gross_amount:          grossNaira,
         custom_fields: [
           { display_name: 'School Fee',                  variable_name: 'base_amount',   value: formatNaira(amount) },
-          { display_name: 'Platform Enabling Fee (1%)',  variable_name: 'platform_fee',  value: formatNaira(platformFeeNaira) },
-          { display_name: isCard ? 'Card Gateway Fee' : 'Bank Transfer Fee', variable_name: 'gateway_fee', value: formatNaira(gatewayFeeNaira) },
+          { display_name: 'Platform Fee',                variable_name: 'platform_fee',  value: formatNaira(platformFeeNaira) },
+          { display_name: effectiveIsCard ? 'Processing Fee' : 'Transfer Fee', variable_name: 'gateway_fee', value: formatNaira(gatewayFeeNaira) },
           { display_name: 'Total Charged',               variable_name: 'gross',         value: formatNaira(grossNaira) },
         ]
       }
@@ -2327,25 +2371,14 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
       `).run(matchable, studentIds, amount, paymentType, percentage, reference, tx.access_code);
 
-      // Check if school has a Dedicated Virtual Account configured
-      let dvaInfo = null;
-      try {
-        const dvaRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_dva'").get();
-        if (dvaRow && dvaRow.value) {
-          dvaInfo = JSON.parse(dvaRow.value);
-        }
-      } catch (_) {}
-
       let payLinkMsg = ``;
-      if (!isCard && dvaInfo && dvaInfo.account_number) {
-        payLinkMsg += `🏦 *Direct Bank Transfer (Dedicated Virtual Account)*\n`;
-        payLinkMsg += `─────────────────────────\n`;
+      if (hasDva && !isCard) {
+        payLinkMsg += `🏦 *Direct Bank Transfer*\n\n`;
         payLinkMsg += `Plan: *${paymentType}*\n`;
-        payLinkMsg += `School Fee:                 *${formatNaira(amount)}*\n`;
-        payLinkMsg += `Platform Enabling Fee (1%): *${formatNaira(platformFeeNaira)}*\n`;
-        payLinkMsg += `Transfer Fee (DVA 1%, max ₦300): *${formatNaira(gatewayFeeNaira)}*\n`;
-        payLinkMsg += `─────────────────────────\n`;
-        payLinkMsg += `Total to Transfer:          *${formatNaira(grossNaira)}*\n\n`;
+        payLinkMsg += `School Fee: *${formatNaira(amount)}*\n`;
+        payLinkMsg += `Platform Fee: *${formatNaira(platformFeeNaira)}*\n`;
+        payLinkMsg += `Transfer Fee: *${formatNaira(gatewayFeeNaira)}*\n\n`;
+        payLinkMsg += `Total to Transfer: *${formatNaira(grossNaira)}*\n\n`;
         payLinkMsg += `🏦 *Bank:* ${dvaInfo.bank_name || 'Wema Bank'}\n`;
         payLinkMsg += `🔢 *Account Number:* \`${dvaInfo.account_number}\`\n`;
         payLinkMsg += `🏷️ *Account Name:* ${dvaInfo.account_name || 'School Settlement'}\n\n`;
@@ -2354,20 +2387,15 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
         payLinkMsg += `${tx.authorization_url}\n\n`;
         payLinkMsg += `_Once payment is successful, your school records will update automatically._`;
       } else {
-        // Show full itemised breakdown so the parent is never surprised
-        const channelLabel = isCard ? '💳 Debit / Credit Card' : '🏦 Direct Bank Transfer';
         payLinkMsg += `🔗 *Secure Checkout Link*\n\n`;
         payLinkMsg += `Plan: *${paymentType}*\n`;
-        payLinkMsg += `Payment Method: *${channelLabel}*\n`;
-        payLinkMsg += `─────────────────────────\n`;
-        payLinkMsg += `School Fee:                 *${formatNaira(amount)}*\n`;
-        payLinkMsg += `Platform Enabling Fee (1%): *${formatNaira(platformFeeNaira)}*\n`;
-        payLinkMsg += `${isCard ? 'Card Gateway Fee' : 'Bank Transfer Fee'}:        *${formatNaira(gatewayFeeNaira)}*\n`;
-        payLinkMsg += `─────────────────────────\n`;
-        payLinkMsg += `Total to Pay:               *${formatNaira(grossNaira)}*\n\n`;
-        payLinkMsg += `Click the link below to complete your payment:\n`;
+        payLinkMsg += `School Fee: *${formatNaira(amount)}*\n`;
+        payLinkMsg += `Platform Fee: *${formatNaira(platformFeeNaira)}*\n`;
+        payLinkMsg += `Processing Fee: *${formatNaira(gatewayFeeNaira)}*\n\n`;
+        payLinkMsg += `Total to Pay: *${formatNaira(grossNaira)}*\n\n`;
+        payLinkMsg += `👉 *Tap the link below to complete your payment securely via Paystack:*\n`;
         payLinkMsg += `${tx.authorization_url}\n\n`;
-        payLinkMsg += `_Once payment is successful, your school records will update automatically._`;
+        payLinkMsg += `_Channel: Card, Bank Transfer & USSD. Once payment is confirmed, your school records will update automatically._`;
       }
 
       clearSession(matchable);
