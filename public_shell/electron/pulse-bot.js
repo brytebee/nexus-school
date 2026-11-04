@@ -2157,6 +2157,9 @@ async function handleMessage(msg) {
     const hasDva = !!(dvaInfo && dvaInfo.account_number);
 
     let channelMsg = ``;
+    const transferGrossCeil = Math.ceil(breakdown.transfer.grossNaira);
+    const transferFeeCeil = transferGrossCeil - txContext.amount - breakdown.platformFeeNaira;
+
     if (!hasDva) {
       channelMsg += `💳 *Payment Method for ${formatNaira(txContext.amount)}*\n\n`;
       channelMsg += `Reply *1* for *Debit / Credit Card & Online Checkout*\n`;
@@ -2167,8 +2170,8 @@ async function handleMessage(msg) {
       channelMsg += `💳 *Choose Payment Method for ${formatNaira(txContext.amount)}*\n\n`;
       channelMsg += `Reply *1* for *Direct Bank Transfer* 🟢 *(Cheapest · Save ${formatNaira(breakdown.savingsNaira)})*\n`;
       channelMsg += `   • Platform Fee: ${platformFeeStr}\n`;
-      channelMsg += `   • Transfer Fee: ${formatNaira(breakdown.transfer.gatewayFeeNaira)}\n`;
-      channelMsg += `   • Total to Pay: *${formatNaira(breakdown.transfer.grossNaira)}*\n\n`;
+      channelMsg += `   • Transfer Fee: ${formatNaira(transferFeeCeil)}\n`;
+      channelMsg += `   • Total to Pay: *${formatNaira(transferGrossCeil)}*\n\n`;
       channelMsg += `Reply *2* for *Debit / Credit Card*\n`;
       channelMsg += `   • Platform Fee: ${platformFeeStr}\n`;
       channelMsg += `   • Card Processing Fee: ${formatNaira(breakdown.card.gatewayFeeNaira)}\n`;
@@ -2181,8 +2184,8 @@ async function handleMessage(msg) {
       channelMsg += `   • Total to Pay: *${formatNaira(breakdown.card.grossNaira)}*\n\n`;
       channelMsg += `Reply *2* for *Direct Bank Transfer*\n`;
       channelMsg += `   • Platform Fee: ${platformFeeStr}\n`;
-      channelMsg += `   • Transfer Fee: ${formatNaira(breakdown.transfer.gatewayFeeNaira)}\n`;
-      channelMsg += `   • Total to Pay: *${formatNaira(breakdown.transfer.grossNaira)}*\n\n`;
+      channelMsg += `   • Transfer Fee: ${formatNaira(transferFeeCeil)}\n`;
+      channelMsg += `   • Total to Pay: *${formatNaira(transferGrossCeil)}*\n\n`;
     }
     channelMsg += `_Reply 0 to cancel and return to main menu_`;
     await msg.reply(channelMsg);
@@ -2324,11 +2327,13 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
 
     const baseKobo = breakdown.baseKobo;
     const platformFeeKobo = breakdown.platformFeeKobo;
-    const gatewayFeeKobo  = channelData.gatewayFeeKobo;
-    const grossKobo       = channelData.grossKobo;      // base + platform + gateway
-    const grossNaira      = channelData.grossNaira;
     const platformFeeNaira = breakdown.platformFeeNaira;
-    const gatewayFeeNaira  = channelData.gatewayFeeNaira;
+
+    // For DVA transfer, ceiling-round to nearest whole Naira to prevent mobile banking rounding shortfall
+    const grossNaira = effectiveIsCard ? channelData.grossNaira : Math.ceil(channelData.grossNaira);
+    const gatewayFeeNaira = effectiveIsCard ? channelData.gatewayFeeNaira : (grossNaira - amount - platformFeeNaira);
+    const grossKobo = Math.round(grossNaira * 100);
+    const gatewayFeeKobo = Math.round(gatewayFeeNaira * 100);
 
     // If DVA is configured and direct transfer chosen: restricted to transfer
     // If hosted checkout: allow card, bank_transfer, ussd on Paystack page
@@ -2383,8 +2388,6 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
         payLinkMsg += `🔢 *Account Number:* \`${dvaInfo.account_number}\`\n`;
         payLinkMsg += `🏷️ *Account Name:* ${dvaInfo.account_name || 'School Settlement'}\n\n`;
         payLinkMsg += `⚠️ *Important:* Please put your phone number (\`${matchable}\`) in the transfer remarks/narration.\n\n`;
-        payLinkMsg += `_Or tap the link below to pay online via Card / USSD:_\n`;
-        payLinkMsg += `${tx.authorization_url}\n\n`;
         payLinkMsg += `_Once payment is successful, your school records will update automatically._`;
       } else {
         payLinkMsg += `🔗 *Secure Checkout Link*\n\n`;

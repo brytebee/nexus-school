@@ -44,7 +44,7 @@ async function resolveAccount(accountNumber, bankCode) {
   return paystackFetch(`/bank/resolve?account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`);
 }
 
-async function createSubaccount(businessName, bankCode, accountNumber, percentageCharge = 100) {
+async function createSubaccount(businessName, bankCode, accountNumber, percentageCharge = 0) {
   return paystackFetch('/subaccount', {
     method: 'POST',
     body: JSON.stringify({

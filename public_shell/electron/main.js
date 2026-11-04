@@ -5616,7 +5616,7 @@ ipcMain.handle("fees:save-settings", async (event, patch) => {
               schoolName,
               acc.bank_code,
               acc.number,
-              100 // 100% split
+              0 // 0% platform charge = 100% split to school subaccount
             );
             if (subacc && subacc.subaccount_code) {
               subaccountCode = subacc.subaccount_code;
