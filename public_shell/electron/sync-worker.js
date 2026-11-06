@@ -990,6 +990,11 @@ async function pushClassesToWebsite() {
       return { ok: true, skipped: true, reason: "no_classes_configured" };
     }
 
+    let deptMgrs = [];
+    try {
+      deptMgrs = db.prepare("SELECT * FROM department_managers ORDER BY id ASC").all() || [];
+    } catch (_) {}
+
     const res = await fetch(`${websiteUrl}/api/sync/classes`, {
       method: "POST",
       headers: {
@@ -1000,6 +1005,7 @@ async function pushClassesToWebsite() {
         schoolCloudId: schoolId,
         hierarchy: hierarchyPayload,
         fullList: flatList,
+        departmentManagers: deptMgrs,
         source: "desktop_sync",
       }),
     });
@@ -1455,6 +1461,32 @@ async function gatherSyncPackage() {
     console.error("[Sync Worker] Error gathering classes for sync:", err);
   }
 
+  // 1b. Educational Departments & Section Managers
+  let departments = [];
+  try {
+    const deptRows = db.prepare("SELECT * FROM department_managers ORDER BY id ASC").all() || [];
+    departments = deptRows.map((r) => {
+      let prefixes = [];
+      try {
+        prefixes = typeof r.class_prefixes === 'string'
+          ? JSON.parse(r.class_prefixes)
+          : (r.class_prefixes || []);
+      } catch (_) {
+        prefixes = [];
+      }
+      return {
+        id: String(r.id),
+        sectionName: (r.section_name || '').trim(),
+        classPrefixes: Array.isArray(prefixes) ? prefixes.map((p) => String(p).trim()).filter(Boolean) : [],
+        managerTitle: (r.manager_title || 'Section Head').trim(),
+        managerName: (r.manager_name || '').trim(),
+        signBase64: r.sign_base64 || null,
+      };
+    }).filter((d) => Boolean(d.sectionName));
+  } catch (err) {
+    console.warn("[Sync Worker] Error gathering department managers for sync:", err.message);
+  }
+
   // 2. School Profile & Branding
   let branding = {
     schoolName: "",
@@ -1731,6 +1763,7 @@ async function gatherSyncPackage() {
         hierarchy: hierarchyPayload,
         fullList: flatList,
       },
+      departments,
       branding,
       calendar,
       fees,
@@ -1816,18 +1849,18 @@ async function performSyncCycle() {
       console.warn("[Sync Worker] Classes push error (non-fatal):", clsErr.message);
     }
 
-    // 2c. Outbound staff & student roster sync: push teachers, allocations, and students to website
-    try {
-      await pushStaffRosterToWebsite();
-    } catch (staffErr) {
-      console.warn("[Sync Worker] Staff roster push error (non-fatal):", staffErr.message);
-    }
-
-    // 2d. Inbound cloud staff data pull: reconcile cloud grades, attendance, ILS, and grading scopes into SQLite
+    // 2c. Inbound cloud staff data pull: reconcile cloud passwords, grades, attendance, ILS, and grading scopes into SQLite first
     try {
       await pullStaffGradesFromWebsite();
     } catch (pullErr) {
       console.warn("[Sync Worker] Staff data pull error (non-fatal):", pullErr.message);
+    }
+
+    // 2d. Outbound staff & student roster sync: push teachers, allocations, and students to website
+    try {
+      await pushStaffRosterToWebsite();
+    } catch (staffErr) {
+      console.warn("[Sync Worker] Staff roster push error (non-fatal):", staffErr.message);
     }
 
     // 3. Outbound push third: push fresh local state (including newly reconciled balances)
