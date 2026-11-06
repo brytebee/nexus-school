@@ -1,3 +1,22 @@
+## What's New in v1.2.01
+
+This release delivers **Manual Payment Reversal Hardening, Unique Parents Telemetry, and Cloud Sync Expansion**.
+
+### 💳 Financial Hub Reversal Engine
+- **Payload Parameter Alignment**: Resolved IPC mismatch where reversal target identifier was lost between renderer and main process, preventing "Transaction not found" errors.
+- **SQLite CHECK Constraint Adherence**: Fixed fee status recalculation after reversals to strictly use lowercase schema-compliant statuses (`cleared`, `partial`, `unpaid`).
+- **Post-Reversal Ledger Refresh**: Replaced obsolete ledger handler invocation with reliable transaction reload and advance balance refresh.
+- **Atomic Operations**: Wrapped ledger reversal insertion, paid sum recomputation, status updates, and audit logging into single atomic database transactions.
+
+### 👨‍👩‍👧‍👦 Dashboard & Portal Parents Metrics
+- **Command Center Metric**: Replaced legacy "Devices Synced" stat card with a deduplicated "Parents" count (deduplicated by primary parent phone).
+- **Web Admin Active Students Split**: Displayed `Students / Parents` (e.g. `892 / 885`) with distinct violet styling for the parent count.
+
+### 🔄 Web Sync & Infrastructure
+- **Educational Departments Module**: Added Departments sync support to WebSyncModal with responsive flex-wrap button improvements in Classes view.
+
+---
+
 ## What's New in v1.2.0
 
 This release delivers **Cloud Bot Co-Existence Guard, Pulse State Conflict Prevention, and Outbound Alert Hardening**.
