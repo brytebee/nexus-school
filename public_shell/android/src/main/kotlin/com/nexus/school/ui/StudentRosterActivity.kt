@@ -2849,7 +2849,6 @@ fun SettingsScreen(onDisconnect: () -> Unit) {
                 val (ip, port) = info
                 val body = org.json.JSONObject().apply {
                     put("teacher_id", teacherId)
-                    put("email", editEmail)
                     put("phone", editPhone)
                 }
                 val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -2863,7 +2862,6 @@ fun SettingsScreen(onDisconnect: () -> Unit) {
                     conn.responseCode == 200
                 }
                 if (result) {
-                    identity.saveStaffEmail(editEmail)
                     identity.saveStaffPhone(editPhone)
                     profileMsg = "✅ Profile saved"
                 } else {
@@ -2904,27 +2902,8 @@ fun SettingsScreen(onDisconnect: () -> Unit) {
                     Divider(color = GlassBorder)
                     SettingsInfoRow(emoji = "🎭", label = "Role", value = role)
                     Divider(color = GlassBorder)
-
-                    // Editable Email
-                    Column {
-                        Text("📧  Email", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(4.dp))
-                        OutlinedTextField(
-                            value = editEmail,
-                            onValueChange = { editEmail = it },
-                            placeholder = { Text("your@email.com", color = TextMuted, fontSize = 13.sp) },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF7C3AED),
-                                unfocusedBorderColor = GlassBorder,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(10.dp)
-                        )
-                    }
+                    SettingsInfoRow(emoji = "📧", label = "Email (Managed)", value = editEmail.ifBlank { "Not configured" })
+                    Divider(color = GlassBorder)
 
                     // Editable Phone
                     Column {
