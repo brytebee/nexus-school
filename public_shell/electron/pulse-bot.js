@@ -2341,7 +2341,42 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
       ? ['bank_transfer', 'ussd']
       : ['card', 'bank_transfer', 'ussd'];
 
-    const splitParams = getHostedCheckoutSplitParams(breakdown, effectiveIsCard ? 'card' : 'bank_transfer');
+    // ── DVA Direct Bank Transfer path ────────────────────────────────────────
+    // A Dedicated Virtual Account is a static NUBAN — no Paystack checkout URL needed.
+    // Skip paystackService.initializeTransaction() entirely for DVA transfers so a
+    // stale subaccount code or Paystack API hiccup can NEVER block parents from
+    // seeing the bank details.
+    if (hasDva && !isCard) {
+      const dvaReference = `DVA-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const studentIds = session.students.map(s => s.id).join(",");
+      try {
+        db.prepare(`
+          INSERT INTO fee_payment_sessions (parent_phone, student_ids, total_amount, payment_type, partial_percent, paystack_ref, paystack_access_code, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+        `).run(matchable, studentIds, amount, paymentType, percentage, dvaReference, '');
+      } catch (sessionErr) {
+        console.warn("[Pulse Bot] DVA session insert warning (non-fatal):", sessionErr.message);
+      }
+
+      let dvaMsg = `🏦 *Direct Bank Transfer*\n\n`;
+      dvaMsg += `Plan: *${paymentType}*\n`;
+      dvaMsg += `School Fee: *${formatNaira(amount)}*\n`;
+      dvaMsg += `Platform Fee: *${formatNaira(platformFeeNaira)}*\n`;
+      dvaMsg += `Transfer Fee: *${formatNaira(gatewayFeeNaira)}*\n\n`;
+      dvaMsg += `Total to Transfer: *${formatNaira(grossNaira)}*\n\n`;
+      dvaMsg += `🏦 *Bank:* ${dvaInfo.bank_name || 'Wema Bank'}\n`;
+      dvaMsg += `🔢 *Account Number:* \`${dvaInfo.account_number}\`\n`;
+      dvaMsg += `🏷️ *Account Name:* ${dvaInfo.account_name || 'School Settlement'}\n\n`;
+      dvaMsg += `⚠️ *Important:* Please put your phone number (\`${matchable}\`) in the transfer remarks/narration.\n\n`;
+      dvaMsg += `_Once payment is successful, your school records will update automatically._`;
+
+      clearSession(matchable);
+      await msg.reply(dvaMsg);
+      return;
+    }
+
+    // ── Card / Hosted Checkout path ───────────────────────────────────────────
+    const splitParams = getHostedCheckoutSplitParams(breakdown, 'card');
 
     const tx = await paystackService.initializeTransaction({
       email: parentEmail,
@@ -2350,7 +2385,7 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
       reference: reference,
       subaccountCode: subaccountCode,
       bearer: 'account',
-      channels: paystackChannels,
+      channels: ['card', 'bank_transfer', 'ussd'],
       callbackUrl: "https://nexusos.com.ng/payment-complete",
       metadata: {
         base_amount:           amount,
@@ -2359,47 +2394,30 @@ async function generatePaystackLink(msg, session, matchable, amount, paymentType
         gateway_channel:       chosenChannel,
         gross_amount:          grossNaira,
         custom_fields: [
-          { display_name: 'School Fee',                  variable_name: 'base_amount',   value: formatNaira(amount) },
-          { display_name: 'Platform Fee',                variable_name: 'platform_fee',  value: formatNaira(platformFeeNaira) },
-          { display_name: effectiveIsCard ? 'Processing Fee' : 'Transfer Fee', variable_name: 'gateway_fee', value: formatNaira(gatewayFeeNaira) },
-          { display_name: 'Total Charged',               variable_name: 'gross',         value: formatNaira(grossNaira) },
+          { display_name: 'School Fee',       variable_name: 'base_amount',   value: formatNaira(amount) },
+          { display_name: 'Platform Fee',     variable_name: 'platform_fee',  value: formatNaira(platformFeeNaira) },
+          { display_name: 'Processing Fee',   variable_name: 'gateway_fee',   value: formatNaira(gatewayFeeNaira) },
+          { display_name: 'Total Charged',    variable_name: 'gross',         value: formatNaira(grossNaira) },
         ]
       }
     });
 
     if (tx && tx.authorization_url) {
       const studentIds = session.students.map(s => s.id).join(",");
-      // Store the BASE amount only — this is what the school actually receives
-      // and what will be credited to student_fees when the webhook fires.
       db.prepare(`
         INSERT INTO fee_payment_sessions (parent_phone, student_ids, total_amount, payment_type, partial_percent, paystack_ref, paystack_access_code, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
       `).run(matchable, studentIds, amount, paymentType, percentage, reference, tx.access_code);
 
-      let payLinkMsg = ``;
-      if (hasDva && !isCard) {
-        payLinkMsg += `🏦 *Direct Bank Transfer*\n\n`;
-        payLinkMsg += `Plan: *${paymentType}*\n`;
-        payLinkMsg += `School Fee: *${formatNaira(amount)}*\n`;
-        payLinkMsg += `Platform Fee: *${formatNaira(platformFeeNaira)}*\n`;
-        payLinkMsg += `Transfer Fee: *${formatNaira(gatewayFeeNaira)}*\n\n`;
-        payLinkMsg += `Total to Transfer: *${formatNaira(grossNaira)}*\n\n`;
-        payLinkMsg += `🏦 *Bank:* ${dvaInfo.bank_name || 'Wema Bank'}\n`;
-        payLinkMsg += `🔢 *Account Number:* \`${dvaInfo.account_number}\`\n`;
-        payLinkMsg += `🏷️ *Account Name:* ${dvaInfo.account_name || 'School Settlement'}\n\n`;
-        payLinkMsg += `⚠️ *Important:* Please put your phone number (\`${matchable}\`) in the transfer remarks/narration.\n\n`;
-        payLinkMsg += `_Once payment is successful, your school records will update automatically._`;
-      } else {
-        payLinkMsg += `🔗 *Secure Checkout Link*\n\n`;
-        payLinkMsg += `Plan: *${paymentType}*\n`;
-        payLinkMsg += `School Fee: *${formatNaira(amount)}*\n`;
-        payLinkMsg += `Platform Fee: *${formatNaira(platformFeeNaira)}*\n`;
-        payLinkMsg += `Processing Fee: *${formatNaira(gatewayFeeNaira)}*\n\n`;
-        payLinkMsg += `Total to Pay: *${formatNaira(grossNaira)}*\n\n`;
-        payLinkMsg += `👉 *Tap the link below to complete your payment securely via Paystack:*\n`;
-        payLinkMsg += `${tx.authorization_url}\n\n`;
-        payLinkMsg += `_Channel: Card, Bank Transfer & USSD. Once payment is confirmed, your school records will update automatically._`;
-      }
+      let payLinkMsg = `🔗 *Secure Checkout Link*\n\n`;
+      payLinkMsg += `Plan: *${paymentType}*\n`;
+      payLinkMsg += `School Fee: *${formatNaira(amount)}*\n`;
+      payLinkMsg += `Platform Fee: *${formatNaira(platformFeeNaira)}*\n`;
+      payLinkMsg += `Processing Fee: *${formatNaira(gatewayFeeNaira)}*\n\n`;
+      payLinkMsg += `Total to Pay: *${formatNaira(grossNaira)}*\n\n`;
+      payLinkMsg += `👉 *Tap the link below to complete your payment securely via Paystack:*\n`;
+      payLinkMsg += `${tx.authorization_url}\n\n`;
+      payLinkMsg += `_Channel: Card, Bank Transfer & USSD. Once payment is confirmed, your school records will update automatically._`;
 
       clearSession(matchable);
       await msg.reply(payLinkMsg);
