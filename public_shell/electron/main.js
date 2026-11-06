@@ -759,6 +759,18 @@ ipcMain.handle("department-managers:delete", (event, { id }) => {
 // Current session (who is logged in). Persists for the lifetime of the app process.
 let currentAdminSession = null;
 
+function verifyAdminSecret(rawSecret, storedHash) {
+    if (!rawSecret || !storedHash) return false;
+    const cleanSecret = String(rawSecret).trim();
+    const sha = crypto.createHash('sha256').update(cleanSecret).digest('hex');
+    const b64 = Buffer.from(cleanSecret).toString('base64');
+    return storedHash === sha || storedHash === b64;
+}
+
+function hashAdminSecret(rawSecret) {
+    return crypto.createHash('sha256').update(String(rawSecret).trim()).digest('hex');
+}
+
 ipcMain.handle('auth:get-admins', () => {
     const db = database.getDb();
     // Use role_level instead of role string, username instead of name.
@@ -770,9 +782,8 @@ ipcMain.handle('auth:verify-pin', (event, { adminId, pin }) => {
     const admin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(adminId);
     if (!admin) return { ok: false, error: 'Admin not found' };
     
-    // For simplicity in the Vault, the hash is base64 of the pin.
-    const pinHash = Buffer.from(String(pin)).toString('base64');
-    if (pinHash !== admin.secret_hash) return { ok: false, error: 'Incorrect PIN' };
+    // Strict SHA-256 with legacy base64 verification fallback
+    if (!verifyAdminSecret(pin, admin.secret_hash)) return { ok: false, error: 'Incorrect PIN' };
     
     currentAdminSession = { id: admin.id, username: admin.username, role_level: admin.role_level, loginAt: Date.now() };
     console.log(`[Auth] Session opened: ${admin.username} (Level ${admin.role_level})`);
@@ -883,7 +894,7 @@ ipcMain.handle('auth:verify-otp-login', (event, { adminId, otp, username }) => {
 
     // Login successful
     delete pendingOTPs[adminId];
-    currentAdminSession = { id: admin.id, username: admin.username, role_level: admin.role_level, loginAt: Date.now() };
+    currentAdminSession = { id: admin.id, username: admin.username, role_level: admin.role_level, loginAt: Date.now(), loginMethod: 'otp' };
     console.log(`[Auth] Session opened via OTP: ${admin.username} (Level ${admin.role_level})`);
     
     db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'LOGIN', 'SYSTEM', 'Session initialized via Emergency OTP')").run(admin.id);
@@ -922,7 +933,7 @@ ipcMain.handle('auth:verify-sqa-login', (event, { adminId, answer, username }) =
     }
 
     // Login successful
-    currentAdminSession = { id: admin.id, username: admin.username, role_level: admin.role_level, loginAt: Date.now() };
+    currentAdminSession = { id: admin.id, username: admin.username, role_level: admin.role_level, loginAt: Date.now(), loginMethod: 'sqa' };
     console.log(`[Auth] Session opened via SQA: ${admin.username}`);
     db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'RECOVERY_SUCCESS', 'SYSTEM', 'Session initialized via Security Question verification')").run(admin.id);
     return { ok: true, username: admin.username, role_level: admin.role_level };
@@ -1121,26 +1132,54 @@ ipcMain.handle('auth:disable-totp', (event, { pin, totpCode }) => {
     }
 });
 
-// auth:change-pin — called after OTP verify to let admin set a new PIN/password
-ipcMain.handle('auth:change-pin', (event, { adminId, newPin, authType }) => {
+// auth:change-pin — called after OTP/SQA verify or by logged-in admin to set a new PIN/password
+ipcMain.handle('auth:change-pin', (event, { adminId, newPin, authType, currentPin }) => {
     try {
         const db = database.getDb();
-        const admin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(adminId);
+        const targetId = parseInt(adminId);
+        const admin = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(targetId);
         if (!admin) return { ok: false, error: 'Admin not found' };
-        if (!newPin || newPin.trim().length < 4) return { ok: false, error: 'PIN must be at least 4 characters.' };
-        const newHash = Buffer.from(newPin.trim()).toString('base64');
-        db.prepare('UPDATE admin_users SET secret_hash = ?, auth_type = ? WHERE id = ?')
-          .run(newHash, authType || admin.auth_type || 'pin', adminId);
+        if (!newPin || newPin.trim().length < 4) return { ok: false, error: 'PIN/password must be at least 4 characters.' };
 
-        let details = 'Admin credentials changed';
-        if (currentAdminSession && currentAdminSession.id === adminId) {
-            details += ' proactively while logged in';
-        } else {
-            details += ' via recovery reset';
+        // Security check: Must have active administrative session
+        if (!currentAdminSession) {
+            return { ok: false, error: 'Unauthorized: Active administrative session required.' };
         }
 
-        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'PIN_CHANGED', 'SYSTEM', ?)").run(adminId, details);
-        console.log(`[Auth] PIN changed for admin ID ${adminId}`);
+        const isSelf = currentAdminSession.id === targetId;
+        const isSuperAdmin = currentAdminSession.role_level >= 9;
+
+        if (isSelf) {
+            // If self, require currentPin unless just authenticated via emergency recovery (within 5 minutes)
+            const isRecentRecovery = (currentAdminSession.loginMethod === 'otp' || currentAdminSession.loginMethod === 'sqa') &&
+                (Date.now() - currentAdminSession.loginAt < 5 * 60 * 1000);
+            if (!isRecentRecovery) {
+                if (!currentPin || !verifyAdminSecret(currentPin, admin.secret_hash)) {
+                    return { ok: false, error: 'Current PIN or password is required and must be correct.' };
+                }
+            }
+        } else if (isSuperAdmin) {
+            // Superadmin resetting subordinate account (cannot reset another Superadmin)
+            if (admin.role_level >= 9) {
+                return { ok: false, error: 'Superadmin accounts cannot reset other Superadmin credentials.' };
+            }
+        } else {
+            return { ok: false, error: 'Forbidden: Insufficient privileges to change administrator credentials.' };
+        }
+
+        const newHash = hashAdminSecret(newPin.trim());
+        db.prepare('UPDATE admin_users SET secret_hash = ?, auth_type = ? WHERE id = ?')
+          .run(newHash, authType || admin.auth_type || 'pin', targetId);
+
+        let details = `Admin credentials changed for ${admin.username}`;
+        if (isSelf) {
+            details += ' by account holder';
+        } else {
+            details += ` by Superadmin @${currentAdminSession.username}`;
+        }
+
+        db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'PIN_CHANGED', 'SYSTEM', ?)").run(targetId, details);
+        console.log(`[Auth] Credentials securely updated for admin ID ${targetId}`);
         return { ok: true };
     } catch (e) {
         console.error('[Auth] change-pin error:', e);
@@ -1161,6 +1200,12 @@ ipcMain.handle('auth:create-admin', (event, { username, pin, authType, roleLevel
             if (!currentAdminSession || currentAdminSession.role_level < 9) {
                 return { ok: false, error: 'Superadmin access required.' };
             }
+        }
+
+        // Enforce Superadmin singleton rule: local school admins cannot create Level 9 Superadmins
+        const parsedLevel = parseInt(roleLevel) || 1;
+        if (parsedLevel >= 9) {
+            return { ok: false, error: 'Forbidden: School Superadmin role (Level 9) is singleton and cannot be created locally.' };
         }
 
         // Limit enforcement based on license tier
@@ -1192,8 +1237,8 @@ ipcMain.handle('auth:create-admin', (event, { username, pin, authType, roleLevel
             if (pin.trim().length < 6) return { ok: false, error: 'Password must be at least 6 characters.' };
         }
 
-        const hash = Buffer.from(pin.trim()).toString('base64');
-        const qHash = answer?.trim() ? Buffer.from(answer.trim().toLowerCase()).toString('base64') : null;
+        const hash = hashAdminSecret(pin.trim());
+        const qHash = answer?.trim() ? hashAdminSecret(answer.trim().toLowerCase()) : null;
         
         const result = db.prepare(`
             INSERT INTO admin_users (username, secret_hash, auth_type, role_level, phone, recovery_question, recovery_answer_hash) 
@@ -1202,13 +1247,13 @@ ipcMain.handle('auth:create-admin', (event, { username, pin, authType, roleLevel
             username.trim(), 
             hash,
             type,
-            parseInt(roleLevel) || 1, 
+            parsedLevel, 
             phone ? phone.trim() : null, 
             question ? question.trim() : null, 
             qHash
         );
         
-        if (currentAdminSession) db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'CREATE_ADMIN', 'admin_users', ?)").run(currentAdminSession.id, `Created: ${username.trim()} (Level ${roleLevel || 1})`);
+        if (currentAdminSession) db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'CREATE_ADMIN', 'admin_users', ?)").run(currentAdminSession.id, `Created: ${username.trim()} (Level ${parsedLevel})`);
         return { ok: true, id: result.lastInsertRowid };
     } catch (e) { return { ok: false, error: e.message }; }
 });
@@ -1276,6 +1321,25 @@ ipcMain.on('auth:lock', () => {
     mainWindow.loadFile('lock.html');
     console.log(`[Auth] System locked due to idle timeout.`);
 });
+
+// ── 10-Minute Idle Inactivity Lock (Bank-Grade Security) ─────────────────────
+const IDLE_LOCK_SECONDS = 10 * 60; // 10 minutes
+setInterval(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    try {
+        if (!currentAdminSession) return; // already locked
+        const idleTime = powerMonitor.getSystemIdleTime();
+        if (idleTime >= IDLE_LOCK_SECONDS) {
+            try {
+                const db = database.getDb();
+                db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'LOCK', 'SYSTEM', 'Idle timeout triggered lock (10m)')").run(currentAdminSession.id);
+            } catch (_) {}
+            currentAdminSession = null;
+            mainWindow.loadFile('lock.html');
+            console.log(`[Auth] System automatically locked due to 10 minutes of inactivity.`);
+        }
+    } catch (_) {}
+}, 10000);
 
 ipcMain.on('window:ensure-focus', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -3522,8 +3586,7 @@ ipcMain.handle("teacher:revoke-access", (event, { teacherId, adminId, pin }) => 
     // Verify admin PIN first
     const admin = adminId ? db.prepare("SELECT * FROM admin_users WHERE id = ?").get(adminId) : null;
     if (!admin) return { ok: false, error: "Admin not found" };
-    const pinHash = Buffer.from(String(pin)).toString("base64");
-    if (pinHash !== admin.secret_hash) return { ok: false, error: "Incorrect PIN" };
+    if (!verifyAdminSecret(pin, admin.secret_hash)) return { ok: false, error: "Incorrect PIN" };
 
     // Execute revocation
     db.prepare("UPDATE teachers SET sync_revoked = 1 WHERE id = ?").run(teacherId);
@@ -3552,8 +3615,7 @@ ipcMain.handle("teacher:restore-access", (event, { teacherId, adminId, pin }) =>
 
     const admin = adminId ? db.prepare("SELECT * FROM admin_users WHERE id = ?").get(adminId) : null;
     if (!admin) return { ok: false, error: "Admin not found" };
-    const pinHash = Buffer.from(String(pin)).toString("base64");
-    if (pinHash !== admin.secret_hash) return { ok: false, error: "Incorrect PIN" };
+    if (!verifyAdminSecret(pin, admin.secret_hash)) return { ok: false, error: "Incorrect PIN" };
 
     db.prepare("UPDATE teachers SET sync_revoked = 0 WHERE id = ?").run(teacherId);
     try {
@@ -3600,9 +3662,17 @@ ipcMain.handle("get-db-stats", () => {
     try {
       fees = db.prepare("SELECT COUNT(*) as c FROM student_fees").get().c;
     } catch (_) {}
-    return { teachers, students, classes, devices, grade_events, grades, attendance, fees };
+    // Count unique parents by normalising on parent_phone (primary phone only).
+    // A parent with multiple children still counts as 1.
+    let parents = 0;
+    try {
+      parents = db.prepare(
+        "SELECT COUNT(DISTINCT TRIM(parent_phone)) as c FROM students WHERE parent_phone IS NOT NULL AND TRIM(parent_phone) != ''"
+      ).get().c;
+    } catch (_) {}
+    return { teachers, students, classes, devices, grade_events, grades, attendance, fees, parents };
   } catch (err) {
-    return { teachers: 0, students: 0, classes: 0, devices: 0, grade_events: 0, grades: 0, attendance: 0, fees: 0 };
+    return { teachers: 0, students: 0, classes: 0, devices: 0, grade_events: 0, grades: 0, attendance: 0, fees: 0, parents: 0 };
   }
 });
 
@@ -5616,7 +5686,7 @@ ipcMain.handle("fees:save-settings", async (event, patch) => {
               schoolName,
               acc.bank_code,
               acc.number,
-              0 // 0% platform charge = 100% split to school subaccount
+              1 // 1% platform enabling fee retained on main account
             );
             if (subacc && subacc.subaccount_code) {
               subaccountCode = subacc.subaccount_code;
