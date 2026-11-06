@@ -3294,9 +3294,9 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
                       value={newStaffRole}
                       onChange={(e) => setNewStaffRole(parseInt(e.target.value))}
                     >
-                      {SYSTEM_ROLES.map((r) => {
-                        const maxRole = currentAdminUser?.role_level ?? 9;
-                        const isAllowed = r.level <= maxRole || maxRole === 9;
+                      {SYSTEM_ROLES.filter((r) => r.level < 9).map((r) => {
+                        const maxRole = currentAdminUser?.role_level ?? 7;
+                        const isAllowed = r.level <= maxRole;
                         return (
                           <option key={r.level} value={r.level} disabled={!isAllowed}>
                             {r.label} (Level {r.level}){r.level > maxRole ? ' — Higher privilege' : ''}

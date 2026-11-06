@@ -982,13 +982,27 @@ export default function Classes() {
             Configure hierarchy classes, assign stable subject capacities, override pass marks, and manage aliases/arms.
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div
+          className="classes-header-actions"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '10px',
+            maxWidth: '100%',
+            overflowX: 'auto',
+            paddingBottom: '4px',
+            WebkitOverflowScrolling: 'touch',
+          }}
+        >
           <a
             href="data:text/csv;charset=utf-8,Class_Name,Max_Subjects,Pass_Mark_Override,Arms%0AJSS 1,12,45,A|B|C%0ASS 1,15,50,Science|Arts"
             download="Nexus_Classes_Template.csv"
             style={{
               display: 'inline-flex',
               alignItems: 'center',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
               background: 'rgba(255, 255, 255, 0.05)',
               border: '1px solid rgba(255, 255, 255, 0.1)',
               borderRadius: '6px',
@@ -1010,6 +1024,8 @@ export default function Classes() {
             style={{
               display: 'inline-flex',
               alignItems: 'center',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
               background: '#00e5ff',
               color: '#020617',
               borderRadius: '6px',
@@ -1038,6 +1054,8 @@ export default function Classes() {
             style={{
               display: 'inline-flex',
               alignItems: 'center',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
               gap: '6px',
               background: isSyncingWeb ? 'rgba(0, 229, 255, 0.25)' : 'rgba(0, 229, 255, 0.12)',
               border: '1px solid rgba(0, 229, 255, 0.4)',
@@ -1068,6 +1086,8 @@ export default function Classes() {
             style={{
               display: 'inline-flex',
               alignItems: 'center',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
               gap: '6px',
               background: 'rgba(168, 85, 247, 0.15)',
               border: '1px solid rgba(168, 85, 247, 0.4)',
@@ -1096,6 +1116,8 @@ export default function Classes() {
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
               background: isPullingBinding ? 'rgba(0, 229, 255, 0.25)' : 'rgba(0, 229, 255, 0.12)',
               border: '1px solid rgba(0, 229, 255, 0.4)',
               borderRadius: '6px',
@@ -1123,6 +1145,8 @@ export default function Classes() {
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
                 background: 'rgba(239, 68, 68, 0.1)',
                 border: '1px solid rgba(239, 68, 68, 0.3)',
                 borderRadius: '6px',

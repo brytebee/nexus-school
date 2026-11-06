@@ -5,7 +5,7 @@ interface WebSyncModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
-  defaultTab?: 'overview' | 'classes' | 'branding' | 'calendar' | 'fees' | 'cbt' | 'extras';
+  defaultTab?: 'overview' | 'classes' | 'departments' | 'branding' | 'calendar' | 'fees' | 'cbt' | 'extras';
 }
 
 export function WebSyncModal({
@@ -14,7 +14,7 @@ export function WebSyncModal({
   onSuccess,
   defaultTab = 'overview',
 }: WebSyncModalProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'classes' | 'branding' | 'calendar' | 'fees' | 'cbt' | 'extras'>(defaultTab);
+  const [activeTab, setActiveTab] = useState<'overview' | 'classes' | 'departments' | 'branding' | 'calendar' | 'fees' | 'cbt' | 'extras'>(defaultTab);
   const [loading, setLoading] = useState(false);
   const [testingImpact, setTestingImpact] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -22,6 +22,7 @@ export function WebSyncModal({
 
   // Module selection toggles
   const [syncClasses, setSyncClasses] = useState(true);
+  const [syncDepartments, setSyncDepartments] = useState(true);
   const [syncBranding, setSyncBranding] = useState(true);
   const [syncCalendar, setSyncCalendar] = useState(true);
   const [syncFees, setSyncFees] = useState(false);
@@ -161,6 +162,10 @@ export function WebSyncModal({
       activeModules.classes = snapshot.modules.classes;
     }
 
+    if (syncDepartments && snapshot?.modules?.departments) {
+      activeModules.departments = snapshot.modules.departments;
+    }
+
     if (syncBranding) {
       activeModules.branding = {
         schoolName: editSchoolName.trim(),
@@ -287,6 +292,7 @@ export function WebSyncModal({
 
   const classesCount = snapshot?.modules?.classes?.fullList?.length || 0;
   const hierarchyCount = snapshot?.modules?.classes?.hierarchy?.length || 0;
+  const departmentsCount = snapshot?.modules?.departments?.length || 0;
   const feesCount = snapshot?.modules?.fees?.length || 0;
   const cbtCount = snapshot?.modules?.cbtExams?.length || 0;
   const cbtBanksCount = snapshot?.modules?.cbtQuestionBanks?.length || 0;
@@ -369,10 +375,11 @@ export function WebSyncModal({
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', color: '#e2e8f0', fontSize: '13px' }}>
         {/* Navigation Tabs */}
-        <div style={{ display: 'flex', gap: '6px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '8px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '8px', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
           {[
             { id: 'overview', label: '📊 Overview & Modules' },
             { id: 'classes', label: `🏫 Classes (${classesCount})` },
+            { id: 'departments', label: `🏛️ Departments (${departmentsCount})` },
             { id: 'branding', label: '🎨 Profile & Branding' },
             { id: 'calendar', label: '📅 Calendar' },
             { id: 'fees', label: `💳 Fees (${feesCount})` },
@@ -388,6 +395,8 @@ export function WebSyncModal({
                 fontWeight: activeTab === tab.id ? 700 : 500,
                 borderRadius: '6px',
                 border: 'none',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
                 background: activeTab === tab.id ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
                 color: activeTab === tab.id ? '#38bdf8' : 'rgba(255,255,255,0.6)',
                 cursor: 'pointer',
@@ -493,6 +502,16 @@ export function WebSyncModal({
                   <strong>Classes &amp; Arms</strong>
                   <span style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
                     {classesCount} classes in {hierarchyCount} hierarchy levels
+                  </span>
+                </div>
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', padding: '10px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)' }}>
+                <input type="checkbox" checked={syncDepartments} onChange={(e) => setSyncDepartments(e.target.checked)} />
+                <div>
+                  <strong>Educational Departments</strong>
+                  <span style={{ display: 'block', fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
+                    {departmentsCount} section{departmentsCount === 1 ? '' : 's'} with managers &amp; signatures
                   </span>
                 </div>
               </label>
@@ -616,6 +635,53 @@ export function WebSyncModal({
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* TAB 2b: DEPARTMENTS & SECTION MANAGERS */}
+        {activeTab === 'departments' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '380px', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '8px' }}>
+              <div>
+                <strong style={{ fontSize: '13px', color: '#fff' }}>Educational Departments &amp; Signatures</strong>
+                <p style={{ margin: '2px 0 0', fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>
+                  Section manager titles, signatory assignments, and prefix patterns routing admissions &amp; CBT exams.
+                </p>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer', background: 'rgba(255,255,255,0.05)', padding: '6px 12px', borderRadius: '6px' }}>
+                <input type="checkbox" checked={syncDepartments} onChange={(e) => setSyncDepartments(e.target.checked)} />
+                Sync Departments
+              </label>
+            </div>
+
+            {(!snapshot?.modules?.departments || snapshot.modules.departments.length === 0) ? (
+              <div style={{ padding: '24px', textAlign: 'center', color: 'rgba(255,255,255,0.5)', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
+                No educational sections configured in desktop settings yet.
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '10px' }}>
+                {snapshot.modules.departments.map((d: any) => (
+                  <div key={d.id || d.sectionName} style={{ padding: '12px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <strong style={{ fontSize: '13px', color: '#38bdf8' }}>{d.sectionName}</strong>
+                      <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: d.signBase64 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255,255,255,0.1)', color: d.signBase64 ? '#10b981' : 'rgba(255,255,255,0.5)' }}>
+                        {d.signBase64 ? '✍️ Signed' : 'No Signature'}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.7)', marginBottom: '6px' }}>
+                      {d.managerTitle}{d.managerName ? ` • ${d.managerName}` : ''}
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                      {Array.isArray(d.classPrefixes) && d.classPrefixes.map((p: string) => (
+                        <span key={p} style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '3px', background: 'rgba(0, 229, 255, 0.1)', color: '#00e5ff', border: '1px solid rgba(0, 229, 255, 0.2)' }}>
+                          {p}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

@@ -9,10 +9,12 @@
         const stats = await window.electronAPI.getDbStats();
         const tc = document.getElementById("dash-teachers-count");
         const sc = document.getElementById("dash-students-count");
+        const pc = document.getElementById("stat-parents-count");
         const bt = document.getElementById("badge-teachers");
         const bs = document.getElementById("badge-students");
         if (tc) tc.textContent = stats.teachers;
         if (sc) sc.textContent = stats.students;
+        if (pc) pc.textContent = stats.parents || 0;
         if (bt) bt.textContent = stats.teachers;
         if (bs) bs.textContent = stats.students;
       }

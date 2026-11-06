@@ -21,7 +21,7 @@ export function Dashboard({ onTabChange }: DashboardProps = {}) {
   // Stat counts
   const [teachersCount, setTeachersCount] = useState(0);
   const [studentsCount, setStudentsCount] = useState(0);
-  const [devicesSynced, setDevicesSynced] = useState(0);
+  const [parentsCount, setParentsCount] = useState(0);
   const [gradeEventsCount, setGradeEventsCount] = useState(0);
 
   // Grade Events Feed
@@ -57,7 +57,7 @@ export function Dashboard({ onTabChange }: DashboardProps = {}) {
       const stats = await window.electronAPI.getDbStats();
       setTeachersCount(stats.teachers || 0);
       setStudentsCount(stats.students || 0);
-      setDevicesSynced(stats.devices || 0);
+      setParentsCount(stats.parents || 0);
       setGradeEventsCount(stats.grade_events || 0);
     } catch (err) {
       console.error('Error fetching db stats:', err);
@@ -101,7 +101,6 @@ export function Dashboard({ onTabChange }: DashboardProps = {}) {
     if (!window.electronAPI) return;
 
     const handleHandshake = (data: any) => {
-      setDevicesSynced(prev => prev + 1);
       setPulseLabel(`📱 ${data?.teacher_name || 'A teacher'} tablet is now married.`);
       setPulseActive(true);
       setTimeout(() => setPulseActive(false), 3000);
@@ -295,7 +294,7 @@ export function Dashboard({ onTabChange }: DashboardProps = {}) {
   const statCards = [
     { icon: '👩‍🏫', value: teachersCount, label: 'Teachers', target: 'teachers' },
     { icon: '👥', value: studentsCount, label: 'Students', target: 'students' },
-    { icon: '📱', value: devicesSynced, label: 'Devices Synced' },
+    { icon: '👨‍👩‍👧‍👦', value: parentsCount, label: 'Parents' },
     { icon: '📊', value: gradeEventsCount, label: 'Grade Events' },
   ];
 
