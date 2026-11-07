@@ -691,6 +691,110 @@ ipcMain.handle("app-settings:set", (event, { key, value }) => {
     return { ok: true };
 });
 
+// ── ZERO-TOUCH CLOUD BOOTSTRAP ────────────────────────────────────────────────
+/**
+ * "sync:cloud-bootstrap"
+ *
+ * Called from the first-launch "Connect Your School" UI screen.
+ * Hits POST /api/sync/bootstrap on nexus-api and, on success:
+ *   1. Writes the signed Ed25519 license token to <userData>/license.nexus
+ *   2. Stores sync metadata in app_settings (nexus_sync_token, school_cloud_id,
+ *      portal_slug, school_website_url)
+ *   3. Stores school identity packet in app_settings (school_name, logo_url)
+ *   4. Returns the full response so the renderer can seed classes via
+ *      sync:pull → activateCloud if the school-website is provisioned.
+ *
+ * Payload: { slug: string; email: string; hardware_id?: string }
+ */
+ipcMain.handle("sync:cloud-bootstrap", async (_event, { slug, email, hardwareId }) => {
+    const API_BASE = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
+    const db = database.getDb();
+
+    // Derive hardware_id from existing settings if not supplied
+    let hwId = hardwareId;
+    if (!hwId) {
+        try {
+            const hwRow = db.prepare("SELECT value FROM app_settings WHERE key = 'hardware_id'").get();
+            if (hwRow?.value) hwId = hwRow.value;
+        } catch (_) {}
+    }
+
+    if (!slug || !email) {
+        return { ok: false, reason: 'missing_fields', message: 'Slug and email are required.' };
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/api/sync/bootstrap`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slug, email, hardware_id: hwId }),
+            signal: AbortSignal.timeout(12000),
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+            return {
+                ok: false,
+                reason: data.reason || 'api_error',
+                message: data.message || `Server returned HTTP ${res.status}`,
+            };
+        }
+
+        // ── Persist license token ──────────────────────────────────────────
+        try {
+            const { app } = require('electron');
+            const fsMod = require('fs');
+            const pathMod = require('path');
+            const licensePath = pathMod.join(app.getPath('userData'), 'license.nexus');
+            fsMod.writeFileSync(licensePath, data.license_token, 'utf-8');
+            console.log('[Bootstrap] ✅ license.nexus written to userData.');
+        } catch (writeErr) {
+            console.error('[Bootstrap] Failed to write license.nexus:', writeErr.message);
+        }
+
+        // ── Persist sync metadata to app_settings ─────────────────────────
+        const upsert = db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)");
+        const persist = (key, value) => { try { upsert.run(key, String(value ?? '')); } catch (_) {} };
+
+        persist('nexus_sync_token',     data.license_token);
+        persist('school_cloud_id',      data.sync_meta?.school_cloud_id ?? '');
+        persist('portal_slug',          data.sync_meta?.portal_slug ?? slug);
+        persist('school_slug',          data.sync_meta?.portal_slug ?? slug);
+        persist('school_website_url',   data.sync_meta?.website_url ?? '');
+        persist('school_name',          data.school?.name ?? '');
+        persist('school_tier',          data.school?.tier ?? '');
+        persist('cloud_bootstrap_at',   String(Date.now()));
+
+        // logo_url stored separately for identity panel rendering
+        if (data.school?.logo_url) persist('school_logo_url', data.school.logo_url);
+
+        console.log(
+            `[Bootstrap] ✅ Cloud bootstrap complete for "${data.school?.name}" ` +
+            `(${data.school?.id}) — tier: ${data.school?.tier}`
+        );
+
+        return {
+            ok: true,
+            school: data.school,
+            academic_hierarchy: data.academic_hierarchy,
+            sync_meta: data.sync_meta,
+            license_token: data.license_token,
+            message: `Connected successfully! Welcome to ${data.school?.name}.`,
+        };
+
+    } catch (err) {
+        const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+        console.error('[Bootstrap] Network error:', err.message);
+        return {
+            ok: false,
+            reason: isTimeout ? 'timeout' : 'network_error',
+            message: isTimeout
+                ? 'Request timed out. Check your internet connection and try again.'
+                : `Connection failed: ${err.message}`,
+        };
+    }
+});
+
 // ── DEPARTMENT MANAGERS (Phase 5) ────────────────────────────────────────────
 ipcMain.handle("department-managers:list", () => {
     try {
