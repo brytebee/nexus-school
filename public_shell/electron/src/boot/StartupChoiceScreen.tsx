@@ -4,9 +4,10 @@ const api = (window as any).nexusAPI || (window as any).electronAPI;
 
 interface StartupChoiceScreenProps {
   onStartFresh: () => void;
+  onConnectCloud: () => void;
 }
 
-export function StartupChoiceScreen({ onStartFresh }: StartupChoiceScreenProps) {
+export function StartupChoiceScreen({ onStartFresh, onConnectCloud }: StartupChoiceScreenProps) {
   const [restoring, setRestoring] = useState(false);
   const [restoreError, setRestoreError] = useState('');
   const [schoolName, setSchoolName] = useState('Nexus School OS');
@@ -92,17 +93,17 @@ export function StartupChoiceScreen({ onStartFresh }: StartupChoiceScreenProps) 
           fontSize: '13px', color: 'rgba(255,255,255,0.45)',
           margin: 0, maxWidth: '400px',
         }}>
-          Set up a fresh school database, or restore a previous backup to continue where you left off.
+          Set up a fresh school database, restore a previous backup, or connect a school you already registered online.
         </p>
       </div>
 
       {/* Choice Cards */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
         gap: '20px',
         width: '100%',
-        maxWidth: '640px',
+        maxWidth: '820px',
         zIndex: 1,
       }}>
         {/* ── Start Fresh ── */}
@@ -207,6 +208,55 @@ export function StartupChoiceScreen({ onStartFresh }: StartupChoiceScreenProps) 
               Pick backup file →
             </div>
           )}
+        </button>
+
+        {/* ── Connect Cloud School ── */}
+        <button
+          onClick={onConnectCloud}
+          style={{
+            background: 'linear-gradient(135deg, rgba(0,180,80,0.18) 0%, rgba(0,255,120,0.08) 100%)',
+            border: '1px solid rgba(0,200,100,0.35)',
+            borderRadius: '20px',
+            padding: '32px 28px',
+            cursor: 'pointer',
+            textAlign: 'left',
+            color: '#fff',
+            transition: 'all 0.25s ease',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            boxShadow: '0 8px 32px rgba(0,180,80,0.10)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '14px',
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(0,255,140,0.6)';
+            (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 12px 48px rgba(0,200,100,0.22)';
+            (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-3px)';
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(0,200,100,0.35)';
+            (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 8px 32px rgba(0,180,80,0.10)';
+            (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)';
+          }}
+        >
+          <div style={{ fontSize: '36px' }}>☁️</div>
+          <div>
+            <div style={{ fontSize: '17px', fontWeight: 700, marginBottom: '6px', color: '#00e5a0' }}>
+              Connect Cloud School
+            </div>
+            <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', lineHeight: '1.65' }}>
+              Already onboarded online? Enter your school slug and email to sync your data to this device.
+            </div>
+          </div>
+          <div style={{
+            marginTop: '4px',
+            fontSize: '11px', fontWeight: 600,
+            color: '#00e5a0',
+            display: 'flex', alignItems: 'center', gap: '5px',
+          }}>
+            Connect &amp; seed →
+          </div>
         </button>
       </div>
 

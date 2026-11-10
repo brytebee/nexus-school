@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { AdminSetupScreen } from './boot/AdminSetupScreen';
+import { CloudConnectScreen } from './boot/CloudConnectScreen';
 import { StartupChoiceScreen } from './boot/StartupChoiceScreen';
 import './index.css';
 import { SudoAuthProvider } from './context/SudoAuthContext';
@@ -9,16 +10,20 @@ import { SudoAuthProvider } from './context/SudoAuthContext';
 const params = new URLSearchParams(window.location.search);
 const isFirstRun = params.get('firstRun') === '1' || window.location.hash === '#firstRun';
 
+type BootMode = 'choice' | 'fresh' | 'connect';
+
 function Root() {
-  // During firstRun the user first picks Start Fresh or Restore Backup.
-  // Only after clicking "Start Fresh" do we advance to AdminSetupScreen.
-  const [setupStarted, setSetupStarted] = useState(false);
+  const [mode, setMode] = useState<BootMode>('choice');
 
   if (isFirstRun) {
-    if (!setupStarted) {
-      return <StartupChoiceScreen onStartFresh={() => setSetupStarted(true)} />;
-    }
-    return <AdminSetupScreen onBack={() => setSetupStarted(false)} />;
+    if (mode === 'fresh')   return <AdminSetupScreen onBack={() => setMode('choice')} />;
+    if (mode === 'connect') return <CloudConnectScreen onBack={() => setMode('choice')} />;
+    return (
+      <StartupChoiceScreen
+        onStartFresh={() => setMode('fresh')}
+        onConnectCloud={() => setMode('connect')}
+      />
+    );
   }
 
   return (

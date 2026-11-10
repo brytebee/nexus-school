@@ -795,6 +795,225 @@ ipcMain.handle("sync:cloud-bootstrap", async (_event, { slug, email, hardwareId 
     }
 });
 
+// ── CLOUD CONNECT (First-run: seed from onboarding data) ─────────────────────
+/**
+ * "sync:cloud-connect"
+ *
+ * Called from CloudConnectScreen after the user enters their school slug,
+ * onboarding email, and a NEW desktop PIN.  Steps:
+ *   1. Bootstrap with nexus-api (same as sync:cloud-bootstrap)
+ *   2. Fetch class hierarchy from school-website → seed class_configs + class_arms
+ *   3. Fetch teachers + allocations            → seed teachers + teacher_allocations
+ *   4. Fetch inaugural students                → seed students
+ *   5. Create local admin_users row (SHA-256 of PIN)
+ *   6. Mark cloud_connected_at in app_settings
+ *
+ * Returns { ok, school, seeded: { classes, teachers, students }, message }
+ */
+ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin }) => {
+    if (!slug || !email || !pin) {
+        return { ok: false, reason: 'missing_fields', message: 'Slug, email and PIN are required.' };
+    }
+
+    const API_BASE = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
+    const db = database.getDb();
+
+    // ── 1. Bootstrap ──────────────────────────────────────────────────────────
+    let hwId;
+    try {
+        const hwRow = db.prepare("SELECT value FROM app_settings WHERE key = 'hardware_id'").get();
+        if (hwRow?.value) hwId = hwRow.value;
+    } catch (_) {}
+
+    let bootstrapData;
+    try {
+        const res = await fetch(`${API_BASE}/api/sync/bootstrap`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slug, email, hardware_id: hwId }),
+            signal: AbortSignal.timeout(14000),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.ok) {
+            return {
+                ok: false,
+                reason: json.reason || 'api_error',
+                message: json.message || `Bootstrap failed (HTTP ${res.status})`,
+            };
+        }
+        bootstrapData = json;
+    } catch (err) {
+        const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+        return {
+            ok: false,
+            reason: isTimeout ? 'timeout' : 'network_error',
+            message: isTimeout
+                ? 'Request timed out. Check your internet connection and try again.'
+                : `Connection failed: ${err.message}`,
+        };
+    }
+
+    // Persist bootstrap metadata (mirror sync:cloud-bootstrap behaviour)
+    try {
+        const { app } = require('electron');
+        const fsMod = require('fs');
+        const pathMod = require('path');
+        fsMod.writeFileSync(
+            pathMod.join(app.getPath('userData'), 'license.nexus'),
+            bootstrapData.license_token,
+            'utf-8'
+        );
+    } catch (_) {}
+
+    const upsertSetting = db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)");
+    const persist = (key, value) => { try { upsertSetting.run(key, String(value ?? '')); } catch (_) {} };
+    persist('nexus_sync_token',   bootstrapData.license_token);
+    persist('school_cloud_id',    bootstrapData.sync_meta?.school_cloud_id ?? '');
+    persist('portal_slug',        bootstrapData.sync_meta?.portal_slug ?? slug);
+    persist('school_slug',        bootstrapData.sync_meta?.portal_slug ?? slug);
+    persist('school_website_url', bootstrapData.sync_meta?.website_url ?? '');
+    persist('school_name',        bootstrapData.school?.name ?? '');
+    persist('school_tier',        bootstrapData.school?.tier ?? '');
+    persist('cloud_bootstrap_at', String(Date.now()));
+    if (bootstrapData.school?.logo_url) persist('school_logo_url', bootstrapData.school.logo_url);
+
+    const syncToken  = bootstrapData.license_token;
+    const cloudId    = bootstrapData.sync_meta?.school_cloud_id ?? '';
+    const websiteUrl = (bootstrapData.sync_meta?.website_url || '').replace(/\/$/, '') ||
+                       (process.env.SCHOOL_WEBSITE_URL || 'http://localhost:3005');
+
+    const syncHeaders = { 'x-nexus-sync-token': syncToken };
+    let seededClasses = 0, seededTeachers = 0, seededStudents = 0;
+
+    // ── 2 & 3. Classes ────────────────────────────────────────────────────────
+    try {
+        const classRes = await fetch(
+            `${websiteUrl}/api/sync/classes?school_cloud_id=${encodeURIComponent(cloudId)}`,
+            { headers: syncHeaders, signal: AbortSignal.timeout(12000) }
+        );
+        const classData = await classRes.json();
+        const hierarchy = classData.importedClasses?.hierarchy || [];
+
+        const insertClassConfig = db.prepare(
+            'INSERT OR IGNORE INTO class_configs (hierarchy_class, max_subjects) VALUES (?, ?)'
+        );
+        const insertClassArm = db.prepare(
+            'INSERT OR IGNORE INTO class_arms (hierarchy_class, arm) VALUES (?, ?)'
+        );
+        for (const cls of hierarchy) {
+            insertClassConfig.run(cls.hierarchyClass, cls.maxSubjects || 0);
+            seededClasses++;
+            for (const arm of (cls.arms || [])) {
+                insertClassArm.run(cls.hierarchyClass, arm);
+            }
+        }
+        console.log(`[CloudConnect] ✅ Seeded ${seededClasses} classes.`);
+    } catch (err) {
+        console.warn('[CloudConnect] ⚠️ Classes fetch failed:', err.message);
+    }
+
+    // ── 4 & 5. Teachers + allocations ─────────────────────────────────────────
+    try {
+        const staffRes = await fetch(
+            `${websiteUrl}/api/sync/staff/pull?schoolCloudId=${encodeURIComponent(cloudId)}`,
+            { headers: syncHeaders, signal: AbortSignal.timeout(12000) }
+        );
+        const staffData = await staffRes.json();
+        const cloudTeachers   = staffData.teachers   || [];
+        const cloudAllocations = staffData.allocations || [];
+
+        const insertTeacher = db.prepare(
+            'INSERT OR IGNORE INTO teachers (id, name, phone, email) VALUES (?, ?, ?, ?)'
+        );
+        for (const t of cloudTeachers) {
+            insertTeacher.run(t.teacherId || t.id, t.name, t.phone || null, t.email || null);
+            seededTeachers++;
+        }
+
+        const insertAlloc = db.prepare(
+            'INSERT OR IGNORE INTO teacher_allocations (teacher_id, class_name, subject) VALUES (?, ?, ?)'
+        );
+        for (const a of cloudAllocations) {
+            if (a.teacherId && a.className && a.subject) {
+                insertAlloc.run(a.teacherId, a.className, a.subject);
+            }
+        }
+        console.log(`[CloudConnect] ✅ Seeded ${seededTeachers} teachers, ${cloudAllocations.length} allocations.`);
+    } catch (err) {
+        console.warn('[CloudConnect] ⚠️ Staff fetch failed:', err.message);
+    }
+
+    // ── 6. Students ───────────────────────────────────────────────────────────
+    try {
+        // Ensure optional columns exist (graceful on older DB versions)
+        for (const col of [
+            "ALTER TABLE students ADD COLUMN class_arm TEXT DEFAULT ''",
+            "ALTER TABLE students ADD COLUMN gender TEXT DEFAULT ''",
+            "ALTER TABLE students ADD COLUMN parent_phone TEXT DEFAULT NULL",
+            "ALTER TABLE students ADD COLUMN parent_name TEXT DEFAULT NULL",
+            "ALTER TABLE students ADD COLUMN parent_email TEXT DEFAULT NULL",
+            "ALTER TABLE students ADD COLUMN address TEXT DEFAULT NULL",
+        ]) {
+            try { db.exec(col); } catch (_) {}
+        }
+
+        const stuRes = await fetch(
+            `${websiteUrl}/api/sync/students?school_cloud_id=${encodeURIComponent(cloudId)}`,
+            { headers: syncHeaders, signal: AbortSignal.timeout(12000) }
+        );
+        const stuData = await stuRes.json();
+        const cloudStudents = stuData.students || [];
+
+        const insertStudent = db.prepare(
+            'INSERT OR IGNORE INTO students (id, name, class_name, class_arm, admission_no) VALUES (?, ?, ?, ?, ?)'
+        );
+        for (const s of cloudStudents) {
+            const fullClass = [s.className, s.classArm].filter(Boolean).join(' ');
+            insertStudent.run(
+                s.studentId || s.id,
+                s.name,
+                fullClass,
+                s.classArm || '',
+                s.admissionNo || ''
+            );
+            seededStudents++;
+        }
+        console.log(`[CloudConnect] ✅ Seeded ${seededStudents} students.`);
+    } catch (err) {
+        console.warn('[CloudConnect] ⚠️ Students fetch failed:', err.message);
+    }
+
+    // ── 7. Create local admin user (SHA-256 of PIN) ────────────────────────
+    try {
+        const secretHash = hashAdminSecret(pin.trim());
+        const username   = bootstrapData.school?.slug || slug;
+        db.prepare(`
+            INSERT INTO admin_users (username, secret_hash, auth_type, role_level)
+            VALUES (?, ?, 'pin', 9)
+            ON CONFLICT(username) DO UPDATE SET secret_hash = excluded.secret_hash
+        `).run(username, secretHash);
+        console.log(`[CloudConnect] ✅ Admin user "${username}" created/updated.`);
+    } catch (err) {
+        console.error('[CloudConnect] ❌ Admin user creation failed:', err.message);
+        return { ok: false, reason: 'admin_create_failed', message: err.message };
+    }
+
+    // ── 8. Mark cloud connected ───────────────────────────────────────────────
+    persist('cloud_connected_at', String(Date.now()));
+
+    console.log(
+        `[CloudConnect] 🎉 "${bootstrapData.school?.name}" connected. ` +
+        `classes=${seededClasses}, teachers=${seededTeachers}, students=${seededStudents}`
+    );
+
+    return {
+        ok: true,
+        school: bootstrapData.school,
+        seeded: { classes: seededClasses, teachers: seededTeachers, students: seededStudents },
+        message: `Connected to ${bootstrapData.school?.name}. Local database seeded successfully.`,
+    };
+});
+
 // ── DEPARTMENT MANAGERS (Phase 5) ────────────────────────────────────────────
 ipcMain.handle("department-managers:list", () => {
     try {
