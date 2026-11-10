@@ -73,16 +73,17 @@ export function CloudConnectScreen({ onBack }: CloudConnectScreenProps) {
   // ── Shared layout wrapper ──────────────────────────────────────────────────
   const wrap = (children: React.ReactNode) => (
     <div style={{
-      minHeight: '100vh',
+      width: '100vw',
+      height: '100vh',
       background: 'linear-gradient(135deg, #050814 0%, #0b1120 50%, #0a0f1e 100%)',
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '40px 24px',
+      padding: '32px 24px',
       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
       position: 'relative',
-      overflowY: 'auto',
+      overflow: 'hidden',
       boxSizing: 'border-box',
       color: '#fff',
     }}>
@@ -218,7 +219,7 @@ export function CloudConnectScreen({ onBack }: CloudConnectScreenProps) {
   };
 
   return wrap(
-    <div style={{ width: '100%', maxWidth: '440px', zIndex: 1 }}>
+    <div style={{ width: '100%', maxWidth: '440px', zIndex: 1, overflowY: 'auto', maxHeight: 'calc(100vh - 48px)' }}>
       {/* Header */}
       <div style={{ textAlign: 'center', marginBottom: '36px' }}>
         <div style={{ fontSize: '44px', marginBottom: '14px' }}>☁️</div>
