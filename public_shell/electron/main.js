@@ -810,9 +810,9 @@ ipcMain.handle("sync:cloud-bootstrap", async (_event, { slug, email, hardwareId 
  *
  * Returns { ok, school, seeded: { classes, teachers, students }, message }
  */
-ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin }) => {
+ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType }) => {
     if (!slug || !email || !pin) {
-        return { ok: false, reason: 'missing_fields', message: 'Slug, email and PIN are required.' };
+        return { ok: false, reason: 'missing_fields', message: 'Slug, email and PIN/Password are required.' };
     }
 
     const API_BASE = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
@@ -879,8 +879,14 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin }) => {
 
     const syncToken  = bootstrapData.license_token;
     const cloudId    = bootstrapData.sync_meta?.school_cloud_id ?? '';
-    const websiteUrl = (bootstrapData.sync_meta?.website_url || '').replace(/\/$/, '') ||
-                       (process.env.SCHOOL_WEBSITE_URL || 'http://localhost:3005');
+    let websiteUrl   = process.env.SCHOOL_WEBSITE_URL;
+    if (!websiteUrl) {
+        if (API_BASE.includes('localhost') || API_BASE.includes('127.0.0.1')) {
+            websiteUrl = 'http://localhost:3005';
+        } else {
+            websiteUrl = (bootstrapData.sync_meta?.website_url || '').replace(/\/$/, '') || 'http://localhost:3005';
+        }
+    }
 
     const syncHeaders = { 'x-nexus-sync-token': syncToken };
     let seededClasses = 0, seededTeachers = 0, seededStudents = 0;
@@ -983,16 +989,19 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin }) => {
         console.warn('[CloudConnect] ⚠️ Students fetch failed:', err.message);
     }
 
-    // ── 7. Create local admin user (SHA-256 of PIN) ────────────────────────
+    // ── 7. Create local admin user (SHA-256 of PIN / Password) ────────────
     try {
         const secretHash = hashAdminSecret(pin.trim());
         const username   = bootstrapData.school?.slug || slug;
+        const chosenAuthType = (authType === 'password') ? 'password' : 'pin';
         db.prepare(`
             INSERT INTO admin_users (username, secret_hash, auth_type, role_level)
-            VALUES (?, ?, 'pin', 9)
-            ON CONFLICT(username) DO UPDATE SET secret_hash = excluded.secret_hash
-        `).run(username, secretHash);
-        console.log(`[CloudConnect] ✅ Admin user "${username}" created/updated.`);
+            VALUES (?, ?, ?, 9)
+            ON CONFLICT(username) DO UPDATE SET 
+                secret_hash = excluded.secret_hash,
+                auth_type = excluded.auth_type
+        `).run(username, secretHash, chosenAuthType);
+        console.log(`[CloudConnect] ✅ Admin user "${username}" created/updated with auth_type="${chosenAuthType}".`);
     } catch (err) {
         console.error('[CloudConnect] ❌ Admin user creation failed:', err.message);
         return { ok: false, reason: 'admin_create_failed', message: err.message };

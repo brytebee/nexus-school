@@ -7,29 +7,32 @@ interface CloudConnectScreenProps {
 }
 
 type Step = 'form' | 'loading' | 'success' | 'error';
+type AuthType = 'pin' | 'password';
 
 export function CloudConnectScreen({ onBack }: CloudConnectScreenProps) {
   const [step, setStep] = useState<Step>('form');
 
   // Form fields
-  const [slug, setSlug]           = useState('');
-  const [email, setEmail]         = useState('');
-  const [pin, setPin]             = useState('');
+  const [slug, setSlug]             = useState('');
+  const [email, setEmail]           = useState('');
+  const [authType, setAuthType]     = useState<AuthType>('pin');
+  const [pin, setPin]               = useState('');
   const [pinConfirm, setPinConfirm] = useState('');
+  const [secretVisible, setSecretVisible] = useState(false);
 
   // Feedback
-  const [errorMsg, setErrorMsg]   = useState('');
-  const [seeded, setSeeded]       = useState<{ classes: number; teachers: number; students: number } | null>(null);
+  const [errorMsg, setErrorMsg]     = useState('');
+  const [seeded, setSeeded]         = useState<{ classes: number; teachers: number; students: number } | null>(null);
   const [schoolName, setSchoolName] = useState('');
   const [loadingLabel, setLoadingLabel] = useState('Connecting to cloud…');
 
   // ── Validation ─────────────────────────────────────────────────────────────
-  const pinPattern = /^\d{4,8}$/;
+  const isPinValid = authType === 'pin' ? /^\d{4}$/.test(pin) : pin.trim().length >= 6;
   const pinMismatch = pin && pinConfirm && pin !== pinConfirm;
   const canSubmit =
     slug.trim().length > 0 &&
     email.trim().length > 0 &&
-    pinPattern.test(pin) &&
+    isPinValid &&
     pin === pinConfirm;
 
   // ── Submit ─────────────────────────────────────────────────────────────────
@@ -40,13 +43,13 @@ export function CloudConnectScreen({ onBack }: CloudConnectScreenProps) {
     setLoadingLabel('Connecting to cloud…');
 
     try {
-      // Small UX delay so the loading label is visible
       setTimeout(() => setLoadingLabel('Seeding local database…'), 2500);
 
       const result = await api.invoke('sync:cloud-connect', {
         slug: slug.trim().toLowerCase(),
         email: email.trim().toLowerCase(),
         pin: pin.trim(),
+        authType,
       });
 
       if (!result?.ok) {
@@ -70,36 +73,44 @@ export function CloudConnectScreen({ onBack }: CloudConnectScreenProps) {
     }
   };
 
-  // ── Shared layout wrapper ──────────────────────────────────────────────────
+  // ── Shared layout wrapper (strict viewport clip to prevent scrollbars) ─────
   const wrap = (children: React.ReactNode) => (
     <div style={{
-      width: '100vw',
+      width: '100%',
       height: '100vh',
+      maxHeight: '100vh',
       background: 'linear-gradient(135deg, #050814 0%, #0b1120 50%, #0a0f1e 100%)',
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '32px 24px',
+      padding: '24px 20px',
       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
       position: 'relative',
       overflow: 'hidden',
       boxSizing: 'border-box',
       color: '#fff',
     }}>
-      {/* Ambient blobs */}
-      <div style={{
-        position: 'absolute', top: '-120px', left: '-120px',
-        width: '360px', height: '360px', borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(0,180,80,0.10) 0%, transparent 70%)',
-        pointerEvents: 'none',
-      }} />
-      <div style={{
-        position: 'absolute', bottom: '-100px', right: '-100px',
-        width: '320px', height: '320px', borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(0,255,120,0.08) 0%, transparent 70%)',
-        pointerEvents: 'none',
-      }} />
+      {/* Hide native scrollbars anywhere on this screen */}
+      <style>{`
+        ::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
+        * { scrollbar-width: none !important; -ms-overflow-style: none !important; }
+      `}</style>
+
+      {/* Decorative ambient blobs strictly clipped within boundary */}
+      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
+        <div style={{
+          position: 'absolute', top: '-120px', left: '-120px',
+          width: '360px', height: '360px', borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(0,180,80,0.10) 0%, transparent 70%)',
+        }} />
+        <div style={{
+          position: 'absolute', bottom: '-100px', right: '-100px',
+          width: '320px', height: '320px', borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(0,255,120,0.08) 0%, transparent 70%)',
+        }} />
+      </div>
+
       {children}
     </div>
   );
@@ -198,13 +209,13 @@ export function CloudConnectScreen({ onBack }: CloudConnectScreenProps) {
     </div>
   );
 
-  // ── Main form ──────────────────────────────────────────────────────────────
+  // ── Main form styling ──────────────────────────────────────────────────────
   const inputStyle: React.CSSProperties = {
     width: '100%',
     background: 'rgba(255,255,255,0.05)',
     border: '1px solid rgba(255,255,255,0.12)',
     borderRadius: '10px',
-    padding: '11px 14px',
+    padding: '10px 14px',
     fontSize: '14px',
     color: '#fff',
     outline: 'none',
@@ -215,18 +226,25 @@ export function CloudConnectScreen({ onBack }: CloudConnectScreenProps) {
     fontSize: '11px', fontWeight: 600,
     color: 'rgba(255,255,255,0.45)',
     letterSpacing: '0.07em', textTransform: 'uppercase',
-    marginBottom: '6px', display: 'block',
+    marginBottom: '5px', display: 'block',
   };
 
   return wrap(
-    <div style={{ width: '100%', maxWidth: '440px', zIndex: 1, overflowY: 'auto', maxHeight: 'calc(100vh - 48px)' }}>
+    <div style={{
+      width: '100%',
+      maxWidth: '430px',
+      zIndex: 1,
+      overflowY: 'auto',
+      maxHeight: 'calc(100vh - 36px)',
+      padding: '4px 6px',
+    }}>
       {/* Header */}
-      <div style={{ textAlign: 'center', marginBottom: '36px' }}>
-        <div style={{ fontSize: '44px', marginBottom: '14px' }}>☁️</div>
-        <h1 style={{ fontSize: '22px', fontWeight: 800, margin: '0 0 8px' }}>
+      <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+        <div style={{ fontSize: '38px', marginBottom: '10px' }}>☁️</div>
+        <h1 style={{ fontSize: '21px', fontWeight: 800, margin: '0 0 6px' }}>
           Connect Cloud School
         </h1>
-        <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.45)', margin: 0 }}>
+        <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.45)', margin: 0 }}>
           Already onboarded online? Enter your school details to sync data to this device.
         </p>
       </div>
@@ -235,30 +253,30 @@ export function CloudConnectScreen({ onBack }: CloudConnectScreenProps) {
       <div style={{
         background: 'rgba(0,180,80,0.06)',
         border: '1px solid rgba(0,200,100,0.20)',
-        borderRadius: '20px',
-        padding: '28px 28px 24px',
+        borderRadius: '18px',
+        padding: '22px 24px 20px',
       }}>
         {/* School Slug */}
-        <div style={{ marginBottom: '18px' }}>
+        <div style={{ marginBottom: '14px' }}>
           <label style={labelStyle}>School Slug</label>
           <input
             type="text"
             value={slug}
             onChange={e => setSlug(e.target.value)}
-            placeholder="e.g. crestmont"
+            placeholder="e.g. dms"
             style={inputStyle}
             autoComplete="off"
             spellCheck={false}
             onFocus={e => { e.currentTarget.style.borderColor = 'rgba(0,229,160,0.5)'; }}
             onBlur={e  => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; }}
           />
-          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', marginTop: '4px' }}>
+          <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginTop: '3px' }}>
             The short identifier from your school's web portal URL
           </div>
         </div>
 
         {/* Admin Email */}
-        <div style={{ marginBottom: '18px' }}>
+        <div style={{ marginBottom: '16px' }}>
           <label style={labelStyle}>Admin Email</label>
           <input
             type="email"
@@ -270,7 +288,7 @@ export function CloudConnectScreen({ onBack }: CloudConnectScreenProps) {
             onFocus={e => { e.currentTarget.style.borderColor = 'rgba(0,229,160,0.5)'; }}
             onBlur={e  => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; }}
           />
-          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', marginTop: '4px' }}>
+          <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginTop: '3px' }}>
             Email used when you registered on the web portal
           </div>
         </div>
@@ -278,58 +296,157 @@ export function CloudConnectScreen({ onBack }: CloudConnectScreenProps) {
         {/* Divider */}
         <div style={{
           borderTop: '1px solid rgba(255,255,255,0.08)',
-          margin: '8px 0 18px',
+          margin: '6px 0 14px',
         }} />
-        <div style={{ fontSize: '11px', color: 'rgba(0,229,160,0.7)', fontWeight: 600, marginBottom: '16px', letterSpacing: '0.06em' }}>
-          🔐 CREATE YOUR DESKTOP PIN
-        </div>
 
-        {/* PIN */}
-        <div style={{ marginBottom: '18px' }}>
-          <label style={labelStyle}>Desktop PIN</label>
-          <input
-            type="password"
-            value={pin}
-            onChange={e => setPin(e.target.value)}
-            placeholder="4–8 digits"
-            maxLength={8}
-            inputMode="numeric"
-            style={inputStyle}
-            onFocus={e => { e.currentTarget.style.borderColor = 'rgba(0,229,160,0.5)'; }}
-            onBlur={e  => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; }}
-          />
-          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', marginTop: '4px' }}>
-            This PIN is separate from your web password — used only on this device
+        {/* Auth Type Selector: PIN vs Password */}
+        <div style={{ marginBottom: '14px' }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '8px',
+          }}>
+            <span style={{ fontSize: '11px', color: 'rgba(0,229,160,0.8)', fontWeight: 700, letterSpacing: '0.06em' }}>
+              🔐 DESKTOP CREDENTIAL
+            </span>
+          </div>
+
+          <div style={{
+            display: 'flex',
+            background: 'rgba(255,255,255,0.05)',
+            borderRadius: '10px',
+            padding: '3px',
+            gap: '4px',
+            border: '1px solid rgba(255,255,255,0.08)',
+          }}>
+            <button
+              type="button"
+              onClick={() => { setAuthType('pin'); setPin(''); setPinConfirm(''); }}
+              style={{
+                flex: 1,
+                padding: '7px 0',
+                border: 'none',
+                borderRadius: '7px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 600,
+                transition: 'all 0.15s ease',
+                background: authType === 'pin' ? '#00e5a0' : 'transparent',
+                color: authType === 'pin' ? '#050814' : 'rgba(255,255,255,0.5)',
+              }}
+            >
+              🔢 4-Digit PIN
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAuthType('password'); setPin(''); setPinConfirm(''); }}
+              style={{
+                flex: 1,
+                padding: '7px 0',
+                border: 'none',
+                borderRadius: '7px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 600,
+                transition: 'all 0.15s ease',
+                background: authType === 'password' ? '#00e5a0' : 'transparent',
+                color: authType === 'password' ? '#050814' : 'rgba(255,255,255,0.5)',
+              }}
+            >
+              🔑 Password
+            </button>
           </div>
         </div>
 
-        {/* Confirm PIN */}
-        <div style={{ marginBottom: '8px' }}>
-          <label style={labelStyle}>Confirm PIN</label>
+        {/* Secret input */}
+        <div style={{ marginBottom: '14px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <label style={labelStyle}>
+              {authType === 'pin' ? 'Desktop PIN' : 'Desktop Password'}
+            </label>
+            <button
+              type="button"
+              onClick={() => setSecretVisible(!secretVisible)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'rgba(255,255,255,0.4)',
+                fontSize: '11px',
+                cursor: 'pointer',
+                padding: '0 2px',
+                marginBottom: '4px',
+              }}
+            >
+              {secretVisible ? '🙈 Hide' : '👁️ Show'}
+            </button>
+          </div>
+
           <input
-            type="password"
+            type={secretVisible ? 'text' : 'password'}
+            value={pin}
+            onChange={e => {
+              const val = e.target.value;
+              if (authType === 'pin') {
+                if (/^\d*$/.test(val) && val.length <= 4) setPin(val);
+              } else {
+                setPin(val);
+              }
+            }}
+            placeholder={authType === 'pin' ? '•••• (4 digits)' : 'Minimum 6 characters'}
+            maxLength={authType === 'pin' ? 4 : 32}
+            inputMode={authType === 'pin' ? 'numeric' : 'text'}
+            style={{
+              ...inputStyle,
+              letterSpacing: (authType === 'pin' && pin && !secretVisible) ? '0.3em' : 'normal',
+            }}
+            onFocus={e => { e.currentTarget.style.borderColor = 'rgba(0,229,160,0.5)'; }}
+            onBlur={e  => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; }}
+          />
+          <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginTop: '3px' }}>
+            {authType === 'pin'
+              ? 'Numbers only, exactly 4 digits — used only on this device'
+              : 'Alphanumeric password — used only on this device'}
+          </div>
+        </div>
+
+        {/* Confirm Secret */}
+        <div style={{ marginBottom: '4px' }}>
+          <label style={labelStyle}>
+            {authType === 'pin' ? 'Confirm PIN' : 'Confirm Password'}
+          </label>
+          <input
+            type={secretVisible ? 'text' : 'password'}
             value={pinConfirm}
-            onChange={e => setPinConfirm(e.target.value)}
-            placeholder="Repeat PIN"
-            maxLength={8}
-            inputMode="numeric"
+            onChange={e => {
+              const val = e.target.value;
+              if (authType === 'pin') {
+                if (/^\d*$/.test(val) && val.length <= 4) setPinConfirm(val);
+              } else {
+                setPinConfirm(val);
+              }
+            }}
+            placeholder={authType === 'pin' ? 'Repeat 4 digits' : 'Repeat password'}
+            maxLength={authType === 'pin' ? 4 : 32}
+            inputMode={authType === 'pin' ? 'numeric' : 'text'}
             style={{
               ...inputStyle,
               borderColor: pinMismatch ? 'rgba(255,100,100,0.6)' : 'rgba(255,255,255,0.12)',
+              letterSpacing: (authType === 'pin' && pinConfirm && !secretVisible) ? '0.3em' : 'normal',
             }}
             onFocus={e => { if (!pinMismatch) e.currentTarget.style.borderColor = 'rgba(0,229,160,0.5)'; }}
             onBlur={e  => { e.currentTarget.style.borderColor = pinMismatch ? 'rgba(255,100,100,0.6)' : 'rgba(255,255,255,0.12)'; }}
           />
           {pinMismatch && (
-            <div style={{ fontSize: '11px', color: '#ff8a80', marginTop: '4px' }}>
-              PINs do not match
+            <div style={{ fontSize: '10px', color: '#ff8a80', marginTop: '3px' }}>
+              {authType === 'pin' ? 'PINs do not match' : 'Passwords do not match'}
             </div>
           )}
         </div>
       </div>
 
       {/* Actions */}
-      <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <button
           onClick={handleConnect}
           disabled={!canSubmit}
@@ -340,8 +457,8 @@ export function CloudConnectScreen({ onBack }: CloudConnectScreenProps) {
               : 'rgba(255,255,255,0.08)',
             border: 'none',
             borderRadius: '12px',
-            padding: '14px',
-            fontSize: '15px',
+            padding: '13px',
+            fontSize: '14px',
             fontWeight: 700,
             color: canSubmit ? '#050814' : 'rgba(255,255,255,0.3)',
             cursor: canSubmit ? 'pointer' : 'not-allowed',
@@ -360,8 +477,8 @@ export function CloudConnectScreen({ onBack }: CloudConnectScreenProps) {
             background: 'transparent',
             border: '1px solid rgba(255,255,255,0.12)',
             borderRadius: '12px',
-            padding: '12px',
-            fontSize: '13px',
+            padding: '11px',
+            fontSize: '12px',
             fontWeight: 500,
             color: 'rgba(255,255,255,0.4)',
             cursor: 'pointer',
@@ -376,8 +493,8 @@ export function CloudConnectScreen({ onBack }: CloudConnectScreenProps) {
 
       {/* Footer */}
       <p style={{
-        textAlign: 'center', marginTop: '24px',
-        fontSize: '11px', color: 'rgba(255,255,255,0.18)',
+        textAlign: 'center', marginTop: '16px',
+        fontSize: '10px', color: 'rgba(255,255,255,0.18)',
       }}>
         Nexus School OS · Secure Offline-First School Management
       </p>

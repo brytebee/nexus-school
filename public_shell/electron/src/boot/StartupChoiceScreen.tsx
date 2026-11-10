@@ -50,19 +50,25 @@ export function StartupChoiceScreen({ onStartFresh, onConnectCloud }: StartupCho
       overflowX: 'hidden',
       boxSizing: 'border-box',
     }}>
-      {/* Ambient glow blobs */}
-      <div style={{
-        position: 'absolute', top: '-120px', left: '-120px',
-        width: '360px', height: '360px', borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(0,100,255,0.12) 0%, transparent 70%)',
-        pointerEvents: 'none',
-      }} />
-      <div style={{
-        position: 'absolute', bottom: '-100px', right: '-100px',
-        width: '320px', height: '320px', borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(100,0,255,0.10) 0%, transparent 70%)',
-        pointerEvents: 'none',
-      }} />
+      {/* Hide native scrollbars anywhere on this screen */}
+      <style>{`
+        ::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
+        * { scrollbar-width: none !important; -ms-overflow-style: none !important; }
+      `}</style>
+
+      {/* Ambient glow blobs strictly clipped */}
+      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
+        <div style={{
+          position: 'absolute', top: '-120px', left: '-120px',
+          width: '360px', height: '360px', borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(0,100,255,0.12) 0%, transparent 70%)',
+        }} />
+        <div style={{
+          position: 'absolute', bottom: '-100px', right: '-100px',
+          width: '320px', height: '320px', borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(100,0,255,0.10) 0%, transparent 70%)',
+        }} />
+      </div>
 
       {/* Logo / Brand */}
       <div style={{ textAlign: 'center', marginBottom: '48px', zIndex: 1 }}>
