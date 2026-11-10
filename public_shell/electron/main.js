@@ -1007,19 +1007,99 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
         return { ok: false, reason: 'admin_create_failed', message: err.message };
     }
 
+    // ── 7.5. Resolve & Persist School Identity ──────────────────────────────
+    let resolvedSchoolName = bootstrapData.school?.name || slug;
+    let resolvedLogoUrl = bootstrapData.school?.logo_url || null;
+
+    try {
+        const bindRes = await fetch(
+            `${websiteUrl}/api/sync/binding?school_cloud_id=${encodeURIComponent(cloudId)}`,
+            { signal: AbortSignal.timeout(8000) }
+        );
+        const bindData = await bindRes.json();
+        if (bindData?.ok && bindData.isBound) {
+            if (bindData.schoolName) resolvedSchoolName = bindData.schoolName;
+            if (bindData.logoUrl) resolvedLogoUrl = bindData.logoUrl;
+            console.log(`[CloudConnect] ✅ Cloud binding resolved: "${resolvedSchoolName}"`);
+        }
+    } catch (bindErr) {
+        console.warn('[CloudConnect] ⚠️ Binding fetch failed (using bootstrap fallback):', bindErr.message);
+    }
+
+    let logoBase64 = null;
+    if (resolvedLogoUrl) {
+        try {
+            const imgRes = await fetch(resolvedLogoUrl, { signal: AbortSignal.timeout(6000) });
+            if (imgRes.ok) {
+                const buf = Buffer.from(await imgRes.arrayBuffer());
+                const mime = imgRes.headers.get('content-type') || 'image/png';
+                logoBase64 = `data:${mime};base64,${buf.toString('base64')}`;
+                console.log('[CloudConnect] ✅ Logo image converted to base64 for offline display.');
+            }
+        } catch (imgErr) {
+            console.warn('[CloudConnect] ⚠️ Logo base64 fetch failed (non-fatal):', imgErr.message);
+        }
+    }
+
+    // Update in-memory identity packet
+    identityPacket = {
+        ...identityPacket,
+        name: resolvedSchoolName,
+        portalSlug: slug,
+        logoUrl: resolvedLogoUrl,
+        logoBase64: logoBase64 || identityPacket.logoBase64,
+        themePrimary: bootstrapData.school?.theme_primary || identityPacket.themePrimary,
+    };
+
+    // Persist to app_settings
+    try {
+        db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_identity', ?)").run(JSON.stringify(identityPacket));
+        db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_name', ?)").run(resolvedSchoolName);
+        if (resolvedLogoUrl) {
+            db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_logo_url', ?)").run(resolvedLogoUrl);
+        }
+    } catch (dbErr) {
+        console.warn('[CloudConnect] ⚠️ Failed to save identity to app_settings:', dbErr.message);
+    }
+
+    // Persist to identity.json
+    try {
+        if (!identityFilePath) {
+            const { app } = require('electron');
+            const pathMod = require('path');
+            identityFilePath = pathMod.join(app.getPath("userData"), "identity.json");
+        }
+        const fsMod = require('fs');
+        fsMod.writeFileSync(identityFilePath, JSON.stringify(identityPacket, null, 2), 'utf-8');
+        console.log(`[CloudConnect] ✅ identity.json written for "${resolvedSchoolName}".`);
+    } catch (fsErr) {
+        console.warn('[CloudConnect] ⚠️ Failed to write identity.json:', fsErr.message);
+    }
+
+    // Notify private_engine if available
+    try {
+        if (typeof setSchoolConfig === 'function') {
+            setSchoolConfig(identityPacket);
+        }
+    } catch (_) {}
+
     // ── 8. Mark cloud connected ───────────────────────────────────────────────
     persist('cloud_connected_at', String(Date.now()));
 
     console.log(
-        `[CloudConnect] 🎉 "${bootstrapData.school?.name}" connected. ` +
+        `[CloudConnect] 🎉 "${resolvedSchoolName}" connected. ` +
         `classes=${seededClasses}, teachers=${seededTeachers}, students=${seededStudents}`
     );
 
     return {
         ok: true,
-        school: bootstrapData.school,
+        school: {
+            ...bootstrapData.school,
+            name: resolvedSchoolName,
+            logo_url: resolvedLogoUrl,
+        },
         seeded: { classes: seededClasses, teachers: seededTeachers, students: seededStudents },
-        message: `Connected to ${bootstrapData.school?.name}. Local database seeded successfully.`,
+        message: `Connected to ${resolvedSchoolName}. Local database seeded successfully.`,
     };
 });
 

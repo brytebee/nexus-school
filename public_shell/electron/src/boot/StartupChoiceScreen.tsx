@@ -15,7 +15,10 @@ export function StartupChoiceScreen({ onStartFresh, onConnectCloud }: StartupCho
   useEffect(() => {
     // Try to read school identity for branding (may not exist yet on first run)
     api?.getIdentity?.()
-      .then((id: any) => { if (id?.school_name) setSchoolName(id.school_name); })
+      .then((id: any) => {
+        const name = id?.name || id?.school_name;
+        if (name && name !== 'Green Valley High') setSchoolName(name);
+      })
       .catch(() => {});
   }, []);
 

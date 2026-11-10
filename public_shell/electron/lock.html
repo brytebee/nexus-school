@@ -363,16 +363,24 @@
     async function loadBranding() {
       try {
         const identity = await api.getIdentity();
-        if (identity.name) {
-          document.getElementById('school-name-label').textContent = identity.name;
-          const initials = identity.name.split(' ').slice(0,2).map(w => w[0]).join('').toUpperCase();
-          document.getElementById('logo-initials').textContent = initials;
+        const schoolName = identity?.name || identity?.school_name;
+        if (schoolName) {
+          document.getElementById('school-name-label').textContent = schoolName;
+          const initials = schoolName.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+          if (initials) document.getElementById('logo-initials').textContent = initials;
         }
-        if (identity.logoBase64) {
+        const logoSrc = identity?.logoBase64 || identity?.logoUrl || identity?.school_logo_url;
+        if (logoSrc) {
           const img = document.getElementById('school-logo-img');
-          img.src = identity.logoBase64;
-          img.style.display = 'block';
-          document.getElementById('logo-initials').style.display = 'none';
+          img.onload = () => {
+            img.style.display = 'block';
+            document.getElementById('logo-initials').style.display = 'none';
+          };
+          img.onerror = () => {
+            img.style.display = 'none';
+            document.getElementById('logo-initials').style.display = 'flex';
+          };
+          img.src = logoSrc;
         }
       } catch(e) { /* branding optional */ }
     }
