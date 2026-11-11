@@ -1010,13 +1010,14 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
     // ── 7.5. Resolve & Persist School Identity ──────────────────────────────
     let resolvedSchoolName = bootstrapData.school?.name || slug;
     let resolvedLogoUrl = bootstrapData.school?.logo_url || null;
+    let bindData = null;
 
     try {
         const bindRes = await fetch(
             `${websiteUrl}/api/sync/binding?school_cloud_id=${encodeURIComponent(cloudId)}`,
             { signal: AbortSignal.timeout(8000) }
         );
-        const bindData = await bindRes.json();
+        bindData = await bindRes.json();
         if (bindData?.ok && bindData.isBound) {
             if (bindData.schoolName) resolvedSchoolName = bindData.schoolName;
             if (bindData.logoUrl) resolvedLogoUrl = bindData.logoUrl;
@@ -1041,14 +1042,37 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
         }
     }
 
-    // Update in-memory identity packet
+    // Fetch principal signature as Base64 if available
+    let principalSignBase64 = null;
+    if (bindData?.signatureUrl) {
+        try {
+            const sigRes = await fetch(bindData.signatureUrl, { signal: AbortSignal.timeout(6000) });
+            if (sigRes.ok) {
+                const sigBuf = Buffer.from(await sigRes.arrayBuffer());
+                const sigMime = sigRes.headers.get('content-type') || 'image/png';
+                principalSignBase64 = `data:${sigMime};base64,${sigBuf.toString('base64')}`;
+                console.log('[CloudConnect] ✅ Principal signature converted to base64 for offline display.');
+            }
+        } catch (sigErr) {
+            console.warn('[CloudConnect] ⚠️ Principal signature fetch failed (non-fatal):', sigErr.message);
+        }
+    }
+
+    // Update in-memory identity packet with all cloud binding metadata
     identityPacket = {
         ...identityPacket,
         name: resolvedSchoolName,
         portalSlug: slug,
         logoUrl: resolvedLogoUrl,
         logoBase64: logoBase64 || identityPacket.logoBase64,
-        themePrimary: bootstrapData.school?.theme_primary || identityPacket.themePrimary,
+        themePrimary: bindData?.theme?.primaryColor || bootstrapData.school?.theme_primary || identityPacket.themePrimary,
+        themeSecondary: bindData?.theme?.accentColor || bootstrapData.school?.theme_secondary || identityPacket.themeSecondary,
+        motto: bindData?.motto || identityPacket.motto || '',
+        address: bindData?.address || identityPacket.address || '',
+        phone: bindData?.phone || identityPacket.phone || '',
+        email: bindData?.email || identityPacket.email || '',
+        signature: bindData?.principalName || identityPacket.signature || '',
+        principalSignBase64: principalSignBase64 || identityPacket.principalSignBase64,
     };
 
     // Persist to app_settings
@@ -1058,6 +1082,13 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
         if (resolvedLogoUrl) {
             db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_logo_url', ?)").run(resolvedLogoUrl);
         }
+        if (logoBase64) {
+            db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_logo_b64', ?)").run(logoBase64);
+        }
+        db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_address', ?)").run(identityPacket.address || '');
+        db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_phone', ?)").run(identityPacket.phone || '');
+        db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_email', ?)").run(identityPacket.email || '');
+        db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('school_motto', ?)").run(identityPacket.motto || '');
     } catch (dbErr) {
         console.warn('[CloudConnect] ⚠️ Failed to save identity to app_settings:', dbErr.message);
     }
