@@ -1012,6 +1012,53 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
             seededFees++;
         }
         console.log(`[CloudConnect] ✅ Seeded ${seededFees} fee structures.`);
+
+        // Auto-apply fee structures to all seeded students so roster displays correct total_billed
+        try {
+            const termConfig = db.prepare('SELECT academic_session, term FROM school_term_config WHERE id = 1').get();
+            if (termConfig?.academic_session && termConfig?.term) {
+                const allStudents = db.prepare('SELECT id, name, class_name, class_arm FROM students').all();
+                const upsertStudentFee = db.prepare(`
+                    INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status)
+                    VALUES (?, ?, ?, ?, 0, 'unpaid')
+                    ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
+                        total_billed = CASE WHEN student_fees.total_billed = 0 THEN excluded.total_billed ELSE student_fees.total_billed END
+                `);
+                const feeQuery = db.prepare(`
+                    SELECT COALESCE(SUM(amount), 0) AS total FROM fee_structures
+                    WHERE (UPPER(REPLACE(class_name, ' ', '')) = UPPER(REPLACE(?, ' ', '')))
+                      AND (LOWER(TRIM(term)) IN ('all terms', 'all term') OR term = ?)
+                `);
+
+                let autoBilledCount = 0;
+                for (const st of allStudents) {
+                    const candidates = [
+                        st.class_name,
+                        `${st.class_name || ''} ${st.class_arm || ''}`.trim(),
+                        (st.class_name || '').split(' ')[0], // base class fallback
+                    ].filter(Boolean);
+
+                    let billed = 0;
+                    for (const c of candidates) {
+                        const r = feeQuery.get(c, termConfig.term);
+                        if (r && r.total > 0) {
+                            billed = r.total;
+                            break;
+                        }
+                    }
+
+                    if (billed > 0) {
+                        upsertStudentFee.run(st.id, termConfig.academic_session, termConfig.term, billed);
+                        autoBilledCount++;
+                    }
+                }
+                if (autoBilledCount > 0) {
+                    console.log(`[CloudConnect] ✅ Auto-billed ${autoBilledCount} students from fee structures.`);
+                }
+            }
+        } catch (autoBillErr) {
+            console.warn('[CloudConnect] ⚠️ Auto-bill calculation failed (non-fatal):', autoBillErr.message);
+        }
     } catch (err) {
         console.warn('[CloudConnect] ⚠️ Fee structures fetch failed:', err.message);
     }
