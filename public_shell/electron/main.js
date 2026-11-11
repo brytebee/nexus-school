@@ -989,6 +989,33 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
         console.warn('[CloudConnect] ⚠️ Students fetch failed:', err.message);
     }
 
+    // ── 6b. Fee Structures ────────────────────────────────────────────────────
+    let seededFees = 0;
+    try {
+        const feeRes = await fetch(
+            `${websiteUrl}/api/sync/fees?school_cloud_id=${encodeURIComponent(cloudId)}`,
+            { headers: syncHeaders, signal: AbortSignal.timeout(12000) }
+        );
+        const feeData = await feeRes.json();
+        const cloudFees = feeData.fees || [];
+
+        const insertFee = db.prepare(
+            'INSERT OR IGNORE INTO fee_structures (class_name, item_name, amount, term) VALUES (?, ?, ?, ?)'
+        );
+        for (const f of cloudFees) {
+            insertFee.run(
+                f.className || 'All Classes',
+                f.itemName || 'Tuition & Levies',
+                (f.amountKobo || 0) / 100,   // convert kobo → naira
+                f.term || 'All Terms'
+            );
+            seededFees++;
+        }
+        console.log(`[CloudConnect] ✅ Seeded ${seededFees} fee structures.`);
+    } catch (err) {
+        console.warn('[CloudConnect] ⚠️ Fee structures fetch failed:', err.message);
+    }
+
     // ── 7. Create local admin user (SHA-256 of PIN / Password) ────────────
     try {
         const secretHash = hashAdminSecret(pin.trim());
@@ -1119,7 +1146,7 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
 
     console.log(
         `[CloudConnect] 🎉 "${resolvedSchoolName}" connected. ` +
-        `classes=${seededClasses}, teachers=${seededTeachers}, students=${seededStudents}`
+        `classes=${seededClasses}, teachers=${seededTeachers}, students=${seededStudents}, fees=${seededFees}`
     );
 
     return {
@@ -1129,7 +1156,7 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
             name: resolvedSchoolName,
             logo_url: resolvedLogoUrl,
         },
-        seeded: { classes: seededClasses, teachers: seededTeachers, students: seededStudents },
+        seeded: { classes: seededClasses, teachers: seededTeachers, students: seededStudents, fees: seededFees },
         message: `Connected to ${resolvedSchoolName}. Local database seeded successfully.`,
     };
 });
