@@ -904,6 +904,7 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
                 DELETE FROM fee_structures;
                 DELETE FROM class_arms;
                 DELETE FROM class_configs;
+                DELETE FROM system_settings WHERE key = 'class_hierarchy';
             `);
         })();
         console.log('[CloudConnect] 🧹 Purged local placeholder data before cloud hydration.');
@@ -928,14 +929,21 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
         const insertClassArm = db.prepare(
             'INSERT OR IGNORE INTO class_arms (hierarchy_class, arm) VALUES (?, ?)'
         );
+        const classNames = [];
         for (const cls of hierarchy) {
             insertClassConfig.run(cls.hierarchyClass, cls.maxSubjects || 0);
+            classNames.push(cls.hierarchyClass);
             seededClasses++;
             for (const arm of (cls.arms || [])) {
                 insertClassArm.run(cls.hierarchyClass, arm);
             }
         }
-        console.log(`[CloudConnect] ✅ Seeded ${seededClasses} classes.`);
+        if (classNames.length > 0) {
+            db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('class_hierarchy', ?)").run(
+                JSON.stringify(classNames)
+            );
+        }
+        console.log(`[CloudConnect] ✅ Seeded ${seededClasses} classes with authoritative hierarchy.`);
     } catch (err) {
         console.warn('[CloudConnect] ⚠️ Classes fetch failed:', err.message);
     }
