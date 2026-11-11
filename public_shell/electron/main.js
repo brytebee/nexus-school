@@ -889,6 +889,28 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
     }
 
     const syncHeaders = { 'x-nexus-sync-token': syncToken };
+
+    // ── 1b. Purge local placeholder data before cloud hydration ──────────────
+    // Factory-default classes/students/fees must be cleared so the cloud-specific
+    // hierarchy and roster land on a clean slate without contamination.
+    try {
+        db.transaction(() => {
+            db.exec(`
+                DELETE FROM student_fees;
+                DELETE FROM student_subjects;
+                DELETE FROM teacher_allocations;
+                DELETE FROM students;
+                DELETE FROM teachers;
+                DELETE FROM fee_structures;
+                DELETE FROM class_arms;
+                DELETE FROM class_configs;
+            `);
+        })();
+        console.log('[CloudConnect] 🧹 Purged local placeholder data before cloud hydration.');
+    } catch (purgeErr) {
+        console.warn('[CloudConnect] ⚠️ Pre-purge failed (non-fatal):', purgeErr.message);
+    }
+
     let seededClasses = 0, seededTeachers = 0, seededStudents = 0;
 
     // ── 2 & 3. Classes ────────────────────────────────────────────────────────
@@ -1013,10 +1035,12 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
         }
         console.log(`[CloudConnect] ✅ Seeded ${seededFees} fee structures.`);
 
-        // Auto-apply fee structures to all seeded students so roster displays correct total_billed
+        // Auto-apply fee structures to all seeded students across ALL configured
+        // sessions/terms so the Financial Hub roster shows the correct total_billed
+        // regardless of which session/term the user selects in the dropdown.
         try {
-            const termConfig = db.prepare('SELECT academic_session, term FROM school_term_config WHERE id = 1').get();
-            if (termConfig?.academic_session && termConfig?.term) {
+            const allTerms = db.prepare('SELECT academic_session, term FROM school_term_config').all();
+            if (allTerms.length > 0) {
                 const allStudents = db.prepare('SELECT id, name, class_name, class_arm FROM students').all();
                 const upsertStudentFee = db.prepare(`
                     INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status)
@@ -1031,29 +1055,31 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
                 `);
 
                 let autoBilledCount = 0;
-                for (const st of allStudents) {
-                    const candidates = [
-                        st.class_name,
-                        `${st.class_name || ''} ${st.class_arm || ''}`.trim(),
-                        (st.class_name || '').split(' ')[0], // base class fallback
-                    ].filter(Boolean);
+                for (const termConfig of allTerms) {
+                    for (const st of allStudents) {
+                        const candidates = [
+                            st.class_name,
+                            `${st.class_name || ''} ${st.class_arm || ''}`.trim(),
+                            (st.class_name || '').split(' ')[0], // base class fallback
+                        ].filter(Boolean);
 
-                    let billed = 0;
-                    for (const c of candidates) {
-                        const r = feeQuery.get(c, termConfig.term);
-                        if (r && r.total > 0) {
-                            billed = r.total;
-                            break;
+                        let billed = 0;
+                        for (const c of candidates) {
+                            const r = feeQuery.get(c, termConfig.term);
+                            if (r && r.total > 0) {
+                                billed = r.total;
+                                break;
+                            }
                         }
-                    }
 
-                    if (billed > 0) {
-                        upsertStudentFee.run(st.id, termConfig.academic_session, termConfig.term, billed);
-                        autoBilledCount++;
+                        if (billed > 0) {
+                            upsertStudentFee.run(st.id, termConfig.academic_session, termConfig.term, billed);
+                            autoBilledCount++;
+                        }
                     }
                 }
                 if (autoBilledCount > 0) {
-                    console.log(`[CloudConnect] ✅ Auto-billed ${autoBilledCount} students from fee structures.`);
+                    console.log(`[CloudConnect] ✅ Auto-billed ${autoBilledCount} student×term rows from fee structures.`);
                 }
             }
         } catch (autoBillErr) {
