@@ -1183,7 +1183,28 @@ async function pushStaffRosterToWebsite() {
       customSubjects = db.prepare("SELECT name, grading_scope FROM custom_subjects").all();
     } catch (_) {}
 
-    if (teachers.length === 0 && students.length === 0) {
+    // 5. Gather desktop grades (student_records with timestamps for cloud LWW ingestion)
+    let grades = [];
+    try {
+      grades = db.prepare(`
+        SELECT student_id, subject, assessment, score, breakdown, teacher_id, academic_session, term, timestamp
+        FROM student_records
+        LIMIT 1000
+      `).all();
+    } catch (_) {}
+
+    // 6. Gather desktop attendance (daily_attendance for cloud portal visibility)
+    let attendance = [];
+    try {
+      attendance = db.prepare(`
+        SELECT student_id, class_name, date, status, academic_session, term, recorded_by_teacher_id
+        FROM daily_attendance
+        ORDER BY date DESC
+        LIMIT 500
+      `).all();
+    } catch (_) {}
+
+    if (teachers.length === 0 && students.length === 0 && grades.length === 0) {
       return { ok: true, skipped: true, reason: "no_staff_or_students" };
     }
 
@@ -1199,6 +1220,8 @@ async function pushStaffRosterToWebsite() {
         allocations,
         students,
         customSubjects,
+        grades,
+        attendance,
       }),
     });
 
@@ -1260,19 +1283,38 @@ async function pullStaffGradesFromWebsite() {
       return { ok: false, reason: data.error };
     }
 
-    // ── 1. Reconcile student_records (grades) ──────────────────────────────
+    // ── 1. Reconcile student_records (grades with LWW & breakdown merging) ─
     if (Array.isArray(data.grades) && data.grades.length > 0) {
       let upsertGrade;
+      let selectGradeBreakdown;
       try {
+        selectGradeBreakdown = db.prepare(`
+          SELECT breakdown, timestamp FROM student_records 
+          WHERE student_id = ? AND subject = ? AND assessment = ? AND academic_session = ? AND term = ?
+        `);
+
         upsertGrade = db.prepare(`
           INSERT INTO student_records
-            (student_id, subject, assessment, score, breakdown, teacher_id, academic_session, term)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (student_id, subject, assessment, score, breakdown, teacher_id, academic_session, term, timestamp)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(student_id, subject, assessment, academic_session, term)
           DO UPDATE SET
-            score       = CASE WHEN excluded.score IS NOT NULL THEN excluded.score ELSE score END,
-            breakdown   = CASE WHEN excluded.breakdown IS NOT NULL THEN excluded.breakdown ELSE breakdown END,
-            teacher_id  = CASE WHEN excluded.teacher_id IS NOT NULL THEN excluded.teacher_id ELSE teacher_id END
+            score       = CASE 
+                            WHEN excluded.score IS NOT NULL AND (timestamp IS NULL OR excluded.timestamp >= timestamp) THEN excluded.score 
+                            ELSE score 
+                          END,
+            breakdown   = CASE 
+                            WHEN excluded.breakdown IS NOT NULL AND (timestamp IS NULL OR excluded.timestamp >= timestamp) THEN excluded.breakdown 
+                            ELSE breakdown 
+                          END,
+            teacher_id  = CASE 
+                            WHEN excluded.teacher_id IS NOT NULL AND (timestamp IS NULL OR excluded.timestamp >= timestamp) THEN excluded.teacher_id 
+                            ELSE teacher_id 
+                          END,
+            timestamp   = CASE
+                            WHEN (timestamp IS NULL OR excluded.timestamp >= timestamp) THEN excluded.timestamp
+                            ELSE timestamp
+                          END
         `);
       } catch (_) {}
 
@@ -1280,15 +1322,47 @@ async function pullStaffGradesFromWebsite() {
         const insertMany = db.transaction((grades) => {
           for (const g of grades) {
             try {
+              const sId = g.studentId || g.student_id;
+              const subj = g.subject;
+              const assess = g.assessment;
+              const sess = g.academicSession || g.academic_session || null;
+              const term = g.term || null;
+              const incomingTime = g.updatedAt || g.updated_at || new Date().toISOString();
+
+              let breakdownStr = null;
+              if (g.breakdown) {
+                try {
+                  const incomingObj = typeof g.breakdown === "string" ? JSON.parse(g.breakdown) : g.breakdown;
+                  if (selectGradeBreakdown) {
+                    const existing = selectGradeBreakdown.get(sId, subj, assess, sess, term);
+                    if (existing && existing.breakdown) {
+                      try {
+                        const existingObj = JSON.parse(existing.breakdown);
+                        breakdownStr = JSON.stringify({ ...existingObj, ...incomingObj });
+                      } catch (_) {
+                        breakdownStr = JSON.stringify(incomingObj);
+                      }
+                    } else {
+                      breakdownStr = JSON.stringify(incomingObj);
+                    }
+                  } else {
+                    breakdownStr = JSON.stringify(incomingObj);
+                  }
+                } catch (_) {
+                  breakdownStr = typeof g.breakdown === "string" ? g.breakdown : JSON.stringify(g.breakdown);
+                }
+              }
+
               upsertGrade.run(
-                g.studentId || g.student_id,
-                g.subject,
-                g.assessment,
+                sId,
+                subj,
+                assess,
                 g.score ?? null,
-                g.breakdown ? (typeof g.breakdown === "string" ? g.breakdown : JSON.stringify(g.breakdown)) : null,
+                breakdownStr,
                 g.teacherId || g.teacher_id || null,
-                g.academicSession || g.academic_session || null,
-                g.term || null
+                sess,
+                term,
+                incomingTime
               );
             } catch (_) {}
           }
@@ -1297,7 +1371,7 @@ async function pullStaffGradesFromWebsite() {
       }
     }
 
-    // ── 2. Reconcile daily_attendance ──────────────────────────────────────
+    // ── 2. Reconcile daily_attendance (State Precedence Lattice) ────────────
     if (Array.isArray(data.attendance) && data.attendance.length > 0) {
       let upsertAttendance;
       try {
@@ -1307,7 +1381,12 @@ async function pullStaffGradesFromWebsite() {
           VALUES (?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(student_id, date)
           DO UPDATE SET
-            status                  = excluded.status,
+            status                  = CASE
+                                        -- State Precedence: Excused > Late > Present > Absent
+                                        WHEN status = 'Excused' AND excluded.status != 'Excused' THEN status
+                                        WHEN status = 'Late' AND excluded.status = 'Present' THEN status
+                                        ELSE excluded.status
+                                      END,
             class_name              = excluded.class_name,
             recorded_by_teacher_id  = CASE WHEN excluded.recorded_by_teacher_id IS NOT NULL THEN excluded.recorded_by_teacher_id ELSE recorded_by_teacher_id END
         `);
@@ -1333,18 +1412,19 @@ async function pullStaffGradesFromWebsite() {
       }
     }
 
-    // ── 3. Reconcile ils_records (ACE PAC scores) ──────────────────────────
+    // ── 3. Reconcile ils_records (ACE PAC scores with LWW) ──────────────────
     if (Array.isArray(data.ilsGrades) && data.ilsGrades.length > 0) {
       let upsertIls;
       try {
         upsertIls = db.prepare(`
           INSERT INTO ils_records
-            (student_id, academic_session, term, subject, pack_number, score, passed)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+            (student_id, academic_session, term, subject, pack_number, score, passed, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(student_id, academic_session, term, subject, pack_number)
           DO UPDATE SET
-            score  = CASE WHEN excluded.score IS NOT NULL THEN excluded.score ELSE score END,
-            passed = CASE WHEN excluded.passed IS NOT NULL THEN excluded.passed ELSE passed END
+            score      = CASE WHEN excluded.score IS NOT NULL AND (created_at IS NULL OR excluded.created_at >= created_at) THEN excluded.score ELSE score END,
+            passed     = CASE WHEN excluded.passed IS NOT NULL AND (created_at IS NULL OR excluded.created_at >= created_at) THEN excluded.passed ELSE passed END,
+            created_at = CASE WHEN (created_at IS NULL OR excluded.created_at >= created_at) THEN excluded.created_at ELSE created_at END
         `);
       } catch (_) {}
 
@@ -1352,6 +1432,7 @@ async function pullStaffGradesFromWebsite() {
         const insertMany = db.transaction((rows) => {
           for (const r of rows) {
             try {
+              const incomingTime = r.updatedAt || r.updated_at || new Date().toISOString();
               upsertIls.run(
                 r.studentId || r.student_id,
                 r.academicSession || r.academic_session || null,
@@ -1359,7 +1440,8 @@ async function pullStaffGradesFromWebsite() {
                 r.subject,
                 r.packNumber || r.pack_number,
                 r.score ?? null,
-                r.passed ?? null
+                r.passed ?? null,
+                incomingTime
               );
             } catch (_) {}
           }
