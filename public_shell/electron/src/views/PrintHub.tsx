@@ -58,16 +58,7 @@ interface PrintHubProps {
 export function PrintHub({ onTabChange }: PrintHubProps) {
   const { license } = useLicense();
   const { termsList } = useTermConfig();
-  const currentTier = license?.tier || "Silver";
   const isActivated = license?.is_activated ?? false;
-
-  const isTemplateLocked = (tpl: string) => {
-    if (tpl === 'clean_slate' || tpl === 'class_photo') return false;
-    if (currentTier === 'Standalone') return true;
-    if (currentTier === 'Silver') return ['royal', 'monarch', 'sovereign', 'sterling', 'apex'].includes(tpl);
-    if (currentTier === 'Gold') return ['sovereign', 'sterling', 'apex'].includes(tpl);
-    return false;
-  };
 
   // Config States
   const [session, setSession] = useState(() => {
@@ -139,7 +130,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
   const previewImgSrc = `../node_modules/@nexus/engine/assets/templates/${currentTemplateImg}.png`;
 
   // Total components score
-  const hasAttendanceAccess = currentTier !== "Silver" && currentTier !== "Standalone";
+  const hasAttendanceAccess = true;
   const totalScoreSum =
     components.reduce((acc, c) => acc + (c.max || 0), 0) +
     (includeAttendance && hasAttendanceAccess ? Number(attendanceWeight) || 0 : 0);
@@ -150,7 +141,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
       if (!window.electronAPI) return;
       try {
         const cfg = await window.electronAPI.getTermConfig();
-        const hasAtt = currentTier !== "Silver" && currentTier !== "Standalone";
+        const hasAtt = true;
         if (cfg) {
           if (cfg.academic_session) setSession(cfg.academic_session);
           if (cfg.term) setTerm(cfg.term);
@@ -182,7 +173,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
           setIncludeAttendance(hasAtt && dbIncludeAtt);
 
           if (cfg.template) {
-            setTemplate(isTemplateLocked(cfg.template) ? "clean_slate" : cfg.template);
+            setTemplate(cfg.template);
           }
 
           // Unregistered courses exclusion flag
@@ -256,7 +247,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
       }
     };
     loadConfig();
-  }, [currentTier]);
+  }, []);
 
   const handleShowAttendanceHelp = () => {
     if (typeof (window as any).Swal !== "undefined") {
@@ -387,7 +378,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
         }
       } catch (_) {}
 
-      const hasAttendanceAccess = currentTier !== "Silver" && currentTier !== "Standalone";
+      const hasAttendanceAccess = true;
       const config = {
         academic_session: trimmedSession,
         term: trimmedTerm,
@@ -396,9 +387,9 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
         term_end_date: termEndDate,
         show_position: showPosition,
         show_domains: showDomains,
-        show_attendance: hasAttendanceAccess ? (showAttendance ? 1 : 0) : 0,
-        include_attendance_in_grades: hasAttendanceAccess ? (includeAttendance ? 1 : 0) : 0,
-        attendance_score_weight: (hasAttendanceAccess && (includeAttendance || showAttendance)) ? attendanceWeight : 0,
+        show_attendance: showAttendance ? 1 : 0,
+        include_attendance_in_grades: includeAttendance ? 1 : 0,
+        attendance_score_weight: (includeAttendance || showAttendance) ? attendanceWeight : 0,
         grading_scale: JSON.stringify({ scale: existingScale, components: sortGradingComponents(components) }),
         template,
         exclude_unregistered_from_totals: excludeUnregistered ? 1 : 0,
@@ -755,8 +746,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
                 Show Affective/Psychomotor
               </label>
 
-              {currentTier !== "Silver" && currentTier !== "Standalone" && (
-                <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "4px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "4px" }}>
                   <label
                     className="ph-toggle"
                     style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center" }}
@@ -807,8 +797,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
                     />
                     Include Attendance in Grade Computation
                   </label>
-                 </div>
-              )}
+              </div>
 
               {/* Unregistered courses exclusion — available to all tiers */}
               <label
@@ -975,7 +964,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
                 </div>
               ))}
 
-              {includeAttendance && currentTier !== "Silver" && currentTier !== "Standalone" && (
+              {includeAttendance && (
                 <div
                   style={{
                     display: "flex",
@@ -1068,58 +1057,56 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
             </div>
           </div>
 
-          {/* Gold Feature: Parent Portal Access */}
-          {(currentTier === "Gold" || currentTier === "Diamond") && (
-            <div
-              style={{
-                background: "rgba(0, 229, 255, 0.05)",
-                border: "1px solid rgba(0, 229, 255, 0.15)",
-                borderRadius: "12px",
-                padding: "15px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginTop: "4px",
-              }}
-            >
-              <div>
-                <h4
-                  style={{
-                    fontSize: "12px",
-                    color: "#00e5ff",
-                    margin: "0 0 4px",
-                  }}
-                >
-                  🔐 Sovereign Portal
-                </h4>
-                <p
-                  style={{
-                    fontSize: "10px",
-                    color: "var(--text-dim)",
-                    margin: 0,
-                  }}
-                >
-                  Print access cards for parents to view records via mobile.
-                </p>
-              </div>
-              <button
-                className="primary-btn"
+          {/* Sovereign Portal Parent Access */}
+          <div
+            style={{
+              background: "rgba(0, 229, 255, 0.05)",
+              border: "1px solid rgba(0, 229, 255, 0.15)",
+              borderRadius: "12px",
+              padding: "15px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginTop: "4px",
+            }}
+          >
+            <div>
+              <h4
                 style={{
-                  padding: "6px 12px",
-                  fontSize: "11px",
-                  background: "#00e5ff",
-                  color: "#000",
-                  animation: "none",
-                }}
-                onClick={() => {
-                  sessionStorage.setItem("rs_report_type", "portal_card");
-                  onTabChange("result-studio");
+                  fontSize: "12px",
+                  color: "#00e5ff",
+                  margin: "0 0 4px",
                 }}
               >
-                Print Cards
-              </button>
+                🔐 Sovereign Portal
+              </h4>
+              <p
+                style={{
+                  fontSize: "10px",
+                  color: "var(--text-dim)",
+                  margin: 0,
+                }}
+              >
+                Print access cards for parents to view records via mobile.
+              </p>
             </div>
-          )}
+            <button
+              className="primary-btn"
+              style={{
+                padding: "6px 12px",
+                fontSize: "11px",
+                background: "#00e5ff",
+                color: "#000",
+                animation: "none",
+              }}
+              onClick={() => {
+                sessionStorage.setItem("rs_report_type", "portal_card");
+                onTabChange("result-studio");
+              }}
+            >
+              Print Cards
+            </button>
+          </div>
         </div>
 
         {/* Right Column (Template Preview) */}
@@ -1170,29 +1157,15 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
                   className="modern-input"
                   style={{ width: "100%" }}
                 >
-                  <option value="clean_slate">🎨 Classic (Free)</option>
-                  <option value="class_photo">📷 Class Photo (Free)</option>
-                  <option value="prestige" disabled={isTemplateLocked('prestige')}>
-                    {isTemplateLocked('prestige') ? '🔒 ' : ''}⭐ Prestige (Silver)
-                  </option>
-                  <option value="azure" disabled={isTemplateLocked('azure')}>
-                    {isTemplateLocked('azure') ? '🔒 ' : ''}⭐ Azure Edge (Silver)
-                  </option>
-                  <option value="royal" disabled={isTemplateLocked('royal')}>
-                    {isTemplateLocked('royal') ? '🔒 ' : ''}⭐⭐ Royal (Gold)
-                  </option>
-                  <option value="monarch" disabled={isTemplateLocked('monarch')}>
-                    {isTemplateLocked('monarch') ? '🔒 ' : ''}⭐⭐ Monarch (Gold)
-                  </option>
-                  <option value="sovereign" disabled={isTemplateLocked('sovereign')}>
-                    {isTemplateLocked('sovereign') ? '🔒 ' : ''}💎 Sovereign (Diamond)
-                  </option>
-                  <option value="sterling" disabled={isTemplateLocked('sterling')}>
-                    {isTemplateLocked('sterling') ? '🔒 ' : ''}💎 Sterling (Diamond)
-                  </option>
-                  <option value="apex" disabled={isTemplateLocked('apex')}>
-                    {isTemplateLocked('apex') ? '🔒 ' : ''}💎 Apex (Diamond)
-                  </option>
+                  <option value="clean_slate">🎨 Classic</option>
+                  <option value="class_photo">📷 Class Photo</option>
+                  <option value="prestige">⭐ Prestige</option>
+                  <option value="azure">⭐ Azure Edge</option>
+                  <option value="royal">⭐⭐ Royal</option>
+                  <option value="monarch">⭐⭐ Monarch</option>
+                  <option value="sovereign">💎 Sovereign</option>
+                  <option value="sterling">💎 Sterling</option>
+                  <option value="apex">💎 Apex</option>
                 </select>
               </div>
 

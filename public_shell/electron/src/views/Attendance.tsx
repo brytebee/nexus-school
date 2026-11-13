@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { useLicense } from '../hooks/useLicense';
 import { DataTable, Column } from '../components/DataTable';
 import { Combobox } from '../components/Combobox';
 import { useClassArms } from '../hooks/useClassArms';
@@ -30,11 +29,8 @@ interface EscalationStep {
 }
 
 export function Attendance() {
-  const { license } = useLicense();
   const { fullList } = useClassArms();
   const termConfig = useTermConfig();
-  const currentTier = license?.tier || 'Silver';
-  const isDiamond = currentTier === 'Diamond';
 
   // Navigation tabs: 'register' | 'radar' | 'reports' | 'settings'
   const [activeSubTab, setActiveSubTab] = useState<'register' | 'radar' | 'reports' | 'settings'>('register');
@@ -140,10 +136,10 @@ export function Attendance() {
 
   // Load Truancy Radar rows when tab is opened
   useEffect(() => {
-    if (activeSubTab === 'radar' && isDiamond) {
+    if (activeSubTab === 'radar') {
       fetchTruancyFlags();
     }
-  }, [activeSubTab, currentTier]);
+  }, [activeSubTab]);
 
   const fetchTruancyFlags = async () => {
     if (!window.electronAPI?.attendance?.getTruancyFlags) return;
@@ -241,7 +237,7 @@ export function Attendance() {
     try {
       const res = await window.electronAPI.attendance.saveSettings({
         enable_daily_attendance: enableDaily,
-        enable_subject_attendance: isDiamond ? enableSubject : false,
+        enable_subject_attendance: enableSubject,
         truancy_escalation_flow: escalationFlow,
       });
       if (res.ok) {
@@ -388,79 +384,11 @@ export function Attendance() {
           📋 Daily Register
         </button>
         <button
-          onClick={() => {
-            if (isDiamond) {
-              setActiveSubTab('radar');
-              return;
-            }
-            const Swal = (window as any).Swal;
-            if (Swal) {
-              Swal.fire({
-                title: '<span style="color:#00E5FF; font-size:24px; font-weight:700;">💎 Diamond Exclusive</span>',
-                html: `
-                    <div style="text-align: left; padding: 10px 5px; font-family: 'Inter', sans-serif;">
-                        <p style="color: #fff; font-size: 14px; margin-bottom: 15px; line-height: 1.5;">
-                            The <strong>Truancy Radar & Guardian Shield</strong> is exclusive to our <strong>Diamond Tier</strong> partner schools.
-                        </p>
-                        <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 15px;">
-                            <div style="display: flex; gap: 10px; align-items: flex-start;">
-                                <span style="font-size: 18px;">🚨</span>
-                                <div>
-                                    <strong style="color: #fff; font-size: 13px;">Subject-Level Tracking</strong>
-                                    <div style="color: #aaa; font-size: 11px; margin-top: 2px;">Track attendance period-by-period rather than once a day.</div>
-                                </div>
-                            </div>
-                            <div style="display: flex; gap: 10px; align-items: flex-start;">
-                                <span style="font-size: 18px;">🛡️</span>
-                                <div>
-                                    <strong style="color: #fff; font-size: 13px;">Guardian Shield Escalation</strong>
-                                    <div style="color: #aaa; font-size: 11px; margin-top: 2px;">Set up automatic alert triggers for Form Teachers, Principals, and Parents.</div>
-                                </div>
-                            </div>
-                            <div style="display: flex; gap: 10px; align-items: flex-start;">
-                                <span style="font-size: 18px;">💬</span>
-                                <div>
-                                    <strong style="color: #fff; font-size: 13px;">Parent WhatsApp Integration</strong>
-                                    <div style="color: #aaa; font-size: 11px; margin-top: 2px;">Instantly notify parents on their mobile phones when a class is skipped.</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                `,
-                confirmButtonText: 'Secure Your Upgrade',
-                confirmButtonColor: '#00E5FF',
-                showCancelButton: true,
-                cancelButtonText: 'Maybe Later',
-                cancelButtonColor: '#ef4444',
-                background: '#0b0f19',
-                color: '#fff',
-                customClass: {
-                    popup: 'premium-swal-popup',
-                    confirmButton: 'premium-swal-confirm',
-                    cancelButton: 'premium-swal-cancel'
-                }
-              }).then((result: any) => {
-                if (result.isConfirmed) {
-                  Swal.fire({
-                    title: 'Upgrade Initiated',
-                    text: 'Please contact the Sovereign operations team or visit your portal at nexusos.com.ng to request an upgrade to Diamond.',
-                    icon: 'success',
-                    confirmButtonText: 'Got it',
-                    confirmButtonColor: '#00E5FF',
-                    background: '#0b0f19',
-                    color: '#fff'
-                  });
-                }
-              });
-            } else {
-              alert('Truancy Radar requires the Diamond Tier upgrade.');
-            }
-          }}
+          onClick={() => setActiveSubTab('radar')}
           className={`fees-tab-btn${activeSubTab === 'radar' ? ' active' : ''}`}
           style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
         >
           🚨 Truancy Radar
-          {!isDiamond && <span style={{ fontSize: '10px' }}>💎</span>}
         </button>
         <button
           onClick={() => setActiveSubTab('reports')}
@@ -791,7 +719,7 @@ export function Attendance() {
       )}
 
       {/* RENDER VIEW: Truancy Radar */}
-      {activeSubTab === 'radar' && isDiamond && (
+      {activeSubTab === 'radar' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--grid-gap)' }}>
 
               {/* Radar header card — Cloud Bridge pattern */}
@@ -806,7 +734,7 @@ export function Attendance() {
                     </p>
                   </div>
                   <span style={{ fontSize: '9px', fontWeight: 900, color: 'var(--danger)', background: 'rgba(239, 68, 68, 0.1)', padding: '2px 8px', borderRadius: '9999px', border: '1px solid rgba(239, 68, 68, 0.2)', textTransform: 'uppercase', letterSpacing: '0.08em', flexShrink: 0 }}>
-                    Diamond
+                    Active
                   </span>
                 </div>
                 <div style={{ background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.15)', borderRadius: 'var(--radius-lg)', padding: '14px 18px', fontSize: '12px', color: 'var(--danger)', lineHeight: '1.6' }}>
@@ -1078,17 +1006,16 @@ export function Attendance() {
                 </div>
 
                 {/* Subject Roll toggle */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '20px', opacity: isDiamond ? 1 : 0.55 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '20px', opacity: 1 }}>
                   <div>
                     <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>Enable Period-Level Subject Roll</span>
                     <span style={{ fontSize: '11px', color: 'var(--text-dim)', lineHeight: '1.55' }}>Tracks attendance subject-by-subject per period. Ideal for secondary school structures.</span>
                   </div>
                   <input
                     type="checkbox"
-                    disabled={!isDiamond}
-                    checked={isDiamond && enableSubject}
+                    checked={enableSubject}
                     onChange={(e) => setEnableSubject(e.target.checked)}
-                    style={{ width: '16px', height: '16px', accentColor: 'var(--accent)', cursor: isDiamond ? 'pointer' : 'not-allowed', flexShrink: 0, marginTop: '2px' }}
+                    style={{ width: '16px', height: '16px', accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0, marginTop: '2px' }}
                   />
                 </div>
               </div>
@@ -1110,7 +1037,7 @@ export function Attendance() {
           <div className="settings-column">
             <div style={{ background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-lg)', padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
-              {/* Card header: title + DIAMOND TIER pill */}
+              {/* Card header: title + Active pill */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)', textTransform: 'uppercase', letterSpacing: '0.12em', margin: 0, borderBottom: 'none', paddingBottom: 0 }}>
                   Guardian Shield Escalation Flow
@@ -1118,98 +1045,85 @@ export function Attendance() {
                 <span style={{
                   fontSize: '9px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em',
                   padding: '3px 8px', borderRadius: '4px', flexShrink: 0,
-                  border: isDiamond ? '1px solid rgba(0, 229, 255, 0.35)' : '1px solid rgba(255,255,255,0.1)',
+                  border: '1px solid rgba(0, 229, 255, 0.35)',
                   background: 'transparent',
-                  color: isDiamond ? 'var(--accent)' : 'var(--text-dim)'
+                  color: 'var(--accent)'
                 }}>
-                  {currentTier} Tier
+                  Active
                 </span>
               </div>
 
-              {isDiamond ? (
-                <>
-                  {/* Escalation step rows — flat, numbered */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                    {escalationFlow.map((step, idx) => {
-                      const notifyLabels: Record<string, string> = {
-                        form_teacher: '🧑‍🏫 Form Teacher',
-                        principal: '👤 Principal',
-                        parent: '💬 Parent (WhatsApp)',
-                      };
-                      return (
-                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                          {/* Step number circle */}
-                          <span style={{
-                            width: '28px', height: '28px', borderRadius: '50%',
-                            background: 'rgba(140, 158, 255, 0.12)', border: '1px solid rgba(140, 158, 255, 0.25)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            fontWeight: 700, color: 'var(--accent-indigo)', fontSize: '11px', flexShrink: 0
-                          }}>
-                            {step.step}
-                          </span>
+              {/* Escalation step rows — flat, numbered */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {escalationFlow.map((step, idx) => {
+                  const notifyLabels: Record<string, string> = {
+                    form_teacher: '🧑‍🏫 Form Teacher',
+                    principal: '👤 Principal',
+                    parent: '💬 Parent (WhatsApp)',
+                  };
+                  return (
+                    <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                      {/* Step number circle */}
+                      <span style={{
+                        width: '28px', height: '28px', borderRadius: '50%',
+                        background: 'rgba(140, 158, 255, 0.12)', border: '1px solid rgba(140, 158, 255, 0.25)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontWeight: 700, color: 'var(--accent-indigo)', fontSize: '11px', flexShrink: 0
+                      }}>
+                        {step.step}
+                      </span>
 
-                          {/* Label + subtext */}
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)', display: 'block' }}>
-                              {notifyLabels[step.notify] || step.notify}
-                            </span>
-                            <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
-                              Triggers after {step.trigger_after} flag{step.trigger_after > 1 ? 's' : ''} · via {step.channel}
-                            </span>
-                          </div>
-
-                          {/* Edit button */}
-                          <button
-                            onClick={() => handleOpenEscalationModal(idx)}
-                            className="small-btn"
-                            style={{ flexShrink: 0 }}
-                          >
-                            Edit
-                          </button>
-
-                          {/* Delete button — red ✕ */}
-                          <button
-                            onClick={() => handleRemoveEscalationStep(idx)}
-                            style={{
-                              background: 'transparent', border: 'none',
-                              color: 'var(--danger)', cursor: 'pointer',
-                              fontSize: '15px', padding: '2px 4px',
-                              display: 'flex', alignItems: 'center', flexShrink: 0,
-                              lineHeight: 1
-                            }}
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      );
-                    })}
-
-                    {escalationFlow.length === 0 && (
-                      <div style={{ textAlign: 'center', padding: '28px', color: 'var(--text-dim)', fontSize: '12px', fontStyle: 'italic', border: '1px dashed var(--glass-border)', borderRadius: 'var(--radius-lg)' }}>
-                        No escalation triggers defined yet.
+                      {/* Label + subtext */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)', display: 'block' }}>
+                          {notifyLabels[step.notify] || step.notify}
+                        </span>
+                        <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
+                          Triggers after {step.trigger_after} flag{step.trigger_after > 1 ? 's' : ''} · via {step.channel}
+                        </span>
                       </div>
-                    )}
-                  </div>
 
-                  {/* Add trigger button — full width, secondary */}
-                  <button
-                    onClick={() => handleOpenEscalationModal(null)}
-                    className="secondary-btn"
-                    style={{ width: '100%', justifyContent: 'center', fontSize: '13px' }}
-                  >
-                    + Add Escalation Trigger
-                  </button>
-                </>
-              ) : (
-                <div style={{ textAlign: 'center', padding: '32px 16px', border: '1px dashed var(--glass-border)', borderRadius: 'var(--radius-lg)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-                  <span style={{ fontSize: '32px' }}>🔒</span>
-                  <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>Upgrade to Diamond Tier</h4>
-                  <p style={{ fontSize: '10px', color: 'var(--text-dim)', maxWidth: '260px', margin: 0, lineHeight: 'var(--lh-body)' }}>
-                    Set up rule-based alerts for form teachers, principals, and parent WhatsApp routing when absences breach thresholds.
-                  </p>
-                  <span style={{ fontSize: '9px', fontWeight: 900, color: 'var(--accent)', background: 'rgba(0,229,255,0.1)', padding: '3px 10px', borderRadius: '4px', border: '1px solid rgba(0,229,255,0.2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Diamond Required</span>
-                </div>
-              )}
+                      {/* Edit button */}
+                      <button
+                        onClick={() => handleOpenEscalationModal(idx)}
+                        className="small-btn"
+                        style={{ flexShrink: 0 }}
+                      >
+                        Edit
+                      </button>
+
+                      {/* Delete button — red ✕ */}
+                      <button
+                        onClick={() => handleRemoveEscalationStep(idx)}
+                        style={{
+                          background: 'transparent', border: 'none',
+                          color: 'var(--danger)', cursor: 'pointer',
+                          fontSize: '15px', padding: '2px 4px',
+                          display: 'flex', alignItems: 'center', flexShrink: 0,
+                          lineHeight: 1
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })}
+
+                {escalationFlow.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: '28px', color: 'var(--text-dim)', fontSize: '12px', fontStyle: 'italic', border: '1px dashed var(--glass-border)', borderRadius: 'var(--radius-lg)' }}>
+                    No escalation triggers defined yet.
+                  </div>
+                )}
+              </div>
+
+              {/* Add trigger button — full width, secondary */}
+              <button
+                onClick={() => handleOpenEscalationModal(null)}
+                className="secondary-btn"
+                style={{ width: '100%', justifyContent: 'center', fontSize: '13px' }}
+              >
+                + Add Escalation Trigger
+              </button>
             </div>
           </div>
         </div>

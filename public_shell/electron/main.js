@@ -431,11 +431,8 @@ ipcMain.on("pulse:start", () => {
         console.warn("[Pulse] Blocked: school not activated.");
         return;
     }
-    if (licenseStatus?.tier === 'Gold' || licenseStatus?.tier === 'Diamond') {
-        pulseBot.startPulse();
-    } else {
-        console.warn("[Pulse] Attempted start on non-eligible tier:", licenseStatus?.tier);
-    }
+    // Phase 3: Pulse available to all tiers
+    pulseBot.startPulse();
 });
 ipcMain.on("pulse:stop", () => pulseBot.destroyPulse());
 ipcMain.on("pulse:set-autostart", (event, enabled) => {
@@ -523,10 +520,7 @@ ipcMain.once("ui-ready", () => {
   console.log('[AUTOSTART-DIAG] ✓ licenseStatus.tier =', JSON.stringify(tier));
   console.log('[AUTOSTART-DIAG]   Full licenseStatus:', JSON.stringify(licenseStatus));
 
-  if (tier === 'Standalone' || tier === 'Silver') {
-    console.log('[AUTOSTART-DIAG] ✗ Tier is ' + tier + ' — auto-start skipped (Gold/Diamond required).');
-    return;
-  }
+  // Phase 3: Autostart available to all tiers
 
   console.log('[AUTOSTART-DIAG] ✓ Tier eligible — starting message queue worker and Paystack polling worker...');
   startMessageQueueWorker();
@@ -1759,12 +1753,7 @@ ipcMain.handle('auth:create-admin', (event, { username, pin, authType, roleLevel
             return { ok: false, error: 'Forbidden: School Superadmin role (Level 9) is singleton and cannot be created locally.' };
         }
 
-        // Limit enforcement based on license tier
-        const ADMIN_LIMITS = { Standalone: 2, Silver: 5, Gold: 5, Diamond: Infinity };
-        const tierLimit = ADMIN_LIMITS[licenseStatus?.tier] ?? 2;
-        if (currentCount >= tierLimit) {
-            return { ok: false, error: `Your ${licenseStatus?.tier || 'Silver'} plan supports up to ${tierLimit} admin accounts. Upgrade to add more.` };
-        }
+        // Phase 3: No per-tier admin account limit — unlimited for all plans
 
         const type = authType === 'password' ? 'password' : 'pin';
         const secretName = type === 'password' ? 'password' : 'PIN';
@@ -2013,9 +2002,7 @@ const PAY_LABELS_VALUE = {
 };
 
 ipcMain.handle('fees:refund', async (event, { studentId, txRef, amount, reason }) => {
-    if (licenseStatus?.tier !== 'Diamond') {
-        return { ok: false, error: 'Diamond tier license is required to issue automated refunds.' };
-    }
+    // Phase 3: Refunds available to all tiers
     if (!currentAdminSession) {
         return { ok: false, error: 'Unauthorized: Admin session required.' };
     }
@@ -2105,10 +2092,7 @@ ipcMain.handle('fees:refund', async (event, { studentId, txRef, amount, reason }
 });
 
 ipcMain.handle('fees:send-receipt-pdf', async (event, { studentId, txRef, txId }) => {
-    const isEligibleTier = licenseStatus?.tier === 'Diamond' || licenseStatus?.tier === 'Gold';
-    if (!isEligibleTier && licenseStatus?.tier === 'Standalone') {
-        return { ok: false, error: 'Cloud connected license (Gold or Diamond) required for automated receipt dispatch.' };
-    }
+    // Phase 3: Receipt dispatch available to all tiers
     const botStatus = pulseBot?.getPulseStatus?.();
     if (botStatus?.status !== 'ready') {
         return { ok: false, error: 'WhatsApp bot is offline — connect Nexus Pulse first.' };
@@ -2600,13 +2584,27 @@ async function processSuccessfulPayment(ref, amountInKobo, transactionId = null)
       receiptRecords.push({ name: sName, amount: allocation, balance: Math.max(0, totalBilled - total_paid_sum) });
     }
 
-    // Leftover → first student
+    // Leftover → first student & safely hold in student_fee_advances
     if (remainingPaid > 0 && studentIds.length > 0) {
       const studentId = studentIds[0];
+      try {
+        ensureAdvanceFeesSchema(db);
+        const advRef = `ADV-${ref}`;
+        db.prepare(`
+          INSERT INTO student_fee_advances (
+            student_id, amount, amount_used, payment_method, reference_number,
+            source_session, source_term, target_session, target_term, recorded_by, note, status
+          ) VALUES (?, ?, 0, 'paystack', ?, ?, ?, NULL, 'Future Terms Holding', 'Online Payment (Paystack)', ?, 'available')
+        `).run(studentId, remainingPaid, advRef, academicSession, term, `Advance excess from online payment ${ref}`);
+        console.log(`[Payment Processor] Held ₦${remainingPaid} excess as Advance Credit for student ${studentId} (Ref: ${advRef})`);
+      } catch (advErr) {
+        console.warn(`[Payment Processor] Failed to record advance excess:`, advErr.message);
+      }
+
       db.prepare(`
         INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(studentId, academicSession, term, remainingPaid, "transfer", ref, session.payment_type || "Online Payment Leftover (Paystack)");
+      `).run(studentId, academicSession, term, remainingPaid, "transfer", ref, session.payment_type || "Online Payment Leftover / Advance (Paystack)");
 
       const { total_paid_sum } = db.prepare(`
         SELECT COALESCE(SUM(amount), 0) AS total_paid_sum FROM fee_transactions
@@ -3522,10 +3520,6 @@ ipcMain.on('trigger-fee-reminders', () => {
 // ── Pulse Cloud Bridge (Turn 2) ───────────────────────────────────────────
 
 ipcMain.on("pulse:save-google-creds", async (event, { clientId, clientSecret }) => {
-    if (licenseStatus?.tier !== 'Diamond') {
-        console.warn("[Pulse] Save credentials rejected: Diamond tier required.");
-        return;
-    }
     const db = database.getDb();
     db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('google_client_id', ?)").run(clientId);
     db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('google_client_secret', ?)").run(clientSecret);
@@ -3535,10 +3529,6 @@ ipcMain.on("pulse:save-google-creds", async (event, { clientId, clientSecret }) 
 });
 
 ipcMain.handle("pulse:get-google-auth-url", async () => {
-    if (licenseStatus?.tier !== 'Diamond') {
-        console.warn("[Pulse] Get Google auth URL rejected: Diamond tier required.");
-        return null;
-    }
     await pulseExporter.init();
     if (!pulseExporter.oAuth2Client) return null;
     return pulseExporter.oAuth2Client.generateAuthUrl({
@@ -3549,14 +3539,6 @@ ipcMain.handle("pulse:get-google-auth-url", async () => {
 });
 
 ipcMain.handle("pulse:get-cloud-status", () => {
-    if (licenseStatus?.tier !== 'Diamond') {
-        return {
-            isConfigured: false,
-            isSyncing: false,
-            securityKey: null,
-            refreshToken: null
-        };
-    }
     return {
         isConfigured: !!pulseExporter.oAuth2Client,
         isSyncing: pulseExporter.isSyncing,
@@ -3566,10 +3548,6 @@ ipcMain.handle("pulse:get-cloud-status", () => {
 });
 
 ipcMain.on("pulse:trigger-sync", () => {
-    if (licenseStatus?.tier !== 'Diamond') {
-        console.warn("[Pulse] Manual sync trigger rejected: Diamond tier required.");
-        return;
-    }
     pulseExporter.syncToDrive();
 });
 
@@ -4749,10 +4727,9 @@ ipcMain.handle("get-all-students", (event, { limit = 15, offset = 0, search = ""
     const totalSql   = `SELECT COUNT(*) as total FROM students s WHERE ${conditions}`;
     
     const tier = licenseStatus?.tier || 'Silver';
-    const isFinancialTier = (tier === 'Gold' || tier === 'Diamond');
     let selectSql = '';
 
-    if (isFinancialTier) {
+    if (true) {
       const activeTerm = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
       const session = (activeTerm?.academic_session || '2025/2026').replace(/'/g, "''");
       const term = (activeTerm?.term || 'First Term').replace(/'/g, "''");
@@ -5118,10 +5095,7 @@ ipcMain.handle('ils:set-class-type', (event, { className, type, pacCount, pacLab
       return { ok: false, error: 'Principal or Superadmin access required (Level 7+).' };
     }
     // ILS/PAC curriculum is a Gold+ feature — Standalone and Silver schools use Standard Nigerian grading only
-    const _ilsTier = licenseStatus?.tier || 'Standalone';
-    if (type === 'ILS' && (_ilsTier === 'Standalone' || _ilsTier === 'Silver')) {
-      return { ok: false, error: `ILS/ACE PAC curriculum mode requires a Gold or Diamond plan. Your current plan is ${_ilsTier}.` };
-    }
+    // Phase 3: ILS/ACE curriculum available to all tiers
     const allowed = ['STANDARD_NIGERIAN', 'ILS'];
     if (!allowed.includes(type)) return { ok: false, error: `Invalid curriculum_type: ${type}` };
     const db = database.getDb();
@@ -5208,10 +5182,7 @@ ipcMain.handle('ils:set-arm-type', (event, { className, arm, type, pacCount, pac
     if (!currentAdminSession || currentAdminSession.role_level < 7) {
       return { ok: false, error: 'Principal or Superadmin access required (Level 7+).' };
     }
-    const _ilsTier = licenseStatus?.tier || 'Standalone';
-    if (type === 'ILS' && (_ilsTier === 'Standalone' || _ilsTier === 'Silver')) {
-      return { ok: false, error: `ILS/ACE PAC curriculum mode requires a Gold or Diamond plan. Your current plan is ${_ilsTier}.` };
-    }
+    // Phase 3: ILS/ACE curriculum available to all tiers
     const allowed = ['STANDARD_NIGERIAN', 'ILS'];
     if (!allowed.includes(type)) return { ok: false, error: `Invalid curriculum_type: ${type}` };
     const db = database.getDb();
@@ -8137,7 +8108,8 @@ ipcMain.handle("generate-reports", async (event, payload) => {
     const db = database.getDb();
     if (payload.students) {
       const _licTier = licenseStatus?.tier || identityPacket?.planTier || identityPacket?.plan_tier || 'Standalone';
-      const _feeGated = _licTier === 'Gold' || _licTier === 'Diamond';
+      // Phase 3: Fee features available to all tiers
+      const _feeGated = true;
 
       // Hoist statements to avoid re-preparing on every student in the loop.
       // ALL tiers: check student_fees balance dynamically (never hardcode 'cleared').
@@ -8482,12 +8454,7 @@ ipcMain.handle("results:dispatch", async (event, payload) => {
 // ── S8-5: Publish results to the parent portal (nexus-api) ─────────────────
 ipcMain.handle("results:publish", async (event, { term, academicSession, studentIds }) => {
   try {
-    // ── Standalone scope lock: Portal publish requires Gold+ (Portal is not part of Standalone pack) ──
-    const _rpTier = licenseStatus?.tier || 'Standalone';
-    if (_rpTier === 'Standalone') {
-      return { ok: false, error: 'Portal publishing is not available on the Standalone plan. Upgrade to Gold or Diamond to enable the Parent Portal.' };
-    }
-
+    // Phase 3: Portal publishing available to all tiers
     const db = database.getDb();
 
     // Read school identity file (contains portalSlug set during onboarding)
@@ -10807,11 +10774,9 @@ function createWindow() {
 
 
   // ── Start Google Drive periodic sync NOW that the license tier is known ─────
-  // Previously this ran inside a .then() microtask that fired BEFORE the
-  // synchronous license-loading block above, so licenseStatus.tier was always
-  // undefined and startPeriodicSync() was never called for production Diamond installs.
-  if (pulseExporter.oAuth2Client && licenseStatus?.tier === 'Diamond') {
-      console.log('[Pulse] Diamond tier confirmed — starting periodic Drive sync.');
+  // Phase 3: Drive sync available to all tiers (if OAuth client is configured)
+  if (pulseExporter.oAuth2Client) {
+      console.log('[Pulse] OAuth client configured — starting periodic Drive sync.');
       pulseExporter.startPeriodicSync();
   }
 

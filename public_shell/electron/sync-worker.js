@@ -142,11 +142,33 @@ async function pushSchoolDelta() {
     return { ok: false, reason: "no_school_id" };
   }
 
-  // 1. Gather Students + Fees + Results Summaries + Attendance Stats
+  // 1. Gather Students + Fees + Results Summaries + Attendance Stats + Advance Balances
   // Belt-and-suspenders: ensure parent_phone_2, admission_no, and parent_name columns exist
   try { db.exec(`ALTER TABLE students ADD COLUMN parent_phone_2 TEXT DEFAULT NULL`); } catch (_) {}
   try { db.exec(`ALTER TABLE students ADD COLUMN admission_no TEXT DEFAULT ''`); } catch (_) {}
   try { db.exec(`ALTER TABLE students ADD COLUMN parent_name TEXT DEFAULT NULL`); } catch (_) {}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS student_fee_advances (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id       TEXT NOT NULL,
+        amount           REAL NOT NULL,
+        amount_used      REAL NOT NULL DEFAULT 0,
+        payment_method   TEXT NOT NULL DEFAULT 'cash',
+        reference_number TEXT NOT NULL,
+        source_session   TEXT NOT NULL,
+        source_term      TEXT NOT NULL,
+        target_session   TEXT DEFAULT NULL,
+        target_term      TEXT DEFAULT NULL,
+        recorded_by      TEXT,
+        note             TEXT,
+        status           TEXT NOT NULL DEFAULT 'available',
+        created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_advances_student ON student_fee_advances(student_id, status);
+    `);
+  } catch (_) {}
 
   const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get() || {
     academic_session: "2025/2026",
@@ -162,10 +184,17 @@ async function pushSchoolDelta() {
            s.parent_email,
            COALESCE(sf.total_billed, 0) as total_billed,
            COALESCE(sf.total_paid, 0) as total_paid,
-           COALESCE(sf.total_billed - sf.total_paid, 0) as fee_balance
+           COALESCE(sf.total_billed - sf.total_paid, 0) as fee_balance,
+           COALESCE(adv.advance_balance, 0) as advance_balance
     FROM students s
     LEFT JOIN student_fees sf ON sf.student_id = s.id
       AND sf.academic_session = ? AND sf.term = ?
+    LEFT JOIN (
+      SELECT student_id, SUM(amount - amount_used) AS advance_balance
+      FROM student_fee_advances
+      WHERE status != 'exhausted' AND (amount - amount_used) > 0
+      GROUP BY student_id
+    ) adv ON adv.student_id = s.id
     WHERE s.parent_phone IS NOT NULL AND s.parent_phone != ''
       AND COALESCE(s.is_active, 1) = 1
   `).all(termConfig.academic_session, termConfig.term);
@@ -209,6 +238,7 @@ async function pushSchoolDelta() {
       total_billed: st.total_billed,
       total_paid: st.total_paid,
       fee_balance: st.fee_balance,
+      advance_balance: st.advance_balance || 0,
       results_summary: resultsSummary,
       attendance_stats: attendanceStats
     };
@@ -515,6 +545,68 @@ async function pullPendingSyncEvents() {
         console.log(`[Sync Worker] Reconciled settled payment session: ${paystack_ref}`);
       } catch (err) {
         console.warn(`[Sync Worker] Failed to reconcile payment ${paystack_ref}:`, err.message);
+      }
+    } else if (ev.event_type === "ADVANCE_CREDITED") {
+      // Parent paid advance credit via WhatsApp bot (advance_direct or custom_with_advance overpayment)
+      const {
+        source_ref,
+        student_ids,
+        advance_naira,
+        settled_at,
+        note
+      } = ev.payload || {};
+
+      try {
+        // Ensure student_fee_advances table exists
+        try {
+          db.exec(`
+            CREATE TABLE IF NOT EXISTS student_fee_advances (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              student_id TEXT NOT NULL,
+              amount REAL NOT NULL DEFAULT 0,
+              source_ref TEXT,
+              source TEXT DEFAULT 'manual',
+              note TEXT,
+              created_at TEXT DEFAULT (datetime('now')),
+              term_id INTEGER
+            )
+          `);
+        } catch (_) {}
+
+        const rawIds = Array.isArray(student_ids)
+          ? student_ids
+          : (typeof student_ids === "string" ? student_ids.split(",").map(s => s.trim()).filter(Boolean) : []);
+
+        const totalAdvNaira = Number(advance_naira || 0);
+        if (rawIds.length > 0 && totalAdvNaira > 0) {
+          // Split advance equally across students
+          const perStudent = Math.round((totalAdvNaira / rawIds.length) * 100) / 100;
+          const advRef = `ADV-${source_ref || Date.now()}`;
+          const createdAt = settled_at || new Date().toISOString();
+          const advNote = note || "WhatsApp Bot Advance Credit";
+
+          for (const sid of rawIds) {
+            // Look up local student by cloud ID or exact id match
+            const localStudent = db.prepare(
+              "SELECT id FROM students WHERE id = ? OR cloud_id = ?"
+            ).get(sid, sid);
+            const localId = localStudent ? localStudent.id : sid;
+
+            // Idempotency: skip if same source_ref already recorded for this student
+            const existing = db.prepare(
+              "SELECT id FROM student_fee_advances WHERE source_ref = ? AND student_id = ?"
+            ).get(advRef, localId);
+            if (!existing) {
+              db.prepare(
+                `INSERT INTO student_fee_advances (student_id, amount, source_ref, source, note, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?)`
+              ).run(localId, perStudent, advRef, "whatsapp_bot", advNote, createdAt);
+              console.log(`[Sync Worker] 💳 Recorded advance credit: ${perStudent} for student ${localId} (ref: ${advRef})`);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`[Sync Worker] Failed to record ADVANCE_CREDITED event:`, err.message);
       }
     } else if (ev.event_type === "STUDENT_UPDATED") {
       const {

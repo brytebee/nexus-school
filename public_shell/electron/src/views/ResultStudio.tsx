@@ -47,19 +47,7 @@ export function ResultStudio() {
   const { license } = useLicense();
   const { fullList } = useClassArms();
   const { session: globalSession, term: globalTerm, termsList, sessionsList } = useTermConfig();
-  const tier = license?.tier || "Silver";
   const isActivated = license?.is_activated ?? false;
-
-  const isTemplateLocked = (tpl: string) => {
-    if (tpl === "clean_slate" || tpl === "class_photo") return false;
-    if (tier === "Standalone") return true;
-    if (tier === "Silver")
-      return ["royal", "monarch", "sovereign", "sterling", "apex"].includes(
-        tpl,
-      );
-    if (tier === "Gold") return ["sovereign", "sterling", "apex"].includes(tpl);
-    return false;
-  };
 
   // Form selections
   const [reportType, setReportType] = useState(
@@ -214,13 +202,9 @@ export function ResultStudio() {
       if (identity?.themePrimary) setBrandPrimary(identity.themePrimary);
       if (identity?.themeSecondary) setBrandSecondary(identity.themeSecondary);
 
-      if (tier === "Silver" || tier === "Standalone") setScope("all");
-
       const cfg = await window.electronAPI.getTermConfig();
       if (cfg?.template) {
-        setTemplate(
-          isTemplateLocked(cfg.template) ? "clean_slate" : cfg.template,
-        );
+        setTemplate(cfg.template);
       }
       if (cfg?.term) setCurrentTerm(cfg.term);
 
@@ -299,10 +283,6 @@ export function ResultStudio() {
   }, []);
 
   const handleScopeChange = (newScope: string) => {
-    if (tier === "Silver" || tier === "Standalone") {
-      setScope("all");
-      return;
-    }
     setScope(newScope);
   };
 
@@ -887,30 +867,6 @@ export function ResultStudio() {
               {genStatus}
             </span>
           )}
-          {(tier === "Silver" || tier === "Standalone") && (
-            <div
-              style={{
-                background: "rgba(255,200,0,0.08)",
-                border: "1px solid rgba(255,200,0,0.22)",
-                borderRadius: "8px",
-                padding: "7px 14px",
-                fontSize: "11px",
-                color: "rgba(255,200,0,0.85)",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              }}
-            >
-              <span>⭐</span>
-              <span>
-                <strong>
-                  {tier === "Standalone" ? "Standalone Pack" : "Silver Plan"}
-                </strong>{" "}
-                — Scope locked to <em>Entire School</em>. Upgrade to Gold for
-                granular reports.
-              </span>
-            </div>
-          )}
         </div>
       </div>
 
@@ -956,41 +912,15 @@ export function ResultStudio() {
                 onChange={(e) => setTemplate(e.target.value)}
                 disabled={reportType === "portal_card"}
               >
-                <option value="clean_slate">🎨 Classic (Free)</option>
-                <option value="class_photo">📷 Class Photo (Free)</option>
-                <option
-                  value="prestige"
-                  disabled={isTemplateLocked("prestige")}
-                >
-                  {isTemplateLocked("prestige") ? "🔒 " : ""}⭐ Prestige
-                  (Silver)
-                </option>
-                <option value="azure" disabled={isTemplateLocked("azure")}>
-                  {isTemplateLocked("azure") ? "🔒 " : ""}⭐ Azure Edge (Silver)
-                </option>
-                <option value="royal" disabled={isTemplateLocked("royal")}>
-                  {isTemplateLocked("royal") ? "🔒 " : ""}⭐⭐ Royal (Gold)
-                </option>
-                <option value="monarch" disabled={isTemplateLocked("monarch")}>
-                  {isTemplateLocked("monarch") ? "🔒 " : ""}⭐⭐ Monarch (Gold)
-                </option>
-                <option
-                  value="sovereign"
-                  disabled={isTemplateLocked("sovereign")}
-                >
-                  {isTemplateLocked("sovereign") ? "🔒 " : ""}💎 Sovereign
-                  (Diamond)
-                </option>
-                <option
-                  value="sterling"
-                  disabled={isTemplateLocked("sterling")}
-                >
-                  {isTemplateLocked("sterling") ? "🔒 " : ""}💎 Sterling
-                  (Diamond)
-                </option>
-                <option value="apex" disabled={isTemplateLocked("apex")}>
-                  {isTemplateLocked("apex") ? "🔒 " : ""}💎 Apex (Diamond)
-                </option>
+                <option value="clean_slate">🎨 Classic</option>
+                <option value="class_photo">📷 Class Photo</option>
+                <option value="prestige">⭐ Prestige</option>
+                <option value="azure">⭐ Azure Edge</option>
+                <option value="royal">⭐⭐ Royal</option>
+                <option value="monarch">⭐⭐ Monarch</option>
+                <option value="sovereign">💎 Sovereign</option>
+                <option value="sterling">💎 Sterling</option>
+                <option value="apex">💎 Apex</option>
               </select>
             </div>
 
@@ -1104,84 +1034,21 @@ export function ResultStudio() {
                 }}
               >
                 Scope
-                {(tier === "Silver" || tier === "Standalone") && (
-                  <span
-                    style={{
-                      fontSize: "10px",
-                      color: "#ffd700",
-                      background: "rgba(212,175,55,0.12)",
-                      border: "1px solid rgba(212,175,55,0.3)",
-                      padding: "1px 6px",
-                      borderRadius: "10px",
-                      textTransform: "uppercase",
-                      fontWeight: 800,
-                    }}
-                  >
-                    🔒 Gated to Entire School
-                  </span>
-                )}
               </label>
               <select
                 className="modern-input"
                 style={{
                   width: "100%",
-                  opacity: tier === "Silver" || tier === "Standalone" ? 0.7 : 1,
-                  cursor:
-                    tier === "Silver" || tier === "Standalone"
-                      ? "not-allowed"
-                      : "default",
-                  borderColor:
-                    tier === "Silver" || tier === "Standalone"
-                      ? "rgba(212, 175, 55, 0.2)"
-                      : undefined,
                 }}
                 value={scope}
                 onChange={(e) => handleScopeChange(e.target.value)}
-                disabled={tier === "Silver" || tier === "Standalone"}
               >
                 <option value="all">🏫 Entire School</option>
-                <option
-                  value="class"
-                  disabled={tier === "Silver" || tier === "Standalone"}
-                >
-                  {tier === "Silver" || tier === "Standalone" ? "🔒 " : ""}🏷️ By
-                  Class
-                </option>
-                <option
-                  value="teacher"
-                  disabled={tier === "Silver" || tier === "Standalone"}
-                >
-                  {tier === "Silver" || tier === "Standalone" ? "🔒 " : ""}👩‍🏫 By
-                  Teacher
-                </option>
-                <option
-                  value="subject"
-                  disabled={tier === "Silver" || tier === "Standalone"}
-                >
-                  {tier === "Silver" || tier === "Standalone" ? "🔒 " : ""}📚 By
-                  Subject
-                </option>
-                <option
-                  value="student"
-                  disabled={tier === "Silver" || tier === "Standalone"}
-                >
-                  {tier === "Silver" || tier === "Standalone" ? "🔒 " : ""}👤
-                  Single Student
-                </option>
+                <option value="class">🏷️ By Class</option>
+                <option value="teacher">👩‍🏫 By Teacher</option>
+                <option value="subject">📚 By Subject</option>
+                <option value="student">👤 Single Student</option>
               </select>
-              {(tier === "Silver" || tier === "Standalone") && (
-                <div
-                  style={{
-                    fontSize: "11px",
-                    color: "var(--text-dim)",
-                    marginTop: "4px",
-                    lineHeight: "1.4",
-                  }}
-                >
-                  Scope filtering requires a <strong>Gold Plan</strong> or
-                  higher.
-                </div>
-              )}
             </div>
 
             {/* Conditional scope pickers */}
@@ -1763,8 +1630,8 @@ export function ResultStudio() {
                 </span>
               </div>
 
-              {/* WhatsApp/Email Dispatch Card (Gold+) */}
-              {tier !== "Silver" && tier !== "Standalone" && queryResults.length > 0 && (
+              {/* WhatsApp/Email Dispatch Card */}
+              {queryResults.length > 0 && (
                 <div
                   className="card"
                   style={{
@@ -2045,9 +1912,7 @@ export function ResultStudio() {
                   <thead>
                     <tr>
                       <th>Student Details</th>
-                      {tier !== "Standalone" && tier !== "Silver" && (
-                        <th style={{ width: "150px" }}>Term Attendance</th>
-                      )}
+                      <th style={{ width: "150px" }}>Term Attendance</th>
                       <th>Class Teacher's Remarks</th>
                       <th>{ilsClassType === 'ILS' ? "Section Manager's Remarks" : "Principal's Remarks"}</th>
                     </tr>
@@ -2070,69 +1935,67 @@ export function ResultStudio() {
                             {ilsClassType === 'ILS' ? '' : '%'}
                           </div>
                         </td>
-                        {tier !== "Standalone" && tier !== "Silver" && (
-                          <td>
-                            <div
+                        <td>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                            }}
+                          >
+                            <input
+                              type="number"
+                              value={student.days_attended || 0}
+                              onChange={(e) =>
+                                setRemarksData((prev) =>
+                                  prev.map((s, i) =>
+                                    i === idx
+                                      ? {
+                                          ...s,
+                                          days_attended:
+                                            parseInt(e.target.value) || 0,
+                                        }
+                                      : s,
+                                  ),
+                                )
+                              }
+                              className="modern-input"
                               style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "6px",
+                                width: "52px",
+                                textAlign: "center",
+                                fontSize: "12px",
+                                padding: "4px 6px",
                               }}
-                            >
-                              <input
-                                type="number"
-                                value={student.days_attended || 0}
-                                onChange={(e) =>
-                                  setRemarksData((prev) =>
-                                    prev.map((s, i) =>
-                                      i === idx
-                                        ? {
-                                            ...s,
-                                            days_attended:
-                                              parseInt(e.target.value) || 0,
-                                          }
-                                        : s,
-                                    ),
-                                  )
-                                }
-                                className="modern-input"
-                                style={{
-                                  width: "52px",
-                                  textAlign: "center",
-                                  fontSize: "12px",
-                                  padding: "4px 6px",
-                                }}
-                              />
-                              <span style={{ color: "var(--text-dim)" }}>
-                                /
-                              </span>
-                              <input
-                                type="number"
-                                value={student.total_days || 0}
-                                onChange={(e) =>
-                                  setRemarksData((prev) =>
-                                    prev.map((s, i) =>
-                                      i === idx
-                                        ? {
-                                            ...s,
-                                            total_days:
-                                              parseInt(e.target.value) || 0,
-                                          }
-                                        : s,
-                                    ),
-                                  )
-                                }
-                                className="modern-input"
-                                style={{
-                                  width: "52px",
-                                  textAlign: "center",
-                                  fontSize: "12px",
-                                  padding: "4px 6px",
-                                }}
-                              />
-                            </div>
+                            />
+                            <span style={{ color: "var(--text-dim)" }}>
+                              /
+                            </span>
+                            <input
+                              type="number"
+                              value={student.total_days || 0}
+                              onChange={(e) =>
+                                setRemarksData((prev) =>
+                                  prev.map((s, i) =>
+                                    i === idx
+                                      ? {
+                                          ...s,
+                                          total_days:
+                                            parseInt(e.target.value) || 0,
+                                        }
+                                      : s,
+                                  ),
+                                )
+                              }
+                              className="modern-input"
+                              style={{
+                                width: "52px",
+                                textAlign: "center",
+                                fontSize: "12px",
+                                padding: "4px 6px",
+                              }}
+                            />
+                          </div>
                         </td>
-                        )}
                         <td>
                           <textarea
                             value={student.remark || ""}

@@ -39,8 +39,6 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
   const { license, refreshQuota } = useLicense();
   const { requireSudo } = useSudoAuth();
 
-  const currentTier = license?.tier || 'Silver';
-
   // Form states
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
@@ -340,13 +338,13 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
     if (sec) setThemeSecondary(sec);
   };
 
-  // Fetch SVG stamp previews dynamically when style, colors or tier change
+  // Fetch SVG stamp previews dynamically when style or colors change
   useEffect(() => {
     const fetchPreviews = async () => {
       if (!window.electronAPI?.getStampPreview) return;
 
       const styles = ['classic_round', 'modern_rect', 'ribbon_endorse', 'minimal_sig'];
-      const color = stampCustomColor || (currentTier === 'Silver' ? '#0D47A1' : themePrimary);
+      const color = stampCustomColor || themePrimary;
       
       const newPreviews: Record<string, string> = {};
       for (const style of styles) {
@@ -363,7 +361,7 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
     };
 
     fetchPreviews();
-  }, [currentTier, themePrimary, stampCustomColor]);
+  }, [themePrimary, stampCustomColor]);
 
   // File read helper
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'sig') => {
@@ -1336,14 +1334,11 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
   ];
 
   // Stamp custom colors config
-  const canCustomizeColor = currentTier === 'Gold' || currentTier === 'Diamond';
   const stampColorSwatches = [
     { id: 'red', color: '#D32F2F' },
     { id: 'primary', color: themePrimary },
     { id: 'blue', color: '#0D47A1' },
   ];
-
-  const isPremiumTier = currentTier === 'Gold' || currentTier === 'Diamond';
 
   return (
     <div className="animate-in fade-in duration-300 h-full flex flex-col min-h-0">
@@ -1659,19 +1654,6 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
           <div className="form-group" style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
             <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <span>Stamp Studio <span style={{ fontSize: '10px', color: 'var(--text-dim)', fontWeight: 'normal', marginLeft: '6px' }}>(Auto-generates SVG seals)</span></span>
-              <span 
-                id="stamp-tier-badge" 
-                style={{
-                  fontSize: '10px', 
-                  background: isPremiumTier ? '#ffd700' : 'rgba(255,255,255,0.1)', 
-                  color: isPremiumTier ? '#000' : '#00E5FF',
-                  padding: '2px 8px', 
-                  borderRadius: '10px', 
-                  fontWeight: 'bold'
-                }}
-              >
-                {currentTier}
-              </span>
             </label>
 
             <div style={{ marginBottom: '12px' }}>
@@ -1705,18 +1687,16 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
               </div>
             </div>
 
-            <div id="stamp-color-section" style={{ display: canCustomizeColor ? 'block' : 'none' }}>
+            <div id="stamp-color-section">
               <p style={{ fontSize: '11px', color: 'var(--text-dim)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '1px' }}>2. Select Ink Color</p>
-              <div id="stamp-color-swatches" className={`color-swatch-list ${!canCustomizeColor ? 'tier-locked' : ''}`}>
+              <div id="stamp-color-swatches" className="color-swatch-list">
                 {stampColorSwatches.map((swatch) => {
                   const isActive = stampCustomColor === swatch.color || (!stampCustomColor && swatch.id === 'primary');
                   return (
                     <div
                       key={swatch.id}
                       onClick={() => {
-                        if (canCustomizeColor) {
-                          setStampCustomColor(swatch.color);
-                        }
+                        setStampCustomColor(swatch.color);
                       }}
                       className={`color-swatch ${isActive ? 'active' : ''}`}
                       style={{ backgroundColor: swatch.color }}
@@ -3223,8 +3203,8 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
                 paddingLeft: '24px'
               }}>
                 <h4 style={{ margin: 0, fontSize: '13px', color: '#00e5ff', fontWeight: 600 }}>Create New Login</h4>
-                <div style={{ fontSize: '10px', color: (staffAccounts.length >= (currentTier === 'Diamond' ? Infinity : (currentTier === 'Gold' ? 5 : 2))) ? '#ff4444' : '#888', marginTop: '-4px', fontWeight: 600 }}>
-                  Accounts: {staffAccounts.length} / {currentTier === 'Diamond' ? '∞' : (currentTier === 'Gold' ? 5 : 2)} used ({currentTier} plan)
+                <div style={{ fontSize: '10px', color: '#888', marginTop: '-4px', fontWeight: 600 }}>
+                  Accounts: {staffAccounts.length} / ∞
                 </div>
                 <form onSubmit={handleCreateStaff} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <div className="form-group" style={{ margin: 0 }}>
@@ -3342,38 +3322,23 @@ export function Settings({ onResetSuccess, onTabChange }: SettingsProps) {
                     />
                   </div>
 
-                  {staffAccounts.length >= (currentTier === 'Diamond' ? Infinity : (currentTier === 'Gold' ? 5 : 2)) ? (
-                    <div style={{
+                  <button
+                    type="submit"
+                    className="primary-btn"
+                    style={{
+                      marginTop: '10px',
+                      padding: '8px',
                       fontSize: '11px',
-                      color: '#ff4444',
-                      background: 'rgba(255, 68, 68, 0.1)',
-                      border: '1px solid rgba(255, 68, 68, 0.2)',
-                      padding: '8px 10px',
+                      background: 'var(--accent)',
+                      color: 'var(--bg-deep)',
+                      fontWeight: 600,
                       borderRadius: '6px',
-                      marginTop: '6px',
-                      lineHeight: 1.4
-                    }}>
-                      ⚠️ Account limit reached ({currentTier === 'Diamond' ? '∞' : (currentTier === 'Gold' ? 5 : 2)} max for {currentTier}). Upgrade your plan to add more staff logins.
-                    </div>
-                  ) : (
-                    <button
-                      type="submit"
-                      className="primary-btn"
-                      style={{
-                        marginTop: '10px',
-                        padding: '8px',
-                        fontSize: '11px',
-                        background: 'var(--accent)',
-                        color: 'var(--bg-deep)',
-                        fontWeight: 600,
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        border: 'none'
-                      }}
-                    >
-                      Create Account
-                    </button>
-                  )}
+                      cursor: 'pointer',
+                      border: 'none'
+                    }}
+                  >
+                    Create Account
+                  </button>
                 </form>
               </div>
             </div>

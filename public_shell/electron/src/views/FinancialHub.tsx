@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useLicense } from '../hooks/useLicense';
 import { useClassArms } from '../hooks/useClassArms';
 import { Combobox } from '../components/Combobox';
 import { generateSessionsList } from '../lib/sessions';
@@ -153,12 +152,8 @@ function PaystackBankSelect({ value, onChange }: { value: string; onChange: (nam
 // FinancialHub
 // ═══════════════════════════════════════════════════════════════════════════════
 export function FinancialHub() {
-  const { license } = useLicense();
   const { fullList, configs } = useClassArms();
   const { termsList } = useTermConfig();
-  const tier       = license?.tier || 'Silver';
-  const isDiamond  = tier === 'Diamond';
-  const isGoldPlus = tier === 'Gold' || tier === 'Diamond';
   const Swal       = (window as any).Swal;
 
   // ── Active tab ────────────────────────────────────────────────────────────
@@ -1899,7 +1894,7 @@ export function FinancialHub() {
         fee_gate_threshold: gateMode === 'any' ? 0 : (Number(gateThreshold)||0),
         fallback_email:     fallbackEmail.trim(),
       };
-      if (isDiamond) { patch.fee_shield_enabled = shieldEnabled; patch.fee_shield_mode = shieldMode; }
+      patch.fee_shield_enabled = shieldEnabled; patch.fee_shield_mode = shieldMode;
       const res = await window.electronAPI.fees.saveSettings(patch);
       if (res?.ok) {
         // Re-fetch settings so newly assigned bank account IDs are reflected in state
@@ -2280,9 +2275,7 @@ export function FinancialHub() {
         <div>
           <h2 className="view-title">💳 Financial Hub</h2>
           <p className="view-sub" id="fees-subtitle">
-            {isDiamond
-              ? 'Full financial ledger — record payments, view transaction history, and enforce Fee Shield.'
-              : 'Track student fee balances and automate reminders via Nexus Pulse.'}
+            Full financial ledger — record payments, view transaction history, and enforce Fee Shield.
           </p>
         </div>
         <div style={{ display:'flex', gap:'10px', alignItems:'center' }}>
@@ -2309,17 +2302,15 @@ export function FinancialHub() {
           >
             💡 Setup Guide
           </button>
-          {isGoldPlus && (
-            <button
-              id="btn-trigger-fee-pulse"
-              onClick={handleTriggerPulse}
-              disabled={dispatchPulse}
-              className="primary-btn"
-              style={{ padding:'7px 16px', fontSize:'12px', background:'rgba(212,175,55,0.15)', border:'1px solid rgba(212,175,55,0.4)', color:'var(--gold)', boxShadow:'none' }}
-            >
-              {dispatchPulse ? '⌛ Sending...' : '🚀 Trigger Fee Pulse'}
-            </button>
-          )}
+          <button
+            id="btn-trigger-fee-pulse"
+            onClick={handleTriggerPulse}
+            disabled={dispatchPulse}
+            className="primary-btn"
+            style={{ padding:'7px 16px', fontSize:'12px', background:'rgba(212,175,55,0.15)', border:'1px solid rgba(212,175,55,0.4)', color:'var(--gold)', boxShadow:'none' }}
+          >
+            {dispatchPulse ? '⌛ Sending...' : '🚀 Trigger Fee Pulse'}
+          </button>
           <button
             id="btn-fees-settings"
             onClick={handleOpenSettings}
@@ -2501,15 +2492,15 @@ export function FinancialHub() {
                     <th style={{ textAlign:'right' }}>Balance (₦)</th>
                     <th style={{ textAlign:'center' }}>Status</th>
                     <th style={{ textAlign:'center' }}>Due Date</th>
-                    {isDiamond && <th id="fees-th-actions" style={{ textAlign:'center' }}>Actions</th>}
+                    <th id="fees-th-actions" style={{ textAlign:'center' }}>Actions</th>
                     <th style={{ width:'32px' }} />
                   </tr>
                 </thead>
                 <tbody id="fees-tbody">
                   {loading ? (
-                    <tr><td colSpan={isDiamond?9:8} style={{ textAlign:'center', padding:'40px', color:'var(--text-dim)' }}>Loading…</td></tr>
+                    <tr><td colSpan={9} style={{ textAlign:'center', padding:'40px', color:'var(--text-dim)' }}>Loading…</td></tr>
                   ) : filteredRoster.length === 0 ? (
-                    <tr><td colSpan={isDiamond?9:8} style={{ textAlign:'center', padding:'50px', color:'var(--text-dim)' }}>
+                    <tr><td colSpan={9} style={{ textAlign:'center', padding:'50px', color:'var(--text-dim)' }}>
                       {roster.length === 0
                         ? <>Select a session and term, then click <strong>Load</strong>.</>
                         : 'No students match the selected filter.'}
@@ -2525,7 +2516,7 @@ export function FinancialHub() {
                     const sc = STATUS_CONFIG[st];
                     const isExpanded = expandedStudentId === row.student_id;
                     const studentExtras = studentExtrasCache[row.student_id] || [];
-                    const colSpan = isDiamond ? 10 : 9;
+                    const colSpan = 10;
                     return (
                       <>
                         <tr key={row.student_id} data-id={row.student_id}
@@ -2545,13 +2536,9 @@ export function FinancialHub() {
                           <td style={{ fontWeight:500 }}>{row.name}</td>
                           <td style={{ fontSize:'12px', color:'var(--text-dim)' }}>{row.class_name}</td>
                           {/* Total Billed */}
-                          {isDiamond
-                            ? <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'13px' }}>₦{fmt(billed)}</td>
-                            : <td style={{ textAlign:'right' }} onClick={e => e.stopPropagation()}><input type="number" className="fee-inline-input" value={billed as number} min={0} onChange={e => handleInlineChange(row.student_id,'total_billed',e.target.value)} style={{ width:'100%', maxWidth:'110px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'6px', color:'#fff', padding:'4px 8px', textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'12px' }} /></td>}
+                          <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'13px' }}>₦{fmt(billed)}</td>
                           {/* Amount Paid */}
-                          {isDiamond
-                            ? <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'13px', color:'#4CAF50' }}>₦{fmt(paid)}</td>
-                            : <td style={{ textAlign:'right' }} onClick={e => e.stopPropagation()}><input type="number" className="fee-inline-input" value={paid as number} min={0} onChange={e => handleInlineChange(row.student_id,'total_paid',e.target.value)} style={{ width:'100%', maxWidth:'110px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'6px', color:'#fff', padding:'4px 8px', textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'12px' }} /></td>}
+                          <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'13px', color:'#4CAF50' }}>₦{fmt(paid)}</td>
                           {/* Balance */}
                           <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'13px', color: bal>0 ? '#FF5252' : '#4CAF50' }}>₦{fmt(bal)}</td>
                           {/* Status */}
@@ -2559,16 +2546,12 @@ export function FinancialHub() {
                             <span style={{ display:'inline-block', padding:'3px 10px', borderRadius:'12px', fontSize:'11px', fontWeight:600, background:sc.bg, color:sc.color }}>{sc.label}</span>
                           </td>
                           {/* Due Date */}
-                          {isDiamond
-                            ? <td style={{ textAlign:'center', fontSize:'12px' }}>{fmtDate(due as string)}</td>
-                            : <td style={{ textAlign:'center' }} onClick={e => e.stopPropagation()}><input type="date" className="fee-inline-input" value={(due as string)||''} onChange={e => handleInlineChange(row.student_id,'next_due_date',e.target.value)} style={{ background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'6px', color:'#fff', padding:'4px 8px', fontSize:'11px', fontFamily:'var(--font-mono)' }} /></td>}
-                          {/* Diamond actions */}
-                          {isDiamond && (
-                            <td style={{ textAlign:'center', whiteSpace:'nowrap' }} onClick={e => e.stopPropagation()}>
-                              <button onClick={() => { setPayStudent({id:row.student_id, name:row.name, total_billed: row.total_billed, total_paid: row.total_paid, balance: bal}); setPayAmount(''); setPayRef(''); setPayNote(''); setPayMethod('cash'); setHoldAdvanceExcess(true); }} className="small-btn btn-record-payment" style={{ fontSize:'11px', padding:'4px 10px', marginRight:'4px', background:'rgba(0,229,255,0.08)', color:'var(--accent)', borderColor:'rgba(0,229,255,0.3)' }}>+Pay</button>
-                              <button onClick={() => openLedger(row.student_id, row.name)} className="small-btn btn-view-ledger" style={{ fontSize:'11px', padding:'4px 10px', background:'rgba(255,255,255,0.05)', color:'var(--text-dim)', borderColor:'var(--glass-border)' }}>Ledger</button>
-                            </td>
-                          )}
+                          <td style={{ textAlign:'center', fontSize:'12px' }}>{fmtDate(due as string)}</td>
+                          {/* Actions */}
+                          <td style={{ textAlign:'center', whiteSpace:'nowrap' }} onClick={e => e.stopPropagation()}>
+                            <button onClick={() => { setPayStudent({id:row.student_id, name:row.name, total_billed: row.total_billed, total_paid: row.total_paid, balance: bal}); setPayAmount(''); setPayRef(''); setPayNote(''); setPayMethod('cash'); setHoldAdvanceExcess(true); }} className="small-btn btn-record-payment" style={{ fontSize:'11px', padding:'4px 10px', marginRight:'4px', background:'rgba(0,229,255,0.08)', color:'var(--accent)', borderColor:'rgba(0,229,255,0.3)' }}>+Pay</button>
+                            <button onClick={() => openLedger(row.student_id, row.name)} className="small-btn btn-view-ledger" style={{ fontSize:'11px', padding:'4px 10px', background:'rgba(255,255,255,0.05)', color:'var(--text-dim)', borderColor:'var(--glass-border)' }}>Ledger</button>
+                          </td>
                           {/* Expand chevron */}
                           <td style={{ textAlign:'center', width:'32px', color:'var(--text-dim)', fontSize:'10px', userSelect:'none' }}>
                             {isExpanded ? '▲' : '▼'}
@@ -3922,7 +3905,6 @@ export function FinancialHub() {
               <div className="card" style={{ padding:'16px', background:'rgba(255,80,80,0.04)', border:'1px solid rgba(255,80,80,0.2)' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'4px' }}>
                   <p style={{ fontSize:'11px', color:'#ff8080', textTransform:'uppercase', letterSpacing:'1px', fontWeight:700, margin:0 }}>🔒 Result Access Gate</p>
-                  <span style={{ fontSize:'10px', fontWeight:700, color:'#f59e0b', padding:'2px 7px', background:'rgba(245,158,11,0.1)', borderRadius:'4px' }}>Gold+</span>
                 </div>
                 <p style={{ fontSize:'11px', color:'var(--text-dim)', marginBottom:'14px', lineHeight:1.6 }}>Withhold academic results for students with outstanding fee balances.</p>
                 <label style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'14px', cursor:'pointer' }}>
@@ -3949,30 +3931,27 @@ export function FinancialHub() {
                 )}
               </div>
 
-              {/* Fee Shield (Diamond) */}
-              {isDiamond && (
-                <div id="fees-shield-section" className="card" style={{ padding:'16px', background:'rgba(212,175,55,0.06)', border:'1px solid rgba(212,175,55,0.2)' }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'4px' }}>
-                    <p style={{ fontSize:'11px', color:'var(--gold)', textTransform:'uppercase', letterSpacing:'1px', fontWeight:700, margin:0 }}>💎 Fee Shield — PDF Enforcement</p>
-                    <span style={{ fontSize:'10px', fontWeight:700, color:'#00e5ff', padding:'2px 7px', background:'rgba(0,229,255,0.1)', borderRadius:'4px' }}>Diamond</span>
-                  </div>
-                  <p style={{ fontSize:'11px', color:'var(--text-dim)', marginBottom:'14px', lineHeight:1.6 }}>Control what happens when a student has outstanding fees at report card generation.</p>
-                  <label style={{ display:'flex', alignItems:'center', gap:'8px', cursor:'pointer', fontSize:'12px', color:'var(--text-dim)', marginBottom:'12px' }}>
-                    <input type="checkbox" id="fees-shield-enabled" checked={shieldEnabled} onChange={e => setShieldEnabled(e.target.checked)} style={{ width:'14px', height:'14px', accentColor:'var(--gold)' }} />
-                    <span>Enable Fee Shield enforcement</span>
-                  </label>
-                  {shieldEnabled && (
-                    <div id="fees-shield-mode-group">
-                      <Lbl>Enforcement Mode</Lbl>
-                      <select id="fees-shield-mode" value={shieldMode} onChange={e => setShieldMode(e.target.value as any)} className="modern-input" style={{ width:'100%', fontSize:'12px' }}>
-                        <option value="warn">⚠️ Warning Prompt Only</option>
-                        <option value="watermark">🖋️ Watermark PDF ("OUTSTANDING BALANCE")</option>
-                        <option value="block">🚫 Block PDF Generation Entirely</option>
-                      </select>
-                    </div>
-                  )}
+              {/* Fee Shield */}
+              <div id="fees-shield-section" className="card" style={{ padding:'16px', background:'rgba(212,175,55,0.06)', border:'1px solid rgba(212,175,55,0.2)' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'4px' }}>
+                  <p style={{ fontSize:'11px', color:'var(--gold)', textTransform:'uppercase', letterSpacing:'1px', fontWeight:700, margin:0 }}>💎 Fee Shield — PDF Enforcement</p>
                 </div>
-              )}
+                <p style={{ fontSize:'11px', color:'var(--text-dim)', marginBottom:'14px', lineHeight:1.6 }}>Control what happens when a student has outstanding fees at report card generation.</p>
+                <label style={{ display:'flex', alignItems:'center', gap:'8px', cursor:'pointer', fontSize:'12px', color:'var(--text-dim)', marginBottom:'12px' }}>
+                  <input type="checkbox" id="fees-shield-enabled" checked={shieldEnabled} onChange={e => setShieldEnabled(e.target.checked)} style={{ width:'14px', height:'14px', accentColor:'var(--gold)' }} />
+                  <span>Enable Fee Shield enforcement</span>
+                </label>
+                {shieldEnabled && (
+                  <div id="fees-shield-mode-group">
+                    <Lbl>Enforcement Mode</Lbl>
+                    <select id="fees-shield-mode" value={shieldMode} onChange={e => setShieldMode(e.target.value as any)} className="modern-input" style={{ width:'100%', fontSize:'12px' }}>
+                      <option value="warn">⚠️ Warning Prompt Only</option>
+                      <option value="watermark">🖋️ Watermark PDF ("OUTSTANDING BALANCE")</option>
+                      <option value="block">🚫 Block PDF Generation Entirely</option>
+                    </select>
+                  </div>
+                )}
+              </div>
 
               {/* Danger Zone */}
               <div className="card" style={{ padding:'16px', background:'rgba(239,68,68,0.04)', border:'1px solid rgba(239,68,68,0.3)' }}>

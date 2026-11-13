@@ -41,20 +41,20 @@ const VIEW_HELP: Record<string, HelpItem> = {
   attendance: {
     icon: '📋',
     title: 'Attendance Module',
-    tier: 'Gold',
-    desc: `Two-layer attendance tracking with automated truancy escalation.<br><br><strong style="color:#f59e0b;">Daily Roll Call (Gold):</strong> Mark whole-day presence per class. Select class → pick date → tick each student → Save.<br><br><strong style="color:#f59e0b;">Subject Roll Call (Diamond):</strong> Track attendance per subject per period — ideal for secondary schools.<br><br><strong style="color:#f59e0b;">Truancy Flags:</strong> When absences exceed your threshold, Guardian Shield auto-alerts the parent via WhatsApp (Diamond).<br><br><strong style="color:#f59e0b;">⚙️ Settings:</strong> Click the gear icon to set thresholds, term dates, and alert templates.`
+    tier: null,
+    desc: `Two-layer attendance tracking with automated truancy escalation.<br><br><strong style="color:#10b981;">Daily Roll Call:</strong> Mark whole-day presence per class. Select class → pick date → tick each student → Save.<br><br><strong style="color:#10b981;">Subject Roll Call:</strong> Track attendance per subject per period — ideal for secondary schools.<br><br><strong style="color:#10b981;">Truancy Flags:</strong> When absences exceed your threshold, Guardian Shield auto-alerts the parent via WhatsApp.<br><br><strong style="color:#10b981;">⚙️ Settings:</strong> Click the gear icon to set thresholds, term dates, and alert templates.`
   },
   fees: {
     icon: '💰',
     title: 'Financial Hub',
-    tier: 'Gold',
-    desc: `End-to-end fee management from billing to payment recording.<br><br><strong style="color:#f59e0b;">Setup fees:</strong><br>1. Go to <em>Fee Structure</em> → set amounts per class (e.g. SS1: ₦45,000)<br>2. Activate billing for this term — all students are auto-billed<br><br><strong style="color:#f59e0b;">Record a payment:</strong><br>1. Search for the student<br>2. Click <em>Record Payment</em><br>3. Enter amount + date — balance updates instantly<br><br><strong style="color:#f59e0b;">Fee Shield (Diamond):</strong> Blocks report card printing for students with outstanding balances.`
+    tier: null,
+    desc: `End-to-end fee management from billing to payment recording.<br><br><strong style="color:#10b981;">Setup fees:</strong><br>1. Go to <em>Fee Structure</em> → set amounts per class (e.g. SS1: ₦45,000)<br>2. Activate billing for this term — all students are auto-billed<br><br><strong style="color:#10b981;">Record a payment:</strong><br>1. Search for the student<br>2. Click <em>Record Payment</em><br>3. Enter amount + date — balance updates instantly<br><br><strong style="color:#10b981;">Fee Shield:</strong> Blocks report card printing for students with outstanding balances.`
   },
   cbt: {
     icon: '📎',
     title: 'CBT Arena',
-    tier: 'Diamond',
-    desc: `Computer-Based Testing — from question bank to live exam, fully offline.<br><br><strong style="color:#00e5ff;">Step 1 — Build a Question Bank:</strong><br>• Click <em>+ Create Bank</em> → name it and pick a subject<br>• Open the bank → click <em>+ Add Question</em> to type questions manually<br>• OR click <em>Upload via Nexus Scholar 🪄</em> to extract MCQs from any PDF/DOCX automatically<br><br><strong style="color:#00e5ff;">Step 2 — Deploy:</strong> Switch to the <em>Deploy</em> tab → pick bank, class, duration → 🚀 Deploy<br><br><strong style="color:#00e5ff;">Step 3 — Monitor:</strong> Watch live student progress from the <em>Live</em> tab.`
+    tier: null,
+    desc: `Computer-Based Testing — from question bank to live exam, fully offline.<br><br><strong style="color:#10b981;">Step 1 — Build a Question Bank:</strong><br>• Click <em>+ Create Bank</em> → name it and pick a subject<br>• Open the bank → click <em>+ Add Question</em> to type questions manually<br>• OR click <em>Upload via Nexus Scholar 🪄</em> to extract MCQs from any PDF/DOCX automatically<br><br><strong style="color:#10b981;">Step 2 — Deploy:</strong> Switch to the <em>Deploy</em> tab → pick bank, class, duration → 🚀 Deploy<br><br><strong style="color:#10b981;">Step 3 — Monitor:</strong> Watch live student progress from the <em>Live</em> tab.`
   },
   printhub: {
     icon: '🖨️',
@@ -71,20 +71,20 @@ const VIEW_HELP: Record<string, HelpItem> = {
   pulse: {
     icon: '📡',
     title: 'Nexus Pulse',
-    tier: 'Gold',
-    desc: `WhatsApp communication engine — keep parents informed automatically.<br><br><strong style="color:#f59e0b;">One-time setup:</strong><br>1. Scan the WhatsApp QR code with the school's dedicated phone number<br>2. Pulse is now connected and ready<br><br><strong style="color:#f59e0b;">What Pulse sends:</strong><br>• Fee reminders • Attendance alerts (Diamond) • Term digest • Emergency OTPs<br><br><strong style="color:#f59e0b;">Always-On Bridge (Diamond):</strong> Publishes a 24/7 parent portal accessible from anywhere, even when this computer is off.`
+    tier: null,
+    desc: `WhatsApp communication engine — keep parents informed automatically.<br><br><strong style="color:#10b981;">One-time setup:</strong><br>1. Scan the WhatsApp QR code with the school's dedicated phone number<br>2. Pulse is now connected and ready<br><br><strong style="color:#10b981;">What Pulse sends:</strong><br>• Fee reminders • Attendance alerts • Term digest • Emergency OTPs<br><br><strong style="color:#10b981;">Always-On Bridge:</strong> Publishes a 24/7 parent portal accessible from anywhere, even when this computer is off.`
   },
   guardian: {
     icon: '🛡️',
     title: 'Guardian Shield',
-    tier: 'Gold',
-    desc: `Automated school governance — runs in the background so you don't have to.<br><br><strong style="color:#f59e0b;">What Guardian does:</strong><br>• Sends the Principal a daily WhatsApp briefing every morning<br>• Auto-alerts parents when a student misses too many days<br>• Flags students with overdue fees<br>• Monitors CBT integrity<br><br><strong style="color:#f59e0b;">Configure:</strong> Set briefing time → enter Principal's WhatsApp number → toggle the alerts you want → Save.`
+    tier: null,
+    desc: `Automated school governance — runs in the background so you don't have to.<br><br><strong style="color:#10b981;">What Guardian does:</strong><br>• Sends the Principal a daily WhatsApp briefing every morning<br>• Auto-alerts parents when a student misses too many days<br>• Flags students with overdue fees<br>• Monitors CBT integrity<br><br><strong style="color:#10b981;">Configure:</strong> Set briefing time → enter Principal's WhatsApp number → toggle the alerts you want → Save.`
   },
   scholar: {
     icon: '🧠',
     title: 'Nexus Scholar',
-    tier: 'Diamond',
-    desc: `AI knowledge base built from your school's own documents.<br><br><strong style="color:#00e5ff;">Upload documents:</strong><br>1. Click <em>Upload Document</em> (PDF, DOCX, or TXT — max 15MB)<br>2. Scholar indexes it in seconds<br>3. Ask questions in plain English: e.g. <em>"What is the fee for SS3?"</em><br>4. Scholar returns the answer from your documents<br><br><strong style="color:#00e5ff;">CBT Integration:</strong> In CBT Arena → open a Question Bank → click <em>Upload via Nexus Scholar</em> to auto-extract MCQs from past question PDFs.`
+    tier: null,
+    desc: `AI knowledge base built from your school's own documents.<br><br><strong style="color:#10b981;">Upload documents:</strong><br>1. Click <em>Upload Document</em> (PDF, DOCX, or TXT — max 15MB)<br>2. Scholar indexes it in seconds<br>3. Ask questions in plain English: e.g. <em>"What is the fee for SS3?"</em><br>4. Scholar returns the answer from your documents<br><br><strong style="color:#10b981;">CBT Integration:</strong> In CBT Arena → open a Question Bank → click <em>Upload via Nexus Scholar</em> to auto-extract MCQs from past question PDFs.`
   },
   settings: {
     icon: '⚙️',
@@ -96,30 +96,30 @@ const VIEW_HELP: Record<string, HelpItem> = {
     icon: 'ℹ️',
     title: 'About Nexus School OS',
     tier: null,
-    desc: `Your license status, system information, and support details.<br><br><strong style="color:#10b981;">License info:</strong><br>• <em>Current Tier</em> — Silver (Free), Gold, or Diamond<br>• <em>Student Quota</em> — maximum students your license supports<br>• <em>Expiry Date</em> — when your Sovereign Shield license expires<br><br><strong style="color:#10b981;">To upgrade:</strong><br>1. Copy your <em>Hardware Fingerprint</em> from this screen<br>2. Send it to your Nexus Partner<br>3. Enter the license key they provide to activate.`
+    desc: `Your license status, system information, and support details.<br><br><strong style="color:#10b981;">License info:</strong><br>• <em>Subscription Plan</em> — Flat 3-tier school suite license<br>• <em>Student Quota</em> — Unlimited students included<br>• <em>Expiry Date</em> — when your Sovereign Shield license expires<br><br><strong style="color:#10b981;">To activate / upgrade:</strong><br>1. Copy your <em>Hardware Fingerprint</em> from this screen<br>2. Send it to your Nexus Partner<br>3. Enter the license key they provide to activate.`
   },
   'live-quiz': {
     icon: '⚡',
     title: 'Live Quiz System',
-    tier: 'Diamond',
+    tier: null,
     desc: 'Kahoot-style real-time quiz — coming in the next release. Teachers project questions; students answer on their phones via a browser. No app install needed.'
   },
   analytics: {
     icon: '📈',
     title: 'Analytics Dashboard',
-    tier: 'Diamond',
+    tier: null,
     desc: 'At-risk student flagging, subject heatmaps, and grade progression charts — coming in the next release.'
   },
   'notes-marketplace': {
     icon: '📚',
     title: 'Notes Marketplace',
-    tier: 'Diamond',
+    tier: null,
     desc: 'A storefront for teachers to sell study materials to students via the school portal — coming in the next release.'
   },
   'skill-mastery': {
     icon: '🎯',
     title: 'Skill Mastery Tracking',
-    tier: 'Diamond',
+    tier: null,
     desc: 'IEP-standard competency reports that track what students can do, not just their scores — coming in the next release.'
   }
 };

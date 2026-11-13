@@ -33,9 +33,6 @@ interface ConversationThread {
 export function NexusPulse() {
   const { license } = useLicense();
   const { identity, updateIdentity } = useIdentity();
-  const currentTier = license?.tier || 'Silver';
-  const isGold = currentTier === 'Gold' || currentTier === 'Diamond';
-  const isDiamond = currentTier === 'Diamond';
   const isActivated = license?.is_activated ?? false;
 
   const Swal = (window as any).Swal;
@@ -400,7 +397,7 @@ export function NexusPulse() {
   };
 
   const hydrateCloudStatus = async () => {
-    if (!isDiamond || !window.electronAPI?.pulse?.getCloudStatus) return;
+    if (!window.electronAPI?.pulse?.getCloudStatus) return;
     try {
       const cs = await window.electronAPI.pulse.getCloudStatus();
       if (cs) {
@@ -663,41 +660,25 @@ export function NexusPulse() {
           <h2 className="view-title">📡 Nexus Pulse</h2>
           <p className="view-sub">
             Automated Parent Communication WhatsApp Assistant
-            <span style={{
-              fontSize: '9px',
-              fontWeight: 900,
-              color: '#FFD700',
-              background: 'rgba(255, 215, 0, 0.1)',
-              padding: '2px 8px',
-              borderRadius: '9999px',
-              border: '1px solid rgba(255, 215, 0, 0.15)',
-              marginLeft: '10px'
-            }}>
-              Gold+
-            </span>
           </p>
         </div>
         <div className="view-header-actions">
-          {isGold && (
-            <>
-              {botStatus === 'ready' || botStatus === 'authenticated' || botStatus === 'starting' || botStatus === 'qr' ? (
-                <button
-                  onClick={handleStopBot}
-                  disabled={loadingAction}
-                  className="danger-btn"
-                >
-                  {loadingAction ? 'Stopping...' : botStatus === 'qr' ? '⏹ Cancel link' : '⏹ Stop Bot'}
-                </button>
-              ) : (
-                <button
-                  onClick={handleStartBot}
-                  disabled={loadingAction}
-                  className="primary-btn"
-                >
-                  {loadingAction ? 'Starting...' : '🤖 Start Bot'}
-                </button>
-              )}
-            </>
+          {botStatus === 'ready' || botStatus === 'authenticated' || botStatus === 'starting' || botStatus === 'qr' ? (
+            <button
+              onClick={handleStopBot}
+              disabled={loadingAction}
+              className="danger-btn"
+            >
+              {loadingAction ? 'Stopping...' : botStatus === 'qr' ? '⏹ Cancel link' : '⏹ Stop Bot'}
+            </button>
+          ) : (
+            <button
+              onClick={handleStartBot}
+              disabled={loadingAction}
+              className="primary-btn"
+            >
+              {loadingAction ? 'Starting...' : '🤖 Start Bot'}
+            </button>
           )}
           <button
             onClick={() => setIsSettingsOpen(true)}
@@ -734,44 +715,7 @@ export function NexusPulse() {
       {/* View Content area */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         
-        {/* Tier Lock Gate */}
-        {!isGold ? (
-          <div className="glass-card" style={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            textAlign: 'center',
-            padding: 'var(--card-pad)',
-            maxWidth: '450px',
-            margin: '24px auto',
-            gap: '16px'
-          }}>
-            <span style={{ fontSize: '36px' }}>🔐</span>
-            <h3 style={{ fontSize: 'var(--text-h3)', fontWeight: 600, color: 'var(--text-main)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>
-              Gold Tier Required
-            </h3>
-            <p style={{ color: 'var(--text-dim)', fontSize: 'var(--text-body)', lineHeight: 'var(--lh-body)', margin: 0 }}>
-              Nexus Pulse automates parent notifications via WhatsApp, facilitating instant responses, automated attendance shield alerts, term snapshots, and fee invoices.
-            </p>
-            <span style={{
-              fontSize: '10px',
-              fontWeight: 700,
-              color: 'var(--warning)',
-              padding: '6px 14px',
-              background: 'rgba(245, 158, 11, 0.1)',
-              borderRadius: '9999px',
-              border: '1px solid rgba(245, 158, 11, 0.25)',
-              display: 'block'
-            }}>
-              Upgrade subscription to unlock
-            </span>
-          </div>
-        ) : (
-          <>
-            
-            {/* SUBVIEW: Parent messaging inbox */}
+        {/* SUBVIEW: Parent messaging inbox */}
             {activeTab === 'inbox' && (
               <div className="pulse-inbox-container">
                 {/* Inbox Left Sidebar */}
@@ -1196,24 +1140,9 @@ export function NexusPulse() {
                         Sync data to Google Drive for 24/7 parent responses even when this laptop is off.
                       </p>
                     </div>
-                    <span style={{ fontSize: '9px', fontWeight: 900, color: 'var(--accent)', background: 'rgba(0, 229, 255, 0.1)', padding: '2px 8px', borderRadius: '9999px', border: '1px solid rgba(0, 229, 255, 0.15)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                      Diamond
-                    </span>
                   </div>
 
-                  {!isDiamond ? (
-                    <div style={{ textAlign: 'center', padding: '24px 16px', background: 'rgba(255, 255, 255, 0.02)', border: '1px dashed var(--glass-border)', borderRadius: 'var(--radius-lg)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      <span style={{ fontSize: '24px', display: 'block' }}>💎</span>
-                      <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>Diamond Tier Required</h4>
-                      <p style={{ fontSize: '10px', color: 'var(--text-dim)', maxWidth: '320px', marginLeft: 'auto', marginRight: 'auto', lineHeight: 'var(--lh-body)', margin: 0 }}>
-                        The Always-On Cloud Bridge allows Nexus to answer parents inquiries 24/7 via Vercel edge routes when your laptop is turned off.
-                      </p>
-                      <span style={{ fontSize: '9px', fontWeight: 900, color: 'var(--accent)', background: 'rgba(0, 229, 255, 0.1)', padding: '4px 12px', borderRadius: '9999px', border: '1px solid rgba(0, 229, 255, 0.20)', display: 'inline-block', alignSelf: 'center' }}>
-                        Upgrade to Diamond to unlock
-                      </span>
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                       
                       {/* Setup Credentials toggle action */}
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-lg)', padding: '22px' }}>
@@ -1334,7 +1263,6 @@ export function NexusPulse() {
                         </div>
                       )}
                     </div>
-                  )}
                 </div>
 
               </div>
@@ -1483,9 +1411,6 @@ export function NexusPulse() {
               </div>
             )}
 
-          </>
-        )}
-
       </div>
 
       {/* Settings slide-in panel overlay drawer */}
@@ -1542,23 +1467,21 @@ export function NexusPulse() {
               </div>
 
               {/* Always-on setup bridge link shortcut */}
-              {isDiamond && (
-                <div style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-lg)', padding: '22px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <span style={{ fontSize: '10px', color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block' }}>
-                    CLOUD BRIDGE SYNC
-                  </span>
-                  <p style={{ fontSize: '10px', color: 'var(--text-dim)', lineHeight: '1.5', margin: 0 }}>
-                    Automated, offline 24/7 parent feedback configurations via Google Drive bridge connection.
-                  </p>
-                  <button
-                    onClick={() => { setIsSettingsOpen(false); setActiveTab('bot_sync'); setShowCloudConfig(true); }}
-                    className="secondary-btn"
-                    style={{ width: '100%', justifyContent: 'center' }}
-                  >
-                    Configure Cloud Setup ↓
-                  </button>
-                </div>
-              )}
+              <div style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-lg)', padding: '22px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <span style={{ fontSize: '10px', color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block' }}>
+                  CLOUD BRIDGE SYNC
+                </span>
+                <p style={{ fontSize: '10px', color: 'var(--text-dim)', lineHeight: '1.5', margin: 0 }}>
+                  Automated, offline 24/7 parent feedback configurations via Google Drive bridge connection.
+                </p>
+                <button
+                  onClick={() => { setIsSettingsOpen(false); setActiveTab('bot_sync'); setShowCloudConfig(true); }}
+                  className="secondary-btn"
+                  style={{ width: '100%', justifyContent: 'center' }}
+                >
+                  Configure Cloud Setup ↓
+                </button>
+              </div>
 
               {/* Bot Behavior settings */}
               <div style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-lg)', padding: '22px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
