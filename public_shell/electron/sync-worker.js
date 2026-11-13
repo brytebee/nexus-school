@@ -1184,13 +1184,32 @@ async function pushStaffRosterToWebsite() {
     } catch (_) {}
 
     // 5. Gather desktop grades (student_records with timestamps for cloud LWW ingestion)
+    //    Uses a watermark (last_desktop_grades_push_at) so only new/changed rows travel
+    //    upstream. First run (no watermark) sends all rows. Safe: watermark is only
+    //    written after a confirmed successful push, so a failed push never advances it.
     let grades = [];
+    let gradeWatermark = null;
     try {
-      grades = db.prepare(`
-        SELECT student_id, subject, assessment, score, breakdown, teacher_id, academic_session, term, timestamp
-        FROM student_records
-        LIMIT 1000
-      `).all();
+      const wmRow = db.prepare("SELECT value FROM app_settings WHERE key = 'last_desktop_grades_push_at'").get();
+      gradeWatermark = wmRow ? wmRow.value : null;
+
+      if (gradeWatermark) {
+        grades = db.prepare(`
+          SELECT student_id, subject, assessment, score, breakdown, teacher_id, academic_session, term, timestamp
+          FROM student_records
+          WHERE timestamp > ?
+          ORDER BY timestamp ASC
+          LIMIT 1000
+        `).all(gradeWatermark);
+      } else {
+        // First ever push — send all records (baseline)
+        grades = db.prepare(`
+          SELECT student_id, subject, assessment, score, breakdown, teacher_id, academic_session, term, timestamp
+          FROM student_records
+          ORDER BY timestamp ASC
+          LIMIT 1000
+        `).all();
+      }
     } catch (_) {}
 
     // 6. Gather desktop attendance (daily_attendance for cloud portal visibility)
@@ -1232,7 +1251,21 @@ async function pushStaffRosterToWebsite() {
     }
 
     const data = await res.json().catch(() => ({}));
-    console.log(`[Sync Worker] Successfully pushed staff roster (${teachers.length} teachers, ${allocations.length} allocations, ${students.length} students) to school website.`);
+
+    // Advance the watermark only after confirmed success.
+    // Use the max timestamp from the batch that was just sent so the next run
+    // only fetches records newer than what we already pushed.
+    if (grades.length > 0) {
+      try {
+        // grades are ordered ASC so the last element has the highest timestamp
+        const latestTs = grades[grades.length - 1].timestamp;
+        if (latestTs) {
+          db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_desktop_grades_push_at', ?)").run(latestTs);
+        }
+      } catch (_) {}
+    }
+
+    console.log(`[Sync Worker] Successfully pushed staff roster (${teachers.length} teachers, ${allocations.length} allocations, ${students.length} students, ${grades.length} grade rows) to school website.`);
     return { ok: true, synced: data.synced };
   } catch (err) {
     console.warn("[Sync Worker] Failed to push staff roster to website:", err.message);
