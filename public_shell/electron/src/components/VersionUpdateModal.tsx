@@ -7,6 +7,8 @@ export interface VersionUpdateInfo {
   release_name?: string;
   release_date?: string;
   release_notes?: string[];
+  download_url_mac_arm64?: string;
+  download_url_mac_x64?: string;
   download_url_mac?: string;
   download_url_win?: string;
   download_url_linux?: string;
@@ -23,33 +25,46 @@ export function VersionUpdateModal({ update, onClose }: VersionUpdateModalProps)
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
-  const handleApplyUpdate = async () => {
+  const handleDownloadNow = async () => {
     setIsApplying(true);
     setErrorMessage('');
-    setStatusMessage('Creating safety snapshot of your database…');
+    setStatusMessage('Launching installer download in your default browser…');
 
     try {
       if ((window as any).electronAPI?.invoke) {
         const res = await (window as any).electronAPI.invoke('system:apply-update');
         if (res?.ok) {
-          setStatusMessage('✅ Database safely backed up! Opening installer and closing app…');
+          setTimeout(() => {
+            setIsApplying(false);
+            onClose();
+          }, 800);
         } else {
           setIsApplying(false);
-          setErrorMessage(res?.error || 'Failed to prepare update.');
+          setErrorMessage(res?.error || 'Failed to trigger download.');
         }
       } else {
-        // Fallback browser open
-        window.open(update.download_url_mac || 'https://nexusos.com.ng/downloads', '_blank');
+        // Fallback direct release URL
+        const fallbackUrl = update.download_url_mac_arm64 || update.download_url_mac || 'https://github.com/brytebee/nexus-school-releases/releases';
+        window.open(fallbackUrl, '_blank');
         setIsApplying(false);
         onClose();
       }
     } catch (err: any) {
       setIsApplying(false);
-      setErrorMessage(err.message || 'Unexpected update error.');
+      setErrorMessage(err.message || 'Unexpected download error.');
     }
   };
 
-  const handleSnooze = () => {
+  const handleSnoozeHour = () => {
+    // Snooze for 1 hour
+    const oneHour = Date.now() + 60 * 60 * 1000;
+    try {
+      localStorage.setItem('nexus_update_snoozed_until', String(oneHour));
+    } catch (_) {}
+    onClose();
+  };
+
+  const handleSnoozeDay = () => {
     // Snooze for 24 hours
     const tomorrow = Date.now() + 24 * 60 * 60 * 1000;
     try {
@@ -96,7 +111,7 @@ export function VersionUpdateModal({ update, onClose }: VersionUpdateModalProps)
         {/* Close button */}
         {!isApplying && (
           <button
-            onClick={handleSnooze}
+            onClick={handleSnoozeHour}
             style={{
               position: 'absolute',
               top: '20px',
@@ -221,7 +236,7 @@ export function VersionUpdateModal({ update, onClose }: VersionUpdateModalProps)
           </div>
         </div>
 
-        {/* Pre-install safety alert banner */}
+        {/* Direct download notice banner */}
         <div
           style={{
             background: 'rgba(0, 230, 118, 0.06)',
@@ -234,9 +249,9 @@ export function VersionUpdateModal({ update, onClose }: VersionUpdateModalProps)
             gap: '12px',
           }}
         >
-          <span style={{ fontSize: '20px', flexShrink: 0 }}>🛡️</span>
+          <span style={{ fontSize: '20px', flexShrink: 0 }}>⚡</span>
           <p style={{ margin: 0, fontSize: '11.5px', color: '#e2e8f0', lineHeight: 1.5 }}>
-            <strong style={{ color: '#00e5a0' }}>Pre-Install Safety Protocol:</strong> A full backup of your local school database is automatically saved before download starts. The app will close safely to allow the installer to run without lock conflicts.
+            <strong style={{ color: '#00e5a0' }}>Direct Download:</strong> Your installer downloads in your default browser. You can continue using Nexus School OS without interruption while it downloads.
           </p>
         </div>
 
@@ -275,28 +290,50 @@ export function VersionUpdateModal({ update, onClose }: VersionUpdateModalProps)
           </div>
         )}
 
-        {/* Action Buttons */}
-        <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+        {/* Action Buttons: Not now (1h), Remind me Tomorrow (24h), Download Now */}
+        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap', alignItems: 'center' }}>
           {!isApplying && (
-            <button
-              onClick={handleSnooze}
-              style={{
-                background: 'transparent',
-                border: '1px solid rgba(255, 255, 255, 0.15)',
-                color: 'rgba(255, 255, 255, 0.7)',
-                padding: '10px 18px',
-                borderRadius: '10px',
-                fontSize: '12.5px',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              Remind Me Tomorrow
-            </button>
+            <>
+              <button
+                onClick={handleSnoozeHour}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  color: 'rgba(255, 255, 255, 0.65)',
+                  padding: '10px 16px',
+                  borderRadius: '10px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+                title="Notify me again in 1 hour"
+              >
+                Not now
+              </button>
+
+              <button
+                onClick={handleSnoozeDay}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid rgba(255, 255, 255, 0.18)',
+                  color: 'rgba(255, 255, 255, 0.8)',
+                  padding: '10px 16px',
+                  borderRadius: '10px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+                title="Snooze update prompt for 24 hours"
+              >
+                Remind me Tomorrow
+              </button>
+            </>
           )}
 
           <button
-            onClick={handleApplyUpdate}
+            onClick={handleDownloadNow}
             disabled={isApplying}
             style={{
               background: isApplying ? 'rgba(0, 229, 255, 0.4)' : 'linear-gradient(135deg, #00e5ff 0%, #00b4d8 100%)',
@@ -316,12 +353,12 @@ export function VersionUpdateModal({ update, onClose }: VersionUpdateModalProps)
             {isApplying ? (
               <>
                 <span style={{ animation: 'pulseDot 1s infinite' }}>⏳</span>
-                Securing Database &amp; Launching…
+                Opening Download…
               </>
             ) : (
               <>
                 <span>🚀</span>
-                Backup &amp; Download Update
+                Download Now
               </>
             )}
           </button>

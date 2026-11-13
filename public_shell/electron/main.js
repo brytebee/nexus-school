@@ -701,7 +701,11 @@ ipcMain.handle("app-settings:set", (event, { key, value }) => {
  * Payload: { slug: string; email: string; hardware_id?: string }
  */
 ipcMain.handle("sync:cloud-bootstrap", async (_event, { slug, email, hardwareId }) => {
-    const API_BASE = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
+    const isDev = !app.isPackaged || process.env.NODE_ENV !== 'production';
+    const primaryBase = process.env.NEXUS_API_URL || (isDev ? 'http://localhost:3001' : 'https://api.nexusos.com.ng');
+    const candidateBases = isDev
+        ? Array.from(new Set([primaryBase, 'http://localhost:3001', 'http://127.0.0.1:3001', 'http://localhost:3000', 'https://api.nexusos.com.ng']))
+        : [primaryBase];
     const db = database.getDb();
 
     // Derive hardware_id from existing settings if not supplied
@@ -717,76 +721,82 @@ ipcMain.handle("sync:cloud-bootstrap", async (_event, { slug, email, hardwareId 
         return { ok: false, reason: 'missing_fields', message: 'Slug and email are required.' };
     }
 
-    try {
-        const res = await fetch(`${API_BASE}/api/sync/bootstrap`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ slug, email, hardware_id: hwId }),
-            signal: AbortSignal.timeout(12000),
-        });
+    let bootstrapData;
+    let lastError = null;
 
-        const data = await res.json();
-        if (!res.ok || !data.ok) {
-            return {
-                ok: false,
-                reason: data.reason || 'api_error',
-                message: data.message || `Server returned HTTP ${res.status}`,
-            };
-        }
-
-        // ── Persist license token ──────────────────────────────────────────
+    for (const baseUrl of candidateBases) {
         try {
-            const { app } = require('electron');
-            const fsMod = require('fs');
-            const pathMod = require('path');
-            const licensePath = pathMod.join(app.getPath('userData'), 'license.nexus');
-            fsMod.writeFileSync(licensePath, data.license_token, 'utf-8');
-            console.log('[Bootstrap] ✅ license.nexus written to userData.');
-        } catch (writeErr) {
-            console.error('[Bootstrap] Failed to write license.nexus:', writeErr.message);
+            const res = await fetch(`${baseUrl}/api/sync/bootstrap`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ slug, email, hardware_id: hwId }),
+                signal: AbortSignal.timeout(isDev ? 4000 : 12000),
+            });
+
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                return {
+                    ok: false,
+                    reason: data.reason || 'api_error',
+                    message: data.message || `Server returned HTTP ${res.status}`,
+                };
+            }
+            bootstrapData = data;
+            break;
+        } catch (err) {
+            lastError = err;
         }
+    }
 
-        // ── Persist sync metadata to app_settings ─────────────────────────
-        const upsert = db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)");
-        const persist = (key, value) => { try { upsert.run(key, String(value ?? '')); } catch (_) {} };
-
-        persist('nexus_sync_token',     data.license_token);
-        persist('school_cloud_id',      data.sync_meta?.school_cloud_id ?? '');
-        persist('portal_slug',          data.sync_meta?.portal_slug ?? slug);
-        persist('school_slug',          data.sync_meta?.portal_slug ?? slug);
-        persist('school_website_url',   data.sync_meta?.website_url ?? '');
-        persist('school_name',          data.school?.name ?? '');
-        persist('school_tier',          data.school?.tier ?? '');
-        persist('cloud_bootstrap_at',   String(Date.now()));
-
-        // logo_url stored separately for identity panel rendering
-        if (data.school?.logo_url) persist('school_logo_url', data.school.logo_url);
-
-        console.log(
-            `[Bootstrap] ✅ Cloud bootstrap complete for "${data.school?.name}" ` +
-            `(${data.school?.id}) — tier: ${data.school?.tier}`
-        );
-
-        return {
-            ok: true,
-            school: data.school,
-            academic_hierarchy: data.academic_hierarchy,
-            sync_meta: data.sync_meta,
-            license_token: data.license_token,
-            message: `Connected successfully! Welcome to ${data.school?.name}.`,
-        };
-
-    } catch (err) {
-        const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
-        console.error('[Bootstrap] Network error:', err.message);
+    if (!bootstrapData) {
         return {
             ok: false,
-            reason: isTimeout ? 'timeout' : 'network_error',
-            message: isTimeout
-                ? 'Request timed out. Check your internet connection and try again.'
-                : `Connection failed: ${err.message}`,
+            reason: lastError?.name === 'TimeoutError' || lastError?.name === 'AbortError' ? 'timeout' : 'network_error',
+            message: lastError ? `Connection failed: ${lastError.message}` : 'Server unreachable',
         };
     }
+
+    // ── Persist license token ──────────────────────────────────────────
+    try {
+        const { app } = require('electron');
+        const fsMod = require('fs');
+        const pathMod = require('path');
+        const licensePath = pathMod.join(app.getPath('userData'), 'license.nexus');
+        fsMod.writeFileSync(licensePath, bootstrapData.license_token, 'utf-8');
+        console.log('[Bootstrap] ✅ license.nexus written to userData.');
+    } catch (writeErr) {
+        console.error('[Bootstrap] Failed to write license.nexus:', writeErr.message);
+    }
+
+    // ── Persist sync metadata to app_settings ─────────────────────────
+    const upsert = db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)");
+    const persist = (key, value) => { try { upsert.run(key, String(value ?? '')); } catch (_) {} };
+
+    persist('nexus_sync_token',     bootstrapData.license_token);
+    persist('school_cloud_id',      bootstrapData.sync_meta?.school_cloud_id ?? '');
+    persist('portal_slug',          bootstrapData.sync_meta?.portal_slug ?? slug);
+    persist('school_slug',          bootstrapData.sync_meta?.portal_slug ?? slug);
+    persist('school_website_url',   bootstrapData.sync_meta?.website_url ?? '');
+    persist('school_name',          bootstrapData.school?.name ?? '');
+    persist('school_tier',          bootstrapData.school?.tier ?? '');
+    persist('cloud_bootstrap_at',   String(Date.now()));
+
+    // logo_url stored separately for identity panel rendering
+    if (bootstrapData.school?.logo_url) persist('school_logo_url', bootstrapData.school.logo_url);
+
+    console.log(
+        `[Bootstrap] ✅ Cloud bootstrap complete for "${bootstrapData.school?.name}" ` +
+        `(${bootstrapData.school?.id}) — tier: ${bootstrapData.school?.tier}`
+    );
+
+    return {
+        ok: true,
+        school: bootstrapData.school,
+        academic_hierarchy: bootstrapData.academic_hierarchy,
+        sync_meta: bootstrapData.sync_meta,
+        license_token: bootstrapData.license_token,
+        message: `Connected successfully! Welcome to ${bootstrapData.school?.name}.`,
+    };
 });
 
 // ── CLOUD CONNECT (First-run: seed from onboarding data) ─────────────────────
@@ -809,7 +819,11 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
         return { ok: false, reason: 'missing_fields', message: 'Slug, email and PIN/Password are required.' };
     }
 
-    const API_BASE = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
+    const isDev = !app.isPackaged || process.env.NODE_ENV !== 'production';
+    const primaryBase = process.env.NEXUS_API_URL || (isDev ? 'http://localhost:3001' : 'https://api.nexusos.com.ng');
+    const candidateBases = isDev
+        ? Array.from(new Set([primaryBase, 'http://localhost:3001', 'http://127.0.0.1:3001', 'http://localhost:3000', 'https://api.nexusos.com.ng']))
+        : [primaryBase];
     const db = database.getDb();
 
     // ── 1. Bootstrap ──────────────────────────────────────────────────────────
@@ -820,30 +834,41 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
     } catch (_) {}
 
     let bootstrapData;
-    try {
-        const res = await fetch(`${API_BASE}/api/sync/bootstrap`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ slug, email, hardware_id: hwId }),
-            signal: AbortSignal.timeout(14000),
-        });
-        const json = await res.json();
-        if (!res.ok || !json.ok) {
-            return {
-                ok: false,
-                reason: json.reason || 'api_error',
-                message: json.message || `Bootstrap failed (HTTP ${res.status})`,
-            };
+    let successfulBase = primaryBase;
+    let lastError = null;
+
+    for (const baseUrl of candidateBases) {
+        try {
+            const res = await fetch(`${baseUrl}/api/sync/bootstrap`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ slug, email, hardware_id: hwId }),
+                signal: AbortSignal.timeout(isDev ? 4000 : 14000),
+            });
+            const json = await res.json();
+            if (!res.ok || !json.ok) {
+                return {
+                    ok: false,
+                    reason: json.reason || 'api_error',
+                    message: json.message || `Bootstrap failed (HTTP ${res.status})`,
+                };
+            }
+            bootstrapData = json;
+            successfulBase = baseUrl;
+            break;
+        } catch (err) {
+            lastError = err;
         }
-        bootstrapData = json;
-    } catch (err) {
-        const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+    }
+
+    if (!bootstrapData) {
+        const isTimeout = lastError?.name === 'TimeoutError' || lastError?.name === 'AbortError';
         return {
             ok: false,
             reason: isTimeout ? 'timeout' : 'network_error',
             message: isTimeout
                 ? 'Request timed out. Check your internet connection and try again.'
-                : `Connection failed: ${err.message}`,
+                : `Connection failed: ${lastError?.message || 'Server unreachable'}`,
         };
     }
 
@@ -875,7 +900,7 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
     const cloudId    = bootstrapData.sync_meta?.school_cloud_id ?? '';
     let websiteUrl   = process.env.SCHOOL_WEBSITE_URL;
     if (!websiteUrl) {
-        if (API_BASE.includes('localhost') || API_BASE.includes('127.0.0.1')) {
+        if (successfulBase.includes('localhost') || successfulBase.includes('127.0.0.1')) {
             websiteUrl = 'http://localhost:3005';
         } else {
             websiteUrl = (bootstrapData.sync_meta?.website_url || '').replace(/\/$/, '') || 'http://localhost:3005';
@@ -7956,9 +7981,11 @@ async function checkVersionUpdate() {
           release_name: update.release_name || `Nexus School OS v${update.latest_version}`,
           release_date: update.release_date || new Date().toISOString().split('T')[0],
           release_notes: update.release_notes || [],
-          download_url_mac: update.download_url_mac || 'https://nexusos.com.ng/downloads/nexus-school-os-latest.dmg',
-          download_url_win: update.download_url_win || 'https://nexusos.com.ng/downloads/nexus-school-os-latest.exe',
-          download_url_linux: update.download_url_linux || 'https://nexusos.com.ng/downloads/nexus-school-os-latest.AppImage',
+          download_url_mac_arm64: update.download_url_mac_arm64 || update.download_url_mac,
+          download_url_mac_x64: update.download_url_mac_x64 || update.download_url_mac,
+          download_url_mac: update.download_url_mac,
+          download_url_win: update.download_url_win,
+          download_url_linux: update.download_url_linux,
           is_critical: !!update.is_critical
         };
         console.log(`[VersionUpdate] Checked updates: current=v${currentVersion}, latest=v${update.latest_version}, hasNewer=${hasNewer}`);
@@ -7982,25 +8009,14 @@ ipcMain.handle("fetch-ads", async () => {
 
 ipcMain.handle("system:apply-update", async (event, customDownloadUrl) => {
   try {
-    const db = database.getDb();
-    const userData = app.getPath('userData');
-    const backupDir = path.join(userData, 'backups');
-    if (!fs.existsSync(backupDir)) {
-      fs.mkdirSync(backupDir, { recursive: true });
-    }
-
-    // 1. Pre-install safety database backup
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupPath = path.join(backupDir, `auto_pre_update_${timestamp}.sqlite`);
-    await db.backup(backupPath);
-    console.log(`[VersionUpdate] 🛡️ Pre-install safety backup created successfully at: ${backupPath}`);
-    logActivity({ event_type: 'PRE_UPDATE_BACKUP_CREATED', payload: { path: backupPath } });
-
-    // 2. Resolve platform-specific installer URL
+    // 1. Resolve platform and CPU architecture-specific installer URL
     let downloadUrl = customDownloadUrl;
     if (!downloadUrl && _versionUpdateCache) {
       if (process.platform === 'darwin') {
-        downloadUrl = _versionUpdateCache.download_url_mac;
+        const isArm64 = process.arch === 'arm64';
+        downloadUrl = isArm64
+          ? (_versionUpdateCache.download_url_mac_arm64 || _versionUpdateCache.download_url_mac)
+          : (_versionUpdateCache.download_url_mac_x64 || _versionUpdateCache.download_url_mac);
       } else if (process.platform === 'win32') {
         downloadUrl = _versionUpdateCache.download_url_win;
       } else {
@@ -8008,22 +8024,17 @@ ipcMain.handle("system:apply-update", async (event, customDownloadUrl) => {
       }
     }
     if (!downloadUrl) {
-      downloadUrl = 'https://nexusos.com.ng/downloads';
+      downloadUrl = 'https://github.com/brytebee/nexus-school-releases/releases';
     }
 
-    // 3. Trigger download via default web browser
-    console.log(`[VersionUpdate] Opening installer download in browser: ${downloadUrl}`);
+    // 2. Trigger direct download via default web browser
+    console.log(`[VersionUpdate] Opening direct installer download in browser: ${downloadUrl}`);
     await shell.openExternal(downloadUrl);
 
-    // 4. Safely close application after grace period so binary is unlocked for installer
-    setTimeout(() => {
-      console.log('[VersionUpdate] Safely quitting application for update installation...');
-      app.quit();
-    }, 1500);
-
-    return { ok: true, backupPath, downloadUrl };
+    // Keep app running — download takes time, install backup will happen on execution
+    return { ok: true, downloadUrl };
   } catch (err) {
-    console.error('[VersionUpdate] Error during update installation prep:', err);
+    console.error('[VersionUpdate] Error launching update download:', err);
     return { ok: false, error: err.message };
   }
 });
