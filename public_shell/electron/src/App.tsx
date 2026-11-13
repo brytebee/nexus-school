@@ -27,7 +27,7 @@ import { AnalyticsDashboard } from "./views/AnalyticsDashboard";
 import { NotesMarketplace } from "./views/NotesMarketplace";
 import { SkillMastery } from "./views/SkillMastery";
 import UpdateBanner from "./components/UpdateBanner";
-import { AdModal } from "./components/AdModal";
+import { VersionUpdateModal, type VersionUpdateInfo } from "./components/VersionUpdateModal";
 
 function App() {
   const [activeTab, setActiveTab] = useState<string>(() => {
@@ -42,23 +42,29 @@ function App() {
   const [isGuideOpen, setIsGuideOpen] = useState<boolean>(false);
   const [guideModule, setGuideModule] = useState<string>("");
 
-  // ── Engagement Ad State ──────────────────────────────────────────────────
-  const [navClickCount, setNavClickCount] = useState(0);
-  const [currentAd, setCurrentAd] = useState<any>(null);
-  const [adsList, setAdsList] = useState<any[]>([]);
+  // ── Version Update Notification State ─────────────────────────────────────
+  const [availableUpdate, setAvailableUpdate] = useState<VersionUpdateInfo | null>(null);
 
   React.useEffect(() => {
-    const loadAds = async () => {
+    const checkUpdate = async () => {
       try {
-        if ((window as any).electronAPI?.fetchAds) {
-          const list = await (window as any).electronAPI.fetchAds();
-          if (Array.isArray(list)) setAdsList(list);
+        const snoozedUntil = parseInt(localStorage.getItem('nexus_update_snoozed_until') || '0', 10);
+        if (Date.now() < snoozedUntil) {
+          return;
+        }
+
+        if ((window as any).electronAPI?.invoke) {
+          const updateRes = await (window as any).electronAPI.invoke('system:check-version-update');
+          if (updateRes && updateRes.has_update) {
+            setAvailableUpdate(updateRes);
+          }
         }
       } catch (err) {
-        console.error('Failed to load ads list:', err);
+        console.warn('[VersionUpdate] Check failed on mount:', err);
       }
     };
-    loadAds();
+    const timer = setTimeout(checkUpdate, 2500);
+    return () => clearTimeout(timer);
   }, []);
 
   const [platform, setPlatform] = useState<string>('darwin');
@@ -163,27 +169,6 @@ function App() {
     setActiveTab(tab);
     localStorage.setItem("nexus_nav_activeTab", tab);
     fetchQuota();
-
-    // Click counter logic for Standalone / Silver ad displays
-    setNavClickCount((prevCount) => {
-      const nextCount = prevCount + 1;
-      if (nextCount >= 3) {
-        const isStandaloneOrSilver = !license?.tier || license.tier === 'Standalone' || license.tier === 'Silver';
-        const hasAdShownThisSession = sessionStorage.getItem('ad_shown') === '1';
-        const isGeneratingReport = (window as any).isReportGenerating === true;
-
-        if (isStandaloneOrSilver && !hasAdShownThisSession && !isGeneratingReport && adsList.length > 0) {
-          const lastAdIndex = parseInt(localStorage.getItem('ad_last_index') || '0', 10);
-          const nextIndex = (lastAdIndex + 1) % adsList.length;
-          localStorage.setItem('ad_last_index', nextIndex.toString());
-          
-          setCurrentAd(adsList[nextIndex]);
-          sessionStorage.setItem('ad_shown', '1');
-        }
-        return 0; // Reset
-      }
-      return nextCount;
-    });
 
     if (pushToHistory) {
       const newHistory = tabHistory.slice(0, historyIndex + 1);
@@ -498,9 +483,12 @@ function App() {
       {/* OTA Update Banner */}
       <UpdateBanner />
 
-      {/* Ad Modal Overlay */}
-      {currentAd && (
-        <AdModal ad={currentAd} onClose={() => setCurrentAd(null)} />
+      {/* Version Update Modal Overlay */}
+      {availableUpdate && (
+        <VersionUpdateModal
+          update={availableUpdate}
+          onClose={() => setAvailableUpdate(null)}
+        />
       )}
 
       {/* Quota Enforcement Modal Overlay */}

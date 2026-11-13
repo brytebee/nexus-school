@@ -6,11 +6,11 @@ interface AboutProps {
 }
 
 export function About({ onTabChange }: AboutProps) {
-  const { license, loading, importLicenseFile, activateOnline, refreshLicense } = useLicense();
-  const [licenseActionStatus, setLicenseActionStatus] = useState<'idle' | 'importing' | 'activating' | 'success' | 'error'>('idle');
+  const { license, loading, importLicenseFile } = useLicense();
+  const [licenseActionStatus, setLicenseActionStatus] = useState<'idle' | 'importing' | 'success' | 'error'>('idle');
   const [licenseActionMsg, setLicenseActionMsg] = useState('');
   const [enrolledCount, setEnrolledCount] = useState<number | null>(null);
-  const [appVersion, setAppVersion] = useState('1.0.0');
+  const [appVersion, setAppVersion] = useState('1.2.01');
 
   useEffect(() => {
     // Fetch live enrolled student count on mount
@@ -34,7 +34,6 @@ export function About({ onTabChange }: AboutProps) {
     fetchVersion();
   }, []);
 
-  const currentTier = license?.tier || 'Silver';
   const expiresAt = license?.expires_at;
   const hasExplicitExpiry = !!expiresAt;
 
@@ -46,7 +45,7 @@ export function About({ onTabChange }: AboutProps) {
   const isExpired = hasExplicitExpiry && Date.now() > expiresAt;
 
   function deriveTermDisplay(terms?: string[]): string {
-    if (!terms || terms.length === 0) return 'Term-based license';
+    if (!terms || terms.length === 0) return 'Academic Term Subscription';
     const last = terms[terms.length - 1]; // e.g. "2025/2026-T3"
     const parts = last.split('-');
     if (parts.length !== 2) return `Licensed through ${last}`;
@@ -59,11 +58,6 @@ export function About({ onTabChange }: AboutProps) {
     return `Valid through ${session} — ${term.replace('T', 'Term ')} (+ 30-day grace)`;
   }
 
-  let tierIcon = '🥈';
-  if (currentTier === 'Standalone') tierIcon = '📦';
-  if (currentTier === 'Gold') tierIcon = '🥇';
-  if (currentTier === 'Diamond') tierIcon = '💎';
-
   return (
     <div className="animate-in fade-in duration-300 h-full flex flex-col min-h-0">
       {/* ── View Header ── */}
@@ -71,7 +65,7 @@ export function About({ onTabChange }: AboutProps) {
         <div>
           <h2 className="view-title">About Nexus School OS</h2>
           <p className="view-sub">
-            Application information, license and upgrade options.
+            Workstation engine information, enterprise licensing and architecture.
           </p>
         </div>
       </div>
@@ -113,11 +107,11 @@ export function About({ onTabChange }: AboutProps) {
           <div
             style={{
               fontSize: '12px',
-              color: '#666',
+              color: '#888',
               fontFamily: 'monospace',
               display: 'flex',
               flexDirection: 'column',
-              gap: '5px',
+              gap: '6px',
             }}
           >
             <div>
@@ -135,23 +129,29 @@ export function About({ onTabChange }: AboutProps) {
                 Ed25519 Secure Handshake
               </span>
             </div>
+            <div>
+              Local Storage:{' '}
+              <span style={{ color: '#4caf50' }}>
+                Encrypted SQLite Vault Active
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* Current Plan card */}
+        {/* Desktop ERP License card */}
         <div
           style={{
-            background: 'rgba(255, 215, 0, 0.05)',
-            border: '1px solid rgba(255, 215, 0, 0.2)',
+            background: 'rgba(0, 229, 255, 0.03)',
+            border: '1px solid rgba(0, 229, 255, 0.2)',
             borderRadius: '16px',
             padding: '24px',
             display: 'flex',
             flexDirection: 'column',
           }}
         >
-          <div style={{ fontSize: '44px', marginBottom: '14px' }}>⭐</div>
-          <h3 style={{ fontSize: '17px', marginBottom: '8px', color: '#ffd700' }}>
-            Current Plan
+          <div style={{ fontSize: '44px', marginBottom: '14px' }}>💎</div>
+          <h3 style={{ fontSize: '17px', marginBottom: '8px', color: '#00e5ff' }}>
+            Enterprise Desktop ERP
           </h3>
           <div
             id="about-plan-info"
@@ -163,55 +163,7 @@ export function About({ onTabChange }: AboutProps) {
             }}
           >
             {loading ? (
-              <div>Loading plan info…</div>
-            ) : currentTier === 'Standalone' ? (
-              <>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    marginBottom: '12px',
-                    borderBottom: '1px solid rgba(255,255,255,0.05)',
-                    paddingBottom: '12px',
-                  }}
-                >
-                  <span>Active Tier</span>
-                  <span style={{ color: '#fff', fontWeight: 'bold' }}>
-                    📦 Standalone Pack
-                  </span>
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    marginBottom: '12px',
-                    borderBottom: '1px solid rgba(255,255,255,0.05)',
-                    paddingBottom: '12px',
-                  }}
-                >
-                  <span>Device Slots</span>
-                  <span style={{ color: '#fff', fontWeight: 'bold' }}>
-                    2 devices max
-                  </span>
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    marginBottom: '12px',
-                  }}
-                >
-                  <span>Valid Until</span>
-                  <span
-                    style={{
-                      color: '#00e5ff',
-                      fontWeight: 'bold',
-                    }}
-                  >
-                    Lifetime (Lifetime Owner)
-                  </span>
-                </div>
-              </>
+              <div>Loading license details…</div>
             ) : (
               <>
                 <div
@@ -223,9 +175,10 @@ export function About({ onTabChange }: AboutProps) {
                     paddingBottom: '12px',
                   }}
                 >
-                  <span>Active Tier</span>
-                  <span style={{ color: '#fff', fontWeight: 'bold' }}>
-                    {tierIcon} {currentTier}
+                  <span>License Status</span>
+                  <span style={{ color: '#00e5ff', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#00e5ff', display: 'inline-block' }} />
+                    Desktop ERP Enabled
                   </span>
                 </div>
                 <div
@@ -239,7 +192,7 @@ export function About({ onTabChange }: AboutProps) {
                 >
                   <span>Enrolled Students</span>
                   <span style={{ color: '#fff', fontWeight: 'bold' }}>
-                    {enrolledCount !== null ? enrolledCount : '—'}
+                    {enrolledCount !== null ? `${enrolledCount} enrolled` : '—'} <span style={{ color: '#4caf50', fontSize: '11px', fontWeight: 'normal' }}>(Unlimited)</span>
                   </span>
                 </div>
                 <div
@@ -249,7 +202,7 @@ export function About({ onTabChange }: AboutProps) {
                     marginBottom: '12px',
                   }}
                 >
-                  <span>Valid Until</span>
+                  <span>Validity &amp; Term</span>
                   <span
                     style={{
                       color: hasExplicitExpiry ? (isExpired ? '#ff4444' : '#00e5ff') : '#94a3b8',
@@ -267,40 +220,19 @@ export function About({ onTabChange }: AboutProps) {
               </>
             )}
           </div>
+
           <button
             onClick={() => onTabChange('settings')}
-            className="primary-btn"
+            className="secondary-btn"
             style={{
               marginTop: '16px',
-              background: 'linear-gradient(135deg, #b8860b, #ffd700)',
-              color: '#000',
-              boxShadow: 'none',
               justifyContent: 'center',
             }}
           >
-            ⚙️ Manage Plan
+            ⚙️ Manage School Settings
           </button>
-          {currentTier === 'Standalone' && (
-            <button
-              onClick={() => {
-                if (window.electronAPI?.openExternal) {
-                  window.electronAPI.openExternal('https://nexusos.com.ng/portal');
-                }
-              }}
-              className="primary-btn"
-              style={{
-                marginTop: '10px',
-                background: 'linear-gradient(135deg, #1A237E, #3F51B5)',
-                color: '#fff',
-                boxShadow: 'none',
-                justifyContent: 'center',
-              }}
-            >
-              🚀 Upgrade to a Plan →
-            </button>
-          )}
 
-          {/* ── In-app License Management ── */}
+          {/* ── Offline License Import (For air-gapped / offline deployments) ── */}
           <div
             style={{
               marginTop: '14px',
@@ -308,8 +240,8 @@ export function About({ onTabChange }: AboutProps) {
               borderTop: '1px solid rgba(255,255,255,0.07)',
             }}
           >
-            <p style={{ fontSize: '10.5px', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>
-              License Key
+            <p style={{ fontSize: '10px', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>
+              Offline Key Management
             </p>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
@@ -342,29 +274,13 @@ export function About({ onTabChange }: AboutProps) {
                 }}
                 disabled={licenseActionStatus !== 'idle'}
                 style={{
-                  flex: 1, padding: '8px 10px', borderRadius: '8px',
+                  width: '100%', padding: '8px 12px', borderRadius: '8px',
                   background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
                   color: '#c8d0e0', fontSize: '11px', fontWeight: 600, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
                 }}
               >
-                📁 Import .nexus File
-              </button>
-              <button
-                id="about-activate-online-btn"
-                onClick={async () => {
-                  setLicenseActionStatus('activating');
-                  setLicenseActionMsg('');
-                  await activateOnline();
-                  setLicenseActionStatus('idle');
-                }}
-                disabled={licenseActionStatus !== 'idle'}
-                style={{
-                  flex: 1, padding: '8px 10px', borderRadius: '8px',
-                  background: 'rgba(0,229,255,0.08)', border: '1px solid rgba(0,229,255,0.2)',
-                  color: '#00e5ff', fontSize: '11px', fontWeight: 600, cursor: 'pointer',
-                }}
-              >
-                {licenseActionStatus === 'activating' ? '🌐 Opening...' : '🌐 Activate Online'}
+                📁 Import .nexus License File
               </button>
             </div>
             {licenseActionStatus === 'importing' && (
@@ -379,62 +295,6 @@ export function About({ onTabChange }: AboutProps) {
           </div>
         </div>
       </div>
-
-      {/* ── Upgrade options banner (Conversion Bridge) ── */}
-      {currentTier !== 'Diamond' && (
-        <div
-          style={{
-            background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.06), rgba(168, 85, 247, 0.06))',
-            border: '1px solid rgba(0, 229, 255, 0.18)',
-            borderRadius: '16px',
-            padding: '24px',
-            marginBottom: '18px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '16px',
-            flexWrap: 'wrap'
-          }}
-        >
-          <div>
-            <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#fff', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-              🚀 Unlock the Full Power of Nexus School OS
-            </h4>
-            <p style={{ margin: '6px 0 0', fontSize: '12px', color: 'var(--text-dim)', lineHeight: 1.5, maxWidth: '600px' }}>
-              {currentTier === 'Standalone' ? (
-                'You are currently on the Standalone Pack (limited to 2 admin devices, free templates, and entire school scope). Upgrade to the Silver or Gold plan to enable unlimited teacher devices, daily registers, mobile sync allocations, and sovereign parent portal access.'
-              ) : (
-                'Upgrade your subscription plan to unlock WhatsApp notifications to parents (Nexus Pulse), automated fees payment ledger tracking, computer-based testing (CBT Arena), and AI-generated report card recommendations.'
-              )}
-            </p>
-          </div>
-          <button
-            onClick={() => {
-              if (window.electronAPI?.openExternal) {
-                window.electronAPI.openExternal('https://nexusos.com.ng/portal');
-              } else {
-                window.open('https://nexusos.com.ng/portal', '_blank');
-              }
-            }}
-            className="primary-btn"
-            style={{
-              background: 'linear-gradient(135deg, #00e5ff, #8b5cf6)',
-              color: '#000',
-              fontWeight: 700,
-              border: 'none',
-              padding: '10px 20px',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              boxShadow: 'none',
-              justifyContent: 'center',
-              animation: 'none'
-            }}
-          >
-            {currentTier === 'Gold' ? 'Manage Plan →' : 'Request Upgrade →'}
-          </button>
-        </div>
-      )}
 
       {/* ── Security & Architecture card ── */}
       <div

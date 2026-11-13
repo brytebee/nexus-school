@@ -7919,51 +7919,113 @@ ipcMain.on("shell:openExternal", (event, url) => {
   shell.openExternal(url);
 });
 ipcMain.handle("get-platform", () => process.platform);
-// ── Ad cache — populated at launch so fetch-ads returns instantly ─────────────
-let _adCache = null;
-const AD_FALLBACK = [
-  {
-    youtube_id: "dQw4w9WgXcQ",
-    title: "Upgrade to Gold Plan to unlock Attendance & Sovereign Portal!",
-    skip_after_seconds: 5,
-    cta_link: "https://nexusos.com.ng/portal/billing"
-  },
-  {
-    youtube_id: "dQw4w9WgXcQ",
-    title: "Unlock CBT Arena and AI Insights with Diamond Plan!",
-    skip_after_seconds: 7,
-    cta_link: "https://nexusos.com.ng/portal/billing"
-  }
-];
 
-async function prefetchAds() {
-  const portalBase = process.env.NEXUSOS_PORTAL_URL || 'https://nexusos.com.ng/portal';
-  const apiBase = portalBase.replace('/portal', '/api');
+// ── Version Update Notification & Pre-Install Safety System ─────────────
+let _versionUpdateCache = null;
+
+function isNewerVersion(latest, current) {
+  if (!latest || !current) return false;
+  const l = latest.replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
+  const c = current.replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(l.length, c.length); i++) {
+    const lPart = l[i] || 0;
+    const cPart = c[i] || 0;
+    if (lPart > cPart) return true;
+    if (lPart < cPart) return false;
+  }
+  return false;
+}
+
+async function checkVersionUpdate() {
+  const currentVersion = app.getVersion();
+  const apiBase = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(`${apiBase}/ads`, { signal: controller.signal });
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const response = await fetch(`${apiBase}/api/ads`, { signal: controller.signal });
     clearTimeout(timeoutId);
     if (response.ok) {
       const data = await response.json();
-      if (data && Array.isArray(data.ads) && data.ads.length > 0) {
-        _adCache = data.ads;
-        console.log(`[Ads] Pre-fetched ${_adCache.length} ad(s) from server.`);
-        return;
+      if (data && data.update) {
+        const update = data.update;
+        const hasNewer = isNewerVersion(update.latest_version, currentVersion);
+        _versionUpdateCache = {
+          has_update: hasNewer,
+          current_version: currentVersion,
+          latest_version: update.latest_version,
+          release_name: update.release_name || `Nexus School OS v${update.latest_version}`,
+          release_date: update.release_date || new Date().toISOString().split('T')[0],
+          release_notes: update.release_notes || [],
+          download_url_mac: update.download_url_mac || 'https://nexusos.com.ng/downloads/nexus-school-os-latest.dmg',
+          download_url_win: update.download_url_win || 'https://nexusos.com.ng/downloads/nexus-school-os-latest.exe',
+          download_url_linux: update.download_url_linux || 'https://nexusos.com.ng/downloads/nexus-school-os-latest.AppImage',
+          is_critical: !!update.is_critical
+        };
+        console.log(`[VersionUpdate] Checked updates: current=v${currentVersion}, latest=v${update.latest_version}, hasNewer=${hasNewer}`);
+        return _versionUpdateCache;
       }
     }
   } catch (err) {
-    console.warn('[Ads] Pre-fetch failed, using fallback list:', err.message);
+    console.warn('[VersionUpdate] Check failed (non-fatal):', err.message);
   }
-  _adCache = AD_FALLBACK;
-  console.log('[Ads] Using fallback ad list.');
+  return _versionUpdateCache || { has_update: false, current_version: currentVersion };
 }
 
+ipcMain.handle("system:check-version-update", async () => {
+  return await checkVersionUpdate();
+});
+
+// Backward-compatible alias for any legacy callers
 ipcMain.handle("fetch-ads", async () => {
-  // Return cached list immediately if available, otherwise fetch now
-  if (_adCache) return _adCache;
-  await prefetchAds();
-  return _adCache || AD_FALLBACK;
+  return [];
+});
+
+ipcMain.handle("system:apply-update", async (event, customDownloadUrl) => {
+  try {
+    const db = database.getDb();
+    const userData = app.getPath('userData');
+    const backupDir = path.join(userData, 'backups');
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+    }
+
+    // 1. Pre-install safety database backup
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = path.join(backupDir, `auto_pre_update_${timestamp}.sqlite`);
+    await db.backup(backupPath);
+    console.log(`[VersionUpdate] 🛡️ Pre-install safety backup created successfully at: ${backupPath}`);
+    logActivity({ event_type: 'PRE_UPDATE_BACKUP_CREATED', payload: { path: backupPath } });
+
+    // 2. Resolve platform-specific installer URL
+    let downloadUrl = customDownloadUrl;
+    if (!downloadUrl && _versionUpdateCache) {
+      if (process.platform === 'darwin') {
+        downloadUrl = _versionUpdateCache.download_url_mac;
+      } else if (process.platform === 'win32') {
+        downloadUrl = _versionUpdateCache.download_url_win;
+      } else {
+        downloadUrl = _versionUpdateCache.download_url_linux;
+      }
+    }
+    if (!downloadUrl) {
+      downloadUrl = 'https://nexusos.com.ng/downloads';
+    }
+
+    // 3. Trigger download via default web browser
+    console.log(`[VersionUpdate] Opening installer download in browser: ${downloadUrl}`);
+    await shell.openExternal(downloadUrl);
+
+    // 4. Safely close application after grace period so binary is unlocked for installer
+    setTimeout(() => {
+      console.log('[VersionUpdate] Safely quitting application for update installation...');
+      app.quit();
+    }, 1500);
+
+    return { ok: true, backupPath, downloadUrl };
+  } catch (err) {
+    console.error('[VersionUpdate] Error during update installation prep:', err);
+    return { ok: false, error: err.message };
+  }
 });
 
 ipcMain.handle("revoke-device", async (event, deviceId) => {
@@ -11178,8 +11240,8 @@ if (app) {
     } else {
       console.log('[Electron] Launch type: NORMAL.');
     }
-  // Kick off ad pre-fetch in background — ready before the user ever clicks
-    prefetchAds();
+  // Kick off version update check in background
+    checkVersionUpdate();
 
 
     ipcMain.handle("db:get-clear-impact", async (event, { type }) => {
