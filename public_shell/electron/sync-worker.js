@@ -1434,32 +1434,37 @@ async function pullStaffGradesFromWebsite() {
     }
 
     if (Array.isArray(data.allocations) && data.allocations.length > 0) {
-      let insertAlloc;
       try {
-        insertAlloc = db.prepare(`
-          INSERT OR IGNORE INTO teacher_allocations (teacher_id, class_name, subject)
-          VALUES (?, ?, ?)
-        `);
-      } catch (_) {}
-
-      if (insertAlloc) {
-        const insertAllocs = db.transaction((rows) => {
-          for (const a of rows) {
-            try {
-              // Guard: only accept allocations for classes that exist in this tenant's local DB
-              // (class_name in allocations may be the arm composite e.g. "JSS 1 Gold" — check base class)
-              const classMatches = a.className && [...validLocalClasses].some(lc => a.className === lc || a.className.startsWith(lc + ' '));
-              if (!classMatches) {
-                console.warn(`[Sync Worker] Skipping allocation for foreign class: ${a.className}`);
-                continue;
-              }
-              if (a.teacherId && a.className && a.subject) {
-                insertAlloc.run(a.teacherId, a.className, a.subject);
-              }
-            } catch (_) {}
+        // Collect all valid allocations from the pulled data
+        const validAllocRows = [];
+        for (const a of data.allocations) {
+          const classMatches = a.className && [...validLocalClasses].some(lc => a.className === lc || a.className.startsWith(lc + ' '));
+          if (classMatches && a.teacherId && a.className && a.subject) {
+            validAllocRows.push({ teacherId: a.teacherId, className: a.className, subject: a.subject });
           }
-        });
-        insertAllocs(data.allocations);
+        }
+
+        // Distinct teachers present in incoming allocations
+        const teacherIdsInAlloc = Array.from(new Set(validAllocRows.map(r => r.teacherId)));
+
+        if (teacherIdsInAlloc.length > 0) {
+          const syncAllocsTx = db.transaction(() => {
+            const delAlloc = db.prepare('DELETE FROM teacher_allocations WHERE teacher_id = ?');
+            for (const tid of teacherIdsInAlloc) {
+              delAlloc.run(tid);
+            }
+            const insAlloc = db.prepare(`
+              INSERT OR IGNORE INTO teacher_allocations (teacher_id, class_name, subject)
+              VALUES (?, ?, ?)
+            `);
+            for (const a of validAllocRows) {
+              insAlloc.run(a.teacherId, a.className, a.subject);
+            }
+          });
+          syncAllocsTx();
+        }
+      } catch (err) {
+        console.warn('[Sync Worker] Failed to reconcile teacher allocations:', err.message);
       }
     }
 
