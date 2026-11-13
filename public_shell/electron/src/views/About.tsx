@@ -1,8 +1,137 @@
 import React, { useState, useEffect } from 'react';
 import { useLicense } from '../hooks/useLicense';
+import { VersionUpdateModal, type VersionUpdateInfo } from '../components/VersionUpdateModal';
 
 interface AboutProps {
   onTabChange: (tab: string) => void;
+}
+
+interface UpToDateModalProps {
+  version: string;
+  onClose: () => void;
+}
+
+export function UpToDateModal({ version, onClose }: UpToDateModalProps) {
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 99999,
+        background: 'rgba(0, 0, 0, 0.75)',
+        backdropFilter: 'blur(8px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '20px',
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          width: '100%',
+          maxWidth: '440px',
+          background: 'linear-gradient(145deg, rgba(16, 24, 38, 0.98), rgba(8, 14, 24, 0.98))',
+          border: '1px solid rgba(0, 229, 255, 0.25)',
+          borderRadius: '20px',
+          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.7), 0 0 40px rgba(0, 229, 255, 0.1)',
+          padding: '28px',
+          color: '#fff',
+          position: 'relative',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={onClose}
+          style={{
+            position: 'absolute',
+            top: '16px',
+            right: '16px',
+            background: 'none',
+            border: 'none',
+            color: 'var(--text-dim, #888)',
+            fontSize: '20px',
+            cursor: 'pointer',
+            padding: '4px',
+            lineHeight: 1,
+          }}
+          aria-label="Close"
+        >
+          ×
+        </button>
+
+        <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+          <div
+            style={{
+              width: '64px',
+              height: '64px',
+              borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(0, 230, 118, 0.2) 0%, rgba(0, 230, 118, 0.05) 70%)',
+              border: '2px solid rgba(0, 230, 118, 0.4)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '28px',
+              margin: '0 auto 16px auto',
+              boxShadow: '0 0 24px rgba(0, 230, 118, 0.25)',
+            }}
+          >
+            ✅
+          </div>
+          <h3 style={{ fontSize: '18px', fontWeight: 700, margin: '0 0 6px 0', color: '#fff' }}>
+            Nexus School OS is Up to Date
+          </h3>
+          <p style={{ fontSize: '13px', color: 'var(--text-dim, #8899aa)', margin: 0 }}>
+            Version <strong style={{ color: 'var(--accent, #00e5ff)' }}>v{version}</strong> is currently the newest available release.
+          </p>
+        </div>
+
+        <div
+          style={{
+            background: 'rgba(255, 255, 255, 0.03)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            borderRadius: '12px',
+            padding: '14px 16px',
+            fontSize: '12px',
+            color: 'var(--text-dim, #8899aa)',
+            marginBottom: '22px',
+            lineHeight: '1.6',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+            <span>Release Channel:</span>
+            <span style={{ color: '#fff', fontWeight: 600 }}>Academic Workstation ERP</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+            <span>Channel Status:</span>
+            <span style={{ color: '#00e676', fontWeight: 600 }}>Latest Verified Build</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Checked:</span>
+            <span style={{ color: '#fff' }}>Just now</span>
+          </div>
+        </div>
+
+        <button
+          onClick={onClose}
+          style={{
+            width: '100%',
+            padding: '10px 16px',
+            borderRadius: '10px',
+            background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.2), rgba(0, 229, 255, 0.1))',
+            border: '1px solid rgba(0, 229, 255, 0.4)',
+            color: '#fff',
+            fontSize: '13px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+          }}
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function About({ onTabChange }: AboutProps) {
@@ -11,6 +140,33 @@ export function About({ onTabChange }: AboutProps) {
   const [licenseActionMsg, setLicenseActionMsg] = useState('');
   const [enrolledCount, setEnrolledCount] = useState<number | null>(null);
   const [appVersion, setAppVersion] = useState('1.2.01');
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [availableUpdate, setAvailableUpdate] = useState<VersionUpdateInfo | null>(null);
+  const [showUpToDate, setShowUpToDate] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+
+  const handleCheckForUpdate = async () => {
+    setIsCheckingUpdate(true);
+    setUpdateError(null);
+    try {
+      const api = (window as any).electronAPI || (window as any).nexusAPI;
+      if (api?.invoke) {
+        const updateRes = await api.invoke('system:check-version-update');
+        if (updateRes && updateRes.has_update) {
+          setAvailableUpdate(updateRes);
+        } else {
+          setShowUpToDate(true);
+        }
+      } else {
+        setUpdateError('Desktop API bridge unavailable.');
+      }
+    } catch (err: any) {
+      console.warn('[About] Check update failed:', err);
+      setUpdateError('Unable to check for updates. Please check your internet connection.');
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
 
   useEffect(() => {
     // Fetch live enrolled student count on mount
@@ -114,9 +270,55 @@ export function About({ onTabChange }: AboutProps) {
               gap: '6px',
             }}
           >
-            <div>
-              Version: <span style={{ color: 'var(--accent)' }}>{appVersion}</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+              <div>
+                Version: <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{appVersion}</span>
+              </div>
+              <button
+                id="about-check-update-btn"
+                onClick={handleCheckForUpdate}
+                disabled={isCheckingUpdate}
+                style={{
+                  padding: '3px 10px',
+                  borderRadius: '6px',
+                  background: isCheckingUpdate ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0, 229, 255, 0.08)',
+                  border: '1px solid rgba(0, 229, 255, 0.3)',
+                  color: 'var(--accent)',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: isCheckingUpdate ? 'wait' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  transition: 'all 0.2s ease',
+                }}
+                title="Check for software updates"
+              >
+                {isCheckingUpdate ? (
+                  <>
+                    <span
+                      style={{
+                        width: '9px',
+                        height: '9px',
+                        border: '1.5px solid var(--accent)',
+                        borderTopColor: 'transparent',
+                        borderRadius: '50%',
+                        display: 'inline-block',
+                        animation: 'spin 0.8s linear infinite',
+                      }}
+                    />
+                    Checking…
+                  </>
+                ) : (
+                  <>🔄 Check for Update</>
+                )}
+              </button>
             </div>
+            {updateError && (
+              <div style={{ color: '#ff5252', fontSize: '11px', lineHeight: 1.4, marginTop: '2px' }}>
+                ⚠️ {updateError}
+              </div>
+            )}
             <div>
               Engine:{' '}
               <span style={{ color: 'var(--accent)' }}>
@@ -334,6 +536,21 @@ export function About({ onTabChange }: AboutProps) {
           </div>
         </div>
       </div>
+
+      {/* ── Update Modals ── */}
+      {availableUpdate && (
+        <VersionUpdateModal
+          update={availableUpdate}
+          onClose={() => setAvailableUpdate(null)}
+        />
+      )}
+
+      {showUpToDate && (
+        <UpToDateModal
+          version={appVersion}
+          onClose={() => setShowUpToDate(false)}
+        />
+      )}
     </div>
   );
 }

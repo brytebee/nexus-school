@@ -724,6 +724,12 @@ ipcMain.handle("sync:cloud-bootstrap", async (_event, { slug, email, hardwareId 
     let bootstrapData;
     let lastError = null;
 
+    // Dev: "soft" failures (credentials_invalid, server_error) from a local candidate
+    // should fall through to the next candidate (e.g. prod). Only "hard" definitives
+    // like slug_mismatch or hardware_mismatch short-circuit across all candidates.
+    const HARD_FAIL_REASONS = new Set(['slug_mismatch', 'hardware_mismatch', 'bad_request']);
+    let lastFailResponse = null;
+
     for (const baseUrl of candidateBases) {
         try {
             const res = await fetch(`${baseUrl}/api/sync/bootstrap`, {
@@ -735,11 +741,12 @@ ipcMain.handle("sync:cloud-bootstrap", async (_event, { slug, email, hardwareId 
 
             const data = await res.json();
             if (!res.ok || !data.ok) {
-                return {
-                    ok: false,
-                    reason: data.reason || 'api_error',
-                    message: data.message || `Server returned HTTP ${res.status}`,
-                };
+                if (HARD_FAIL_REASONS.has(data.reason)) {
+                    return { ok: false, reason: data.reason, message: data.message || `Server returned HTTP ${res.status}` };
+                }
+                // Soft failure — remember it and try next candidate
+                lastFailResponse = { ok: false, reason: data.reason || 'api_error', message: data.message || `Server returned HTTP ${res.status}` };
+                continue;
             }
             bootstrapData = data;
             break;
@@ -749,6 +756,7 @@ ipcMain.handle("sync:cloud-bootstrap", async (_event, { slug, email, hardwareId 
     }
 
     if (!bootstrapData) {
+        if (lastFailResponse) return lastFailResponse;
         return {
             ok: false,
             reason: lastError?.name === 'TimeoutError' || lastError?.name === 'AbortError' ? 'timeout' : 'network_error',
@@ -837,6 +845,10 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
     let successfulBase = primaryBase;
     let lastError = null;
 
+    // Dev: soft failures fall through to next candidate; hard failures short-circuit.
+    const HARD_FAIL_REASONS_CC = new Set(['slug_mismatch', 'hardware_mismatch', 'bad_request']);
+    let lastFailResponseCC = null;
+
     for (const baseUrl of candidateBases) {
         try {
             const res = await fetch(`${baseUrl}/api/sync/bootstrap`, {
@@ -847,11 +859,11 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
             });
             const json = await res.json();
             if (!res.ok || !json.ok) {
-                return {
-                    ok: false,
-                    reason: json.reason || 'api_error',
-                    message: json.message || `Bootstrap failed (HTTP ${res.status})`,
-                };
+                if (HARD_FAIL_REASONS_CC.has(json.reason)) {
+                    return { ok: false, reason: json.reason, message: json.message || `Bootstrap failed (HTTP ${res.status})` };
+                }
+                lastFailResponseCC = { ok: false, reason: json.reason || 'api_error', message: json.message || `Bootstrap failed (HTTP ${res.status})` };
+                continue;
             }
             bootstrapData = json;
             successfulBase = baseUrl;
@@ -862,6 +874,7 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
     }
 
     if (!bootstrapData) {
+        if (lastFailResponseCC) return lastFailResponseCC;
         const isTimeout = lastError?.name === 'TimeoutError' || lastError?.name === 'AbortError';
         return {
             ok: false,
