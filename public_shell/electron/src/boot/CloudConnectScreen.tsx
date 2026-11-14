@@ -62,9 +62,13 @@ export function CloudConnectScreen({ onBack }: CloudConnectScreenProps) {
       setSeeded(result.seeded || null);
       setStep('success');
 
-      // Auto-advance to lock screen after 2.5 s
+      // Auto-advance to lock screen or relaunch after 2.5 s
       setTimeout(async () => {
-        await api.invoke('app:load-lock');
+        try {
+          await api.invoke('app:relaunch');
+        } catch (_) {
+          await api.invoke('app:load-lock');
+        }
       }, 2500);
 
     } catch (err: any) {

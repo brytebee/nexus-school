@@ -144,6 +144,57 @@ let qrPayload = null;
 let licenseStatus = { locked: false, message: "" };
 pulseExporter.getLicenseTier = () => licenseStatus?.tier || "Silver";
 
+// ── Ed25519 Canonical Public Key & Offline Token Verification ──────────────
+const NEXUS_PUBLIC_KEY_HEX = '3a963a04b3da96bd402eb5d8a4ffd200e8c695f9fa4633c789649fa188db0daa';
+
+function verifyNexusToken(token) {
+  const b64urlDecode = s => Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+  const parts = token.split('.');
+  if (parts.length !== 2) throw new Error('Malformed token');
+  const payloadBytes = b64urlDecode(parts[0]);
+  const sigBytes     = b64urlDecode(parts[1]);
+  const pubKey = Buffer.from(NEXUS_PUBLIC_KEY_HEX, 'hex');
+  if (pubKey.length !== 32) throw new Error('Public key not configured');
+  const SPKI_ED25519_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
+  const spkiDer = Buffer.concat([SPKI_ED25519_PREFIX, pubKey]);
+  const keyObj = crypto.createPublicKey({ key: spkiDer, format: 'der', type: 'spki' });
+  const valid = crypto.verify(null, payloadBytes, keyObj, sigBytes);
+  if (!valid) throw new Error('Invalid signature');
+  return JSON.parse(payloadBytes.toString('utf8'));
+}
+
+function refreshLicenseStatusFromDisk() {
+  try {
+    const { app } = require('electron');
+    const pathMod = require('path');
+    const fsMod = require('fs');
+    const lp = pathMod.join(app.getPath('userData'), 'license.nexus');
+    if (!fsMod.existsSync(lp)) return false;
+
+    const token = fsMod.readFileSync(lp, 'utf-8').trim();
+    const payload = verifyNexusToken(token);
+    if (payload && payload.school_id) {
+      const normalisedTier = (payload.tier || '').toLowerCase();
+      licenseStatus = {
+        locked: false,
+        message: 'VALID',
+        tier: toDisplayTier(normalisedTier),
+        student_count: payload.student_cap || 9999,
+        licensed_terms: payload.licensed_terms || [],
+        needs_activation: false,
+      };
+      if (typeof setSchoolLicense === 'function') {
+        try { setSchoolLicense({ payload: JSON.stringify(payload) }); } catch (_) {}
+      }
+      console.log(`[License] Refreshed status from disk: ${licenseStatus.tier} (${licenseStatus.student_count} students, locked=false)`);
+      return true;
+    }
+  } catch (err) {
+    console.warn('[License] refreshLicenseStatusFromDisk error:', err.message);
+  }
+  return false;
+}
+
  // ── Quota Gating (Two-Phase Seat Cap Enforcement) ──────────────────────────
 // F3: Per-student cap and overflow tagging removed. Tiers now only determine
 // subscription price; no feature gating on enrolled count.
@@ -772,6 +823,7 @@ ipcMain.handle("sync:cloud-bootstrap", async (_event, { slug, email, hardwareId 
         const licensePath = pathMod.join(app.getPath('userData'), 'license.nexus');
         fsMod.writeFileSync(licensePath, bootstrapData.license_token, 'utf-8');
         console.log('[Bootstrap] ✅ license.nexus written to userData.');
+        refreshLicenseStatusFromDisk();
     } catch (writeErr) {
         console.error('[Bootstrap] Failed to write license.nexus:', writeErr.message);
     }
@@ -895,6 +947,7 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
             bootstrapData.license_token,
             'utf-8'
         );
+        refreshLicenseStatusFromDisk();
     } catch (_) {}
 
     const upsertSetting = db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)");
@@ -10919,6 +10972,7 @@ function createWindow() {
 
   // ── Load lock screen — called by AdminSetupScreen after first admin is created ──
   ipcMain.handle('app:load-lock', () => {
+    refreshLicenseStatusFromDisk();
     if (mainWindow) mainWindow.loadFile('lock.html');
   });
 
