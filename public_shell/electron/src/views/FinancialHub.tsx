@@ -979,7 +979,7 @@ export function FinancialHub() {
     setLoadingStruct(true);
     try {
       const data = await window.electronAPI.feeStructure.getAll({ className: structClass });
-      setStructItems(data || []);
+      setStructItems(Array.isArray(data) ? data : []);
     } catch (e) { console.error(e); } finally { setLoadingStruct(false); }
   }, [structClass]);
 
@@ -1136,7 +1136,7 @@ export function FinancialHub() {
     setLoadingAdj(true);
     try {
       const data = await window.electronAPI.feeStructure.getAdjustments({ academicSession:sessionRef.current, term:termRef.current });
-      setAdjustments(data || []);
+      setAdjustments(Array.isArray(data) ? data : []);
     } finally { setLoadingAdj(false); }
   }, []);
 

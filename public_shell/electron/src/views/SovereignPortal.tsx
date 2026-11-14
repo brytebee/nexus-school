@@ -282,7 +282,7 @@ export function SovereignPortal() {
             <div className="ip-selector-group" style={{ marginBottom: '20px' }}>
               <label style={{ fontSize: '11px', textTransform: 'uppercase', color: '#888', display: 'block', marginBottom: '8px' }}>Select Broadcasting Interface</label>
               <div id="portal-ip-list" className="ip-chip-list" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {portalInfo?.allIps.map(ip => {
+                {(Array.isArray(portalInfo?.allIps) ? portalInfo!.allIps : ['127.0.0.1']).map(ip => {
                   const isActive = activeIp === ip;
                   return (
                     <button

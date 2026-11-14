@@ -366,7 +366,7 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
     setIsLoadingBanks(true);
     try {
       const data = await window.electronAPI.cbt.getBanks();
-      setBanksList(data || []);
+      setBanksList(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error("Failed to load banks", e);
     } finally {
@@ -1224,7 +1224,7 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
     setIsLoadingLiveExams(true);
     try {
       const exams = await window.electronAPI.cbt.getExams();
-      setLiveExams(exams || []);
+      setLiveExams(Array.isArray(exams) ? exams : []);
     } catch (e) {
       console.error("Failed to load active exams", e);
     } finally {
@@ -1371,10 +1371,10 @@ export function CbtArena({ onOpenHelp }: CbtArenaProps) {
   const refreshLiveDashboard = async (examId: number) => {
     try {
       const batches = await window.electronAPI.cbt.getBatches(examId);
-      setLiveBatches(batches || []);
+      setLiveBatches(Array.isArray(batches) ? batches : []);
 
       const tokens = await window.electronAPI.cbt.getTokens(examId);
-      setLiveTokens(tokens || []);
+      setLiveTokens(Array.isArray(tokens) ? tokens : []);
     } catch (e) {
       console.error("Failed to refresh live invigilation dashboard", e);
     }
