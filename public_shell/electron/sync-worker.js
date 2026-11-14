@@ -1087,14 +1087,29 @@ async function pushClassesToWebsite() {
       deptMgrs = db.prepare("SELECT * FROM department_managers ORDER BY id ASC").all() || [];
     } catch (_) {}
 
+    let portalSlug = "";
+    try {
+      const slugRow = db.prepare("SELECT value FROM app_settings WHERE key = 'portal_slug'").get();
+      if (slugRow?.value) portalSlug = slugRow.value;
+    } catch (_) {}
+    if (!portalSlug) {
+      try {
+        const sRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_slug'").get();
+        if (sRow?.value) portalSlug = sRow.value;
+      } catch (_) {}
+    }
+
     const res = await fetch(`${websiteUrl}/api/sync/classes`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-sync-token": syncToken,
+        "x-nexus-sync-token": syncToken,
       },
       body: JSON.stringify({
         schoolCloudId: schoolId,
+        slug: portalSlug,
+        portal_slug: portalSlug,
         hierarchy: hierarchyPayload,
         fullList: flatList,
         departmentManagers: deptMgrs,
@@ -1227,14 +1242,29 @@ async function pushStaffRosterToWebsite() {
       return { ok: true, skipped: true, reason: "no_staff_or_students" };
     }
 
+    let portalSlug = "";
+    try {
+      const slugRow = db.prepare("SELECT value FROM app_settings WHERE key = 'portal_slug'").get();
+      if (slugRow?.value) portalSlug = slugRow.value;
+    } catch (_) {}
+    if (!portalSlug) {
+      try {
+        const sRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_slug'").get();
+        if (sRow?.value) portalSlug = sRow.value;
+      } catch (_) {}
+    }
+
     const res = await fetch(`${websiteUrl}/api/sync/staff`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-sync-token": syncToken,
+        "x-nexus-sync-token": syncToken,
       },
       body: JSON.stringify({
         schoolCloudId: schoolId,
+        slug: portalSlug,
+        portal_slug: portalSlug,
         teachers,
         allocations,
         students,
@@ -1301,10 +1331,27 @@ async function pullStaffGradesFromWebsite() {
     if (row && row.value) since = row.value.trim();
   } catch (_) {}
 
-  const url = `${websiteUrl}/api/sync/staff/pull?schoolCloudId=${encodeURIComponent(schoolId)}${since ? `&since=${encodeURIComponent(since)}` : ""}`;
+  let portalSlug = "";
+  try {
+    const slugRow = db.prepare("SELECT value FROM app_settings WHERE key = 'portal_slug'").get();
+    if (slugRow?.value) portalSlug = slugRow.value;
+  } catch (_) {}
+  if (!portalSlug) {
+    try {
+      const sRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_slug'").get();
+      if (sRow?.value) portalSlug = sRow.value;
+    } catch (_) {}
+  }
+
+  const url = `${websiteUrl}/api/sync/staff/pull?schoolCloudId=${encodeURIComponent(schoolId)}${portalSlug ? `&slug=${encodeURIComponent(portalSlug)}` : ""}${since ? `&since=${encodeURIComponent(since)}` : ""}`;
 
   try {
-    const res = await fetch(url, { headers: { "x-sync-token": syncToken } });
+    const res = await fetch(url, {
+      headers: {
+        "x-sync-token": syncToken,
+        "x-nexus-sync-token": syncToken,
+      },
+    });
     if (!res.ok) {
       const errText = await res.text().catch(() => res.statusText);
       console.warn(`[Sync Worker] pullStaffGradesFromWebsite HTTP ${res.status}: ${errText}`);
@@ -1580,6 +1627,37 @@ async function pullStaffGradesFromWebsite() {
         }
       } catch (err) {
         console.warn('[Sync Worker] Failed to reconcile teacher allocations:', err.message);
+      }
+    }
+
+    // ── 5.5. Reconcile administrator accounts (Super Admins & Principal) ────
+    if (Array.isArray(data.admins) && data.admins.length > 0) {
+      try {
+        const primaryAdmin = db.prepare("SELECT secret_hash, auth_type FROM admin_users WHERE role_level = 9 ORDER BY id ASC LIMIT 1").get();
+        const fallbackHash = primaryAdmin?.secret_hash || '';
+        const fallbackAuth = primaryAdmin?.auth_type || 'pin';
+
+        const upsertAdmin = db.prepare(`
+          INSERT INTO admin_users (username, secret_hash, auth_type, role_level, recovery_email)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(username) DO UPDATE SET
+            role_level = excluded.role_level,
+            recovery_email = COALESCE(excluded.recovery_email, admin_users.recovery_email)
+        `);
+
+        for (const admin of data.admins) {
+          const cleanUser = (admin.username || '').trim().toLowerCase();
+          if (!cleanUser) continue;
+          upsertAdmin.run(
+            cleanUser,
+            fallbackHash,
+            fallbackAuth,
+            admin.role_level || (admin.role === 'principal' ? 7 : 9),
+            admin.email || null
+          );
+        }
+      } catch (adminErr) {
+        console.warn('[Sync Worker] Failed to reconcile admin accounts:', adminErr.message);
       }
     }
 
@@ -2010,11 +2088,25 @@ async function dispatchSyncPackage(payload, options = {}) {
     syncToken = process.env.SCHOOL_WEBSITE_SYNC_TOKEN || getSyncToken(db);
   }
 
+  let portalSlug = "";
+  try {
+    const slugRow = db.prepare("SELECT value FROM app_settings WHERE key = 'portal_slug'").get();
+    if (slugRow?.value) portalSlug = slugRow.value;
+  } catch (_) {}
+  if (!portalSlug) {
+    try {
+      const sRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_slug'").get();
+      if (sRow?.value) portalSlug = sRow.value;
+    } catch (_) {}
+  }
+
   const dryRun = Boolean(options.dryRun);
   const targetEndpoint = `${websiteUrl}/api/sync/package`;
 
   const bodyData = {
     schoolCloudId: schoolId,
+    slug: portalSlug,
+    portal_slug: portalSlug,
     dryRun,
     modules: payload?.modules || {},
   };
@@ -2024,6 +2116,7 @@ async function dispatchSyncPackage(payload, options = {}) {
     headers: {
       "Content-Type": "application/json",
       "x-sync-token": syncToken,
+      "x-nexus-sync-token": syncToken,
     },
     body: JSON.stringify(bodyData),
   });
@@ -2494,19 +2587,34 @@ async function pullWebsiteBinding(force = false) {
     } catch (_) {}
   }
 
-  // Check candidate portals: env override, local dev (3005), and production root domain
+  let portalSlug = "";
+  try {
+    const slugRow = db.prepare("SELECT value FROM app_settings WHERE key = 'portal_slug'").get();
+    if (slugRow?.value) portalSlug = slugRow.value;
+  } catch (_) {}
+  if (!portalSlug) {
+    try {
+      const sRow = db.prepare("SELECT value FROM app_settings WHERE key = 'school_slug'").get();
+      if (sRow?.value) portalSlug = sRow.value;
+    } catch (_) {}
+  }
+
+  // Check candidate portals: env override, local dev (3005), school subdomain, and production root
   let candidateBases = [];
   if (process.env.SCHOOL_WEBSITE_URL) {
     candidateBases.push(process.env.SCHOOL_WEBSITE_URL.trim().replace(/\/+$/, ""));
   }
   candidateBases.push("http://localhost:3005");
+  if (portalSlug) {
+    candidateBases.push(`https://${portalSlug}.nexusos.com.ng`);
+  }
   candidateBases.push("https://crestmont.nexusos.com.ng");
 
   let boundData = null;
 
   for (const base of candidateBases) {
     try {
-      const endpoint = `${base}/api/sync/binding?school_cloud_id=${encodeURIComponent(schoolId)}`;
+      const endpoint = `${base}/api/sync/binding?school_cloud_id=${encodeURIComponent(schoolId)}${portalSlug ? `&slug=${encodeURIComponent(portalSlug)}` : ''}`;
       const res = await fetch(endpoint, {
         method: "GET",
         headers: { "Content-Type": "application/json" },

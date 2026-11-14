@@ -911,6 +911,7 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
 
     const syncToken  = bootstrapData.license_token;
     const cloudId    = bootstrapData.sync_meta?.school_cloud_id ?? '';
+    const portalSlug = bootstrapData.sync_meta?.portal_slug ?? slug;
     let websiteUrl   = process.env.SCHOOL_WEBSITE_URL;
     if (!websiteUrl) {
         if (successfulBase.includes('localhost') || successfulBase.includes('127.0.0.1')) {
@@ -920,7 +921,10 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
         }
     }
 
-    const syncHeaders = { 'x-nexus-sync-token': syncToken };
+    const syncHeaders = {
+        'x-nexus-sync-token': syncToken,
+        'x-sync-token': syncToken,
+    };
 
     // ── 1b. Purge local placeholder data before cloud hydration ──────────────
     // Factory-default classes/students/fees must be cleared so the cloud-specific
@@ -945,11 +949,12 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
     }
 
     let seededClasses = 0, seededTeachers = 0, seededStudents = 0;
+    let cloudAdmins = [];
 
     // ── 2 & 3. Classes ────────────────────────────────────────────────────────
     try {
         const classRes = await fetch(
-            `${websiteUrl}/api/sync/classes?school_cloud_id=${encodeURIComponent(cloudId)}`,
+            `${websiteUrl}/api/sync/classes?school_cloud_id=${encodeURIComponent(cloudId)}&slug=${encodeURIComponent(portalSlug)}`,
             { headers: syncHeaders, signal: AbortSignal.timeout(12000) }
         );
         const classData = await classRes.json();
@@ -983,12 +988,13 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
     // ── 4 & 5. Teachers + allocations ─────────────────────────────────────────
     try {
         const staffRes = await fetch(
-            `${websiteUrl}/api/sync/staff/pull?schoolCloudId=${encodeURIComponent(cloudId)}`,
+            `${websiteUrl}/api/sync/staff/pull?schoolCloudId=${encodeURIComponent(cloudId)}&slug=${encodeURIComponent(portalSlug)}`,
             { headers: syncHeaders, signal: AbortSignal.timeout(12000) }
         );
         const staffData = await staffRes.json();
         const cloudTeachers   = staffData.teachers   || [];
         const cloudAllocations = staffData.allocations || [];
+        cloudAdmins = staffData.admins || [];
 
         const insertTeacher = db.prepare(
             'INSERT OR IGNORE INTO teachers (id, name, phone, email) VALUES (?, ?, ?, ?)'
@@ -1026,7 +1032,7 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
         }
 
         const stuRes = await fetch(
-            `${websiteUrl}/api/sync/students?school_cloud_id=${encodeURIComponent(cloudId)}`,
+            `${websiteUrl}/api/sync/students?school_cloud_id=${encodeURIComponent(cloudId)}&slug=${encodeURIComponent(portalSlug)}`,
             { headers: syncHeaders, signal: AbortSignal.timeout(12000) }
         );
         const stuData = await stuRes.json();
@@ -1055,7 +1061,7 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
     let seededFees = 0;
     try {
         const feeRes = await fetch(
-            `${websiteUrl}/api/sync/fees?school_cloud_id=${encodeURIComponent(cloudId)}`,
+            `${websiteUrl}/api/sync/fees?school_cloud_id=${encodeURIComponent(cloudId)}&slug=${encodeURIComponent(portalSlug)}`,
             { headers: syncHeaders, signal: AbortSignal.timeout(12000) }
         );
         const feeData = await feeRes.json();
@@ -1142,6 +1148,28 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
                 auth_type = excluded.auth_type
         `).run(username, secretHash, chosenAuthType);
         console.log(`[CloudConnect] ✅ Admin user "${username}" created/updated with auth_type="${chosenAuthType}".`);
+
+        if (Array.isArray(cloudAdmins) && cloudAdmins.length > 0) {
+            const insertAdminAccount = db.prepare(`
+                INSERT INTO admin_users (username, secret_hash, auth_type, role_level, recovery_email)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(username) DO UPDATE SET
+                    role_level = excluded.role_level,
+                    recovery_email = COALESCE(excluded.recovery_email, admin_users.recovery_email)
+            `);
+            for (const admin of cloudAdmins) {
+                const cleanUser = (admin.username || '').trim().toLowerCase();
+                if (!cleanUser || cleanUser === username.toLowerCase()) continue;
+                insertAdminAccount.run(
+                    cleanUser,
+                    secretHash,
+                    chosenAuthType,
+                    admin.role_level || (admin.role === 'principal' ? 7 : 9),
+                    admin.email || null
+                );
+            }
+            console.log(`[CloudConnect] ✅ Seeded ${cloudAdmins.length} additional administrator accounts.`);
+        }
     } catch (err) {
         console.error('[CloudConnect] ❌ Admin user creation failed:', err.message);
         return { ok: false, reason: 'admin_create_failed', message: err.message };
@@ -1154,7 +1182,7 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
 
     try {
         const bindRes = await fetch(
-            `${websiteUrl}/api/sync/binding?school_cloud_id=${encodeURIComponent(cloudId)}`,
+            `${websiteUrl}/api/sync/binding?school_cloud_id=${encodeURIComponent(cloudId)}&slug=${encodeURIComponent(portalSlug)}`,
             { signal: AbortSignal.timeout(8000) }
         );
         bindData = await bindRes.json();
@@ -1162,6 +1190,20 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
             if (bindData.schoolName) resolvedSchoolName = bindData.schoolName;
             if (bindData.logoUrl) resolvedLogoUrl = bindData.logoUrl;
             console.log(`[CloudConnect] ✅ Cloud binding resolved: "${resolvedSchoolName}"`);
+
+            // Seed academic session & term from onboarding data
+            const cloudSession = bindData.academicSession || '2026/2027';
+            const cloudTerm = bindData.termName || 'First Term';
+            try {
+                db.prepare(`
+                    UPDATE school_term_config SET academic_session = ?, term = ? WHERE id = 1
+                `).run(cloudSession, cloudTerm);
+                db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('current_academic_session', ?)").run(cloudSession);
+                db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('current_term', ?)").run(cloudTerm);
+                console.log(`[CloudConnect] ✅ Term config set to ${cloudSession} / ${cloudTerm}`);
+            } catch (termErr) {
+                console.warn('[CloudConnect] ⚠️ Term config update failed (non-fatal):', termErr.message);
+            }
         }
     } catch (bindErr) {
         console.warn('[CloudConnect] ⚠️ Binding fetch failed (using bootstrap fallback):', bindErr.message);
