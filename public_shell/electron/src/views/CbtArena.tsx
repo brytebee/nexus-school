@@ -39,7 +39,8 @@ async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 const splitClass = (selected: string, configs: { hierarchy_class: string }[]) => {
-  const sorted = [...configs].sort((a, b) => b.hierarchy_class.length - a.hierarchy_class.length);
+  const safeConfigs = Array.isArray(configs) ? configs : [];
+  const sorted = [...safeConfigs].sort((a, b) => b.hierarchy_class.length - a.hierarchy_class.length);
   for (const conf of sorted) {
     const prefix = conf.hierarchy_class;
     if (selected === prefix) {

@@ -193,7 +193,7 @@ export function NexusPulse() {
     if (window.electronAPI?.invoke) {
       try {
         const msgs = await window.electronAPI.invoke('pulse-inbox:get-messages');
-        setMessages(msgs || []);
+        setMessages(Array.isArray(msgs) ? msgs : []);
       } catch (err) {
         console.error('Failed to fetch inbox messages:', err);
       }

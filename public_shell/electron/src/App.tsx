@@ -522,7 +522,7 @@ function App() {
 
           {/* View container */}
           <div className="view active">
-            <ViewErrorBoundary onReset={() => navigateTo('dashboard', true)}>
+            <ViewErrorBoundary key={activeTab} onReset={() => navigateTo('dashboard', true)}>
               {renderActiveView()}
             </ViewErrorBoundary>
           </div>

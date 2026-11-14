@@ -18,15 +18,16 @@ export function useClassArms() {
       const api = (window as any).electronAPI;
       if (api?.classes?.getAll) {
         const allConfigs = await api.classes.getAll();
-        setConfigs(allConfigs);
+        const safeConfigs = Array.isArray(allConfigs) ? allConfigs : [];
+        setConfigs(safeConfigs);
 
         if (api?.classes?.getFullList) {
           const list = await api.classes.getFullList();
-          setFullList(list);
+          setFullList(Array.isArray(list) ? list : []);
         } else {
           // Fallback construction in case getFullList is missing
           const list: string[] = [];
-          allConfigs.forEach((c: ClassConfig) => {
+          safeConfigs.forEach((c: ClassConfig) => {
             if (c.arms && c.arms.length > 0) {
               c.arms.forEach(a => list.push(`${c.hierarchy_class} ${a}`));
             } else {

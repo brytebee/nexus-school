@@ -84,7 +84,8 @@ const Lbl: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 );
 
 const splitClass = (selected: string, configs: { hierarchy_class: string }[]) => {
-  const sorted = [...configs].sort((a, b) => b.hierarchy_class.length - a.hierarchy_class.length);
+  const safeConfigs = Array.isArray(configs) ? configs : [];
+  const sorted = [...safeConfigs].sort((a, b) => b.hierarchy_class.length - a.hierarchy_class.length);
   for (const conf of sorted) {
     const prefix = conf.hierarchy_class;
     if (selected === prefix) {
@@ -186,7 +187,7 @@ export function FinancialHub() {
   const { exportTablePdf, exporting: exportingPdf } = useExportPdf();
 
   // Derived class list from useClassArms — includes arms (e.g. "JSS 1 Gold", "SSS 2 Science")
-  const uniqueClasses = useMemo(() => [...fullList].sort(), [fullList]);
+  const uniqueClasses = useMemo(() => Array.isArray(fullList) ? [...fullList].sort() : [], [fullList]);
 
   // ── Fee Structure ─────────────────────────────────────────────────────────
   const [structClass,   setStructClass]   = useState('');

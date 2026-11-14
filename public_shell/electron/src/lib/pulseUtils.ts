@@ -21,6 +21,7 @@
  * @returns {Array} ConversationThread[]
  */
 export function buildThreads(messages) {
+  if (!Array.isArray(messages)) return [];
   const map = {};
   const sorted = [...messages].sort(
     (a, b) => new Date(a.received_at).getTime() - new Date(b.received_at).getTime()
@@ -60,6 +61,7 @@ export function buildThreads(messages) {
  * @returns {Array}
  */
 export function filterUnread(messages) {
+  if (!Array.isArray(messages)) return [];
   return messages.filter(m => m.direction !== 'outgoing' && m.status === 'unread');
 }
 
@@ -71,6 +73,7 @@ export function filterUnread(messages) {
  * @returns {Object|null}
  */
 export function findLatestIncoming(messages) {
+  if (!Array.isArray(messages)) return null;
   return [...messages].reverse().find(m => m.direction !== 'outgoing') || null;
 }
 
@@ -146,6 +149,7 @@ export function autostartPersist(checked, storage, electronAPI) {
  * @returns {Array}
  */
 export function applyNewMessage(prev, newMsg) {
-  if (prev.some(m => m.id === newMsg.id)) return prev;
-  return [newMsg, ...prev];
+  const arr = Array.isArray(prev) ? prev : [];
+  if (arr.some(m => m.id === newMsg.id)) return arr;
+  return [newMsg, ...arr];
 }
