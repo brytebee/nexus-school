@@ -1,3 +1,21 @@
+## What's New in v1.2.02
+
+This release delivers **Onboarding Stability Fixes — First-Run Boot, Cloud Connect, and View Error Guards**.
+
+### 🚀 First-Run & Cloud Connect Boot Reliability
+- **First-Run Priority Boot**: Setup wizard screen now correctly takes priority over the licence lock screen on a completely fresh install (no `license.nexus` present).
+- **Cloud Connect Escape Hatch**: Lock screen now shows a **☁️ Connect Cloud School** button when a known school identity exists, allowing Cloud Connect without needing a local licence file first.
+- **In-Memory Licence Refresh**: After a successful Cloud Connect, the app's in-memory licence state is refreshed immediately from disk — the app no longer falls back to "Licence Required" after connecting.
+
+### 🛡️ View Error Guards (Array Safety)
+- **Financial Hub**: Fee Structures and Fee Adjustments tabs no longer crash with `be.filter is not a function` on a fresh database.
+- **CBT Arena**: Banks and Live Exam tabs no longer crash with `O.map is not a function` on a fresh database.
+- **Sovereign Portal**: IP interface list no longer crashes with `Cannot read properties of undefined (reading 'map')` when portal info is unavailable.
+
+> **Root cause:** All affected views used `data || []` to guard IPC-sourced state. This guard only protects against `null`/`undefined`; non-array objects (e.g. error envelopes returned from IPC handlers on empty tables) still caused `.filter()`/`.map()` crashes in the minified bundle. Fixed across all views with `Array.isArray(data) ? data : []`.
+
+---
+
 ## What's New in v1.2.01
 
 This release delivers **Manual Payment Reversal Hardening, Unique Parents Telemetry, and Cloud Sync Expansion**.
