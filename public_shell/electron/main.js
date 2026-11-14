@@ -9129,7 +9129,40 @@ function createWindow() {
 
   let bootFile = 'lock.html';
   let loadOptions = {};
-  if (licenseStatus.locked) {
+
+  // ── First-run detection (no admins exist yet) ──────────────────────────────
+  // Fresh installs or wiped installations must boot to StartupChoiceScreen (#firstRun).
+  // This allows connecting to cloud (which provisions license.nexus), starting fresh,
+  // or restoring from backup. Prioritising this avoids an impossible license lockout.
+  let isFirstRun = false;
+  try {
+    const db = database.getDb();
+    const adminCount = db.prepare('SELECT COUNT(*) as c FROM admin_users').get().c;
+    if (adminCount === 0) isFirstRun = true;
+  } catch (e) {
+    console.warn('[Boot] Admin count check failed (treating as first-run):', e.message);
+    isFirstRun = true;
+  }
+
+  if (process.env.DEV_AUTO_LOGIN === 'true') {
+    try {
+      const db = database.getDb();
+      const firstSuper = db.prepare('SELECT id, username, role_level FROM admin_users WHERE role_level = 9 LIMIT 1').get();
+      if (firstSuper) {
+        currentAdminSession = { id: firstSuper.id, username: firstSuper.username, role_level: firstSuper.role_level, loginAt: Date.now() };
+      } else {
+        currentAdminSession = { id: 1, username: 'developer', role_level: 9, loginAt: Date.now() };
+      }
+    } catch (_) {
+      currentAdminSession = { id: 1, username: 'developer', role_level: 9, loginAt: Date.now() };
+    }
+    console.log(`[Auth] DEV_AUTO_LOGIN active — skipping lock screen. Logged in as: ${currentAdminSession.username || 'Developer'} (ID: ${currentAdminSession.id})`);
+    bootFile = 'dist/renderer.html';
+  } else if (isFirstRun) {
+    bootFile = 'dist/renderer.html';
+    loadOptions = { hash: 'firstRun', query: { firstRun: '1' } };
+    console.log('[Boot] First-run detected — no admins exist. Loading StartupChoiceScreen.');
+  } else if (licenseStatus.locked) {
     let hash = 'default';
     if (licenseStatus.reason === 'no_license') {
       hash = 'invalid';
@@ -9147,41 +9180,9 @@ function createWindow() {
     bootFile = 'lock.html';
     loadOptions = { hash: hash };
     console.log(`[License] System is LOCKED due to ${licenseStatus.reason || 'restriction'}. Loading ${bootFile}#${hash}`);
-  } else if (process.env.DEV_AUTO_LOGIN === 'true') {
-    try {
-      const db = database.getDb();
-      const firstSuper = db.prepare('SELECT id, username, role_level FROM admin_users WHERE role_level = 9 LIMIT 1').get();
-      if (firstSuper) {
-        currentAdminSession = { id: firstSuper.id, username: firstSuper.username, role_level: firstSuper.role_level, loginAt: Date.now() };
-      } else {
-        currentAdminSession = { id: 1, username: 'developer', role_level: 9, loginAt: Date.now() };
-      }
-    } catch (_) {
-      currentAdminSession = { id: 1, username: 'developer', role_level: 9, loginAt: Date.now() };
-    }
-    console.log(`[Auth] DEV_AUTO_LOGIN active — skipping lock screen. Logged in as: ${currentAdminSession.username || 'Developer'} (ID: ${currentAdminSession.id})`);
-    bootFile = 'dist/renderer.html';
   } else {
-    // ── First-run detection: valid license but no admins created yet ───────────────
-    // Boot to the React AdminSetupScreen instead of the PIN login screen.
-    // Once the admin is created, the screen calls app:load-lock to continue.
-    try {
-      const db = database.getDb();
-      const adminCount = db.prepare('SELECT COUNT(*) as c FROM admin_users').get().c;
-      if (adminCount === 0) {
-        bootFile = 'dist/renderer.html';
-        loadOptions = { hash: 'firstRun' };
-        console.log('[Boot] First-run detected — no admins exist. Loading admin setup screen.');
-      }
-      // else: bootFile stays 'lock.html' — normal PIN login
-    } catch (e) {
-      // DB not initialised yet (fresh install) or table missing — always treat as first run.
-      // Showing the PIN lock screen here would be a dead end with no admin to log in with.
-      console.warn('[Boot] Admin count check failed (treating as first-run):', e.message);
-      bootFile = 'dist/renderer.html';
-      loadOptions = { hash: 'firstRun' };
-      console.log('[Boot] Defaulting to admin setup screen.');
-    }
+    // Normal PIN login
+    bootFile = 'lock.html';
   }
   mainWindow.loadFile(bootFile, loadOptions);
 
@@ -10919,6 +10920,13 @@ function createWindow() {
   // ── Load lock screen — called by AdminSetupScreen after first admin is created ──
   ipcMain.handle('app:load-lock', () => {
     if (mainWindow) mainWindow.loadFile('lock.html');
+  });
+
+  // ── Load first-run — escape hatch to StartupChoiceScreen from lock.html ─────
+  ipcMain.handle('app:load-first-run', () => {
+    if (mainWindow) {
+      mainWindow.loadFile('dist/renderer.html', { hash: 'firstRun', query: { firstRun: '1' } });
+    }
   });
 
 
