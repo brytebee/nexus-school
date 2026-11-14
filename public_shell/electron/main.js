@@ -1057,6 +1057,28 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
         console.warn('[CloudConnect] ⚠️ Students fetch failed:', err.message);
     }
 
+    // ── 6b-pre. Early Binding: resolve academic session BEFORE auto-billing ──
+    // Fetch binding now so school_term_config is correct before fee auto-billing.
+    // The full binding persist (logo, identity, etc.) still happens at step 7.5.
+    let earlyCloudSession = null;
+    let earlyCloudTerm = null;
+    try {
+        const earlyBindRes = await fetch(
+            `${websiteUrl}/api/sync/binding?school_cloud_id=${encodeURIComponent(cloudId)}&slug=${encodeURIComponent(portalSlug)}`,
+            { signal: AbortSignal.timeout(8000) }
+        );
+        const earlyBind = await earlyBindRes.json();
+        if (earlyBind?.ok && earlyBind.isBound && earlyBind.academicSession) {
+            earlyCloudSession = earlyBind.academicSession;
+            earlyCloudTerm    = earlyBind.termName || 'First Term';
+            db.prepare('UPDATE school_term_config SET academic_session = ?, term = ? WHERE id = 1')
+              .run(earlyCloudSession, earlyCloudTerm);
+            console.log(`[CloudConnect] ✅ Early term config set to ${earlyCloudSession} / ${earlyCloudTerm} (before auto-billing)`);
+        }
+    } catch (earlyBindErr) {
+        console.warn('[CloudConnect] ⚠️ Early binding fetch failed (non-fatal):', earlyBindErr.message);
+    }
+
     // ── 6b. Fee Structures ────────────────────────────────────────────────────
     let seededFees = 0;
     try {

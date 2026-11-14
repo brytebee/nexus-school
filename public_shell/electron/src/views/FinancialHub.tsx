@@ -2394,14 +2394,26 @@ export function FinancialHub() {
             <div className="ph-config-strip" style={{ display:'flex', gap:'14px', alignItems:'center', flexWrap:'wrap', padding:'14px 20px', flexShrink:0, background:'transparent', border:'none', borderRadius:0, marginBottom:0 }}>
               <div className="ph-config-group">
                 <Lbl>Session</Lbl>
-                <select id="fees-session-select" value={selectedSession} onChange={e => { setSelectedSession(e.target.value); sessionRef.current = e.target.value; }}
+                <select id="fees-session-select" value={selectedSession} onChange={e => {
+                    const newSession = e.target.value;
+                    setSelectedSession(newSession);
+                    sessionRef.current = newSession;
+                    setRosterPage(0);
+                    doLoadRoster(newSession, termRef.current, 0, searchQuery, statusFilter, classFilterRef.current);
+                  }}
                   className="modern-input" style={{ width:'130px', fontSize:'12px' }}>
                   {sessions.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
               <div className="ph-config-group">
                 <Lbl>Term</Lbl>
-                <select id="fees-term-select" value={selectedTerm} onChange={e => { setSelectedTerm(e.target.value); termRef.current = e.target.value; }}
+                <select id="fees-term-select" value={selectedTerm} onChange={e => {
+                    const newTerm = e.target.value;
+                    setSelectedTerm(newTerm);
+                    termRef.current = newTerm;
+                    setRosterPage(0);
+                    doLoadRoster(sessionRef.current, newTerm, 0, searchQuery, statusFilter, classFilterRef.current);
+                  }}
                   className="modern-input" style={{ width:'140px', fontSize:'12px' }}>
                   {termsList.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>

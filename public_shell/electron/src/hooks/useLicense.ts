@@ -39,18 +39,13 @@ export function useLicense() {
       if (window.nexusAPI?.getLicenseStatus) {
         const data = await window.nexusAPI.getLicenseStatus();
         if (data) {
-          // Atomically update license + release loading in one React batch.
           setLicense(data);
-          setLoading(false);
-          initialized.current = true;
         }
-        // No data → stay loading; onLicenseStatus push-update will resolve it.
+        setLoading(false);
+        initialized.current = true;
       }
-      // No API → stay loading; onLicenseStatus push-update will resolve it.
     } catch (err: any) {
       setError(err.message || 'Failed to fetch license status');
-      // Hard error: release loading — fail-closed default (locked) stays in
-      // place so the app never accidentally shows on an IPC failure.
       setLoading(false);
       initialized.current = true;
     }
@@ -68,6 +63,16 @@ export function useLicense() {
         initialized.current = true;
       });
     }
+
+    // Safety timeout: prevent indefinite dark-screen hang if IPC races or drops
+    const safetyTimer = setTimeout(() => {
+      if (!initialized.current) {
+        setLoading(false);
+        initialized.current = true;
+      }
+    }, 2500);
+
+    return () => clearTimeout(safetyTimer);
   }, []);
 
 

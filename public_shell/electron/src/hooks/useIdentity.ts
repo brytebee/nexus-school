@@ -90,6 +90,7 @@ export function useIdentity() {
         listeners.delete(onChange);
       };
     },
+    () => storeState,
     () => storeState
   );
 

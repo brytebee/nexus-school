@@ -29,6 +29,57 @@ import { SkillMastery } from "./views/SkillMastery";
 import UpdateBanner from "./components/UpdateBanner";
 import { VersionUpdateModal, type VersionUpdateInfo } from "./components/VersionUpdateModal";
 
+class ViewErrorBoundary extends React.Component<
+  { children: React.ReactNode; onReset: () => void },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: Error, errorInfo: any) {
+    console.error("[ViewErrorBoundary] View caught an error:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          padding: '40px',
+          color: '#ff6b6b',
+          textAlign: 'center',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100%'
+        }}>
+          <div style={{ fontSize: '48px', marginBottom: '16px' }}>⚠️</div>
+          <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#fff', marginBottom: '8px' }}>
+            View Error
+          </h2>
+          <p style={{ color: '#94a3b8', fontSize: '13px', maxWidth: '500px', marginBottom: '20px' }}>
+            {this.state.error?.message || 'An unexpected error occurred while loading this view.'}
+          </p>
+          <button
+            onClick={() => {
+              this.setState({ hasError: false, error: null });
+              this.props.onReset();
+            }}
+            className="primary-btn"
+            style={{ padding: '8px 20px', fontSize: '12px' }}
+          >
+            ← Return to Dashboard
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function App() {
   const [activeTab, setActiveTab] = useState<string>(() => {
     return localStorage.getItem("nexus_nav_activeTab") || "dashboard";
@@ -470,7 +521,11 @@ function App() {
           </div>
 
           {/* View container */}
-          <div className="view active">{renderActiveView()}</div>
+          <div className="view active">
+            <ViewErrorBoundary onReset={() => navigateTo('dashboard', true)}>
+              {renderActiveView()}
+            </ViewErrorBoundary>
+          </div>
         </main>
       </div>
 
