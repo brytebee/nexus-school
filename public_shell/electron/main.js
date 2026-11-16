@@ -1386,6 +1386,8 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
         email: bindData?.email || identityPacket.email || '',
         signature: bindData?.principalName || identityPacket.signature || '',
         principalSignBase64: principalSignBase64 || identityPacket.principalSignBase64,
+        stampStyle: bindData?.stamp_style || bootstrapData.school?.stamp_style || identityPacket.stampStyle || 'classic_round',
+        stampCustomColor: bindData?.stamp_custom_color || bootstrapData.school?.stamp_custom_color || identityPacket.stampCustomColor || '',
     };
 
     // Persist to app_settings
@@ -3552,7 +3554,7 @@ function startPaystackPollingWorker() {
     const db = database.getDb();
     // V2: Drain the pending emails queue
     try {
-      await resultDispatcher.processEmailQueue();
+      await resultDispatcher.processEmailQueue(db);
     } catch (err) {
       console.error("[Email Queue Poller] Error draining pending email queue:", err.message);
     }
@@ -8784,7 +8786,12 @@ ipcMain.handle("results:publish", async (event, { term, academicSession, student
     const NEXUS_API_SECRET = process.env.NEXUS_API_SECRET || "";
 
     // ── Step 1: Generate all student PDFs + upload to Cloudinary ──────────────
-    const baseDir = require("path").join(__dirname, "..");
+    let baseDir = path.join(__dirname, "../../private_engine");
+    if (!fs.existsSync(baseDir) || !fs.existsSync(path.join(baseDir, "assets", "templates"))) {
+      try {
+        baseDir = path.dirname(require.resolve("@nexus/engine"));
+      } catch (_) {}
+    }
     event.sender.send("publish:progress", { stage: "generating", message: "Stage 1/2: Preparing result PDFs & save-points…" });
 
     const { results, parentMap, skipped, total, cachedCount = 0 } =
@@ -8934,6 +8941,9 @@ function createWindow() {
 
     const betterSqlite3 = require("better-sqlite3");
     database.init(dbPath, betterSqlite3);
+    try {
+      require("../../private_engine/src/database").init(dbPath, betterSqlite3);
+    } catch (_) {}
     ensureIlsSchema(database.getDb());
     reconcileExistingStudentExtras(database.getDb());
     ensureAdvanceFeesSchema(database.getDb());

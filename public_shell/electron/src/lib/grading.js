@@ -15,7 +15,7 @@ function getGradeInfo(score, scale = defaultScale) {
   if (score === null || score === undefined || score === "") {
     return { grade: "", remark: "", bg: "transparent", color: "inherit" };
   }
-  const s     = Number(score) || 0;
+  const s     = Math.min(100, Math.max(0, Number(score) || 0));
   const entry = scale.find(e => s >= e.min && s <= e.max);
   if (!entry) return { grade: "F9", remark: "Fail", bg: "#fde8e8", color: "#c62828" };
   
