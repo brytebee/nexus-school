@@ -45,9 +45,9 @@ const receiptGenerator = require('./receipt-generator.js');
 const { generateTablePdf } = require('./table-pdf-generator.js');
 const resultDispatcher = (() => {
   try {
-    return require("@nexus/engine/src/result-dispatcher");
+    return require("../../private_engine/src/result-dispatcher");
   } catch (_) {
-    try { return require("../../private_engine/src/result-dispatcher"); } catch (__) {}
+    try { return require("@nexus/engine/src/result-dispatcher"); } catch (__) {}
   }
 })();
 
@@ -1049,11 +1049,31 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
         const cloudAllocations = staffData.allocations || [];
         cloudAdmins = staffData.admins || [];
 
-        const insertTeacher = db.prepare(
-            'INSERT OR IGNORE INTO teachers (id, name, phone, email) VALUES (?, ?, ?, ?)'
+        const upsertTeacher = db.prepare(
+            `INSERT INTO teachers (id, name, phone, email, signature)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               name      = excluded.name,
+               phone     = excluded.phone,
+               email     = excluded.email,
+               signature = COALESCE(excluded.signature, teachers.signature)`
         );
+        // Also ensure form_teachers row exists for teachers with a host class
+        let upsertFormTeacher = null;
+        try {
+            upsertFormTeacher = db.prepare(
+                `INSERT INTO form_teachers (class_name, teacher_id)
+                 VALUES (?, ?)
+                 ON CONFLICT(class_name) DO UPDATE SET teacher_id = excluded.teacher_id`
+            );
+        } catch (_) { /* table may not exist on older schema */ }
+
         for (const t of cloudTeachers) {
-            insertTeacher.run(t.teacherId || t.id, t.name, t.phone || null, t.email || null);
+            const tid = t.teacherId || t.id;
+            upsertTeacher.run(tid, t.name, t.phone || null, t.email || null, t.signature || null);
+            if (upsertFormTeacher && t.formClass) {
+                try { upsertFormTeacher.run(t.formClass, tid); } catch (_) {}
+            }
             seededTeachers++;
         }
 
@@ -1080,6 +1100,7 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
             "ALTER TABLE students ADD COLUMN parent_name TEXT DEFAULT NULL",
             "ALTER TABLE students ADD COLUMN parent_email TEXT DEFAULT NULL",
             "ALTER TABLE students ADD COLUMN address TEXT DEFAULT NULL",
+            "ALTER TABLE students ADD COLUMN photo TEXT DEFAULT NULL",
         ]) {
             try { db.exec(col); } catch (_) {}
         }
@@ -1091,17 +1112,25 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
         const stuData = await stuRes.json();
         const cloudStudents = stuData.students || [];
 
-        const insertStudent = db.prepare(
-            'INSERT OR IGNORE INTO students (id, name, class_name, class_arm, admission_no) VALUES (?, ?, ?, ?, ?)'
-        );
+        const upsertStudent = db.prepare(`
+            INSERT INTO students (id, name, class_name, class_arm, admission_no, photo)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                class_name = excluded.class_name,
+                class_arm = excluded.class_arm,
+                admission_no = excluded.admission_no,
+                photo = COALESCE(excluded.photo, students.photo)
+        `);
         for (const s of cloudStudents) {
             const fullClass = [s.className, s.classArm].filter(Boolean).join(' ');
-            insertStudent.run(
+            upsertStudent.run(
                 s.studentId || s.id,
                 s.name,
                 fullClass,
                 s.classArm || '',
-                s.admissionNo || ''
+                s.admissionNo || '',
+                s.photoUrl || s.photo || null
             );
             seededStudents++;
         }
@@ -4260,9 +4289,9 @@ ipcMain.handle("generateAdminQR", () => {
 });
 
 
-// ── Teacher Access Revocation ─────────────────────────────────────────────────
-// Lazily adds sync_revoked column if it doesn't exist yet (safe migration).
-function ensureSyncRevokedColumn() {
+// ── Teacher Access Revocation & Timestamp Tracking ────────────────────────────
+// Lazily adds sync_revoked and updated_at columns if they don't exist yet (safe migration).
+function ensureTeacherColumns() {
   try {
     const db = database.getDb();
     const cols = db.prepare("PRAGMA table_info(teachers)").all();
@@ -4270,9 +4299,16 @@ function ensureSyncRevokedColumn() {
       db.prepare("ALTER TABLE teachers ADD COLUMN sync_revoked INTEGER DEFAULT 0").run();
       console.log('[SyncHub] Added sync_revoked column to teachers table');
     }
+    if (!cols.some(c => c.name === 'updated_at')) {
+      db.prepare("ALTER TABLE teachers ADD COLUMN updated_at TEXT").run();
+      console.log('[SyncHub] Added updated_at column to teachers table');
+    }
   } catch (err) {
-    console.error('[SyncHub] ensureSyncRevokedColumn error:', err.message);
+    console.error('[SyncHub] ensureTeacherColumns error:', err.message);
   }
+}
+function ensureSyncRevokedColumn() {
+  ensureTeacherColumns();
 }
 
 ipcMain.handle("teacher:get-access-list", () => {
@@ -4506,11 +4542,13 @@ ipcMain.handle("update-teacher-full", (event, { id, name, phone, email, signatur
     if (email && !isValidEmail(email)) {
       return { ok: false, error: "Invalid email address format." };
     }
+    ensureTeacherColumns();
     const db = database.getDb();
+    const nowIso = new Date().toISOString();
     db.transaction(() => {
       db.prepare(
-        "UPDATE teachers SET name=@name, phone=@phone, email=@email, signature=@signature WHERE id=@id",
-      ).run({ id, name: name || "", phone: phone || "", email: email || "", signature: signature || null });
+        "UPDATE teachers SET name=@name, phone=@phone, email=@email, signature=@signature, updated_at=@updated_at WHERE id=@id",
+      ).run({ id, name: name || "", phone: phone || "", email: email || "", signature: signature || null, updated_at: nowIso });
       db.prepare("DELETE FROM teacher_allocations WHERE teacher_id = ?").run(id);
       if (allocations && allocations.length > 0) {
         const ins = db.prepare(
@@ -5796,7 +5834,7 @@ ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, 
         ${classClause}
     `).get(...countParams).total;
 
-    const rowParams = [academic_session, term, query, query, query, query, query, query, query, filter, filter];
+    const rowParams = [academic_session, term, academic_session, term, query, query, query, query, query, query, query, filter, filter];
     if (classNorm) rowParams.push(classNorm, classNorm);
     rowParams.push(limit, offset);
 
@@ -5812,6 +5850,13 @@ ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, 
         COALESCE(f.total_billed, 0)                              AS total_billed,
         COALESCE(f.total_paid,   0)                              AS total_paid,
         COALESCE(f.total_billed, 0) - COALESCE(f.total_paid, 0) AS balance,
+        (
+          SELECT COALESCE(SUM(pf.total_billed - pf.total_paid), 0)
+          FROM student_fees pf
+          WHERE pf.student_id = s.id
+            AND (pf.academic_session != ? OR pf.term != ?)
+            AND (pf.total_billed - pf.total_paid) > 0
+        )                                                        AS prior_balance,
         COALESCE(f.status,       'unpaid')                       AS status,
         COALESCE(f.next_due_date, '')                            AS next_due_date,
         COALESCE(f.updated_at,   '')                             AS updated_at
@@ -5848,12 +5893,20 @@ ipcMain.handle("fees:get-summary", (event, { academic_session, term, search = ""
       ? `AND (UPPER(replace(s.class_name, ' ', '')) = ? OR UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', '')) = ?)`
       : '';
 
-    const sumParams = [academic_session, term, query, query, query, query, query, query, query];
+    const sumParams = [academic_session, term, academic_session, term, query, query, query, query, query, query, query];
     if (classNorm) sumParams.push(classNorm, classNorm);
 
     const summary = db.prepare(`
       SELECT
         COALESCE(SUM(CASE WHEN COALESCE(f.total_billed, 0) > COALESCE(f.total_paid, 0) THEN COALESCE(f.total_billed, 0) - COALESCE(f.total_paid, 0) ELSE 0 END), 0) AS outstanding,
+        (
+          SELECT COALESCE(SUM(pf.total_billed - pf.total_paid), 0)
+          FROM student_fees pf
+          JOIN students ps ON ps.id = pf.student_id
+          WHERE COALESCE(ps.is_active, 1) = 1
+            AND (pf.academic_session != ? OR pf.term != ?)
+            AND (pf.total_billed - pf.total_paid) > 0
+        ) AS prior_outstanding,
         SUM(CASE WHEN COALESCE(f.total_billed, 0) <= COALESCE(f.total_paid, 0) AND COALESCE(f.total_billed, 0) > 0 THEN 1 ELSE 0 END) AS cleared,
         SUM(CASE WHEN COALESCE(f.total_paid, 0) > 0 AND COALESCE(f.total_billed, 0) > COALESCE(f.total_paid, 0) THEN 1 ELSE 0 END) AS partial,
         SUM(CASE WHEN COALESCE(f.total_paid, 0) = 0 AND COALESCE(f.total_billed, 0) > 0 THEN 1 ELSE 0 END) AS unpaid,

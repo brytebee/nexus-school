@@ -16,6 +16,7 @@ interface RosterRow {
   total_billed: number;
   total_paid: number;
   balance: number;
+  prior_balance?: number;
   status: 'cleared' | 'partial' | 'unpaid';
   next_due_date: string;
 }
@@ -231,7 +232,7 @@ export function FinancialHub() {
   const [rejectingR,   setRejectingR]   = useState(false);
 
   // ── Record Payment (Diamond) ──────────────────────────────────────────────
-  const [payStudent,   setPayStudent]   = useState<{ id: string; name: string; total_billed?: number; total_paid?: number; balance?: number }|null>(null);
+  const [payStudent,   setPayStudent]   = useState<{ id: string; name: string; total_billed?: number; total_paid?: number; balance?: number; prior_balance?: number }|null>(null);
   const [payAmount,    setPayAmount]    = useState('');
   const [payMethod,    setPayMethod]    = useState('cash');
   const [payRef,       setPayRef]       = useState('');
@@ -2553,7 +2554,14 @@ export function FinancialHub() {
                           {/* Amount Paid */}
                           <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'13px', color:'#4CAF50' }}>₦{fmt(paid)}</td>
                           {/* Balance */}
-                          <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'13px', color: bal>0 ? '#FF5252' : '#4CAF50' }}>₦{fmt(bal)}</td>
+                          <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'13px', color: bal>0 ? '#FF5252' : '#4CAF50' }}>
+                            <div>₦{fmt(bal)}</div>
+                            {Number(row.prior_balance) > 0 && (
+                              <div style={{ fontSize:'10px', color:'#F59E0B', fontWeight:600 }} title="Prior term arrears">
+                                +₦{fmt(Number(row.prior_balance))} prior
+                              </div>
+                            )}
+                          </td>
                           {/* Status */}
                           <td style={{ textAlign:'center' }}>
                             <span style={{ display:'inline-block', padding:'3px 10px', borderRadius:'12px', fontSize:'11px', fontWeight:600, background:sc.bg, color:sc.color }}>{sc.label}</span>
@@ -2562,7 +2570,7 @@ export function FinancialHub() {
                           <td style={{ textAlign:'center', fontSize:'12px' }}>{fmtDate(due as string)}</td>
                           {/* Actions */}
                           <td style={{ textAlign:'center', whiteSpace:'nowrap' }} onClick={e => e.stopPropagation()}>
-                            <button onClick={() => { setPayStudent({id:row.student_id, name:row.name, total_billed: row.total_billed, total_paid: row.total_paid, balance: bal}); setPayAmount(''); setPayRef(''); setPayNote(''); setPayMethod('cash'); setHoldAdvanceExcess(true); }} className="small-btn btn-record-payment" style={{ fontSize:'11px', padding:'4px 10px', marginRight:'4px', background:'rgba(0,229,255,0.08)', color:'var(--accent)', borderColor:'rgba(0,229,255,0.3)' }}>+Pay</button>
+                            <button onClick={() => { setPayStudent({id:row.student_id, name:row.name, total_billed: row.total_billed, total_paid: row.total_paid, balance: bal, prior_balance: row.prior_balance || 0}); setPayAmount(''); setPayRef(''); setPayNote(''); setPayMethod('cash'); setHoldAdvanceExcess(true); }} className="small-btn btn-record-payment" style={{ fontSize:'11px', padding:'4px 10px', marginRight:'4px', background:'rgba(0,229,255,0.08)', color:'var(--accent)', borderColor:'rgba(0,229,255,0.3)' }}>+Pay</button>
                             <button onClick={() => openLedger(row.student_id, row.name)} className="small-btn btn-view-ledger" style={{ fontSize:'11px', padding:'4px 10px', background:'rgba(255,255,255,0.05)', color:'var(--text-dim)', borderColor:'var(--glass-border)' }}>Ledger</button>
                           </td>
                           {/* Expand chevron */}
@@ -4185,7 +4193,12 @@ export function FinancialHub() {
         <div id="modal-record-payment" style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', backdropFilter:'blur(6px)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}>
           <div style={{ background:'var(--bg-panel)', border:'1px solid var(--glass-border)', borderRadius:'16px', padding:'28px 32px', width:'440px', maxWidth:'92vw' }}>
             <h3 style={{ marginBottom:'4px', fontSize:'16px' }}>Record Payment</h3>
-            <p id="payment-modal-student-name" style={{ fontSize:'12px', color:'var(--text-dim)', marginBottom:'20px' }}>Student: {payStudent.name}</p>
+            <p id="payment-modal-student-name" style={{ fontSize:'12px', color:'var(--text-dim)', marginBottom: payStudent.prior_balance ? '8px' : '20px' }}>Student: {payStudent.name}</p>
+            {Number(payStudent.prior_balance) > 0 && (
+              <div style={{ background:'rgba(245, 158, 11, 0.1)', border:'1px solid rgba(245, 158, 11, 0.3)', borderRadius:'8px', padding:'8px 12px', marginBottom:'16px', fontSize:'11.5px', color:'#F59E0B' }}>
+                ⚠️ <strong>Prior Balance:</strong> ₦{fmt(Number(payStudent.prior_balance))} outstanding from previous terms is not included in current term billing.
+              </div>
+            )}
             <input type="hidden" id="payment-student-id" value={payStudent.id} />
             <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
               <div><Lbl>Amount Paid (₦)</Lbl><input type="number" id="payment-amount" placeholder="e.g. 50000" min={1} value={payAmount} onChange={e => setPayAmount(e.target.value)} className="modern-input" style={{ width:'100%' }} /></div>

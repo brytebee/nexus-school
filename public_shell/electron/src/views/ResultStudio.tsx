@@ -226,7 +226,13 @@ export function ResultStudio() {
       if (cfg?.template) {
         setTemplate(cfg.template);
       }
-      if (cfg?.term) setCurrentTerm(cfg.term);
+      if (cfg?.academic_session) {
+        setSelectedSession(cfg.academic_session);
+      }
+      if (cfg?.term) {
+        setSelectedTerm(cfg.term);
+        setCurrentTerm(cfg.term);
+      }
 
       const meta = await window.electronAPI.getUniqueMetadata();
       if (meta) {

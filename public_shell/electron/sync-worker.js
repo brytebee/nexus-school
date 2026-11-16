@@ -1163,7 +1163,8 @@ async function pushStaffRosterToWebsite() {
       teachers = db.prepare(`
         SELECT t.id, t.name, t.email, t.phone, t.password_hash,
                COALESCE(t.is_active, 1) as is_active,
-               f.class_name as form_class
+               f.class_name as form_class,
+               COALESCE(t.updated_at, '') as updated_at
         FROM teachers t
         LEFT JOIN form_teachers f ON f.teacher_id = t.id
       `).all();
