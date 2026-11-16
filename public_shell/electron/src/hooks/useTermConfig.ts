@@ -7,6 +7,7 @@ export interface TermConfigState {
   termsList: string[];
   sessionsList: string[];
   periodLabel: string;
+  config: any;
   loading: boolean;
   reload: () => Promise<void>;
 }
@@ -18,6 +19,7 @@ export function useTermConfig(): TermConfigState {
   const [term, setTerm] = useState<string>('First Term');
   const [termsList, setTermsList] = useState<string[]>(DEFAULT_TERMS);
   const [periodLabel, setPeriodLabel] = useState<string>('term');
+  const [config, setConfig] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
   const reload = useCallback(async () => {
@@ -30,6 +32,7 @@ export function useTermConfig(): TermConfigState {
       if (api.getTermConfig) {
         const cfg = await api.getTermConfig();
         if (cfg) {
+          setConfig(cfg);
           if (cfg.academic_session) setSession(cfg.academic_session);
           if (cfg.term) setTerm(cfg.term);
         }
@@ -73,6 +76,7 @@ export function useTermConfig(): TermConfigState {
     termsList,
     sessionsList,
     periodLabel,
+    config,
     loading,
     reload
   };

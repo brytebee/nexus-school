@@ -1275,6 +1275,33 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
                 `).run(cloudSession, cloudTerm);
                 db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('current_academic_session', ?)").run(cloudSession);
                 db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('current_term', ?)").run(cloudTerm);
+
+                // Phase 17: Ensure default term calendar dates if empty so setupChain is satisfied
+                const existingDates = db.prepare("SELECT term_start_date, term_end_date, resumption_date FROM school_term_config WHERE id = 1").get();
+                if (!existingDates?.term_start_date || !existingDates?.term_end_date || !existingDates?.resumption_date) {
+                    const sYear = parseInt(cloudSession.split('/')[0], 10) || 2026;
+                    const eYear = parseInt(cloudSession.split('/')[1], 10) || (sYear + 1);
+                    let defStart = `${sYear}-09-08`;
+                    let defEnd = `${sYear}-12-15`;
+                    let defResump = `${eYear}-01-05`;
+                    if (cloudTerm.includes('Second')) {
+                        defStart = `${eYear}-01-08`;
+                        defEnd = `${eYear}-04-05`;
+                        defResump = `${eYear}-04-26`;
+                    } else if (cloudTerm.includes('Third')) {
+                        defStart = `${eYear}-05-02`;
+                        defEnd = `${eYear}-07-25`;
+                        defResump = `${eYear}-09-08`;
+                    }
+                    db.prepare(`
+                        UPDATE school_term_config 
+                        SET term_start_date = COALESCE(NULLIF(term_start_date, ''), ?),
+                            term_end_date   = COALESCE(NULLIF(term_end_date, ''), ?),
+                            resumption_date = COALESCE(NULLIF(resumption_date, ''), ?)
+                        WHERE id = 1
+                    `).run(defStart, defEnd, defResump);
+                }
+
                 console.log(`[CloudConnect] ✅ Term config set to ${cloudSession} / ${cloudTerm}`);
             } catch (termErr) {
                 console.warn('[CloudConnect] ⚠️ Term config update failed (non-fatal):', termErr.message);
@@ -6030,6 +6057,45 @@ ipcMain.handle("fees:record-payment", async (event, { student_id, academic_sessi
       }
     }
 
+    // Strategy C: Asynchronous non-blocking fee clearance sync to cloud portal
+    setImmediate(async () => {
+      try {
+        let identity = {};
+        try { identity = JSON.parse(fs.readFileSync(identityFilePath, "utf8")); } catch (_) {}
+        const slug = identity.portalSlug;
+        if (slug) {
+          const { total_paid } = db.prepare(`
+            SELECT COALESCE(SUM(amount), 0) AS total_paid FROM fee_transactions
+            WHERE student_id = ? AND academic_session = ? AND term = ?
+          `).get(student_id, academic_session, term) || { total_paid: 0 };
+          const existing = db.prepare(`
+            SELECT COALESCE(total_billed, 0) AS total_billed FROM student_fees
+            WHERE student_id = ? AND academic_session = ? AND term = ?
+          `).get(student_id, academic_session, term) || { total_billed: 0 };
+          const isCleared = (existing.total_billed > 0 && total_paid >= existing.total_billed);
+
+          const NEXUS_API = process.env.NEXUS_API_URL || "https://api.nexusos.com.ng";
+          const NEXUS_API_SECRET = process.env.NEXUS_API_SECRET || "";
+          const termKey = `${term} ${academic_session}`;
+          await fetch(`${NEXUS_API}/api/schools/${slug}/results/fee-status`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "x-nexus-secret": NEXUS_API_SECRET
+            },
+            body: JSON.stringify({
+              studentId: student_id,
+              termKey,
+              feeCleared: isCleared
+            }),
+            signal: AbortSignal.timeout(10_000)
+          });
+        }
+      } catch (e) {
+        console.warn("[Fees] Background fee-status portal sync skipped:", e.message);
+      }
+    });
+
     return { ok: true };
   } catch (err) {
     console.error("[Fees] record-payment error:", err);
@@ -7314,11 +7380,7 @@ ipcMain.handle("get-student-attendance-report", async (event, { student_id }) =>
 // ── V2: Query Results (dynamic scope filtering) ───────────────────────────────
 ipcMain.handle("query-results", (event, { scope, session, term, class_name, subject, teacher_id, student_id }) => {
   console.log(`[Diagnostic] query-results: scope=${scope}, session=${session}, term=${term}`);
-  // ── Silver / Standalone plan: only 'all' scope permitted ──────────────────
-  const _qrTier = licenseStatus?.tier || 'Silver';
-  if ((_qrTier === 'Silver' || _qrTier === 'Standalone') && scope && scope !== 'all') {
-    return { ok: false, error: 'Generating individual, class, or subject reports requires a Gold or Diamond plan. Contact your Nexus Partner to upgrade.', results: [] };
-  }
+  // Phase 3 & 17: All scope filters (all, class, student, subject, teacher) unlocked for all plans
   try {
     const db = database.getDb();
 
@@ -7358,7 +7420,8 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
     if (scope === "student" && student_id) {
       students = db.prepare(`SELECT * FROM students WHERE id = ? AND ${_activeGuard}`).all(student_id);
     } else if (scope === "class" && class_name) {
-      students = db.prepare(`SELECT * FROM students WHERE UPPER(replace(class_name || COALESCE(' ' || NULLIF(class_arm, ''), ''), ' ', '')) = ? AND ${_activeGuard} ORDER BY name ASC`).all(class_name.replace(/\s+/g, '').toUpperCase());
+      const cleanClass = class_name.replace(/\s+/g, '').toUpperCase();
+      students = db.prepare(`SELECT * FROM students WHERE (UPPER(replace(class_name, ' ', '')) = ? OR UPPER(replace(class_name || COALESCE(' ' || NULLIF(class_arm, ''), ''), ' ', '')) = ?) AND ${_activeGuard} ORDER BY name ASC`).all(cleanClass, cleanClass);
     } else if (scope === "teacher" && teacher_id) {
       students = db.prepare(`
         SELECT DISTINCT s.* FROM students s
@@ -8289,14 +8352,7 @@ console.log("[Electron] Registering generate-reports handler...");
 ipcMain.handle("generate-reports", async (event, payload) => {
   const { termConfig, reportType = "terminal", format = "pdf" } = payload || {};
   let tempDir = "";
-  // ── Standalone scope lock: Standalone schools may only generate reports for the entire school ──
-  const _grTier = licenseStatus?.tier || 'Standalone';
-  if (_grTier === 'Standalone') {
-    const _reqScope = payload?.scope;
-    if (_reqScope && _reqScope !== 'all') {
-      return { ok: false, error: 'Standalone plan is restricted to whole-school report generation. Per-class and per-teacher scoping requires a Gold or Diamond plan.' };
-    }
-  }
+  // Phase 3 & 17: Report generation scoping unlocked for all tiers
   // Keep display awake for the duration of report generation
   const sleepBlockerId = powerSaveBlocker.start('prevent-display-sleep');
   try {
@@ -8676,41 +8732,57 @@ ipcMain.handle("results:publish", async (event, { term, academicSession, student
 
     // ── Step 1: Generate all student PDFs + upload to Cloudinary ──────────────
     const baseDir = require("path").join(__dirname, "..");
-    event.sender.send("publish:progress", { stage: "generating", message: "Generating result PDFs…" });
+    event.sender.send("publish:progress", { stage: "generating", message: "Stage 1/2: Preparing result PDFs & save-points…" });
 
-    const { results, parentMap, skipped, total } =
+    const { results, parentMap, skipped, total, cachedCount = 0 } =
       await resultDispatcher.compileBatchAndUpload(db, term, academicSession, baseDir, studentIds);
 
-    if (results.length === 0 && total === 0) {
-      return { ok: false, error: `No students with results found for ${term} ${academicSession}. Ensure scores have been entered for this term.` };
+    if (results.length === 0) {
+      return { 
+        ok: false, 
+        error: total === 0 
+          ? `No students with results found for ${term} ${academicSession}. Ensure scores have been entered for this term.`
+          : `Failed to compile result PDFs for all ${total} student(s). Check application logs for details.` 
+      };
     }
 
+    const cacheNote = cachedCount > 0 ? ` (${cachedCount} reused from cache)` : "";
     event.sender.send("publish:progress", {
       stage:   "uploading",
-      message: `Uploaded ${results.length} of ${total} PDFs (${skipped} skipped). Publishing to portal…`,
+      message: `Stage 2/2: Registering ${results.length} results${cacheNote} with portal API…`,
     });
 
     // ── Step 2: POST to nexus-api (publish terms + PDF URLs + parentMap) ───────
-    const res = await fetch(
-      `${NEXUS_API}/api/schools/${slug}/results/published-terms`,
-      {
-        method:  "POST",
-        headers: {
-          "Content-Type":   "application/json",
-          "x-nexus-secret": NEXUS_API_SECRET,
-        },
-        body: JSON.stringify({
-          schoolId:        identity.schoolId || slug,
-          schoolName:      identity.name,
-          themePrimary:    identity.themePrimary,
-          term,
-          academicSession,
-          parentMap,
-          results,
-        }),
-        signal: AbortSignal.timeout(60_000),
-      }
-    );
+    let res;
+    try {
+      res = await fetch(
+        `${NEXUS_API}/api/schools/${slug}/results/published-terms`,
+        {
+          method:  "POST",
+          headers: {
+            "Content-Type":   "application/json",
+            "x-nexus-secret": NEXUS_API_SECRET,
+          },
+          body: JSON.stringify({
+            schoolId:        identity.schoolId || slug,
+            schoolName:      identity.name,
+            themePrimary:    identity.themePrimary,
+            term,
+            academicSession,
+            parentMap,
+            results,
+          }),
+          signal: AbortSignal.timeout(60_000),
+        }
+      );
+    } catch (fetchErr) {
+      console.error("[results:publish] Cloud POST failed:", fetchErr);
+      const isConnRefused = fetchErr.message?.includes("fetch failed") || fetchErr.cause?.code === "ECONNREFUSED";
+      const userMsg = isConnRefused
+        ? `Could not connect to central API (${NEXUS_API}). Ensure the server is online.`
+        : `Network error publishing results: ${fetchErr.message}`;
+      return { ok: false, error: userMsg };
+    }
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {

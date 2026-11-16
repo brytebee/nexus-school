@@ -43,10 +43,16 @@ const PAID_TEMPLATES = [
   "apex",
 ];
 
+const formatStudentClass = (className?: string, classArm?: string): string => {
+  if (!className) return '';
+  if (!classArm) return className;
+  return className.includes(classArm) ? className : `${className} ${classArm}`;
+};
+
 export function ResultStudio() {
   const { license } = useLicense();
   const { fullList } = useClassArms();
-  const { session: globalSession, term: globalTerm, termsList, sessionsList } = useTermConfig();
+  const { session: globalSession, term: globalTerm, termsList, sessionsList, config: globalTermConfig } = useTermConfig();
   const isActivated = license?.is_activated ?? false;
 
   // Form selections
@@ -63,6 +69,19 @@ export function ResultStudio() {
   const [template, setTemplate] = useState("clean_slate");
   const [format, setFormat] = useState<"pdf" | "html" | "image">("pdf");
   const [useBrandColors, setUseBrandColors] = useState(true);
+
+  // Phase 17: Synchronize session and term dropdowns with active school_term_config
+  useEffect(() => {
+    if (globalSession && !selectedSession) {
+      setSelectedSession(globalSession);
+    }
+  }, [globalSession]);
+
+  useEffect(() => {
+    if (globalTerm && !selectedTerm) {
+      setSelectedTerm(globalTerm);
+    }
+  }, [globalTerm]);
 
   // Metadata dropdown options
   const [subjects, setSubjects] = useState<string[]>([]);
@@ -422,7 +441,7 @@ export function ResultStudio() {
     }
   };
 
-  // S8-5: Detailed Pre-Publish Audit & Dry Run (Grading completeness + Fee clearance)
+  // S8-5: Detailed Pre-Publish Audit & Dry Run (Grading completeness + Fee clearance + Term calendar setup)
   const auditPrePublishDryRun = async (students: any[], actionLabel: string): Promise<any[] | null> => {
     // 1. Fee Clearance
     const cleared = students.filter((s: any) =>
@@ -436,24 +455,49 @@ export function ResultStudio() {
     const graded = students.filter((s: any) => (s.average ?? 0) > 0);
     const ungraded = students.filter((s: any) => (s.average ?? 0) <= 0);
 
-    // Eligible to publish: cleared fees AND graded
-    const publishable = cleared.filter((s: any) => (s.average ?? 0) > 0);
+    // Strategy C: All students with completed grades qualify to be published to the cloud portal.
+    // Cleared students are immediately claimable; owing students are held in Locked status on the portal.
+    const publishable = graded;
+
+    // 3. Academic Calendar & Term Configuration Verification
+    let liveTermConfig = globalTermConfig;
+    try {
+      if ((window as any).electronAPI?.getTermConfig) {
+        const fresh = await (window as any).electronAPI.getTermConfig();
+        if (fresh && fresh.academic_session) liveTermConfig = fresh;
+      }
+    } catch (_) {}
+
+    const missingTermDates: string[] = [];
+    if (!liveTermConfig?.academic_session) missingTermDates.push("Academic Session");
+    if (!liveTermConfig?.term) missingTermDates.push("Term Name");
+    if (!liveTermConfig?.term_start_date) missingTermDates.push("Term Start Date");
+    if (!liveTermConfig?.term_end_date) missingTermDates.push("Term End Date");
+    if (!liveTermConfig?.resumption_date) missingTermDates.push("Next Term Resumption Date");
+    const isTermSetupComplete = missingTermDates.length === 0;
 
     const Swal = (window as any).Swal;
     if (!Swal) {
+      if (!isTermSetupComplete) {
+        alert(
+          `⚠️ Term Calendar Incomplete!\n\nThe following details are required before publishing results:\n• ${missingTermDates.join('\n• ')}\n\nPlease complete them in Print Hub → Term Settings.`
+        );
+        return null;
+      }
       const proceed = window.confirm(
         `Pre-Publish Dry Run — ${actionLabel}\n\n` +
+        `📅 Term: ${liveTermConfig?.academic_session || selectedSession} · ${liveTermConfig?.term || selectedTerm}\n` +
         `📊 Grading: ${graded.length} graded, ${ungraded.length} incomplete\n` +
         `🛡️ Fees: ${cleared.length} cleared, ${owing.length} outstanding\n\n` +
-        `Proceed to publish ${publishable.length} eligible student(s)?`
+        `Proceed to publish ${publishable.length} student(s) to cloud portal?`
       );
       return (proceed && publishable.length > 0) ? publishable : null;
     }
 
-    const owingNames = owing.slice(0, 6).map((s: any) => `• ${s.name} (${s.class_name || ''})`).join('<br/>');
+    const owingNames = owing.slice(0, 6).map((s: any) => `• ${s.name} (${s.class_arm && !s.class_name.includes(s.class_arm) ? `${s.class_name} ${s.class_arm}` : s.class_name})`).join('<br/>');
     const moreOwing = owing.length > 6 ? `<br/><em style="color:#94a3b8">… and ${owing.length - 6} more</em>` : '';
 
-    const ungradedNames = ungraded.slice(0, 6).map((s: any) => `• ${s.name} (${s.class_name || ''})`).join('<br/>');
+    const ungradedNames = ungraded.slice(0, 6).map((s: any) => `• ${s.name} (${s.class_arm && !s.class_name.includes(s.class_arm) ? `${s.class_name} ${s.class_arm}` : s.class_name})`).join('<br/>');
     const moreUngraded = ungraded.length > 6 ? `<br/><em style="color:#94a3b8">… and ${ungraded.length - 6} more</em>` : '';
 
     const result = await Swal.fire({
@@ -463,6 +507,26 @@ export function ResultStudio() {
           <p style="margin:0 0 10px;color:#94a3b8">
             Pre-flight dry run audit for <strong>${students.length} target student(s)</strong>:
           </p>
+
+          ${!isTermSetupComplete ? `
+            <div style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.35);padding:10px 12px;border-radius:6px;margin-bottom:12px;color:#fca5a5">
+              <strong style="color:#ef4444;font-size:13px">⚠️ Academic Calendar Setup Incomplete:</strong><br/>
+              The following term calendar parameters are required before publishing or printing results:
+              <ul style="margin:6px 0 6px 18px;padding:0;color:#f87171">
+                ${missingTermDates.map(d => `<li><strong>${d}</strong></li>`).join('')}
+              </ul>
+              <span style="font-size:11px;color:#cbd5e1">
+                Configuring these in <strong>Print Hub → Term Settings</strong> ensures resumption notices and attendance periods are accurately reflected on student portals.
+              </span>
+            </div>
+          ` : `
+            <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.22);padding:8px 12px;border-radius:6px;margin-bottom:12px;color:#a7f3d0">
+              📅 <strong>Academic Calendar:</strong> ${liveTermConfig.academic_session} · ${liveTermConfig.term}<br/>
+              <span style="font-size:11px;color:#94a3b8">
+                🗓️ ${liveTermConfig.term_start_date} → ${liveTermConfig.term_end_date} · <strong>Next Resumption:</strong> ${liveTermConfig.resumption_date}
+              </span>
+            </div>
+          `}
 
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
             <div style="background:rgba(0,229,255,0.06);border:1px solid rgba(0,229,255,0.2);padding:8px 12px;border-radius:6px">
@@ -489,27 +553,36 @@ export function ResultStudio() {
             </div>
           ` : ''}
 
-          <div style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);padding:8px 12px;border-radius:6px;color:#a5b4fc">
-            🚀 <strong>Ready to Publish:</strong> ${publishable.length} student(s) with completed grades &amp; cleared fees
+          <div style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);padding:10px 12px;border-radius:6px;color:#a5b4fc">
+            🚀 <strong>Ready to Publish:</strong> ${publishable.length} student(s) with completed grades.<br/>
+            ${owing.length > 0 ? `<span style="display:block;margin-top:4px;font-size:11.5px;color:#94a3b8">🔒 <strong>Note:</strong> ${owing.length} student(s) with outstanding fees will be published in <em>Locked</em> status on the portal until fees are settled.</span>` : ''}
           </div>
-          ${publishable.length === 0 ? '<p style="margin:10px 0 0;font-size:12px;color:#f87171">⚠️ No students qualify for publishing. Ensure grades are entered and fee balances cleared.</p>' : ''}
+          ${publishable.length === 0 ? '<p style="margin:10px 0 0;font-size:12px;color:#f87171">⚠️ No students have scores entered. Please enter grades before publishing.</p>' : ''}
         </div>
       `,
-      icon: publishable.length > 0 ? (owing.length > 0 || ungraded.length > 0 ? 'warning' : 'info') : 'error',
+      icon: !isTermSetupComplete ? 'warning' : publishable.length > 0 ? (owing.length > 0 || ungraded.length > 0 ? 'info' : 'success') : 'error',
       background: '#0b0f19',
       color: '#fff',
       showCancelButton: true,
-      confirmButtonColor: publishable.length > 0 ? '#00E5FF' : '#ef4444',
+      confirmButtonColor: !isTermSetupComplete ? '#f59e0b' : publishable.length > 0 ? '#00E5FF' : '#ef4444',
       cancelButtonColor: '#64748b',
-      confirmButtonText: publishable.length > 0
-        ? `✅ Publish ${publishable.length} Student${publishable.length !== 1 ? 's' : ''}`
-        : '❌ Cannot Proceed',
+      confirmButtonText: !isTermSetupComplete
+        ? '⚙️ Configure in Term Settings'
+        : publishable.length > 0
+          ? `✅ Publish ${publishable.length} Graded Student${publishable.length !== 1 ? 's' : ''}`
+          : '❌ Cannot Proceed',
       cancelButtonText: 'Cancel',
       allowOutsideClick: false,
       allowEscapeKey: false,
     });
 
-    if (result.isConfirmed && publishable.length > 0) return publishable;
+    if (result.isConfirmed) {
+      if (!isTermSetupComplete) {
+        window.dispatchEvent(new CustomEvent('nexus-nav', { detail: 'printhub' }));
+        return null;
+      }
+      if (publishable.length > 0) return publishable;
+    }
     return null;
   };
 
@@ -603,7 +676,26 @@ export function ResultStudio() {
       if (res?.ok) {
         setPublishStatus("✅ Published " + (res.published || 0) + " results successfully!");
       } else {
-        setPublishStatus("❌ Failed: " + (res?.error || "Unknown error"));
+        const errMsg = res?.message || res?.error || "Unknown error";
+        setPublishStatus("❌ Failed: " + errMsg);
+        const Swal = (window as any).Swal;
+        if (res?.error === 'SETUP_INCOMPLETE' && Swal) {
+          Swal.fire({
+            title: "Setup Incomplete",
+            text: res.message || "Please complete school identity and term settings before proceeding.",
+            icon: "warning",
+            confirmButtonText: "Go to Term Settings",
+            showCancelButton: true,
+            cancelButtonText: "Dismiss",
+            confirmButtonColor: "#0284c7",
+            background: "#0b0f19",
+            color: "#fff"
+          }).then((r: any) => {
+            if (r.isConfirmed) {
+              window.dispatchEvent(new CustomEvent('nexus-nav', { detail: 'printhub' }));
+            }
+          });
+        }
       }
     } catch (err: any) {
       setPublishStatus("❌ Error: " + err.message);
@@ -1111,7 +1203,7 @@ export function ResultStudio() {
                   <option value="">— Select —</option>
                   {students.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.name} ({s.class_name}{s.class_arm ? ` ${s.class_arm}` : ''})
+                      {s.name} ({formatStudentClass(s.class_name, s.class_arm)})
                     </option>
                   ))}
                 </select>
@@ -1751,7 +1843,7 @@ export function ResultStudio() {
                              <td>
                                <strong>{s.name}</strong>
                              </td>
-                             <td>{s.class_name}{s.class_arm ? ` ${s.class_arm}` : ''}</td>
+                             <td>{formatStudentClass(s.class_name, s.class_arm)}</td>
                              <td>
                                {s.subjects?.filter((x: any) => x.score !== null)
                                  .length || 0}{" "}
@@ -1931,7 +2023,7 @@ export function ResultStudio() {
                               fontFamily: "var(--font-mono)",
                             }}
                           >
-                            {student.class_name}{student.class_arm ? ` ${student.class_arm}` : ''} · {ilsClassType === 'ILS' ? 'ILS Avg' : 'Avg'}: {student.average ?? '—'}
+                            {formatStudentClass(student.class_name, student.class_arm)} · {ilsClassType === 'ILS' ? 'ILS Avg' : 'Avg'}: {student.average ?? '—'}
                             {ilsClassType === 'ILS' ? '' : '%'}
                           </div>
                         </td>
@@ -2203,6 +2295,44 @@ export function ResultStudio() {
             </div>
           </div>
 
+          {/* Phase 17: Academic Calendar Term Dates Verification Notice */}
+          {(!globalTermConfig?.term_start_date || !globalTermConfig?.term_end_date || !globalTermConfig?.resumption_date) && (
+            <div style={{
+              background: "rgba(245,158,11,0.12)",
+              border: "1px solid rgba(245,158,11,0.35)",
+              color: "#fde68a",
+              padding: "8px 14px",
+              borderRadius: "6px",
+              fontSize: "12px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "14px"
+            }}>
+              <span>⚠️ <strong>Notice:</strong> Term start date, end date, or resumption date are not yet configured. Complete them in <strong>Print Hub → Term Settings</strong> before publishing to ensure dates appear accurately on parent report cards.</span>
+              <button
+                onClick={() => {
+                  setIsPreviewModalOpen(false);
+                  window.dispatchEvent(new CustomEvent('nexus-nav', { detail: 'printhub' }));
+                }}
+                style={{
+                  background: "#f59e0b",
+                  color: "#000",
+                  border: "none",
+                  borderRadius: "4px",
+                  padding: "4px 10px",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  marginLeft: "12px"
+                }}
+              >
+                ⚙️ Set Dates in Print Hub
+              </button>
+            </div>
+          )}
+
           <div
             style={{
               flex: 1,
@@ -2259,7 +2389,7 @@ export function ResultStudio() {
                             const totalPossible = subCount * pacCap;
                             return `Class: ${s.class_name} · Subjects: ${subCount} · PACs: ${totalGradedPacks} / ${totalPossible}`;
                           })() : (
-                            `Class: ${s.class_name} ${(s as any).class_arm || ''} · Score: ${(s as any).total_score ?? '—'} · Avg: ${s.average ? `${s.average}%` : '—'}`
+                            `Class: ${formatStudentClass(s.class_name, (s as any).class_arm)} · Score: ${(s as any).total_score ?? '—'} · Avg: ${s.average ? `${s.average}%` : '—'}`
                           )}
                         </div>
                       </div>
