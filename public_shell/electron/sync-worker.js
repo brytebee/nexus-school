@@ -1563,16 +1563,26 @@ async function pullStaffGradesFromWebsite() {
 
     if (Array.isArray(data.teachers) && data.teachers.length > 0) {
       let upsertTeacher;
+      let upsertFormTeacher;
       try {
         upsertTeacher = db.prepare(`
-          INSERT INTO teachers (id, name, email, phone, is_active, password_hash)
-          VALUES (?, ?, ?, ?, ?, ?)
+          INSERT INTO teachers (id, name, email, phone, is_active, password_hash, signature)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             name = COALESCE(excluded.name, teachers.name),
             email = COALESCE(excluded.email, teachers.email),
             phone = COALESCE(excluded.phone, teachers.phone),
             is_active = COALESCE(excluded.is_active, teachers.is_active),
-            password_hash = CASE WHEN excluded.password_hash IS NOT NULL THEN excluded.password_hash ELSE teachers.password_hash END
+            password_hash = CASE WHEN excluded.password_hash IS NOT NULL THEN excluded.password_hash ELSE teachers.password_hash END,
+            signature = CASE WHEN excluded.signature IS NOT NULL THEN excluded.signature ELSE teachers.signature END
+        `);
+      } catch (_) {}
+
+      try {
+        upsertFormTeacher = db.prepare(`
+          INSERT INTO form_teachers (class_name, teacher_id)
+          VALUES (?, ?)
+          ON CONFLICT(class_name) DO UPDATE SET teacher_id = excluded.teacher_id
         `);
       } catch (_) {}
 
@@ -1580,14 +1590,23 @@ async function pullStaffGradesFromWebsite() {
         const insertTeachers = db.transaction((rows) => {
           for (const t of rows) {
             try {
+              const teacherId = t.teacherId || t.id;
               upsertTeacher.run(
-                t.teacherId || t.id,
+                teacherId,
                 t.name,
                 t.email || null,
                 t.phone || null,
                 t.isActive !== false ? 1 : 0,
-                t.passwordHash || null
+                t.passwordHash || null,
+                t.signature || null
               );
+
+              const hostClass = t.formClass || t.form_class;
+              if (hostClass && upsertFormTeacher) {
+                try {
+                  upsertFormTeacher.run(hostClass, teacherId);
+                } catch (_) {}
+              }
             } catch (_) {}
           }
         });

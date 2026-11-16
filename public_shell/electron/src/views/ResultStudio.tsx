@@ -186,6 +186,7 @@ export function ResultStudio() {
   const [publishingPortal, setPublishingPortal] = useState(false);
   const [publishProgress, setPublishProgress] = useState("");
   const [publishStatus, setPublishStatus] = useState("");
+  const [forceRecompile, setForceRecompile] = useState(false);
 
   // Listen to IPC portal publish progress updates
   useEffect(() => {
@@ -556,6 +557,7 @@ export function ResultStudio() {
           <div style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);padding:10px 12px;border-radius:6px;color:#a5b4fc">
             🚀 <strong>Ready to Publish:</strong> ${publishable.length} student(s) with completed grades.<br/>
             ${owing.length > 0 ? `<span style="display:block;margin-top:4px;font-size:11.5px;color:#94a3b8">🔒 <strong>Note:</strong> ${owing.length} student(s) with outstanding fees will be published in <em>Locked</em> status on the portal until fees are settled.</span>` : ''}
+            ${forceRecompile ? `<span style="display:block;margin-top:4px;font-size:11.5px;color:#f59e0b">🔄 <strong>Force Re-compile:</strong> Save-point cache bypassed. All PDFs will be freshly compiled and uploaded.</span>` : ''}
           </div>
           ${publishable.length === 0 ? '<p style="margin:10px 0 0;font-size:12px;color:#f87171">⚠️ No students have scores entered. Please enter grades before publishing.</p>' : ''}
         </div>
@@ -670,7 +672,8 @@ export function ResultStudio() {
       const res = await (window as any).electronAPI.results.publish({
         term,
         academicSession: session,
-        studentIds: targetStudents.map((s: any) => s.id)
+        studentIds: targetStudents.map((s: any) => s.id),
+        forceRecompile,
       });
 
       if (res?.ok) {
@@ -1791,6 +1794,10 @@ export function ResultStudio() {
                     >
                       {publishingPortal ? `⧗ ${publishProgress || "Publishing…"}` : "🌐 Publish to Portal"}
                     </button>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "11px", color: forceRecompile ? "#f59e0b" : "var(--text-dim)", cursor: "pointer" }} title="Bypass local PDF save-point cache and recompile all PDFs afresh">
+                      <input type="checkbox" checked={forceRecompile} onChange={(e) => setForceRecompile(e.target.checked)} />
+                      🔄 Force re-compile
+                    </label>
                     {publishStatus && (
                       <span style={{ fontSize: "12px", color: "var(--text-dim)" }}>{publishStatus}</span>
                     )}
@@ -2437,6 +2444,10 @@ export function ResultStudio() {
               >
                 {publishingPortal ? "☁️ Publishing…" : "☁️ Publish to Portal"}
               </button>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", color: forceRecompile ? "#F59E0B" : "#94a3b8", cursor: "pointer" }} title="Bypass local PDF save-point cache and recompile all PDFs afresh">
+                <input type="checkbox" checked={forceRecompile} onChange={(e) => setForceRecompile(e.target.checked)} />
+                🔄 Force re-compile
+              </label>
               {(dispatchStatus || publishStatus || publishProgress) && (
                 <span style={{ fontSize: "11px", color: "#00E5FF" }}>
                   {dispatchStatus || publishStatus || publishProgress}
