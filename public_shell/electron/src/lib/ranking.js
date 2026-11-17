@@ -33,11 +33,18 @@ function resolveMaxSubjects(className, maxSubjectsMap) {
 function computeRankMap(studentList, maxSubjectsMap = null) {
   const classGroups = new Map();
   studentList.forEach(s => {
-    const rawSubs = s.subjects || s.Records || [];
     const cn = s.class_name || "__all__";
-    const maxSubjects = resolveMaxSubjects(cn, maxSubjectsMap);
-    const { avgScore } = scoringLib.aggregateScores(rawSubs, 100, maxSubjects);
-    const avg = avgScore === "—" ? 0 : (parseFloat(avgScore) || 0);
+    // Prefer pre-computed average (already incorporates attendance weights + exclusions)
+    let avg = 0;
+    const precomputed = parseFloat(s.average);
+    if (!isNaN(precomputed) && precomputed >= 0) {
+      avg = precomputed;
+    } else {
+      const rawSubs = s.subjects || s.Records || [];
+      const maxSubjects = resolveMaxSubjects(cn, maxSubjectsMap);
+      const { avgScore } = scoringLib.aggregateScores(rawSubs, 100, maxSubjects);
+      avg = avgScore === "—" ? 0 : (parseFloat(avgScore) || 0);
+    }
 
     if (!classGroups.has(cn)) classGroups.set(cn, []);
     classGroups.get(cn).push({ id: s.id, average: avg });
@@ -49,13 +56,46 @@ function computeRankMap(studentList, maxSubjectsMap = null) {
     let currentRank = 1;
     sorted.forEach((entry, idx) => {
       if (idx > 0 && entry.average < sorted[idx - 1].average) currentRank = idx + 1;
-      const suffix = currentRank === 1 ? "st"
-        : currentRank === 2 ? "nd"
-        : currentRank === 3 ? "rd" : "th";
+      const suffix = (currentRank % 10 === 1 && currentRank % 100 !== 11) ? 'st'
+        : (currentRank % 10 === 2 && currentRank % 100 !== 12) ? 'nd'
+        : (currentRank % 10 === 3 && currentRank % 100 !== 13) ? 'rd' : 'th';
       rankMap.set(entry.id, `${currentRank}${suffix}`);
     });
   });
   return rankMap;
+}
+
+// ── computeCohortRankings ─────────────────────────────────────────────────────
+// Builds a class-scoped position map for STANDARD_NIGERIAN students only.
+// ILS students are skipped (position = null).
+// Returns Map<studentId, positionString> e.g. "1st of 3", "2nd of 3"
+function computeCohortRankings(students) {
+  const classGroups = new Map();
+  students.forEach(s => {
+    if (s.curriculum_type === 'ILS') return; // ILS: unranked
+    const cn = s.class_name || '__all__';
+    if (!classGroups.has(cn)) classGroups.set(cn, []);
+    const precomputed = parseFloat(s.average);
+    const avg = (!isNaN(precomputed) && precomputed >= 0)
+      ? precomputed
+      : (s.subjects || []).reduce((acc, sub) => acc + (typeof sub.score === 'number' ? sub.score : 0), 0);
+    classGroups.get(cn).push({ id: s.id, avg });
+  });
+
+  const positionMap = new Map();
+  classGroups.forEach((group, cn) => {
+    const classSize = group.length;
+    const sorted = [...group].sort((a, b) => b.avg - a.avg);
+    let currentRank = 1;
+    sorted.forEach((item, idx) => {
+      if (idx > 0 && item.avg < sorted[idx - 1].avg) currentRank = idx + 1;
+      const suffix = (currentRank % 10 === 1 && currentRank % 100 !== 11) ? 'st'
+        : (currentRank % 10 === 2 && currentRank % 100 !== 12) ? 'nd'
+        : (currentRank % 10 === 3 && currentRank % 100 !== 13) ? 'rd' : 'th';
+      positionMap.set(item.id, `${currentRank}${suffix} of ${classSize}`);
+    });
+  });
+  return positionMap;
 }
 
 function computeSubjectRankMap(studentList) {
@@ -83,9 +123,9 @@ function computeSubjectRankMap(studentList) {
       let currentRank = 1;
       sorted.forEach((entry, idx) => {
         if (idx > 0 && entry.score < sorted[idx - 1].score) currentRank = idx + 1;
-        const suffix = currentRank === 1 ? "st"
-          : currentRank === 2 ? "nd"
-          : currentRank === 3 ? "rd" : "th";
+        const suffix = (currentRank % 10 === 1 && currentRank % 100 !== 11) ? 'st'
+          : (currentRank % 10 === 2 && currentRank % 100 !== 12) ? 'nd'
+          : (currentRank % 10 === 3 && currentRank % 100 !== 13) ? 'rd' : 'th';
         if (!rankMap.has(entry.id)) rankMap.set(entry.id, new Map());
         rankMap.get(entry.id).set(subjName, `${currentRank}${suffix}`);
       });
@@ -94,4 +134,4 @@ function computeSubjectRankMap(studentList) {
   return rankMap;
 }
 
-module.exports = { computeRankMap, computeSubjectRankMap };
+module.exports = { computeRankMap, computeSubjectRankMap, computeCohortRankings };
