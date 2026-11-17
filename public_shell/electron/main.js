@@ -8925,7 +8925,7 @@ ipcMain.handle("results:dispatch", async (event, payload) => {
 });
 
 // ── S8-5: Publish results to the parent portal (nexus-api) ─────────────────
-ipcMain.handle("results:publish", async (event, { term, academicSession, studentIds, forceRecompile }) => {
+ipcMain.handle("results:publish", async (event, { term, academicSession, studentIds, forceRecompile, templateId }) => {
   try {
     // Phase 3: Portal publishing available to all tiers
     const db = database.getDb();
@@ -8954,7 +8954,7 @@ ipcMain.handle("results:publish", async (event, { term, academicSession, student
     event.sender.send("publish:progress", { stage: "generating", message: "Stage 1/2: Preparing result PDFs & save-points…" });
 
     const { results, parentMap, skipped, total, cachedCount = 0 } =
-      await resultDispatcher.compileBatchAndUpload(db, term, academicSession, baseDir, studentIds, Boolean(forceRecompile));
+      await resultDispatcher.compileBatchAndUpload(db, term, academicSession, baseDir, studentIds, Boolean(forceRecompile), templateId || 'clean_slate');
 
     if (results.length === 0) {
       return { 

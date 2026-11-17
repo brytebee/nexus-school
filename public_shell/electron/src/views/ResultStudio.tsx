@@ -703,6 +703,7 @@ export function ResultStudio() {
         academicSession: session,
         studentIds: targetStudents.map((s: any) => s.id),
         forceRecompile,
+        templateId: template,
       });
 
       if (res?.ok) {
