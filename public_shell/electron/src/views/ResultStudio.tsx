@@ -449,7 +449,12 @@ export function ResultStudio() {
   };
 
   // S8-5: Detailed Pre-Publish Audit & Dry Run (Grading completeness + Fee clearance + Term calendar setup)
-  const auditPrePublishDryRun = async (students: any[], actionLabel: string): Promise<any[] | null> => {
+  const auditPrePublishDryRun = async (
+    students: any[],
+    actionLabel: string,
+    targetSession?: string,
+    targetTerm?: string
+  ): Promise<any[] | null> => {
     // 1. Fee Clearance
     const cleared = students.filter((s: any) =>
       s.fee_status === 'cleared' || s.feeStatus === 'cleared'
@@ -467,11 +472,28 @@ export function ResultStudio() {
     const publishable = graded;
 
     // 3. Academic Calendar & Term Configuration Verification
-    let liveTermConfig = globalTermConfig;
+    const evalSession = targetSession || selectedSession || globalSession || "2025/2026";
+    const evalTerm = targetTerm || selectedTerm || globalTerm || "First Term";
+
+    let liveTermConfig: any = {
+      academic_session: evalSession,
+      term: evalTerm,
+      term_start_date: "",
+      term_end_date: "",
+      resumption_date: "",
+    };
+
     try {
-      if ((window as any).electronAPI?.getTermConfig) {
+      if ((window as any).electronAPI?.getTermCalendar) {
+        const cal = await (window as any).electronAPI.getTermCalendar({ session: evalSession, term: evalTerm });
+        if (cal && cal.ok) {
+          liveTermConfig = { ...liveTermConfig, ...cal };
+        }
+      } else if ((window as any).electronAPI?.getTermConfig) {
         const fresh = await (window as any).electronAPI.getTermConfig();
-        if (fresh && fresh.academic_session) liveTermConfig = fresh;
+        if (fresh && fresh.academic_session === evalSession && fresh.term === evalTerm) {
+          liveTermConfig = { ...liveTermConfig, ...fresh };
+        }
       }
     } catch (_) {}
 
@@ -493,7 +515,7 @@ export function ResultStudio() {
       }
       const proceed = window.confirm(
         `Pre-Publish Dry Run — ${actionLabel}\n\n` +
-        `📅 Term: ${liveTermConfig?.academic_session || selectedSession} · ${liveTermConfig?.term || selectedTerm}\n` +
+        `📅 Term: ${liveTermConfig?.academic_session || evalSession} · ${liveTermConfig?.term || evalTerm}\n` +
         `📊 Grading: ${graded.length} graded, ${ungraded.length} incomplete\n` +
         `🛡️ Fees: ${cleared.length} cleared, ${owing.length} outstanding\n\n` +
         `Proceed to publish ${publishable.length} student(s) to cloud portal?`
@@ -530,7 +552,7 @@ export function ResultStudio() {
             <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.22);padding:8px 12px;border-radius:6px;margin-bottom:12px;color:#a7f3d0">
               📅 <strong>Academic Calendar:</strong> ${liveTermConfig.academic_session} · ${liveTermConfig.term}<br/>
               <span style="font-size:11px;color:#94a3b8">
-                🗓️ ${liveTermConfig.term_start_date} → ${liveTermConfig.term_end_date} · <strong>Next Resumption:</strong> ${liveTermConfig.resumption_date}
+                🗓️ ${liveTermConfig.term_start_date || '—'} → ${liveTermConfig.term_end_date || '—'} · <strong>Next Resumption:</strong> ${liveTermConfig.resumption_date || '—'}
               </span>
             </div>
           `}
@@ -664,7 +686,10 @@ export function ResultStudio() {
       return;
     }
 
-    const audited = await auditPrePublishDryRun(targetStudents, "Publishing to Portal");
+    const term = selectedTerm || globalTerm || "First Term";
+    const session = selectedSession || globalSession || "2025/2026";
+
+    const audited = await auditPrePublishDryRun(targetStudents, "Publishing to Portal", session, term);
     if (!audited || !audited.length) return;
     targetStudents = audited;
 
@@ -672,8 +697,6 @@ export function ResultStudio() {
     setPublishProgress("Generating PDFs…");
     setPublishStatus("");
     try {
-      const term = selectedTerm || globalTerm || "First Term";
-      const session = selectedSession || globalSession || "2025/2026";
 
       const res = await (window as any).electronAPI.results.publish({
         term,

@@ -88,6 +88,7 @@ const nexusAPI = {
     // V2: Term config & Print Hub
     getTermConfig:      ()       => ipcRenderer.invoke('get-term-config'),
     saveTermConfig:     (data)   => ipcRenderer.invoke('save-term-config', data),
+    getTermCalendar:    (params) => ipcRenderer.invoke('get-term-calendar', params),
     listDepartmentManagers:   ()       => ipcRenderer.invoke('department-managers:list'),
     saveDepartmentManager:   (data)   => ipcRenderer.invoke('department-managers:save', data),
     deleteDepartmentManager: (params) => ipcRenderer.invoke('department-managers:delete', params),

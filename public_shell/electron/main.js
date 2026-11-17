@@ -4137,11 +4137,13 @@ ipcMain.handle("insert-score", async (event, { studentId, subject, componentKey,
       return { success: false, error: "Grading is locked. You cannot enter new scores." };
     }
 
-    const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
-    if (!termConfig) {
-      return { success: false, error: "School term configuration not set" };
-    }
-    const { academic_session, term } = termConfig;
+    const activeTermConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get() || {};
+    const academic_session = (event && event.academic_session) || activeTermConfig.academic_session || "2026/2027";
+    const term = (event && event.term) || activeTermConfig.term || "First Term";
+
+    ensureTermCalendarSchema(db);
+    const calRow = db.prepare("SELECT is_closed FROM term_calendars WHERE academic_session = ? AND term = ?").get(academic_session, term);
+    const isTermClosed = calRow && calRow.is_closed === 1;
 
     db.transaction(() => {
       // 1. Fetch existing record to load current breakdown
@@ -4155,6 +4157,15 @@ ipcMain.handle("insert-score", async (event, { studentId, subject, componentKey,
         try {
           breakdown = JSON.parse(existing.breakdown) || {};
         } catch (_) {}
+      }
+
+      // Immutability Guard: If term is closed, only allow entry if component was previously unset/null
+      if (isTermClosed) {
+        const val = breakdown[cleanCompKey];
+        const isAlreadyRecorded = (typeof val === 'number') || (val !== undefined && val !== null && val !== "");
+        if (isAlreadyRecorded) {
+          throw new Error(`GRADE_IMMUTABLE: Cannot overwrite finalized grade component '${cleanCompKey}' in closed term (${term} ${academic_session}).`);
+        }
       }
 
       // 2. Update the specific component
@@ -5484,10 +5495,19 @@ ipcMain.handle('ils:insert-pac-score', (event, { studentId, subject, packNumber,
       return { ok: false, error: 'Cannot record PAC scores for inactive or overflow students.' };
     }
 
-    const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
-    if (!termConfig) return { ok: false, error: 'School term not configured' };
-    const { academic_session, term } = termConfig;
+    const activeTermConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get() || {};
+    const academic_session = (event && event.academic_session) || activeTermConfig.academic_session || '2026/2027';
+    const term = (event && event.term) || activeTermConfig.term || 'First Term';
     const passed = scoreNum >= 85 ? 1 : 0;
+
+    ensureTermCalendarSchema(db);
+    const calRow = db.prepare("SELECT is_closed FROM term_calendars WHERE academic_session = ? AND term = ?").get(academic_session, term);
+    if (calRow && calRow.is_closed === 1) {
+      const existing = db.prepare("SELECT id FROM ils_records WHERE student_id = ? AND academic_session = ? AND term = ? AND subject = ? AND pack_number = ?").get(studentId, academic_session, term, subject.trim(), packNum);
+      if (existing) {
+        return { ok: false, error: `PAC_IMMUTABLE: Pack ${packNum} score has already been recorded for closed term (${term} ${academic_session}).` };
+      }
+    }
 
     db.prepare(`
       INSERT INTO ils_records (student_id, academic_session, term, subject, pack_number, score, passed)
@@ -5699,13 +5719,76 @@ ipcMain.handle("student:deactivate", (event, { studentId, is_active }) => {
   }
 });
 
-// ── V2: Term Configuration ────────────────────────────────────────────────────
+// ── V2: Term Configuration & Historical Calendars ─────────────────────────────
+function ensureTermCalendarSchema(db) {
+  if (!db) return;
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS term_calendars (
+        academic_session TEXT NOT NULL,
+        term             TEXT NOT NULL,
+        term_start_date  TEXT DEFAULT '',
+        term_end_date    TEXT DEFAULT '',
+        resumption_date  TEXT DEFAULT '',
+        is_closed        INTEGER DEFAULT 0,
+        created_at       TEXT DEFAULT (datetime('now')),
+        updated_at       TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (academic_session, term)
+      );
+    `);
+  } catch (err) {
+    console.error('[term_calendars] ensureTermCalendarSchema error:', err.message);
+  }
+}
+
 ipcMain.handle("get-term-config", () => {
   try {
     const db = database.getDb();
+    ensureTermCalendarSchema(db);
     return db.prepare("SELECT * FROM school_term_config WHERE id = 1").get() || {};
   } catch (err) {
     return {};
+  }
+});
+
+ipcMain.handle("get-term-calendar", (event, { session, term } = {}) => {
+  try {
+    const db = database.getDb();
+    ensureTermCalendarSchema(db);
+
+    const active = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get() || {};
+    const targetSession = session || active.academic_session || '2026/2027';
+    const targetTerm = term || active.term || 'First Term';
+
+    const row = db.prepare("SELECT * FROM term_calendars WHERE academic_session = ? AND term = ?").get(targetSession, targetTerm);
+    if (row) {
+      return { ok: true, ...row };
+    }
+
+    // Fallback: if querying active term and not yet in term_calendars, return active config dates
+    if (active.academic_session === targetSession && active.term === targetTerm) {
+      return {
+        ok: true,
+        academic_session: targetSession,
+        term: targetTerm,
+        term_start_date: active.term_start_date || '',
+        term_end_date: active.term_end_date || '',
+        resumption_date: active.resumption_date || '',
+        is_closed: 0,
+      };
+    }
+
+    return {
+      ok: true,
+      academic_session: targetSession,
+      term: targetTerm,
+      term_start_date: '',
+      term_end_date: '',
+      resumption_date: '',
+      is_closed: 0,
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
   }
 });
 
@@ -5721,6 +5804,32 @@ ipcMain.handle("save-term-config", (event, config) => {
     const cleanTerm = config.term.trim();
 
     const db = database.getDb();
+    ensureTermCalendarSchema(db);
+
+    // ── Immutability Guard: Closed Terms Calendar Dates Cannot Be Modified ────
+    const existingCal = db.prepare("SELECT * FROM term_calendars WHERE academic_session = ? AND term = ?").get(cleanSession, cleanTerm);
+    if (existingCal && existingCal.is_closed === 1) {
+      const datesChanged = (
+        (config.term_start_date !== undefined && (config.term_start_date || '') !== (existingCal.term_start_date || '')) ||
+        (config.term_end_date !== undefined && (config.term_end_date || '') !== (existingCal.term_end_date || '')) ||
+        (config.resumption_date !== undefined && (config.resumption_date || '') !== (existingCal.resumption_date || ''))
+      );
+      if (datesChanged) {
+        return { ok: false, error: "IMMUTABLE_CALENDAR: Term calendar dates for closed terms cannot be modified." };
+      }
+    } else {
+      // Upsert term calendar for open/active terms
+      db.prepare(`
+        INSERT INTO term_calendars (academic_session, term, term_start_date, term_end_date, resumption_date, is_closed, updated_at)
+        VALUES (?, ?, ?, ?, ?, 0, datetime('now'))
+        ON CONFLICT(academic_session, term) DO UPDATE SET
+          term_start_date = excluded.term_start_date,
+          term_end_date = excluded.term_end_date,
+          resumption_date = excluded.resumption_date,
+          updated_at = datetime('now')
+      `).run(cleanSession, cleanTerm, config.term_start_date || "", config.term_end_date || "", config.resumption_date || "");
+    }
+
     // Ensure new column exists for DBs that haven't restarted since migration was added
     try { db.exec("ALTER TABLE school_term_config ADD COLUMN exclude_unregistered_from_totals INTEGER DEFAULT 0"); } catch (_) {}
     db.prepare(`
@@ -7672,7 +7781,7 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
         daysAttended = attRow.days_attended;
       }
 
-      // Attendance score injection — aligns preview total_score/average with PDF output.
+      // Attendance score injection — aligns preview total_score/average and subject scores with PDF output.
       // termCfgForExclude is already a full SELECT * row (widened above).
       const _attWeight = Number(termCfgForExclude.attendance_score_weight) || 0;
       const _inclAtt = termCfgForExclude.include_attendance_in_grades !== 0;
@@ -7681,7 +7790,13 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
       let adjustedAvg = avg;
       if (_attWeight > 0 && _inclAtt && _showAtt && classTotalDays > 0) {
         const attScore = Math.round((daysAttended / classTotalDays) * _attWeight);
-        adjustedTotalScore = totalScore + attScore;
+        gradedSubjects.forEach(s => {
+          s.score = Number(s.score) + attScore;
+          if (!s.breakdown) s.breakdown = {};
+          s.breakdown["Attendance"] = attScore;
+        });
+        const totalAttScore = attScore * gradedSubjects.length;
+        adjustedTotalScore = totalScore + totalAttScore;
         adjustedAvg = gradedSubjects.length ? (adjustedTotalScore / _denom).toFixed(2) : '—';
       }
 
@@ -7811,17 +7926,26 @@ ipcMain.handle("get-student-grades", (event, { student_id }) => {
 // ── Admin Grade Editor (Sudo-protected on the frontend) ───────────────────────
 // Receives: { student_id, grades: [{ subject, breakdown: { CA1, CA2, Exam, ... } }] }
 // Recomputes the total score from breakdown values and upserts each record.
-ipcMain.handle("save-student-grades", (event, { student_id, grades }) => {
+ipcMain.handle("save-student-grades", (event, { student_id, grades, academic_session: reqSession, term: reqTerm }) => {
   try {
     const db = database.getDb();
-    const termConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get();
-    if (!termConfig) return { ok: false, error: "Term config not found" };
-    const { academic_session, term } = termConfig;
+    const activeTermConfig = db.prepare("SELECT academic_session, term FROM school_term_config WHERE id = 1").get() || {};
+    const academic_session = reqSession || activeTermConfig.academic_session || "2026/2027";
+    const term = reqTerm || activeTermConfig.term || "First Term";
+
+    ensureTermCalendarSchema(db);
+    const calRow = db.prepare("SELECT is_closed FROM term_calendars WHERE academic_session = ? AND term = ?").get(academic_session, term);
+    const isTermClosed = calRow && calRow.is_closed === 1;
 
     // The student_records UNIQUE key includes `assessment`, so a plain ON CONFLICT
     // on (student_id, academic_session, term, subject) fails.  Instead, delete all
     // existing rows for this student/subject/session/term and insert one clean
     // consolidated row (assessment = 'FULL') that carries the full breakdown JSON.
+    const getExisting = db.prepare(`
+      SELECT breakdown FROM student_records
+      WHERE student_id = ? AND academic_session = ? AND term = ? AND subject = ?
+    `);
+
     const deleteRow = db.prepare(`
       DELETE FROM student_records
       WHERE student_id = ? AND academic_session = ? AND term = ? AND subject = ?
@@ -7838,10 +7962,29 @@ ipcMain.handle("save-student-grades", (event, { student_id, grades }) => {
         if (!item || !item.subject || typeof item.subject !== 'string' || !item.subject.trim()) continue;
         const cleanSubj = item.subject.trim();
         const rawBd = item.breakdown || {};
+        
+        // Immutability Guard: If term is closed, verify no previously recorded component is being modified
+        let existingBd = {};
+        if (isTermClosed) {
+          const exRow = getExisting.get(student_id, academic_session, term, cleanSubj);
+          if (exRow && exRow.breakdown) {
+            try { existingBd = JSON.parse(exRow.breakdown) || {}; } catch (_) {}
+          }
+        }
+
         const bd = {};
         for (const [k, v] of Object.entries(rawBd)) {
-          bd[k] = Math.round((Number(v) || 0) * 100) / 100;
+          const newVal = Math.round((Number(v) || 0) * 100) / 100;
+          if (isTermClosed) {
+            const exVal = existingBd[k];
+            const isRecorded = (typeof exVal === 'number') || (exVal !== undefined && exVal !== null && exVal !== "");
+            if (isRecorded && exVal !== newVal) {
+              throw new Error(`GRADE_IMMUTABLE: Cannot modify finalized component '${k}' for subject '${cleanSubj}' in closed term (${term} ${academic_session}).`);
+            }
+          }
+          bd[k] = newVal;
         }
+
         // If no sub-components exist use the passed score directly (flat-score grade)
         const totalRaw = Object.keys(bd).length > 0
           ? Object.values(bd).reduce((sum, v) => sum + (Number(v) || 0), 0)
@@ -11679,6 +11822,20 @@ if (app) {
         const currentSession = termRow?.academic_session || '2025/2026';
         const termIdx = termStructure.terms.indexOf(currentTerm);
         const isLastTerm = termIdx >= 0 && termIdx === termStructure.terms.length - 1;
+
+        ensureTermCalendarSchema(db);
+        const currentDates = db.prepare("SELECT term_start_date, term_end_date, resumption_date FROM school_term_config WHERE id=1").get() || {};
+        // Persist outgoing term to term_calendars as CLOSED with its dates
+        db.prepare(`
+          INSERT INTO term_calendars (academic_session, term, term_start_date, term_end_date, resumption_date, is_closed, updated_at)
+          VALUES (?, ?, ?, ?, ?, 1, datetime('now'))
+          ON CONFLICT(academic_session, term) DO UPDATE SET
+            term_start_date = COALESCE(NULLIF(excluded.term_start_date, ''), term_calendars.term_start_date),
+            term_end_date   = COALESCE(NULLIF(excluded.term_end_date, ''), term_calendars.term_end_date),
+            resumption_date = COALESCE(NULLIF(excluded.resumption_date, ''), term_calendars.resumption_date),
+            is_closed       = 1,
+            updated_at      = datetime('now')
+        `).run(currentSession, currentTerm, currentDates.term_start_date || "", currentDates.term_end_date || "", currentDates.resumption_date || "");
 
         if (!isLastTerm) {
           // ── MODE A: Advance to next term within same session ─────────────────

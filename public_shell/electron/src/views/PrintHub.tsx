@@ -79,6 +79,7 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
   const [attendanceWeight, setAttendanceWeight] = useState(10);
   const [template, setTemplate] = useState("clean_slate");
   const [excludeUnregistered, setExcludeUnregistered] = useState(false);
+  const [isTermClosed, setIsTermClosed] = useState(false);
 
   // Grading scale components
   const [components, setComponents] = useState<GradingComponent[]>([
@@ -248,6 +249,24 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
     };
     loadConfig();
   }, []);
+
+  // Fetch term calendar and immutability status whenever session or term changes
+  useEffect(() => {
+    let active = true;
+    if (!window.electronAPI?.getTermCalendar) return;
+    window.electronAPI.getTermCalendar({ session, term }).then((cal: any) => {
+      if (!active) return;
+      if (cal && cal.ok) {
+        setTermStartDate(cal.term_start_date || "");
+        setTermEndDate(cal.term_end_date || "");
+        setResumptionDate(cal.resumption_date || "");
+        setIsTermClosed(cal.is_closed === 1);
+      } else {
+        setIsTermClosed(false);
+      }
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [session, term]);
 
   const handleShowAttendanceHelp = () => {
     if (typeof (window as any).Swal !== "undefined") {
@@ -609,18 +628,36 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
                 paddingBottom: "10px",
               }}
             >
-              <h3
-                style={{
-                  fontSize: "12px",
-                  fontWeight: "bold",
-                  color: "#fff",
-                  textTransform: "uppercase",
-                  letterSpacing: "1px",
-                  margin: 0,
-                }}
-              >
-                Term Configuration
-              </h3>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <h3
+                  style={{
+                    fontSize: "12px",
+                    fontWeight: "bold",
+                    color: "#fff",
+                    textTransform: "uppercase",
+                    letterSpacing: "1px",
+                    margin: 0,
+                  }}
+                >
+                  Term Configuration
+                </h3>
+                {isTermClosed && (
+                  <span
+                    style={{
+                      fontSize: "10px",
+                      padding: "2px 8px",
+                      borderRadius: "4px",
+                      background: "rgba(239,68,68,0.15)",
+                      color: "#f87171",
+                      border: "1px solid rgba(239,68,68,0.3)",
+                      fontWeight: 600,
+                    }}
+                    title="This term has concluded and its calendar dates are immutable."
+                  >
+                    🔒 Closed Term · Dates Immutable
+                  </span>
+                )}
+              </div>
               <button
                 onClick={handleSaveConfig}
                 className="primary-btn"
@@ -678,35 +715,41 @@ export function PrintHub({ onTabChange }: PrintHubProps) {
               }}
             >
               <div className="ph-config-group">
-                <label className="ph-label">Term Start Date</label>
+                <label className="ph-label">Term Start Date {isTermClosed && <span style={{ color: "#f87171", fontSize: "10px" }}>(Locked)</span>}</label>
                 <input
                   type="date"
                   value={termStartDate}
                   onChange={(e) => setTermStartDate(e.target.value)}
+                  disabled={isTermClosed}
+                  readOnly={isTermClosed}
                   className="modern-input"
-                  style={{ width: "100%" }}
+                  style={{ width: "100%", opacity: isTermClosed ? 0.6 : 1, cursor: isTermClosed ? "not-allowed" : "auto" }}
                 />
               </div>
 
               <div className="ph-config-group">
-                <label className="ph-label">Term End Date</label>
+                <label className="ph-label">Term End Date {isTermClosed && <span style={{ color: "#f87171", fontSize: "10px" }}>(Locked)</span>}</label>
                 <input
                   type="date"
                   value={termEndDate}
                   onChange={(e) => setTermEndDate(e.target.value)}
+                  disabled={isTermClosed}
+                  readOnly={isTermClosed}
                   className="modern-input"
-                  style={{ width: "100%" }}
+                  style={{ width: "100%", opacity: isTermClosed ? 0.6 : 1, cursor: isTermClosed ? "not-allowed" : "auto" }}
                 />
               </div>
 
               <div className="ph-config-group">
-                <label className="ph-label">Resumption Date</label>
+                <label className="ph-label">Resumption Date {isTermClosed && <span style={{ color: "#f87171", fontSize: "10px" }}>(Locked)</span>}</label>
                 <input
                   type="date"
                   value={resumptionDate}
                   onChange={(e) => setResumptionDate(e.target.value)}
+                  disabled={isTermClosed}
+                  readOnly={isTermClosed}
                   className="modern-input"
-                  style={{ width: "100%" }}
+                  style={{ width: "100%", opacity: isTermClosed ? 0.6 : 1, cursor: isTermClosed ? "not-allowed" : "auto" }}
                 />
               </div>
             </div>
