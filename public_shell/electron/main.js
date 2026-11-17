@@ -7534,7 +7534,7 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
     let excludeUnregisteredFromTotals = false;
     try {
       try { db.exec("ALTER TABLE school_term_config ADD COLUMN exclude_unregistered_from_totals INTEGER DEFAULT 0"); } catch (_) {}
-      const termCfgForExclude = db.prepare("SELECT exclude_unregistered_from_totals FROM school_term_config WHERE id = 1").get() || {};
+      const termCfgForExclude = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get() || {};
       excludeUnregisteredFromTotals = termCfgForExclude.exclude_unregistered_from_totals === 1;
     } catch (_) { /* safety net — defaults to false */ }
     
@@ -7669,6 +7669,19 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
         daysAttended = attRow.days_attended;
       }
 
+      // Attendance score injection — aligns preview total_score/average with PDF output.
+      // termCfgForExclude is already a full SELECT * row (widened above).
+      const _attWeight = Number(termCfgForExclude.attendance_score_weight) || 0;
+      const _inclAtt = termCfgForExclude.include_attendance_in_grades !== 0;
+      const _showAtt = termCfgForExclude.show_attendance !== 0;
+      let adjustedTotalScore = totalScore;
+      let adjustedAvg = avg;
+      if (_attWeight > 0 && _inclAtt && _showAtt && classTotalDays > 0) {
+        const attScore = Math.round((daysAttended / classTotalDays) * _attWeight);
+        adjustedTotalScore = totalScore + attScore;
+        adjustedAvg = gradedSubjects.length ? (adjustedTotalScore / _denom).toFixed(2) : '—';
+      }
+
       // V2.2: Resolve official stamp
       let schoolStamp = identityPacket.stamp || null;
       if (identityPacket.stampStyle && identityPacket.stampStyle !== "none" && !schoolStamp) {
@@ -7723,8 +7736,8 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
         ...stu,
         class_name: fullClassName,
         subjects: allSubjectsArray,
-        total_score: totalScore,
-        average: avg,
+        total_score: adjustedTotalScore,
+        average: adjustedAvg,
         domains,
         attendance: {
           total_days: classTotalDays,
