@@ -1,3 +1,23 @@
+## What's New in v1.2.05
+
+This release delivers **Class-Scoped Ranking, Ordinal Numbering Fixes, and Official Template Preservation on Portal Publishing**.
+
+### 🏆 Standard Curriculum Class-Scoped Position Ranking
+- **Class-Grouped Rank Calculation**: Result publishing and PDF generation now calculate cohort rankings strictly scoped to each student's class rather than globally across multi-class publishes.
+- **Singleton Compile Override**: Pre-computed class positions are now passed directly to student report card compilation, completely eliminating the class-of-one issue where single-student PDF compilations defaulted to 1st position.
+- **Accurate Ordinal Suffix Math**: Corrected rank suffix arithmetic to properly handle 11th, 12th, 13th, and compound ordinals (e.g., 21st, 22nd, 23rd).
+- **Attendance Weight & Exclusions Integrity**: Position ranking now prioritizes pre-computed student averages incorporating attendance score weights and subject exclusions.
+
+### 🎨 Report Card Template Fidelity
+- **Selected Template Forwarding**: Fixed portal publishing pipeline to honour the selected official school template (Royal / Gold Tier, Sovereign, Sterling, Classic) chosen in Result Studio instead of hardcoding `clean_slate`.
+- **Dynamic Save-Point Cache Busting**: Included the selected template ID in the deterministic PDF compilation hash, ensuring that switching templates invalidates stale cached PDFs and compiles fresh ones.
+
+### 🔒 Term Immutability & Scoped Pre-Publish Audits
+- **Dual-Layer Concluded Term Lock**: Concluded term dates and calendars are strictly immutable across both UI forms and IPC/API validation layers once a term has closed.
+- **Targeted Audit Scoping**: Result Studio pre-publish audits are now strictly scoped to the active session and term selected in the studio.
+
+---
+
 ## What's New in v1.2.02
 
 This release delivers **Onboarding Stability Fixes — First-Run Boot, Cloud Connect, and View Error Guards**.
