@@ -7531,10 +7531,13 @@ ipcMain.handle("query-results", (event, { scope, session, term, class_name, subj
 
     // Determine whether to exclude unregistered subjects from totals/averages.
     // Ensure column exists first (DBs not yet restarted after migration), then read safely.
+    // termCfgForExclude is hoisted to function scope so the students.map() callback can read
+    // attendance_score_weight, include_attendance_in_grades and show_attendance from it.
     let excludeUnregisteredFromTotals = false;
+    let termCfgForExclude = {};
     try {
       try { db.exec("ALTER TABLE school_term_config ADD COLUMN exclude_unregistered_from_totals INTEGER DEFAULT 0"); } catch (_) {}
-      const termCfgForExclude = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get() || {};
+      termCfgForExclude = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get() || {};
       excludeUnregisteredFromTotals = termCfgForExclude.exclude_unregistered_from_totals === 1;
     } catch (_) { /* safety net — defaults to false */ }
     
