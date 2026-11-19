@@ -104,7 +104,7 @@ async function initiateRefund(transactionIdOrRef, amountKobo = null, reason = ""
 }
 
 function verifyWebhookSignature(body, signature) {
-  const secret = process.env.PAYSTACK_WEBHOOK_SECRET || process.env.PAYSTACK_SECRET_KEY;
+  const secret = process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_WEBHOOK_SECRET;
   if (!secret || !signature) return false;
   
   const hash = crypto.createHmac('sha512', secret).update(body).digest('hex');
