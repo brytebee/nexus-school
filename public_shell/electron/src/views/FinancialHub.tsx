@@ -2561,13 +2561,13 @@ export function FinancialHub() {
                   {exportingPdf ? '⌛ Generating…' : '🖨️ Export PDF'}
                 </button>
                 <button
-                  id="btn-fees-recovery-pulse"
-                  onClick={handlePreviewRecoveryPulse}
-                  disabled={pulseLoading}
+                  id="btn-fees-view-reports"
+                  onClick={() => setActiveTab('pulse-reports')}
                   className="primary-btn"
+                  title="View Fee Pulse audit report and delivery metrics"
                   style={{ padding:'7px 16px', fontSize:'12px', background:'rgba(0,229,255,0.07)', border:'1px solid rgba(0,229,255,0.2)', color:'#00e5ff' }}
                 >
-                  {pulseLoading ? '⌛' : '🤖 Recovery Pulse'}
+                  📊 View Reports
                 </button>
                 <button id="btn-fees-load" onClick={handleLoad} disabled={loading} className="primary-btn" style={{ padding:'7px 18px', fontSize:'12px' }}>
                   {loading ? '⌛ Loading...' : 'Load'}
