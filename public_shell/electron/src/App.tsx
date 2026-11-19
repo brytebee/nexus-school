@@ -27,6 +27,7 @@ import { AnalyticsDashboard } from "./views/AnalyticsDashboard";
 import { NotesMarketplace } from "./views/NotesMarketplace";
 import { SkillMastery } from "./views/SkillMastery";
 import UpdateBanner from "./components/UpdateBanner";
+import FeePulseBanner from "./components/FeePulseBanner";
 import { VersionUpdateModal, type VersionUpdateInfo } from "./components/VersionUpdateModal";
 
 class ViewErrorBoundary extends React.Component<
@@ -214,6 +215,16 @@ function App() {
       document.removeEventListener('click', handleFocusRecovery, true);
       window.removeEventListener('focus', handleWindowFocus);
     };
+  }, []);
+
+  useEffect(() => {
+    const handleNav = (e: any) => {
+      if (e.detail?.tab) {
+        navigateTo(e.detail.tab);
+      }
+    };
+    window.addEventListener('nexus:navigate-tab', handleNav);
+    return () => window.removeEventListener('nexus:navigate-tab', handleNav);
   }, []);
 
   const navigateTo = (tab: string, pushToHistory = true) => {
@@ -537,6 +548,9 @@ function App() {
 
       {/* OTA Update Banner */}
       <UpdateBanner />
+
+      {/* Fee Pulse Real-time Progress & Audit Banner */}
+      <FeePulseBanner onNavigateToReports={() => navigateTo('fees')} />
 
       {/* Version Update Modal Overlay */}
       {availableUpdate && (

@@ -2645,11 +2645,8 @@ ipcMain.handle('fee-structure:add-adjustment', (event, data) => {
             INSERT INTO fee_adjustments (student_id, academic_session, term, adjustment_type, description, amount, approved_by)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         `).run(studentId, session, term, adjustmentType || 'discount', description || '', amount, adminName);
-        // Reduce total_billed by adjustment amount
-        db.prepare(`
-            UPDATE student_fees SET total_billed = MAX(0, total_billed - ?), updated_at = datetime('now')
-            WHERE student_id = ? AND academic_session = ? AND term = ?
-        `).run(amount, studentId, session, term);
+        // Atomically recompute total_billed and fee status with the adjustment factored in
+        recalculateStudentTotalBilled(db, studentId, session, term);
     })();
     const adminId = currentAdminSession ? currentAdminSession.id : null;
     db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'ADD_FEE_ADJUSTMENT', 'fee_adjustments', ?)").run(adminId, `Added ${adjustmentType} of ₦${amount} for student ${studentId}`);
@@ -2659,8 +2656,11 @@ ipcMain.handle('fee-structure:add-adjustment', (event, data) => {
 ipcMain.handle('fee-structure:delete-adjustment', (event, id) => {
     const db = database.getDb();
     const adj = db.prepare('SELECT * FROM fee_adjustments WHERE id = ?').get(id);
-    db.prepare('DELETE FROM fee_adjustments WHERE id = ?').run(id);
     if (adj) {
+        db.transaction(() => {
+            db.prepare('DELETE FROM fee_adjustments WHERE id = ?').run(id);
+            recalculateStudentTotalBilled(db, adj.student_id, adj.academic_session, adj.term);
+        })();
         const adminId = currentAdminSession ? currentAdminSession.id : null;
         db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'DELETE_FEE_ADJUSTMENT', 'fee_adjustments', ?)").run(adminId, `Deleted adjustment ID ${id} for student ${adj.student_id}`);
     }
@@ -3704,30 +3704,355 @@ ipcMain.handle('pulse-inbox:reply', async (event, { id, phone, replyText }) => {
     }
 });
 
-// Overwrite the old trigger-fee-reminders to use the queue instead of direct sends
-ipcMain.removeAllListeners('trigger-fee-reminders');
-ipcMain.on('trigger-fee-reminders', () => {
-    const db = database.getDb();
-    const termConfig = db.prepare('SELECT * FROM school_term_config WHERE id = 1').get();
-    const debtors = db.prepare(`
-        SELECT s.name, s.parent_phone, f.total_billed, f.total_paid
-        FROM students s JOIN student_fees f ON s.id = f.student_id
-        WHERE f.academic_session = ? AND f.term = ?
-          AND (f.total_billed - f.total_paid) > 0
-          AND s.parent_phone IS NOT NULL AND s.parent_phone != ''
-    `).all(termConfig.academic_session, termConfig.term);
+// ── Fee Pulse Engine (Deductions, Idempotency & Delivery Audit) ─────────────
+let isFeePulseRunning = false;
+
+function ensureFeePulseTables(db) {
+  if (!db) return;
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS fee_pulse_batches (
+      id TEXT PRIMARY KEY,
+      academic_session TEXT NOT NULL,
+      term TEXT NOT NULL,
+      trigger_source TEXT NOT NULL,
+      total_targeted INTEGER DEFAULT 0,
+      total_sent INTEGER DEFAULT 0,
+      total_delivered INTEGER DEFAULT 0,
+      total_read INTEGER DEFAULT 0,
+      total_failed INTEGER DEFAULT 0,
+      total_offline INTEGER DEFAULT 0,
+      total_not_on_wa INTEGER DEFAULT 0,
+      total_debt_targeted REAL DEFAULT 0,
+      total_debt_recovered REAL DEFAULT 0,
+      status TEXT DEFAULT 'in_progress',
+      started_at TEXT DEFAULT (datetime('now')),
+      completed_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS fee_pulse_logs (
+      id TEXT PRIMARY KEY,
+      batch_id TEXT NOT NULL,
+      student_id INTEGER NOT NULL,
+      student_name TEXT NOT NULL,
+      class_name TEXT,
+      parent_phone TEXT NOT NULL,
+      original_balance REAL NOT NULL,
+      wa_message_id TEXT,
+      ack_level INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'DISPATCHED',
+      dispatched_at TEXT DEFAULT (datetime('now')),
+      delivered_at TEXT,
+      read_at TEXT,
+      FOREIGN KEY(batch_id) REFERENCES fee_pulse_batches(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_fee_pulse_logs_batch_id ON fee_pulse_logs(batch_id);
+    CREATE INDEX IF NOT EXISTS idx_fee_pulse_logs_student_id ON fee_pulse_logs(student_id);
+    CREATE INDEX IF NOT EXISTS idx_fee_pulse_logs_wa_msg_id ON fee_pulse_logs(wa_message_id);
+  `);
+}
+
+async function runFeePulseBatch({ triggerSource = 'desktop_manual' } = {}) {
+  if (isFeePulseRunning) {
+    console.warn('[Fee Pulse] Batch is already running. Concurrent trigger prevented.');
+    return { ok: false, error: 'A Fee Pulse batch is already in progress.' };
+  }
+
+  const db = database.getDb();
+  if (!db) return { ok: false, error: 'Database not initialized.' };
+
+  ensureFeePulseTables(db);
+  isFeePulseRunning = true;
+
+  try {
+    const termConfig = db.prepare('SELECT * FROM school_term_config WHERE id = 1').get() || {
+      academic_session: '2025/2026',
+      term: 'First Term'
+    };
+    const session = termConfig.academic_session;
+    const term = termConfig.term;
+
+    // 1. Query debtors with net positive balance
+    const allDebtors = db.prepare(`
+      SELECT s.id as student_id, s.name, s.class_name, s.class_arm, s.parent_phone, f.total_billed, f.total_paid
+      FROM students s
+      JOIN student_fees f ON s.id = f.student_id
+      WHERE f.academic_session = ? AND f.term = ?
+        AND (f.total_billed - f.total_paid) > 0
+        AND s.parent_phone IS NOT NULL AND TRIM(s.parent_phone) != ''
+        AND COALESCE(s.is_active, 1) = 1
+    `).all(session, term);
+
+    // 2. Idempotency Guard: 24h cooldown to prevent repeated sends on same day
+    const recentSentRows = db.prepare(`
+      SELECT DISTINCT l.student_id
+      FROM fee_pulse_logs l
+      JOIN fee_pulse_batches b ON l.batch_id = b.id
+      WHERE b.academic_session = ? AND b.term = ?
+        AND l.dispatched_at > datetime('now', '-24 hours')
+    `).all(session, term);
+    const recentlyRemindedIds = new Set(recentSentRows.map(r => r.student_id));
+
+    const eligibleDebtors = allDebtors.filter(d => !recentlyRemindedIds.has(d.student_id));
+
+    if (eligibleDebtors.length === 0) {
+      console.log(`[Fee Pulse] No debtors to remind (Total debtors: ${allDebtors.length}, already reminded in last 24h: ${recentlyRemindedIds.size})`);
+      if (mainWindow) {
+        mainWindow.webContents.send('fee-reminders-complete', {
+          batchId: null,
+          total: allDebtors.length,
+          sent: 0,
+          delivered: 0,
+          offline: 0,
+          notOnWa: 0,
+          failed: 0,
+          alreadyReminded: recentlyRemindedIds.size,
+          duration: 0
+        });
+        mainWindow.webContents.send('fee-reminders-sent', { count: 0 });
+      }
+      isFeePulseRunning = false;
+      return { ok: true, count: 0, message: 'All debtors were already reminded within the last 24 hours.' };
+    }
+
+    // 3. Create batch record
+    const batchId = `fp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const totalDebtTargeted = eligibleDebtors.reduce((sum, d) => sum + (d.total_billed - d.total_paid), 0);
+
+    db.prepare(`
+      INSERT INTO fee_pulse_batches (
+        id, academic_session, term, trigger_source, total_targeted, total_debt_targeted, status, started_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'in_progress', datetime('now'))
+    `).run(batchId, session, term, triggerSource, eligibleDebtors.length, totalDebtTargeted);
 
     const schoolName = identityPacket.name || 'Nexus School';
-    const enqueue = db.prepare(`INSERT INTO pending_pulse_messages (phone, message, type) VALUES (?, ?, 'fee_reminder')`);
-    db.transaction(() => {
-        for (const d of debtors) {
-            const balance = (d.total_billed - d.total_paid).toLocaleString('en-NG');
-            const msg = `Hello! This is a reminder from ${schoolName}.\n\nStudent: *${d.name}*\nOutstanding Balance: *₦${balance}*\n\nKindly make payment to avoid any inconvenience. Thank you! 📚`;
-            enqueue.run(d.parent_phone, msg);
+    const totalCount = eligibleDebtors.length;
+    let notOnWaCount = 0;
+    let failedCount = 0;
+    let offlineCount = 0;
+    let sentCount = 0;
+    const startTime = Date.now();
+
+    console.log(`[Fee Pulse] Starting batch ${batchId} for ${totalCount} debtors (${triggerSource})...`);
+
+    // 4. Dispatch loop with rate-limiting & progress emissions
+    for (let i = 0; i < totalCount; i++) {
+      const debtor = eligibleDebtors[i];
+      const balance = Math.max(0, debtor.total_billed - debtor.total_paid);
+      const balanceStr = balance.toLocaleString('en-NG');
+      const studentClass = debtor.class_name + (debtor.class_arm ? ' ' + debtor.class_arm : '');
+      const msg = `Hello! This is a reminder from ${schoolName}.\n\nStudent: *${debtor.name}*\nOutstanding Balance: *₦${balanceStr}*\n\nKindly make payment to avoid any inconvenience. Thank you! 📚`;
+
+      const logId = `log_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`;
+      let sendResult;
+
+      try {
+        sendResult = await pulseBot.sendFeeReminderRaw(debtor.parent_phone, msg);
+      } catch (sendErr) {
+        sendResult = { ok: false, error: sendErr.message, status: 'FAILED' };
+      }
+
+      let logStatus = 'SENT_OFFLINE';
+      let ackLevel = 1;
+      let waMessageId = null;
+
+      if (!sendResult.ok) {
+        if (sendResult.status === 'NOT_ON_WHATSAPP') {
+          logStatus = 'NOT_ON_WHATSAPP';
+          ackLevel = -2;
+          notOnWaCount++;
+        } else {
+          logStatus = 'FAILED';
+          ackLevel = -1;
+          failedCount++;
         }
-    })();
-    console.log(`[Queue] ${debtors.length} fee reminders enqueued.`);
-    if (mainWindow) mainWindow.webContents.send('fee-reminders-queued', { count: debtors.length });
+      } else {
+        waMessageId = sendResult.wa_message_id || null;
+        ackLevel = sendResult.ack || 1;
+        logStatus = sendResult.status || 'SENT_OFFLINE';
+        sentCount++;
+        if (logStatus === 'SENT_OFFLINE') {
+          offlineCount++;
+        }
+      }
+
+      // Record log row
+      db.prepare(`
+        INSERT INTO fee_pulse_logs (
+          id, batch_id, student_id, student_name, class_name, parent_phone,
+          original_balance, wa_message_id, ack_level, status, dispatched_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `).run(logId, batchId, debtor.student_id, debtor.name, studentClass, debtor.parent_phone, balance, waMessageId, ackLevel, logStatus);
+
+      // Emit real-time progress to UI banner
+      const progressPayload = {
+        batchId,
+        current: i + 1,
+        total: totalCount,
+        percentage: Math.round(((i + 1) / totalCount) * 100),
+        studentName: debtor.name,
+        status: logStatus
+      };
+
+      if (mainWindow) {
+        mainWindow.webContents.send('fee-reminders-progress', progressPayload);
+      }
+
+      // Safety delay between sends (1.5s)
+      if (i < totalCount - 1) {
+        await new Promise(r => setTimeout(r, 1500));
+      }
+    }
+
+    // 5. Finalize batch summary in SQLite
+    const summary = db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN ack_level >= 1 THEN 1 ELSE 0 END) as sent,
+        SUM(CASE WHEN ack_level = 2 THEN 1 ELSE 0 END) as delivered,
+        SUM(CASE WHEN ack_level >= 3 THEN 1 ELSE 0 END) as read_count,
+        SUM(CASE WHEN status = 'SENT_OFFLINE' THEN 1 ELSE 0 END) as offline,
+        SUM(CASE WHEN status = 'NOT_ON_WHATSAPP' THEN 1 ELSE 0 END) as not_on_wa,
+        SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) as failed
+      FROM fee_pulse_logs
+      WHERE batch_id = ?
+    `).get(batchId);
+
+    db.prepare(`
+      UPDATE fee_pulse_batches
+      SET total_sent = ?,
+          total_delivered = ?,
+          total_read = ?,
+          total_offline = ?,
+          total_not_on_wa = ?,
+          total_failed = ?,
+          status = 'completed',
+          completed_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      summary.sent || 0,
+      summary.delivered || 0,
+      summary.read_count || 0,
+      summary.offline || 0,
+      summary.not_on_wa || 0,
+      summary.failed || 0,
+      batchId
+    );
+
+    const duration = Math.round((Date.now() - startTime) / 1000);
+    console.log(`[Fee Pulse] Batch ${batchId} complete in ${duration}s: ${summary.sent} sent, ${summary.offline} offline, ${summary.not_on_wa} not on WA, ${summary.failed} failed.`);
+
+    const completePayload = {
+      batchId,
+      total: totalCount,
+      sent: summary.sent || 0,
+      delivered: summary.delivered || 0,
+      read: summary.read_count || 0,
+      offline: summary.offline || 0,
+      notOnWa: summary.not_on_wa || 0,
+      failed: summary.failed || 0,
+      duration
+    };
+
+    if (mainWindow) {
+      mainWindow.webContents.send('fee-reminders-complete', completePayload);
+      mainWindow.webContents.send('fee-reminders-sent', { count: summary.sent || 0 });
+    }
+
+    isFeePulseRunning = false;
+    return { ok: true, ...completePayload };
+  } catch (err) {
+    console.error('[Fee Pulse] Batch execution error:', err);
+    isFeePulseRunning = false;
+    if (mainWindow) {
+      mainWindow.webContents.send('fee-reminders-complete', { error: err.message });
+    }
+    return { ok: false, error: err.message };
+  }
+}
+
+// Overwrite the old trigger-fee-reminders to use the unified Fee Pulse runner
+ipcMain.removeAllListeners('trigger-fee-reminders');
+ipcMain.on('trigger-fee-reminders', () => {
+  runFeePulseBatch({ triggerSource: 'desktop_manual' });
+});
+
+ipcMain.handle('pulse:get-batches', () => {
+  try {
+    const db = database.getDb();
+    ensureFeePulseTables(db);
+    const batches = db.prepare(`
+      SELECT * FROM fee_pulse_batches
+      ORDER BY started_at DESC
+      LIMIT 50
+    `).all();
+
+    const enriched = batches.map(b => {
+      const logs = db.prepare(`
+        SELECT l.student_id, l.original_balance, f.total_billed, f.total_paid
+        FROM fee_pulse_logs l
+        LEFT JOIN student_fees f ON f.student_id = l.student_id AND f.academic_session = ? AND f.term = ?
+        WHERE l.batch_id = ?
+      `).all(b.academic_session, b.term, b.id);
+
+      let totalRecovered = 0;
+      for (const row of logs) {
+        const currentBal = Math.max(0, (row.total_billed || 0) - (row.total_paid || 0));
+        const recovered = Math.max(0, row.original_balance - currentBal);
+        totalRecovered += recovered;
+      }
+
+      return {
+        ...b,
+        total_debt_recovered: totalRecovered
+      };
+    });
+
+    return { ok: true, data: enriched };
+  } catch (err) {
+    return { ok: false, error: err.message, data: [] };
+  }
+});
+
+ipcMain.handle('pulse:get-batch-details', (event, batchId) => {
+  try {
+    if (!batchId) return { ok: false, error: 'batchId required' };
+    const db = database.getDb();
+    ensureFeePulseTables(db);
+    const batch = db.prepare('SELECT * FROM fee_pulse_batches WHERE id = ?').get(batchId);
+    if (!batch) return { ok: false, error: 'Batch not found' };
+
+    const logs = db.prepare(`
+      SELECT l.*, f.total_billed, f.total_paid
+      FROM fee_pulse_logs l
+      LEFT JOIN student_fees f ON f.student_id = l.student_id AND f.academic_session = ? AND f.term = ?
+      WHERE l.batch_id = ?
+      ORDER BY l.dispatched_at ASC
+    `).all(batch.academic_session, batch.term, batchId);
+
+    let totalRecovered = 0;
+    const enrichedLogs = logs.map(l => {
+      const currentBal = Math.max(0, (l.total_billed || 0) - (l.total_paid || 0));
+      const recovered = Math.max(0, l.original_balance - currentBal);
+      totalRecovered += recovered;
+      return {
+        ...l,
+        current_balance: currentBal,
+        recovered_amount: recovered
+      };
+    });
+
+    return {
+      ok: true,
+      batch: {
+        ...batch,
+        total_debt_recovered: totalRecovered
+      },
+      logs: enrichedLogs
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 // ── Pulse Cloud Bridge (Turn 2) ───────────────────────────────────────────
@@ -6976,7 +7301,18 @@ function recalculateStudentTotalBilled(db, studentId, academicSession, term) {
   `).get(studentId, academicSession, term);
   const extrasFee = Number(extrasRow?.total || 0);
 
-  const newTotalBilled = baseFee + extrasFee;
+  // 3b. Fee adjustments (scholarships, discounts, bursaries, waivers)
+  let adjFee = 0;
+  try {
+    const adjRow = db.prepare(`
+      SELECT COALESCE(SUM(amount), 0) as total
+      FROM fee_adjustments
+      WHERE student_id = ? AND academic_session = ? AND term = ?
+    `).get(studentId, academicSession, term);
+    adjFee = Number(adjRow?.total || 0);
+  } catch (_) {}
+
+  const newTotalBilled = Math.max(0, baseFee + extrasFee - adjFee);
 
   // 4. Update student_fees row atomically
   const existing = db.prepare(`
@@ -11625,50 +11961,66 @@ function createWindow() {
            db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_academic_pulse_date', ?)").run(weekStr);
         }
       }
+
+      // 3. Auto Fee Reminders (Scheduled Dates)
+      try {
+        const feeSettings = _parseFeeSettings(db);
+        const r1 = feeSettings?.reminder_date_1;
+        const r2 = feeSettings?.reminder_date_2;
+
+        if (r1 && r1 === dateStr) {
+          const lastAuto1 = db.prepare("SELECT value FROM app_settings WHERE key='last_auto_fee_reminder_1'").get()?.value;
+          if (lastAuto1 !== dateStr) {
+            console.log(`[Fee Pulse] Scheduled Date 1 matched today (${dateStr}). Executing auto-dispatch...`);
+            db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_auto_fee_reminder_1', ?)").run(dateStr);
+            runFeePulseBatch({ triggerSource: 'desktop_auto' });
+          }
+        }
+        if (r2 && r2 === dateStr) {
+          const lastAuto2 = db.prepare("SELECT value FROM app_settings WHERE key='last_auto_fee_reminder_2'").get()?.value;
+          if (lastAuto2 !== dateStr) {
+            console.log(`[Fee Pulse] Scheduled Date 2 matched today (${dateStr}). Executing auto-dispatch...`);
+            db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_auto_fee_reminder_2', ?)").run(dateStr);
+            runFeePulseBatch({ triggerSource: 'desktop_auto' });
+          }
+        }
+      } catch (e) {
+        console.error("[Fee Pulse Auto-Trigger] Error checking scheduled dates:", e.message);
+      }
     }, CHECK_INTERVAL);
   }
 
   startGovernanceService();
 
-  // On-Demand Fee Reminders
-  ipcMain.on("trigger-fee-reminders", async () => {
+  // Startup check for scheduled fee reminder dates (runs 10s after startup)
+  setTimeout(() => {
     try {
-        const db = database.getDb();
-        const termConfig = db.prepare("SELECT * FROM school_term_config WHERE id = 1").get();
-        const debtors = db.prepare(`
-            SELECT s.id as student_id, s.name, s.class_name, s.class_arm, s.parent_phone, f.total_billed, f.total_paid 
-            FROM students s
-            JOIN student_fees f ON s.id = f.student_id
-            WHERE f.academic_session = ? AND f.term = ? AND (f.total_billed - f.total_paid) > 0
-        `).all(termConfig.academic_session, termConfig.term);
+      const db = database.getDb();
+      if (!db) return;
+      const now = new Date();
+      const dateStr = now.toISOString().split('T')[0];
+      const feeSettings = _parseFeeSettings(db);
+      const r1 = feeSettings?.reminder_date_1;
+      const r2 = feeSettings?.reminder_date_2;
 
-        console.log(`[Guardian Shield] Triggering Fee Reminders for ${debtors.length} parents...`);
-        
-        for (const debtor of debtors) {
-            if (debtor.parent_phone) {
-                const balance = debtor.total_billed - debtor.total_paid;
-                await pulseBot.sendFeeReminder(
-                    debtor.parent_phone, 
-                    debtor.name, 
-                    identityPacket.name || "Nexus School", 
-                    balance,
-                    debtor.student_id,
-                    debtor.class_name,
-                    debtor.class_arm,
-                    termConfig.term
-                );
-                // Simple rate limiting: 2s delay
-                await new Promise(r => setTimeout(r, 2000));
-            }
+      if (r1 && r1 === dateStr) {
+        const lastAuto1 = db.prepare("SELECT value FROM app_settings WHERE key='last_auto_fee_reminder_1'").get()?.value;
+        if (lastAuto1 !== dateStr) {
+          console.log(`[Fee Pulse Startup] Triggering scheduled reminder date 1 (${dateStr})...`);
+          db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_auto_fee_reminder_1', ?)").run(dateStr);
+          runFeePulseBatch({ triggerSource: 'desktop_auto' });
         }
-        
-        if (mainWindow) {
-            mainWindow.webContents.send("fee-reminders-sent", { count: debtors.length });
+      }
+      if (r2 && r2 === dateStr) {
+        const lastAuto2 = db.prepare("SELECT value FROM app_settings WHERE key='last_auto_fee_reminder_2'").get()?.value;
+        if (lastAuto2 !== dateStr) {
+          console.log(`[Fee Pulse Startup] Triggering scheduled reminder date 2 (${dateStr})...`);
+          db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_auto_fee_reminder_2', ?)").run(dateStr);
+          runFeePulseBatch({ triggerSource: 'desktop_auto' });
         }
-    } catch (err) {
-        console.error("[Guardian Shield] Fee Pulse Failed:", err);
-    }
-  });
+      }
+    } catch (_) {}
+  }, 10000);
 }
 
 if (app) {

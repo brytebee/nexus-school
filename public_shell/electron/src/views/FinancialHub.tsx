@@ -159,7 +159,16 @@ export function FinancialHub() {
   const Swal       = (window as any).Swal;
 
   // ── Active tab ────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<'roster'|'structure'|'adjustments'|'receipts'|'online-payments'|'import'|'optional-orders'|'student-extras'>('roster');
+  const [activeTab, setActiveTab] = useState<'roster'|'structure'|'adjustments'|'receipts'|'online-payments'|'import'|'optional-orders'|'student-extras'|'pulse-reports'>('roster');
+
+  // ── Fee Pulse Audit Reports State ──────────────────────────────────────────
+  const [pulseBatches, setPulseBatches] = useState<any[]>([]);
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+  const [selectedBatchDetails, setSelectedBatchDetails] = useState<any | null>(null);
+  const [loadingBatches, setLoadingBatches] = useState<boolean>(false);
+  const [loadingBatchDetails, setLoadingBatchDetails] = useState<boolean>(false);
+  const [pulseStatusFilter, setPulseStatusFilter] = useState<string>('ALL');
+  const [pulseSearch, setPulseSearch] = useState<string>('');
 
   // ── Session/Term ──────────────────────────────────────────────────────────
   const [sessions,        setSessions]        = useState<string[]>([]);
@@ -1703,6 +1712,72 @@ export function FinancialHub() {
 
   useEffect(() => { if (activeTab === 'receipts') loadReceipts(); }, [activeTab]);
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // FEE PULSE AUDIT REPORTS
+  // ═══════════════════════════════════════════════════════════════════════════
+  const loadPulseBatches = useCallback(async () => {
+    setLoadingBatches(true);
+    try {
+      const api = (window as any).electronAPI;
+      if (!api?.invoke) return;
+      const res = await api.invoke('pulse:get-batches');
+      if (res?.ok && Array.isArray(res.data)) {
+        setPulseBatches(res.data);
+        if (res.data.length > 0 && !selectedBatchId) {
+          setSelectedBatchId(res.data[0].id);
+        }
+      }
+    } catch (err) {
+      console.error('[FinancialHub] Failed to load pulse batches:', err);
+    } finally {
+      setLoadingBatches(false);
+    }
+  }, [selectedBatchId]);
+
+  const loadBatchDetails = useCallback(async (batchId: string) => {
+    if (!batchId) return;
+    setLoadingBatchDetails(true);
+    try {
+      const api = (window as any).electronAPI;
+      if (!api?.invoke) return;
+      const res = await api.invoke('pulse:get-batch-details', batchId);
+      if (res?.ok) {
+        setSelectedBatchDetails(res);
+      }
+    } catch (err) {
+      console.error('[FinancialHub] Failed to load batch details:', err);
+    } finally {
+      setLoadingBatchDetails(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'pulse-reports') {
+      loadPulseBatches();
+    }
+  }, [activeTab, loadPulseBatches]);
+
+  useEffect(() => {
+    if (selectedBatchId && activeTab === 'pulse-reports') {
+      loadBatchDetails(selectedBatchId);
+    }
+  }, [selectedBatchId, activeTab, loadBatchDetails]);
+
+  useEffect(() => {
+    const handleFeesNav = (e: any) => {
+      if (e.detail) {
+        setActiveTab(e.detail);
+      }
+    };
+    window.addEventListener('nexus:navigate-fees-tab', handleFeesNav);
+    const cached = localStorage.getItem('nexus_fees_active_tab');
+    if (cached === 'pulse-reports') {
+      setActiveTab('pulse-reports');
+      localStorage.removeItem('nexus_fees_active_tab');
+    }
+    return () => window.removeEventListener('nexus:navigate-fees-tab', handleFeesNav);
+  }, []);
+
   const openApprove = (r: Receipt) => {
     setApproveR(r);
     setApproveAmt(r.extracted_amount ? String(r.extracted_amount) : '');
@@ -2380,6 +2455,13 @@ export function FinancialHub() {
           onClick={() => setActiveTab('import')}
         >
           📥 Bulk Import
+        </button>
+        <button
+          id="fees-tab-btn-pulse-reports"
+          className={`fees-tab-btn${activeTab==='pulse-reports'?' active':''}`}
+          onClick={() => setActiveTab('pulse-reports')}
+        >
+          📡 Pulse Reports
         </button>
       </div>
 
@@ -3626,6 +3708,281 @@ export function FinancialHub() {
                   })}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {/* ══ TAB: FEE PULSE DELIVERY AUDIT & RECOVERY REPORTS ══ */}
+        {activeTab === 'pulse-reports' && (
+          <div id="fees-tab-pulse-reports" style={{ display:'flex', flex:1, overflow:'hidden', background:'rgba(11,15,25,0.6)' }}>
+            {/* Left Batch Selector */}
+            <div style={{ width:'320px', borderRight:'1px solid var(--glass-border)', display:'flex', flexDirection:'column', flexShrink:0, background:'rgba(0,0,0,0.2)' }}>
+              <div style={{ padding:'16px', borderBottom:'1px solid var(--glass-border)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <div>
+                  <div style={{ fontWeight:700, fontSize:'14px' }}>📡 Pulse Batches</div>
+                  <div style={{ fontSize:'11px', color:'var(--text-dim)' }}>Recent reminder runs</div>
+                </div>
+                <button
+                  onClick={loadPulseBatches}
+                  disabled={loadingBatches}
+                  className="small-btn"
+                  style={{ fontSize:'11px', padding:'4px 8px' }}
+                >
+                  {loadingBatches ? '...' : '🔄 Refresh'}
+                </button>
+              </div>
+
+              <div style={{ flex:1, overflowY:'auto', padding:'12px', display:'flex', flexDirection:'column', gap:'8px' }}>
+                {pulseBatches.length === 0 ? (
+                  <div style={{ textAlign:'center', padding:'32px 16px', color:'var(--text-dim)', fontSize:'12px' }}>
+                    No Fee Pulse reminder batches recorded yet. Trigger fee reminders from the roster to start tracking delivery.
+                  </div>
+                ) : (
+                  pulseBatches.map(b => {
+                    const isSelected = selectedBatchId === b.id;
+                    const isAuto = b.trigger_source === 'desktop_auto' || b.trigger_source === 'cloud_cron';
+                    return (
+                      <div
+                        key={b.id}
+                        onClick={() => setSelectedBatchId(b.id)}
+                        style={{
+                          padding:'12px',
+                          borderRadius:'8px',
+                          cursor:'pointer',
+                          background: isSelected ? 'rgba(0, 229, 255, 0.08)' : 'rgba(255, 255, 255, 0.03)',
+                          border: isSelected ? '1px solid rgba(0, 229, 255, 0.4)' : '1px solid rgba(255, 255, 255, 0.06)',
+                          transition:'all 0.15s ease'
+                        }}
+                      >
+                        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'4px' }}>
+                          <span style={{
+                            fontSize:'10px',
+                            fontWeight:700,
+                            padding:'2px 6px',
+                            borderRadius:'4px',
+                            background: isAuto ? 'rgba(168, 85, 247, 0.15)' : 'rgba(0, 229, 255, 0.15)',
+                            color: isAuto ? '#c084fc' : '#00e5ff',
+                            textTransform:'uppercase'
+                          }}>
+                            {isAuto ? '🤖 Scheduled' : '👤 Manual'}
+                          </span>
+                          <span style={{ fontSize:'11px', color:'var(--text-dim)' }}>
+                            {new Date(b.started_at).toLocaleDateString('en-NG', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}
+                          </span>
+                        </div>
+
+                        <div style={{ fontSize:'12px', fontWeight:600, color:'#fff', marginBottom:'6px' }}>
+                          {b.academic_session} • {b.term}
+                        </div>
+
+                        <div style={{ display:'flex', justifyContent:'space-between', fontSize:'11px', color:'var(--text-dim)' }}>
+                          <span>Targeted: <b style={{ color:'#cbd5e1' }}>{b.total_targeted}</b></span>
+                          <span style={{ color:'#10b981', fontWeight:700 }}>
+                            +₦{Number(b.total_debt_recovered || 0).toLocaleString('en-NG')} ROI
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Right Batch Detail View */}
+            <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+              {loadingBatchDetails ? (
+                <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-dim)' }}>
+                  Loading batch delivery details...
+                </div>
+              ) : !selectedBatchDetails?.batch ? (
+                <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-dim)', fontSize:'13px' }}>
+                  Select a Fee Pulse batch on the left to inspect its delivery audit and recovery stats.
+                </div>
+              ) : (
+                (() => {
+                  const b = selectedBatchDetails.batch;
+                  const logs = selectedBatchDetails.logs || [];
+                  const filteredLogs = logs.filter((l: any) => {
+                    const matchStatus = pulseStatusFilter === 'ALL' || l.status === pulseStatusFilter;
+                    const matchSearch = !pulseSearch ||
+                      l.student_name?.toLowerCase().includes(pulseSearch.toLowerCase()) ||
+                      l.parent_phone?.includes(pulseSearch) ||
+                      l.class_name?.toLowerCase().includes(pulseSearch.toLowerCase());
+                    return matchStatus && matchSearch;
+                  });
+
+                  const recoveryRate = b.total_debt_targeted > 0
+                    ? Math.round((b.total_debt_recovered / b.total_debt_targeted) * 100)
+                    : 0;
+
+                  return (
+                    <div style={{ display:'flex', flexDirection:'column', flex:1, overflow:'hidden' }}>
+                      {/* Metric Summary Cards */}
+                      <div style={{ padding:'16px 20px', borderBottom:'1px solid var(--glass-border)', display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:'12px' }}>
+                        <div className="card" style={{ padding:'12px', background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.06)' }}>
+                          <div style={{ fontSize:'11px', color:'var(--text-dim)' }}>Debt Targeted</div>
+                          <div style={{ fontSize:'16px', fontWeight:800, color:'#fff', marginTop:'2px' }}>
+                            ₦{Number(b.total_debt_targeted || 0).toLocaleString('en-NG')}
+                          </div>
+                          <div style={{ fontSize:'10px', color:'var(--text-dim)', marginTop:'2px' }}>{b.total_targeted} parent recipients</div>
+                        </div>
+
+                        <div className="card" style={{ padding:'12px', background:'rgba(16, 185, 129, 0.05)', border:'1px solid rgba(16, 185, 129, 0.2)' }}>
+                          <div style={{ fontSize:'11px', color:'#10b981' }}>Total Debt Recovered</div>
+                          <div style={{ fontSize:'16px', fontWeight:800, color:'#10b981', marginTop:'2px' }}>
+                            ₦{Number(b.total_debt_recovered || 0).toLocaleString('en-NG')}
+                          </div>
+                          <div style={{ fontSize:'10px', color:'#6ee7b7', marginTop:'2px' }}>{recoveryRate}% collected since pulse</div>
+                        </div>
+
+                        <div className="card" style={{ padding:'12px', background:'rgba(0, 229, 255, 0.05)', border:'1px solid rgba(0, 229, 255, 0.2)' }}>
+                          <div style={{ fontSize:'11px', color:'#00e5ff' }}>Delivery Breakdown</div>
+                          <div style={{ fontSize:'13px', fontWeight:700, color:'#fff', marginTop:'4px', display:'flex', gap:'8px' }}>
+                            <span>🔵 {b.total_read || 0} read</span>
+                            <span>🟡 {b.total_delivered || 0} deliv</span>
+                            <span>🟢 {b.total_offline || 0} offl</span>
+                          </div>
+                          <div style={{ fontSize:'10px', color:'var(--text-dim)', marginTop:'2px' }}>
+                            🔴 {b.total_not_on_wa || 0} not on WA • ❌ {b.total_failed || 0} failed
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Filter Bar & Search */}
+                      <div style={{ padding:'12px 20px', borderBottom:'1px solid var(--glass-border)', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'12px', flexWrap:'wrap' }}>
+                        <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+                          {[
+                            { key: 'ALL', label: `All (${logs.length})` },
+                            { key: 'READ', label: `🔵 Read (${logs.filter((l: any) => l.status === 'READ').length})` },
+                            { key: 'DELIVERED', label: `🟡 Delivered (${logs.filter((l: any) => l.status === 'DELIVERED').length})` },
+                            { key: 'SENT_OFFLINE', label: `🟢 Sent / Offline (${logs.filter((l: any) => l.status === 'SENT_OFFLINE').length})` },
+                            { key: 'NOT_ON_WHATSAPP', label: `🔴 Not on WA (${logs.filter((l: any) => l.status === 'NOT_ON_WHATSAPP').length})` },
+                            { key: 'FAILED', label: `❌ Failed (${logs.filter((l: any) => l.status === 'FAILED').length})` },
+                          ].map(f => (
+                            <button
+                              key={f.key}
+                              onClick={() => setPulseStatusFilter(f.key)}
+                              style={{
+                                background: pulseStatusFilter === f.key ? 'rgba(0,229,255,0.2)' : 'rgba(255,255,255,0.04)',
+                                border: pulseStatusFilter === f.key ? '1px solid #00e5ff' : '1px solid rgba(255,255,255,0.08)',
+                                color: pulseStatusFilter === f.key ? '#fff' : 'var(--text-dim)',
+                                borderRadius:'6px',
+                                padding:'4px 10px',
+                                fontSize:'11px',
+                                cursor:'pointer'
+                              }}
+                            >
+                              {f.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        <input
+                          type="text"
+                          placeholder="Search student, class, phone..."
+                          value={pulseSearch}
+                          onChange={e => setPulseSearch(e.target.value)}
+                          className="modern-input"
+                          style={{ width:'220px', fontSize:'12px', padding:'6px 12px' }}
+                        />
+                      </div>
+
+                      {/* Recipient Audit Table */}
+                      <div style={{ flex:1, overflowY:'auto' }}>
+                        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'12px' }}>
+                          <thead>
+                            <tr style={{ borderBottom:'1px solid var(--glass-border)', background:'rgba(0,0,0,0.1)', color:'var(--text-dim)', textAlign:'left' }}>
+                              <th style={{ padding:'10px 16px' }}>Student</th>
+                              <th style={{ padding:'10px 16px' }}>Parent Phone</th>
+                              <th style={{ padding:'10px 16px' }}>Balance Reminded</th>
+                              <th style={{ padding:'10px 16px' }}>Delivery Status</th>
+                              <th style={{ padding:'10px 16px' }}>Current Debt</th>
+                              <th style={{ padding:'10px 16px' }}>Recovered</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredLogs.length === 0 ? (
+                              <tr>
+                                <td colSpan={6} style={{ textAlign:'center', padding:'32px', color:'var(--text-dim)' }}>
+                                  No student records match the selected filter.
+                                </td>
+                              </tr>
+                            ) : (
+                              filteredLogs.map((l: any) => {
+                                const isRecovered = Number(l.recovered_amount || 0) > 0;
+                                let badgeColor = '#64748b';
+                                let badgeBg = 'rgba(100, 116, 139, 0.1)';
+                                let statusLabel = l.status;
+
+                                if (l.status === 'READ') {
+                                  badgeColor = '#38bdf8';
+                                  badgeBg = 'rgba(56, 189, 248, 0.15)';
+                                  statusLabel = '🔵 Read';
+                                } else if (l.status === 'DELIVERED') {
+                                  badgeColor = '#eab308';
+                                  badgeBg = 'rgba(234, 179, 8, 0.15)';
+                                  statusLabel = '🟡 Delivered';
+                                } else if (l.status === 'SENT_OFFLINE') {
+                                  badgeColor = '#22c55e';
+                                  badgeBg = 'rgba(34, 197, 94, 0.15)';
+                                  statusLabel = '🟢 Sent (Offline)';
+                                } else if (l.status === 'NOT_ON_WHATSAPP') {
+                                  badgeColor = '#ef4444';
+                                  badgeBg = 'rgba(239, 68, 68, 0.15)';
+                                  statusLabel = '🔴 Not on WhatsApp';
+                                } else if (l.status === 'FAILED') {
+                                  badgeColor = '#f87171';
+                                  badgeBg = 'rgba(248, 113, 113, 0.15)';
+                                  statusLabel = '❌ Failed';
+                                }
+
+                                return (
+                                  <tr key={l.id} style={{ borderBottom:'1px solid rgba(255,255,255,0.03)' }}>
+                                    <td style={{ padding:'10px 16px' }}>
+                                      <div style={{ fontWeight:600, color:'#fff' }}>{l.student_name}</div>
+                                      <div style={{ fontSize:'10px', color:'var(--text-dim)' }}>{l.class_name}</div>
+                                    </td>
+                                    <td style={{ padding:'10px 16px', color:'#cbd5e1' }}>
+                                      {l.parent_phone}
+                                    </td>
+                                    <td style={{ padding:'10px 16px', fontWeight:600 }}>
+                                      ₦{Number(l.original_balance || 0).toLocaleString('en-NG')}
+                                    </td>
+                                    <td style={{ padding:'10px 16px' }}>
+                                      <span style={{
+                                        fontSize:'11px',
+                                        fontWeight:600,
+                                        padding:'3px 8px',
+                                        borderRadius:'12px',
+                                        background: badgeBg,
+                                        color: badgeColor
+                                      }}>
+                                        {statusLabel}
+                                      </span>
+                                    </td>
+                                    <td style={{ padding:'10px 16px', color: l.current_balance === 0 ? '#10b981' : '#f87171' }}>
+                                      ₦{Number(l.current_balance || 0).toLocaleString('en-NG')}
+                                    </td>
+                                    <td style={{ padding:'10px 16px' }}>
+                                      {isRecovered ? (
+                                        <span style={{ color:'#10b981', fontWeight:700 }}>
+                                          +₦{Number(l.recovered_amount).toLocaleString('en-NG')}
+                                        </span>
+                                      ) : (
+                                        <span style={{ color:'var(--text-dim)' }}>—</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()
+              )}
             </div>
           </div>
         )}

@@ -326,6 +326,58 @@ async function startPulse() {
       }
     });
 
+    client.on("message_ack", async (msg, ack) => {
+      try {
+        const waId = msg?.id?._serialized;
+        if (!waId) return;
+        const db = database.getDb();
+        if (!db) return;
+
+        let status = null;
+        let deliveredAt = null;
+        let readAt = null;
+
+        if (ack === 1) {
+          status = 'SENT_OFFLINE';
+        } else if (ack === 2) {
+          status = 'DELIVERED';
+          deliveredAt = new Date().toISOString();
+        } else if (ack >= 3) {
+          status = 'READ';
+          readAt = new Date().toISOString();
+        }
+
+        if (status) {
+          if (status === 'READ') {
+            db.prepare(`
+              UPDATE fee_pulse_logs
+              SET ack_level = MAX(ack_level, ?),
+                  status = 'READ',
+                  read_at = COALESCE(read_at, ?)
+              WHERE wa_message_id = ?
+            `).run(ack, readAt, waId);
+          } else if (status === 'DELIVERED') {
+            db.prepare(`
+              UPDATE fee_pulse_logs
+              SET ack_level = MAX(ack_level, ?),
+                  status = CASE WHEN status = 'READ' THEN 'READ' ELSE 'DELIVERED' END,
+                  delivered_at = COALESCE(delivered_at, ?)
+              WHERE wa_message_id = ?
+            `).run(ack, deliveredAt, waId);
+          } else if (status === 'SENT_OFFLINE') {
+            db.prepare(`
+              UPDATE fee_pulse_logs
+              SET ack_level = MAX(ack_level, ?),
+                  status = CASE WHEN status IN ('READ', 'DELIVERED') THEN status ELSE 'SENT_OFFLINE' END
+              WHERE wa_message_id = ?
+            `).run(ack, waId);
+          }
+        }
+      } catch (err) {
+        // Table may not exist yet or defensive catch
+      }
+    });
+
     _initInProgress = true;
     try {
       await client.initialize();
@@ -2605,38 +2657,14 @@ module.exports = {
   },
   sendFeeReminder: async (phone, studentName, schoolName, balance, studentId, className, classArm, term) => {
     if (!client || !isReady) return;
-    let target = phone.replace(/\D/g, "");
+    let target = (phone || "").replace(/\D/g, "");
+    if (!target) return;
     if (target.length === 10) target = "234" + target;
     else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
     if (!target.includes("@c.us")) target += "@c.us";
 
-    let breakdownText = "";
-    if (studentId && className) {
-      try {
-        const db = database.getDb();
-        const fmt = (n) => `₦${Number(n || 0).toLocaleString('en-NG')}`;
-        const fullClassName = className + (classArm ? ' ' + classArm : '');
-        const breakdown = db.prepare(`
-          SELECT item_name, amount
-          FROM   fee_structures
-          WHERE  class_name = ?
-            AND  (term = 'All Terms' OR term = ?)
-          ORDER BY item_name ASC
-        `).all(fullClassName, term);
-
-        if (breakdown.length > 0) {
-          breakdownText += `📋 *Fee Breakdown*:\n`;
-          for (const item of breakdown) {
-            breakdownText += `   • ${item.item_name}: ${fmt(item.amount)}\n`;
-          }
-          breakdownText += `   ─────────────────────\n\n`;
-        }
-      } catch (err) {
-        console.error("[Pulse Bot] Failed to query breakdown for reminder:", err);
-      }
-    }
-
-    const message = `💳 *Nexus Pulse: Fee Reminder*\n\nHello! This is a friendly reminder from *${schoolName}* regarding *${studentName}'s* outstanding balance.\n\n${breakdownText}*Current Balance:* ₦${balance.toLocaleString()}\n\nPlease kindly clear this balance at your earliest convenience to avoid any disruption to academic activities.\n\n_Thank you for your partnership._`;
+    const formattedBal = Number(balance || 0).toLocaleString('en-NG');
+    const message = `Hello! This is a reminder from ${schoolName}.\n\nStudent: *${studentName}*\nOutstanding Balance: *₦${formattedBal}*\n\nKindly make payment to avoid any inconvenience. Thank you! 📚`;
     
     await client.sendMessage(target, message);
   },
@@ -2685,6 +2713,53 @@ module.exports = {
     await client.sendMessage(target, message);
   },
 
+  // ── High-Reliability Fee Reminder Dispatcher ────────────────────────────────
+  // Returns delivery metadata ({ ok, wa_message_id, ack, status })
+  sendFeeReminderRaw: async (phone, message) => {
+    if (!client || !isReady) throw new Error('WhatsApp bot is not connected');
+    if (client.pupPage?.isClosed()) {
+      isReady = false;
+      destroyPulse();
+      throw new Error('WhatsApp is reconnecting after page reload. Please wait 30 seconds.');
+    }
+    let target = (phone || "").replace(/\D/g, "");
+    if (!target) throw new Error('Invalid phone number specified');
+    if (target.length === 10) target = "234" + target;
+    else if (target.length === 11 && target.startsWith("0")) target = "234" + target.slice(1);
+    if (!target.includes("@c.us")) target += "@c.us";
+
+    await ensureLidSafetyPatch(client);
+
+    let isRegistered = true;
+    try {
+      const numberId = await client.getNumberId(target);
+      if (!numberId) {
+        isRegistered = false;
+      } else if (numberId?._serialized && !numberId._serialized.includes('@lid')) {
+        target = numberId._serialized;
+      }
+    } catch (_) {}
+
+    if (!isRegistered) {
+      return { ok: false, status: 'NOT_ON_WHATSAPP', error: 'Number not registered on WhatsApp' };
+    }
+
+    try {
+      await client.getChatById(target);
+    } catch (_) {}
+
+    const sentMsg = await client.sendMessage(target, message);
+    const waId = sentMsg?.id?._serialized || null;
+    const ack = sentMsg?.ack || 1;
+    const status = ack === 2 ? 'DELIVERED' : (ack >= 3 ? 'READ' : 'SENT_OFFLINE');
+
+    return {
+      ok: true,
+      wa_message_id: waId,
+      ack,
+      status
+    };
+  },
 
   // ── Smart Intent & Knowledge Engine Exports ──────────────────────────────────
   detectIntent,

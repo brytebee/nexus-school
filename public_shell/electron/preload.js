@@ -356,7 +356,12 @@ const nexusAPI = {
     // ── Generic bridge (Guardian Shield, etc.) ───────────────────────
     invoke: (channel, data)  => ipcRenderer.invoke(channel, data),
     send:   (channel, data)  => ipcRenderer.send(channel, data),
-    on:     (channel, cb)    => ipcRenderer.on(channel, (_event, value) => cb(value)),
+    on:     (channel, cb)    => {
+        const handler = (_event, value) => cb(value);
+        ipcRenderer.on(channel, handler);
+        return () => ipcRenderer.removeListener(channel, handler);
+    },
+    off:    (channel, cb)    => ipcRenderer.removeListener(channel, cb),
     openExternal: (url)      => ipcRenderer.send('shell:openExternal', url),
     fetchAds:     ()         => ipcRenderer.invoke('fetch-ads'),
     // ── Admin Management ──────────────────────────────────────────────
