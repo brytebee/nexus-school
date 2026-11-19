@@ -3842,12 +3842,12 @@ export function FinancialHub() {
                         <div className="card" style={{ padding:'12px', background:'rgba(0, 229, 255, 0.05)', border:'1px solid rgba(0, 229, 255, 0.2)' }}>
                           <div style={{ fontSize:'11px', color:'#00e5ff' }}>Delivery Breakdown</div>
                           <div style={{ fontSize:'13px', fontWeight:700, color:'#fff', marginTop:'4px', display:'flex', gap:'8px' }}>
-                            <span>🔵 {b.total_read || 0} read</span>
-                            <span>🟡 {b.total_delivered || 0} deliv</span>
-                            <span>🟢 {b.total_offline || 0} offl</span>
+                            <span>🔵 {logs.filter((l: any) => l.status === 'READ').length} read</span>
+                            <span>🟡 {logs.filter((l: any) => l.status === 'DELIVERED').length} deliv</span>
+                            <span>🟢 {logs.filter((l: any) => l.status === 'SENT_OFFLINE').length} offl</span>
                           </div>
                           <div style={{ fontSize:'10px', color:'var(--text-dim)', marginTop:'2px' }}>
-                            🔴 {b.total_not_on_wa || 0} not on WA • ❌ {b.total_failed || 0} failed
+                            🔴 {logs.filter((l: any) => l.status === 'NOT_ON_WHATSAPP').length} not on WA • ❌ {logs.filter((l: any) => l.status === 'FAILED').length} failed
                           </div>
                         </div>
                       </div>

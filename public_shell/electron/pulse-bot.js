@@ -2749,7 +2749,22 @@ module.exports = {
     } catch (_) {}
 
     const sentMsg = await client.sendMessage(target, message);
-    const waId = sentMsg?.id?._serialized || null;
+
+    // LID (Linked Device) sessions can return a message object where
+    // _serialized is not yet populated at the moment sendMessage() resolves.
+    // A short yield lets the internal promise chain settle before we read it.
+    await new Promise(r => setTimeout(r, 150));
+
+    const waId = sentMsg?.id?._serialized
+      || (sentMsg?.id?.id && sentMsg?.id?.remote
+          ? `${sentMsg.id.remote}_${sentMsg.id.id}`
+          : null)
+      || null;
+
+    if (!waId) {
+      console.warn('[Pulse Bot] sendFeeReminderRaw: wa_message_id could not be resolved — ACK delivery tracking will be unavailable for this message.');
+    }
+
     const ack = sentMsg?.ack || 1;
     const status = ack === 2 ? 'DELIVERED' : (ack >= 3 ? 'READ' : 'SENT_OFFLINE');
 

@@ -3977,22 +3977,34 @@ ipcMain.handle('pulse:get-batches', () => {
 
     const enriched = batches.map(b => {
       const logs = db.prepare(`
-        SELECT l.student_id, l.original_balance, f.total_billed, f.total_paid
+        SELECT l.student_id, l.original_balance, l.ack_level, l.status, f.total_billed, f.total_paid
         FROM fee_pulse_logs l
         LEFT JOIN student_fees f ON f.student_id = l.student_id AND f.academic_session = ? AND f.term = ?
         WHERE l.batch_id = ?
       `).all(b.academic_session, b.term, b.id);
 
       let totalRecovered = 0;
+      let liveRead = 0, liveDelivered = 0, liveOffline = 0, liveNotOnWa = 0, liveFailed = 0;
       for (const row of logs) {
         const currentBal = Math.max(0, (row.total_billed || 0) - (row.total_paid || 0));
         const recovered = Math.max(0, row.original_balance - currentBal);
         totalRecovered += recovered;
+        if (row.status === 'READ')             liveRead++;
+        else if (row.status === 'DELIVERED')   liveDelivered++;
+        else if (row.status === 'SENT_OFFLINE') liveOffline++;
+        else if (row.status === 'NOT_ON_WHATSAPP') liveNotOnWa++;
+        else if (row.status === 'FAILED')      liveFailed++;
       }
 
       return {
         ...b,
-        total_debt_recovered: totalRecovered
+        total_debt_recovered: totalRecovered,
+        // Live ACK counts — overrides stale snapshot written at dispatch time
+        total_read: liveRead,
+        total_delivered: liveDelivered,
+        total_offline: liveOffline,
+        total_not_on_wa: liveNotOnWa,
+        total_failed: liveFailed
       };
     });
 
