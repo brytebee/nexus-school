@@ -297,14 +297,6 @@ function isValidName(v) {
 
 const originalHandle = ipcMain.handle;
 ipcMain.handle = function(channel, listener) {
-    const gatedChannels = [
-        'pulse:', 'scholar:', 'cbt:', 'portal:', 'portal-content:', 'fee-structure:', 'attendance:', 'queue:', 'pulse-inbox:',
-        'get-daily-attendance', 'save-daily-attendance', 'get-student-attendance-report', 'save-attendance', 'get-attendance'
-    ];
-    const shouldGate = gatedChannels.some(prefix => channel.startsWith(prefix)) &&
-                       channel !== 'cbt:get-system-settings' &&
-                       channel !== 'cbt:save-system-setting';
-
     const wrapper = async (event, ...args) => {
         const quotaError = assertQuotaCompliant(channel);
         if (quotaError) return quotaError;
@@ -315,9 +307,7 @@ ipcMain.handle = function(channel, listener) {
         const paymentError = assertPaymentOpen(channel);
         if (paymentError) return paymentError;
 
-        if (shouldGate && licenseStatus?.tier === 'Standalone') {
-            return { ok: false, error: 'Feature locked. Migrate to a payment plan to enjoy the full features of Nexus School OS.' };
-        }
+        // Tier / plan gating removed — all channels open across all tiers per revised pricing strategy.
 
         // Setup chain guard check — only runs once DB is initialized
         if (database.isInitialized()) {
@@ -10291,22 +10281,19 @@ function createWindow() {
         WHERE student_id = ? AND academic_session = ? AND term = ?
       `).get(id, termConfig.academic_session, termConfig.term) || { total_billed: 0, total_paid: 0 };
 
-      // ── Fee Gate (Gold / Diamond only — Silver/Standalone have no financial module) ────
-      const _portalTier = licenseStatus?.tier || 'Silver';
+      // ── Fee Gate (Fee-based results withholding across all tiers) ────
       let resultsBlocked = false;
       let resultsBlockedMsg = '';
       let resultsBlockedBalance = 0;
-      if (_portalTier !== 'Silver' && _portalTier !== 'Standalone') {
-        try {
-          const gateResult = isStudentFeeGated(db, id, termConfig.academic_session, termConfig.term);
-          if (gateResult.gated) {
-            resultsBlocked = true;
-            resultsBlockedBalance = gateResult.balance;
-            resultsBlockedMsg = `Your child's academic results are currently withheld pending fee clearance. Outstanding balance: ₦${Number(gateResult.balance).toLocaleString('en-NG')}. Please contact the school bursar to resolve this.`;
-          }
-        } catch (feeGateErr) {
-          console.warn('[Portal] Fee gate check failed (non-fatal):', feeGateErr.message);
+      try {
+        const gateResult = isStudentFeeGated(db, id, termConfig.academic_session, termConfig.term);
+        if (gateResult.gated) {
+          resultsBlocked = true;
+          resultsBlockedBalance = gateResult.balance;
+          resultsBlockedMsg = `Your child's academic results are currently withheld pending fee clearance. Outstanding balance: ₦${Number(gateResult.balance).toLocaleString('en-NG')}. Please contact the school bursar to resolve this.`;
         }
+      } catch (feeGateErr) {
+        console.warn('[Portal] Fee gate check failed (non-fatal):', feeGateErr.message);
       }
 
       // Pull bank account details from settings (Gold+)

@@ -1726,6 +1726,8 @@ export function FinancialHub() {
         if (res.data.length > 0 && !selectedBatchId) {
           setSelectedBatchId(res.data[0].id);
         }
+      } else if (res && !res.ok) {
+        console.warn('[FinancialHub] pulse:get-batches returned non-ok result:', res.error);
       }
     } catch (err) {
       console.error('[FinancialHub] Failed to load pulse batches:', err);
@@ -1743,6 +1745,8 @@ export function FinancialHub() {
       const res = await api.invoke('pulse:get-batch-details', batchId);
       if (res?.ok) {
         setSelectedBatchDetails(res);
+      } else if (res && !res.ok) {
+        console.warn('[FinancialHub] pulse:get-batch-details returned non-ok result:', res.error);
       }
     } catch (err) {
       console.error('[FinancialHub] Failed to load batch details:', err);
