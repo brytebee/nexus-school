@@ -2161,18 +2161,16 @@ ipcMain.handle('fee-structure:apply-to-class', (event, { className, academicSess
     const students = db.prepare("SELECT id FROM students WHERE UPPER(replace(class_name || COALESCE(' ' || NULLIF(class_arm, ''), ''), ' ', '')) = ?").all(className.replace(/\s+/g, '').toUpperCase());
     if (students.length === 0) return { ok: false, error: 'No students in class', count: 0 };
 
-    const upsert = db.prepare(`
-        INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status)
-        VALUES (?, ?, ?, ?, 0, 'unpaid')
-        ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
-          total_billed = excluded.total_billed, updated_at = datetime('now')
-    `);
-    db.transaction(() => { for (const s of students) upsert.run(s.id, session, activeTerm, total); })();
+    db.transaction(() => {
+        for (const s of students) {
+            recalculateStudentTotalBilled(db, s.id, session, activeTerm);
+        }
+    })();
 
     const adminId = currentAdminSession ? currentAdminSession.id : null;
-    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'BULK_APPLY_FEES', 'student_fees', ?)").run(adminId, `Applied ₦${total.toLocaleString()} to ${students.length} students in ${className}`);
+    db.prepare("INSERT INTO audit_logs (admin_id, action, target, details) VALUES (?, 'BULK_APPLY_FEES', 'student_fees', ?)").run(adminId, `Applied fee structure to ${students.length} students in ${className} factoring extras & adjustments`);
 
-    console.log(`[Fee Structure] Applied ₦${total.toLocaleString()} to ${students.length} students in ${className}`);
+    console.log(`[Fee Structure] Applied fee structure to ${students.length} students in ${className}`);
     return { ok: true, count: students.length, totalBilled: total };
 });
 
@@ -7278,17 +7276,25 @@ ipcMain.handle('fees:dry-run-recovery-pulse', (event, { academic_session, term }
 function recalculateStudentTotalBilled(db, studentId, academicSession, term) {
   if (!studentId || !academicSession || !term) return null;
 
-  // 1. Get student class
+  // 1. Get student class (normalize class name and class arm)
   const student = db.prepare('SELECT class_name, class_arm FROM students WHERE id = ?').get(studentId);
-  const className = student ? (student.class_name + (student.class_arm ? ' ' + student.class_arm : '')) : '';
+  const rawClass = student?.class_name ? String(student.class_name).trim() : '';
+  const rawArm = student?.class_arm ? String(student.class_arm).trim() : '';
+  const fullClassName = (rawClass + (rawArm ? ' ' + rawArm : '')).trim();
 
-  // 2. Base class fee from fee_structures
+  // 2. Base class fee from fee_structures (match full class name e.g. "Beginners A" or raw class "Beginners")
   let baseFee = 0;
-  if (className) {
+  if (rawClass) {
     const feeRow = db.prepare(`
       SELECT COALESCE(SUM(amount), 0) as total FROM fee_structures
-      WHERE class_name = ? AND (LOWER(TRIM(term)) IN ('all terms', 'all term') OR term = ?)
-    `).get(className, term);
+      WHERE (
+        UPPER(replace(class_name, ' ', '')) = UPPER(replace(?, ' ', ''))
+        OR UPPER(replace(class_name, ' ', '')) = UPPER(replace(?, ' ', ''))
+      ) AND (
+        LOWER(TRIM(term)) IN ('all terms', 'all term')
+        OR LOWER(TRIM(term)) = LOWER(TRIM(?))
+      )
+    `).get(fullClassName, rawClass, term);
     baseFee = Number(feeRow?.total || 0);
   }
 
@@ -7297,7 +7303,10 @@ function recalculateStudentTotalBilled(db, studentId, academicSession, term) {
     SELECT COALESCE(SUM(fe.amount), 0) as total
     FROM student_extra_selections ses
     JOIN fee_extras fe ON fe.id = ses.extra_id
-    WHERE ses.student_id = ? AND ses.academic_session = ? AND ses.term = ? AND fe.is_active = 1
+    WHERE ses.student_id = ?
+      AND TRIM(ses.academic_session) = TRIM(?)
+      AND LOWER(TRIM(ses.term)) = LOWER(TRIM(?))
+      AND fe.is_active = 1
   `).get(studentId, academicSession, term);
   const extrasFee = Number(extrasRow?.total || 0);
 
@@ -7307,7 +7316,9 @@ function recalculateStudentTotalBilled(db, studentId, academicSession, term) {
     const adjRow = db.prepare(`
       SELECT COALESCE(SUM(amount), 0) as total
       FROM fee_adjustments
-      WHERE student_id = ? AND academic_session = ? AND term = ?
+      WHERE student_id = ?
+        AND TRIM(academic_session) = TRIM(?)
+        AND LOWER(TRIM(term)) = LOWER(TRIM(?))
     `).get(studentId, academicSession, term);
     adjFee = Number(adjRow?.total || 0);
   } catch (_) {}
@@ -7317,7 +7328,9 @@ function recalculateStudentTotalBilled(db, studentId, academicSession, term) {
   // 4. Update student_fees row atomically
   const existing = db.prepare(`
     SELECT total_paid FROM student_fees
-    WHERE student_id = ? AND academic_session = ? AND term = ?
+    WHERE student_id = ?
+      AND TRIM(academic_session) = TRIM(?)
+      AND LOWER(TRIM(term)) = LOWER(TRIM(?))
   `).get(studentId, academicSession, term);
 
   const totalPaid = Number(existing?.total_paid || 0);
@@ -7328,17 +7341,19 @@ function recalculateStudentTotalBilled(db, studentId, academicSession, term) {
   if (existing) {
     db.prepare(`
       UPDATE student_fees
-      SET total_billed = ?, status = ?
-      WHERE student_id = ? AND academic_session = ? AND term = ?
+      SET total_billed = ?, status = ?, updated_at = datetime('now')
+      WHERE student_id = ?
+        AND TRIM(academic_session) = TRIM(?)
+        AND LOWER(TRIM(term)) = LOWER(TRIM(?))
     `).run(newTotalBilled, status, studentId, academicSession, term);
-  } else if (newTotalBilled > 0) {
+  } else {
     db.prepare(`
-      INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status)
-      VALUES (?, ?, ?, ?, 0, 'unpaid')
-    `).run(studentId, academicSession, term, newTotalBilled);
+      INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status, updated_at)
+      VALUES (?, ?, ?, ?, 0, ?, datetime('now'))
+    `).run(studentId, academicSession, term, newTotalBilled, status);
   }
 
-  return { baseFee, extrasFee, totalBilled: newTotalBilled, totalPaid, status };
+  return { baseFee, extrasFee, adjFee, totalBilled: newTotalBilled, totalPaid, status };
 }
 
 /**
@@ -7361,6 +7376,29 @@ function reconcileExistingStudentExtras(db) {
     }
   } catch (err) {
     console.warn('[Database] Extras reconciliation error (non-fatal):', err.message);
+  }
+}
+
+/**
+ * reconcileExistingFeeAdjustments — Startup reconciliation loop that recalculates
+ * student_fees.total_billed for all students with recorded fee adjustments.
+ */
+function reconcileExistingFeeAdjustments(db) {
+  try {
+    const rows = db.prepare(`
+      SELECT DISTINCT student_id, academic_session, term
+      FROM fee_adjustments
+    `).all();
+    if (rows && rows.length > 0) {
+      db.transaction(() => {
+        for (const r of rows) {
+          recalculateStudentTotalBilled(db, r.student_id, r.academic_session, r.term);
+        }
+      })();
+      console.log(`[Database] Reconciled fee adjustments for ${rows.length} student record(s).`);
+    }
+  } catch (err) {
+    console.warn('[Database] Fee adjustments reconciliation error (non-fatal):', err.message);
   }
 }
 
@@ -9441,6 +9479,7 @@ function createWindow() {
     } catch (_) {}
     ensureIlsSchema(database.getDb());
     reconcileExistingStudentExtras(database.getDb());
+    reconcileExistingFeeAdjustments(database.getDb());
     ensureAdvanceFeesSchema(database.getDb());
     
     // FINAL DEMO CHECK: Print the number of records found
