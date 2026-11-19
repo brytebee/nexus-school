@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { NavSidebar } from "./components/NavSidebar";
 import { HelpDrawer } from "./components/HelpDrawer";
 import { SetupGuideDrawer } from "./components/SetupGuideDrawer";
@@ -217,7 +217,7 @@ function App() {
     };
   }, []);
 
-  useEffect(() => {
+  React.useEffect(() => {
     const handleNav = (e: any) => {
       if (e.detail?.tab) {
         navigateTo(e.detail.tab);
