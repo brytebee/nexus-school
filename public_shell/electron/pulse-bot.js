@@ -432,72 +432,86 @@ async function destroyPulse() {
 // instead of paying the 200 ms – 5 s puppeteer IPC cost on every message.
 
 async function resolvePhoneNumber(msg) {
+  const fromJid = msg.from || "";
+
   // ── Fast path: cache hit ──────────────────────────────────────────────────
-  const cached = _jidPhoneCache.get(msg.from);
+  const cached = _jidPhoneCache.get(fromJid);
   if (cached) {
-    console.log(`[Pulse Bot] Phone resolved via cache for JID: ${msg.from}`);
+    console.log(`[Pulse Bot] Phone resolved via cache for JID: ${fromJid}`);
     return cached;
   }
 
   try {
-    const contact = await msg.getContact();
-    console.log(`[Pulse Bot] Raw JID: ${msg.from} | contact.number: ${contact.number}`);
-
     let resolved = null;
 
-    // Strategy 1: Contact's own number field (most reliable)
-    if (!resolved && contact.number && isLikelyPhone(contact.number)) {
-      console.log("[Pulse Bot] Phone resolved via contact.number");
-      resolved = contact.number;
-    }
-
-    // Strategy 2: contact.id._serialized stripped of @c.us and device suffix
-    if (!resolved) {
-      const serialized = contact.id?._serialized ?? "";
-      if (serialized.includes("@c.us")) {
-        const extracted = serialized.split("@")[0].split(":")[0];
-        if (isLikelyPhone(extracted)) {
-          console.log("[Pulse Bot] Phone resolved via contact.id._serialized");
-          resolved = extracted;
-        }
+    // Strategy 1: Standard Consumer JID (@c.us) — sender phone is directly in the JID
+    if (fromJid.includes("@c.us")) {
+      const extracted = fromJid.split("@")[0].split(":")[0];
+      if (isLikelyPhone(extracted)) {
+        console.log("[Pulse Bot] Phone resolved via @c.us JID");
+        resolved = extracted;
       }
     }
 
-    // Strategy 3: client.getNumberId lookup (resolves LID → real number)
-    if (!resolved && client) {
-      const lid = msg.from.split("@")[0].split(":")[0];
+    // Strategy 2: Linked Identity (@lid) — opaque device ID, requires resolution to PN (@c.us)
+    if (!resolved && fromJid.includes("@lid")) {
+      // 2a. Check if contact model already has the resolved PN wid in id._serialized
       try {
-        const wid = await client.getNumberId(lid);
-        if (wid) {
-          const r = wid._serialized.split("@")[0];
-          if (isLikelyPhone(r)) {
-            console.log("[Pulse Bot] Phone resolved via getNumberId");
-            resolved = r;
+        const contact = await msg.getContact();
+        const contactJid = contact?.id?._serialized || "";
+        if (contactJid.includes("@c.us")) {
+          const extracted = contactJid.split("@")[0].split(":")[0];
+          if (isLikelyPhone(extracted)) {
+            console.log("[Pulse Bot] Phone resolved via contact.id @c.us");
+            resolved = extracted;
           }
         }
-      } catch (lidErr) {
-        console.warn("[Pulse Bot] getNumberId failed:", lidErr.message);
+      } catch (cErr) {
+        console.warn("[Pulse Bot] contact fetch failed:", cErr.message);
+      }
+
+      // 2b. Explicit LID -> PN resolution via whatsapp-web.js enforceLidAndPnRetrieval
+      if (!resolved && client && typeof client.getContactLidAndPhone === "function") {
+        try {
+          const cleanLid = fromJid.split(":")[0].split("@")[0] + "@lid";
+          const pairs = await client.getContactLidAndPhone([cleanLid]);
+          const pnJid = pairs?.[0]?.pn || "";
+          if (pnJid.includes("@c.us")) {
+            const extracted = pnJid.split("@")[0].split(":")[0];
+            if (isLikelyPhone(extracted)) {
+              console.log("[Pulse Bot] Phone resolved via getContactLidAndPhone");
+              resolved = extracted;
+            }
+          }
+        } catch (lidErr) {
+          console.warn("[Pulse Bot] getContactLidAndPhone failed:", lidErr.message);
+        }
       }
     }
 
-    // Strategy 4: Parse directly from msg.from JID
-    if (!resolved && msg.from.includes("@c.us")) {
-      const fromPhone = msg.from.split("@")[0].split(":")[0];
-      if (isLikelyPhone(fromPhone)) {
-        console.log("[Pulse Bot] Phone resolved via msg.from JID");
-        resolved = fromPhone;
-      }
+    // Strategy 3: Fallback via contact.number — ONLY permitted if neither message nor contact is @lid
+    if (!resolved) {
+      try {
+        const contact = await msg.getContact();
+        const contactJid = contact?.id?._serialized || "";
+        if (!fromJid.includes("@lid") && !contactJid.includes("@lid") && contact?.number) {
+          if (isLikelyPhone(contact.number)) {
+            console.log("[Pulse Bot] Phone resolved via fallback contact.number");
+            resolved = contact.number;
+          }
+        }
+      } catch (_) {}
     }
 
     if (!resolved) {
       console.warn("[Pulse Bot] All resolution strategies exhausted.", {
-        from: msg.from, number: contact.number,
+        from: fromJid,
       });
       return null;
     }
 
     // ── Cache the resolved phone so future messages from this JID are instant
-    _jidPhoneCache.set(msg.from, resolved);
+    _jidPhoneCache.set(fromJid, resolved);
     return resolved;
 
   } catch (err) {
@@ -507,19 +521,14 @@ async function resolvePhoneNumber(msg) {
 }
 
 /**
- * Rejects LID values (14-digit numbers starting with 5/6/7/8/9) and accepts
- * valid E.164 numbers or Nigerian-formatted local numbers.
+ * Returns true only for real phone numbers in E.164, Nigerian local, or 10-digit
+ * bare format (7–15 digits in E.164 standard; we require 10–15 digits).
  */
 function isLikelyPhone(value) {
   if (!value) return false;
   const digits = String(value).replace(/\D/g, "");
   if (digits.length < 10 || digits.length > 15) return false;
-  // Reject LIDs — they're typically 14 digits starting with a high digit
-  if (digits.length >= 13 && /^[56789]/.test(digits)) return false;
-  const intl = digits.startsWith("234") && digits.length === 13;
-  const local = digits.startsWith("0") && digits.length === 11;
-  const bare = digits.length === 10;
-  return intl || local || bare;
+  return true;
 }
 
 /**
