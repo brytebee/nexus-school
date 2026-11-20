@@ -159,7 +159,7 @@ export function FinancialHub() {
   const Swal       = (window as any).Swal;
 
   // ── Active tab ────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<'roster'|'structure'|'adjustments'|'receipts'|'online-payments'|'import'|'optional-orders'|'student-extras'|'pulse-reports'>('roster');
+  const [activeTab, setActiveTab] = useState<'dashboard'|'roster'|'structure'|'adjustments'|'receipts'|'online-payments'|'import'|'optional-orders'|'student-extras'|'pulse-reports'>('roster');
 
   // ── Fee Pulse Audit Reports State ──────────────────────────────────────────
   const [pulseBatches, setPulseBatches] = useState<any[]>([]);
@@ -2406,6 +2406,13 @@ export function FinancialHub() {
 
       {/* ── TAB RAIL (V1 exact) ── */}
       <div style={{ display:'flex', gap:'4px', padding:'0 20px', borderBottom:'1px solid var(--glass-border)', flexShrink:0 }}>
+        <button
+          id="fees-tab-btn-dashboard"
+          className={`fees-tab-btn${activeTab==='dashboard'?' active':''}`}
+          onClick={() => setActiveTab('dashboard')}
+        >
+          📊 Dashboard
+        </button>
         {(['roster','structure','adjustments'] as const).map(tab => {
           const labels = { roster:'📋 Fee Roster', structure:'🏗️ Fee Structure', adjustments:'🎓 Adjustments' };
           return (
@@ -2473,6 +2480,184 @@ export function FinancialHub() {
           TAB PANELS
       ══════════════════════════════════════════════════════════════════════ */}
       <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}>
+
+        {/* ══ TAB: FINANCIAL DASHBOARD ══ */}
+        {activeTab === 'dashboard' && (
+          <div id="fees-tab-dashboard" style={{ flex:1, overflowY:'auto', padding:'24px 28px', display:'flex', flexDirection:'column', gap:'24px' }}>
+            {/* Header & Term Selector */}
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'16px' }}>
+              <div>
+                <h3 style={{ margin:0, fontSize:'18px', fontWeight:700, color:'var(--text-main)' }}>
+                  📊 Financial Operations &amp; Tuition Intelligence
+                </h3>
+                <p style={{ margin:'4px 0 0', fontSize:'12px', color:'var(--text-dim)' }}>
+                  Executive cash flow, fee collection targets, and gate debt clearance for {selectedSession} ({selectedTerm}).
+                </p>
+              </div>
+
+              <div style={{ display:'flex', gap:'12px', alignItems:'center' }}>
+                <select
+                  value={selectedSession}
+                  onChange={e => {
+                    const s = e.target.value;
+                    setSelectedSession(s);
+                    sessionRef.current = s;
+                    loadDbSummary(s, termRef.current, searchQuery, classFilterRef.current);
+                  }}
+                  className="modern-input"
+                  style={{ width:'130px', fontSize:'12px' }}
+                >
+                  {sessions.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+
+                <select
+                  value={selectedTerm}
+                  onChange={e => {
+                    const t = e.target.value;
+                    setSelectedTerm(t);
+                    termRef.current = t;
+                    loadDbSummary(sessionRef.current, t, searchQuery, classFilterRef.current);
+                  }}
+                  className="modern-input"
+                  style={{ width:'140px', fontSize:'12px' }}
+                >
+                  {termsList.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+
+                <button
+                  onClick={() => loadDbSummary(selectedSession, selectedTerm, searchQuery, classFilterRef.current)}
+                  className="small-btn"
+                  style={{ padding:'7px 14px', fontSize:'12px' }}
+                >
+                  🔄 Refresh
+                </button>
+              </div>
+            </div>
+
+            {/* Metric KPI Cards Grid */}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:'16px' }}>
+              {/* Card 1: Outstanding Debt */}
+              <div style={{ background:'linear-gradient(135deg, rgba(239,68,68,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#f87171', letterSpacing:'0.5px' }}>Total Outstanding</span>
+                  <span style={{ fontSize:'16px' }}>⚠️</span>
+                </div>
+                <div style={{ fontSize:'24px', fontWeight:800, color:'#fca5a5', fontFamily:'var(--font-mono)', marginTop:'8px' }}>
+                  ₦{fmt(dbSummary?.outstanding || 0)}
+                </div>
+                <div style={{ fontSize:'11px', color:'rgba(248,113,113,0.8)', marginTop:'6px' }}>
+                  {(dbSummary?.unpaid || 0) + (dbSummary?.partial || 0)} students with arrears
+                </div>
+              </div>
+
+              {/* Card 2: Cleared Students */}
+              <div style={{ background:'linear-gradient(135deg, rgba(34,197,94,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(34,197,94,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#4ade80', letterSpacing:'0.5px' }}>Fully Cleared</span>
+                  <span style={{ fontSize:'16px' }}>✅</span>
+                </div>
+                <div style={{ fontSize:'24px', fontWeight:800, color:'#86efac', fontFamily:'var(--font-mono)', marginTop:'8px' }}>
+                  {dbSummary?.cleared || 0}
+                </div>
+                <div style={{ fontSize:'11px', color:'rgba(74,222,128,0.8)', marginTop:'6px' }}>
+                  {dbSummary?.total ? Math.round(((dbSummary.cleared || 0) / dbSummary.total) * 100) : 0}% of student body settled
+                </div>
+              </div>
+
+              {/* Card 3: Partially Paid */}
+              <div style={{ background:'linear-gradient(135deg, rgba(245,158,11,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#fbbf24', letterSpacing:'0.5px' }}>Partial Debtors</span>
+                  <span style={{ fontSize:'16px' }}>⏳</span>
+                </div>
+                <div style={{ fontSize:'24px', fontWeight:800, color:'#fde68a', fontFamily:'var(--font-mono)', marginTop:'8px' }}>
+                  {dbSummary?.partial || 0}
+                </div>
+                <div style={{ fontSize:'11px', color:'rgba(251,191,36,0.8)', marginTop:'6px' }}>
+                  Installment plans in progress
+                </div>
+              </div>
+
+              {/* Card 4: Unpaid Debtors */}
+              <div style={{ background:'linear-gradient(135deg, rgba(168,85,247,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(168,85,247,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#c084fc', letterSpacing:'0.5px' }}>Total Enrolled</span>
+                  <span style={{ fontSize:'16px' }}>👥</span>
+                </div>
+                <div style={{ fontSize:'24px', fontWeight:800, color:'#e9d5ff', fontFamily:'var(--font-mono)', marginTop:'8px' }}>
+                  {dbSummary?.total || 0}
+                </div>
+                <div style={{ fontSize:'11px', color:'rgba(192,132,252,0.8)', marginTop:'6px' }}>
+                  Active profiles in active term
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Navigation Cards */}
+            <div>
+              <h4 style={{ margin:'0 0 12px', fontSize:'13px', fontWeight:600, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.5px' }}>
+                Fast Operational Navigation
+              </h4>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))', gap:'14px' }}>
+                <div
+                  onClick={() => setActiveTab('roster')}
+                  style={{ background:'rgba(255,255,255,0.03)', border:'1px solid var(--glass-border)', borderRadius:'12px', padding:'16px', cursor:'pointer', transition:'all 0.2s' }}
+                  onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(0,229,255,0.4)')}
+                  onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--glass-border)')}
+                >
+                  <div style={{ fontSize:'15px', fontWeight:700, color:'var(--text-main)', display:'flex', alignItems:'center', gap:'8px' }}>
+                    📋 Fee Roster
+                  </div>
+                  <div style={{ fontSize:'12px', color:'var(--text-dim)', marginTop:'4px' }}>
+                    View complete student fee ledger, print debt lists, and export Excel rosters.
+                  </div>
+                </div>
+
+                <div
+                  onClick={() => setActiveTab('structure')}
+                  style={{ background:'rgba(255,255,255,0.03)', border:'1px solid var(--glass-border)', borderRadius:'12px', padding:'16px', cursor:'pointer', transition:'all 0.2s' }}
+                  onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(0,229,255,0.4)')}
+                  onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--glass-border)')}
+                >
+                  <div style={{ fontSize:'15px', fontWeight:700, color:'var(--text-main)', display:'flex', alignItems:'center', gap:'8px' }}>
+                    🏗️ Fee Structure
+                  </div>
+                  <div style={{ fontSize:'12px', color:'var(--text-dim)', marginTop:'4px' }}>
+                    Configure class tuition line items, bank accounts, and bulk-apply to classes.
+                  </div>
+                </div>
+
+                <div
+                  onClick={() => setActiveTab('adjustments')}
+                  style={{ background:'rgba(255,255,255,0.03)', border:'1px solid var(--glass-border)', borderRadius:'12px', padding:'16px', cursor:'pointer', transition:'all 0.2s' }}
+                  onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(0,229,255,0.4)')}
+                  onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--glass-border)')}
+                >
+                  <div style={{ fontSize:'15px', fontWeight:700, color:'var(--text-main)', display:'flex', alignItems:'center', gap:'8px' }}>
+                    🎓 Adjustments
+                  </div>
+                  <div style={{ fontSize:'12px', color:'var(--text-dim)', marginTop:'4px' }}>
+                    Record scholarships, bursaries, staff discounts, and humanitarian fee waivers.
+                  </div>
+                </div>
+
+                <div
+                  onClick={() => setActiveTab('receipts')}
+                  style={{ background:'rgba(255,255,255,0.03)', border:'1px solid var(--glass-border)', borderRadius:'12px', padding:'16px', cursor:'pointer', transition:'all 0.2s' }}
+                  onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(0,229,255,0.4)')}
+                  onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--glass-border)')}
+                >
+                  <div style={{ fontSize:'15px', fontWeight:700, color:'var(--text-main)', display:'flex', alignItems:'center', gap:'8px' }}>
+                    📄 Receipts &amp; Transactions
+                  </div>
+                  <div style={{ fontSize:'12px', color:'var(--text-dim)', marginTop:'4px' }}>
+                    Inspect payment transactions, generate official PDF receipts, and audit collections.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ══ TAB: FEE ROSTER ══ */}
         {activeTab === 'roster' && (
@@ -2609,10 +2794,12 @@ export function FinancialHub() {
                     const pend   = pendingEdits[row.student_id] as any;
                     const billed = pend?.total_billed !== undefined ? pend.total_billed : row.total_billed;
                     const paid   = pend?.total_paid   !== undefined ? pend.total_paid   : row.total_paid;
-                    const bal    = (billed as number) - (paid as number);
+                    const rawBal = (billed as number) - (paid as number);
+                    const bal    = Math.max(0, rawBal);
+                    const advanceCredit = Math.max(0, (paid as number) - (billed as number));
                     const due    = pend?.next_due_date !== undefined ? pend.next_due_date : row.next_due_date;
                     // Re-derive status from live values (pending edits change it)
-                    const st: 'cleared'|'partial'|'unpaid' = bal <= 0 ? 'cleared' : (paid as number) > 0 ? 'partial' : 'unpaid';
+                    const st: 'cleared'|'partial'|'unpaid' = rawBal <= 0 ? 'cleared' : (paid as number) > 0 ? 'partial' : 'unpaid';
                     const sc = STATUS_CONFIG[st];
                     const isExpanded = expandedStudentId === row.student_id;
                     const studentExtras = studentExtrasCache[row.student_id] || [];
@@ -2642,6 +2829,11 @@ export function FinancialHub() {
                           {/* Balance */}
                           <td style={{ textAlign:'right', fontFamily:'var(--font-mono)', fontSize:'13px', color: bal>0 ? '#FF5252' : '#4CAF50' }}>
                             <div>₦{fmt(bal)}</div>
+                            {advanceCredit > 0 && (
+                              <div style={{ fontSize:'10px', color:'#00E5FF', fontWeight:600 }} title="Advance credit / overpayment">
+                                (+₦{fmt(advanceCredit)} credit)
+                              </div>
+                            )}
                             {Number(row.prior_balance) > 0 && (
                               <div style={{ fontSize:'10px', color:'#F59E0B', fontWeight:600 }} title="Prior term arrears">
                                 +₦{fmt(Number(row.prior_balance))} prior
