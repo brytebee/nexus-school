@@ -195,8 +195,7 @@ async function pushSchoolDelta() {
       WHERE status != 'exhausted' AND (amount - amount_used) > 0
       GROUP BY student_id
     ) adv ON adv.student_id = s.id
-    WHERE s.parent_phone IS NOT NULL AND s.parent_phone != ''
-      AND COALESCE(s.is_active, 1) = 1
+    WHERE COALESCE(s.is_active, 1) = 1
   `).all(termConfig.academic_session, termConfig.term);
 
   const studentPayload = students.map((st) => {
@@ -232,7 +231,7 @@ async function pushSchoolDelta() {
       class_arm: st.class_arm,
       admission_no: st.admission_no || null,
       parent_name: st.parent_name || null,
-      parent_phone: st.parent_phone,
+      parent_phone: st.parent_phone || '',
       parent_phone_2: st.parent_phone_2 || null,
       parent_email: st.parent_email || null,
       total_billed: st.total_billed,

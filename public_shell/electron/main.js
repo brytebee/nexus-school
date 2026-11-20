@@ -4377,7 +4377,7 @@ ipcMain.handle("create-class", async (event, { className, maxSubjects, passMarkO
     const isLocked = (() => {
       try {
         const lockRow = db.prepare("SELECT value FROM app_settings WHERE key = 'mobile_registration_locked'").get();
-        if (lockRow && lockRow.value === '1') return true;
+        if (!lockRow || lockRow.value === '1') return true;
         const lockAtRow = db.prepare("SELECT value FROM app_settings WHERE key = 'mobile_registration_lock_at'").get();
         if (lockAtRow && lockAtRow.value) {
           const lockAtTime = new Date(lockAtRow.value).getTime();
@@ -5148,7 +5148,7 @@ ipcMain.handle('students:get-settings', () => {
 
     return {
       ok: true,
-      mobile_registration_locked: regRow ? regRow.value === '1' : false,
+      mobile_registration_locked: regRow ? regRow.value === '1' : true,
       mobile_grades_locked: gradesRow ? gradesRow.value === '1' : false,
       mobile_attendance_locked: attRow ? attRow.value === '1' : false,
       mobile_registration_lock_at: regLockAtRow ? regLockAtRow.value : null,
