@@ -363,6 +363,7 @@ const nexusAPI = {
     },
     off:    (channel, cb)    => ipcRenderer.removeListener(channel, cb),
     openExternal: (url)      => ipcRenderer.send('shell:openExternal', url),
+    checkVersionUpdate: (opts) => ipcRenderer.invoke('system:check-version-update', opts),
     fetchAds:     ()         => ipcRenderer.invoke('fetch-ads'),
     // ── Admin Management ──────────────────────────────────────────────
     getAdmins:    ()     => ipcRenderer.invoke('auth:get-admins'),

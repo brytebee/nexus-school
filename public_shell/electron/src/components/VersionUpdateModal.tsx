@@ -32,7 +32,7 @@ export function VersionUpdateModal({ update, onClose }: VersionUpdateModalProps)
 
     try {
       if ((window as any).electronAPI?.invoke) {
-        const res = await (window as any).electronAPI.invoke('system:apply-update');
+        const res = await (window as any).electronAPI.invoke('system:apply-update', update);
         if (res?.ok) {
           setTimeout(() => {
             setIsApplying(false);

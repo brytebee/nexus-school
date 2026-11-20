@@ -112,23 +112,49 @@ export function UpToDateModal({ version, onClose }: UpToDateModalProps) {
           </div>
         </div>
 
-        <button
-          onClick={onClose}
-          style={{
-            width: '100%',
-            padding: '10px 16px',
-            borderRadius: '10px',
-            background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.2), rgba(0, 229, 255, 0.1))',
-            border: '1px solid rgba(0, 229, 255, 0.4)',
-            color: '#fff',
-            fontSize: '13px',
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'all 0.2s',
-          }}
-        >
-          Done
-        </button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button
+            onClick={() => {
+              const api = (window as any).electronAPI || (window as any).nexusAPI;
+              if (api?.openExternal) {
+                api.openExternal('https://github.com/brytebee/nexus-school-releases/releases');
+              } else {
+                window.open('https://github.com/brytebee/nexus-school-releases/releases', '_blank');
+              }
+            }}
+            style={{
+              flex: 1,
+              padding: '10px 14px',
+              borderRadius: '10px',
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              color: 'rgba(255, 255, 255, 0.8)',
+              fontSize: '12px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+          >
+            📦 Release Downloads
+          </button>
+          <button
+            onClick={onClose}
+            style={{
+              flex: 1,
+              padding: '10px 16px',
+              borderRadius: '10px',
+              background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.2), rgba(0, 229, 255, 0.1))',
+              border: '1px solid rgba(0, 229, 255, 0.4)',
+              color: '#fff',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+          >
+            Done
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -149,9 +175,16 @@ export function About({ onTabChange }: AboutProps) {
     setIsCheckingUpdate(true);
     setUpdateError(null);
     try {
+      try {
+        localStorage.removeItem('nexus_update_snoozed_until');
+      } catch (_) {}
+
       const api = (window as any).electronAPI || (window as any).nexusAPI;
       if (api?.invoke) {
-        const updateRes = await api.invoke('system:check-version-update');
+        const updateRes = api?.checkVersionUpdate
+          ? await api.checkVersionUpdate({ force: true })
+          : await api.invoke('system:check-version-update', { force: true });
+
         if (updateRes && updateRes.has_update) {
           setAvailableUpdate(updateRes);
         } else {

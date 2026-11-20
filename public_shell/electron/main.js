@@ -8730,6 +8730,7 @@ ipcMain.handle("get-platform", () => process.platform);
 
 // ── Version Update Notification & Pre-Install Safety System ─────────────
 let _versionUpdateCache = null;
+let _versionUpdateCacheTime = 0;
 
 function isNewerVersion(latest, current) {
   if (!latest || !current) return false;
@@ -8744,45 +8745,141 @@ function isNewerVersion(latest, current) {
   return false;
 }
 
-async function checkVersionUpdate() {
-  const currentVersion = app.getVersion();
-  const apiBase = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
-    const response = await fetch(`${apiBase}/api/ads`, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data.update) {
-        const update = data.update;
-        const hasNewer = isNewerVersion(update.latest_version, currentVersion);
-        _versionUpdateCache = {
-          has_update: hasNewer,
-          current_version: currentVersion,
-          latest_version: update.latest_version,
-          release_name: update.release_name || `Nexus School OS v${update.latest_version}`,
-          release_date: update.release_date || new Date().toISOString().split('T')[0],
-          release_notes: update.release_notes || [],
-          download_url_mac_arm64: update.download_url_mac_arm64 || update.download_url_mac,
-          download_url_mac_x64: update.download_url_mac_x64 || update.download_url_mac,
-          download_url_mac: update.download_url_mac,
-          download_url_win: update.download_url_win,
-          download_url_linux: update.download_url_linux,
-          is_critical: !!update.is_critical
-        };
-        console.log(`[VersionUpdate] Checked updates: current=v${currentVersion}, latest=v${update.latest_version}, hasNewer=${hasNewer}`);
-        return _versionUpdateCache;
-      }
-    }
-  } catch (err) {
-    console.warn('[VersionUpdate] Check failed (non-fatal):', err.message);
+function parseGitHubReleaseAssets(release) {
+  const tagName = release.tag_name || 'v1.2.06';
+  const version = tagName.replace(/^v/, '');
+  const releaseName = release.name || `Nexus School OS v${version}`;
+  const releaseDate = release.published_at ? release.published_at.split('T')[0] : new Date().toISOString().split('T')[0];
+
+  let releaseNotes = [];
+  if (release.body && typeof release.body === 'string') {
+    releaseNotes = release.body
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.startsWith('- ') || line.startsWith('* ') || line.startsWith('• '))
+      .map(line => line.replace(/^[-*•]\s+/, '').trim())
+      .filter(Boolean);
   }
-  return _versionUpdateCache || { has_update: false, current_version: currentVersion };
+  if (releaseNotes.length === 0) {
+    releaseNotes = [
+      `Nexus School OS v${version} performance and stability enhancements`,
+      'Academic workstation suite features and enterprise security updates',
+      'Automated pre-install SQLite backup safeguard prior to version upgrades',
+      'Enhanced offline synchronization with Android tablet grade collector'
+    ];
+  }
+
+  const assets = Array.isArray(release.assets) ? release.assets : [];
+  const findAssetUrl = (predicate) => {
+    const match = assets.find(a => a.name && predicate(String(a.name).toLowerCase()));
+    return match?.browser_download_url;
+  };
+
+  const ghBase = `https://github.com/brytebee/nexus-school-releases/releases/download/${tagName}`;
+  const macArm64 = findAssetUrl(n => n.endsWith('.dmg') && (n.includes('arm64') || n.includes('aarch64')));
+  const macX64 = findAssetUrl(n => n.endsWith('.dmg') && (n.includes('x64') || n.includes('intel') || n.includes('x86_64')));
+  const macAny = findAssetUrl(n => n.endsWith('.dmg'));
+  const winExe = findAssetUrl(n => n.endsWith('.exe'));
+  const linuxAppImage = findAssetUrl(n => n.endsWith('.appimage') || n.endsWith('.deb'));
+
+  return {
+    latest_version: version,
+    release_name: releaseName,
+    release_date: releaseDate,
+    release_notes: releaseNotes,
+    download_url_mac_arm64: macArm64 || macAny || `${ghBase}/Nexus-School-OS-${version}-arm64.dmg`,
+    download_url_mac_x64: macX64 || macAny || `${ghBase}/Nexus-School-OS-${version}-x64.dmg`,
+    download_url_mac: macArm64 || macAny || `${ghBase}/Nexus-School-OS-${version}-arm64.dmg`,
+    download_url_win: winExe || `${ghBase}/Nexus-School-OS-Setup-${version}.exe`,
+    download_url_linux: linuxAppImage || `${ghBase}/Nexus-School-OS-${version}.AppImage`,
+    is_critical: false
+  };
 }
 
-ipcMain.handle("system:check-version-update", async () => {
-  return await checkVersionUpdate();
+async function fetchFromGitHubReleases() {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 6000);
+  try {
+    const res = await fetch('https://api.github.com/repos/brytebee/nexus-school-releases/releases/latest', {
+      headers: {
+        'User-Agent': 'NexusSchoolOS-Updater',
+        'Accept': 'application/vnd.github.v3+json'
+      },
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      const release = await res.json();
+      return parseGitHubReleaseAssets(release);
+    }
+  } catch (err) {
+    clearTimeout(timeoutId);
+    console.warn('[VersionUpdate] GitHub release check fallback failed:', err.message);
+  }
+  return null;
+}
+
+async function checkVersionUpdate(force = false) {
+  const currentVersion = app.getVersion();
+  if (!force && _versionUpdateCache && (Date.now() - _versionUpdateCacheTime < 5 * 60 * 1000)) {
+    return _versionUpdateCache;
+  }
+
+  const apiBase = process.env.NEXUS_API_URL || 'https://api.nexusos.com.ng';
+  let updateData = null;
+
+  // 1. Try canonical /api/version-update, then fallback to legacy /api/ads
+  const endpoints = [`${apiBase}/api/version-update`, `${apiBase}/api/ads`];
+  for (const url of endpoints) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.update && data.update.latest_version) {
+          updateData = data.update;
+          break;
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. If API was unavailable or returned a version not newer than current, check GitHub Releases directly
+  if (!updateData || !isNewerVersion(updateData.latest_version, currentVersion)) {
+    const ghData = await fetchFromGitHubReleases();
+    if (ghData) {
+      updateData = ghData;
+    }
+  }
+
+  if (updateData) {
+    const hasNewer = isNewerVersion(updateData.latest_version, currentVersion);
+    _versionUpdateCache = {
+      has_update: hasNewer,
+      current_version: currentVersion,
+      latest_version: updateData.latest_version,
+      release_name: updateData.release_name || `Nexus School OS v${updateData.latest_version}`,
+      release_date: updateData.release_date || new Date().toISOString().split('T')[0],
+      release_notes: updateData.release_notes || [],
+      download_url_mac_arm64: updateData.download_url_mac_arm64 || updateData.download_url_mac,
+      download_url_mac_x64: updateData.download_url_mac_x64 || updateData.download_url_mac,
+      download_url_mac: updateData.download_url_mac,
+      download_url_win: updateData.download_url_win,
+      download_url_linux: updateData.download_url_linux,
+      is_critical: !!updateData.is_critical
+    };
+    _versionUpdateCacheTime = Date.now();
+    console.log(`[VersionUpdate] Checked updates: current=v${currentVersion}, latest=v${updateData.latest_version}, hasNewer=${hasNewer}`);
+    return _versionUpdateCache;
+  }
+
+  return _versionUpdateCache || { has_update: false, current_version: currentVersion, latest_version: currentVersion };
+}
+
+ipcMain.handle("system:check-version-update", async (_event, opts) => {
+  return await checkVersionUpdate(!!opts?.force);
 });
 
 // Backward-compatible alias for any legacy callers
@@ -8790,22 +8887,29 @@ ipcMain.handle("fetch-ads", async () => {
   return [];
 });
 
-ipcMain.handle("system:apply-update", async (event, customDownloadUrl) => {
+ipcMain.handle("system:apply-update", async (event, customPayload) => {
   try {
     // 1. Resolve platform and CPU architecture-specific installer URL
-    let downloadUrl = customDownloadUrl;
-    if (!downloadUrl && _versionUpdateCache) {
+    let downloadUrl = null;
+    const sourceObj = (typeof customPayload === 'object' && customPayload !== null)
+      ? customPayload
+      : _versionUpdateCache;
+
+    if (typeof customPayload === 'string' && customPayload.startsWith('http')) {
+      downloadUrl = customPayload;
+    } else if (sourceObj) {
       if (process.platform === 'darwin') {
         const isArm64 = process.arch === 'arm64';
         downloadUrl = isArm64
-          ? (_versionUpdateCache.download_url_mac_arm64 || _versionUpdateCache.download_url_mac)
-          : (_versionUpdateCache.download_url_mac_x64 || _versionUpdateCache.download_url_mac);
+          ? (sourceObj.download_url_mac_arm64 || sourceObj.download_url_mac)
+          : (sourceObj.download_url_mac_x64 || sourceObj.download_url_mac);
       } else if (process.platform === 'win32') {
-        downloadUrl = _versionUpdateCache.download_url_win;
+        downloadUrl = sourceObj.download_url_win;
       } else {
-        downloadUrl = _versionUpdateCache.download_url_linux;
+        downloadUrl = sourceObj.download_url_linux;
       }
     }
+
     if (!downloadUrl) {
       downloadUrl = 'https://github.com/brytebee/nexus-school-releases/releases';
     }
