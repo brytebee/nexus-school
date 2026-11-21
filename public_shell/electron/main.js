@@ -123,6 +123,29 @@ if (!app) {
 
 let mainWindow;
 
+function ensureDatabaseInitialized() {
+  if (database.isInitialized && database.isInitialized()) {
+    return database.getDb();
+  }
+  try {
+    return database.getDb();
+  } catch (_) {
+    try {
+      const userDataPath = app.getPath("userData");
+      const dbPath = path.join(userDataPath, 'nexus_os.db');
+      const betterSqlite3 = require("better-sqlite3");
+      database.init(dbPath, betterSqlite3);
+      try {
+        require("../../private_engine/src/database").init(dbPath, betterSqlite3);
+      } catch (__) {}
+      return database.getDb();
+    } catch (initErr) {
+      console.error("[Database] Failed to self-heal/initialize database:", initErr.message);
+      throw initErr;
+    }
+  }
+}
+
 // ── State at module scope so IPC handlers can safely access it ──
 let identityPacket = {
   name: "Green Valley High",
@@ -747,7 +770,7 @@ ipcMain.handle("sync:cloud-bootstrap", async (_event, { slug, email, hardwareId 
     const candidateBases = isDev
         ? Array.from(new Set([primaryBase, 'http://localhost:3001', 'http://127.0.0.1:3001', 'http://localhost:3000', 'https://api.nexusos.com.ng']))
         : [primaryBase];
-    const db = database.getDb();
+    const db = ensureDatabaseInitialized();
 
     // Derive hardware_id from existing settings if not supplied
     let hwId = hardwareId;
@@ -874,7 +897,7 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
     const candidateBases = isDev
         ? Array.from(new Set([primaryBase, 'http://localhost:3001', 'http://127.0.0.1:3001', 'http://localhost:3000', 'https://api.nexusos.com.ng']))
         : [primaryBase];
-    const db = database.getDb();
+    const db = ensureDatabaseInitialized();
 
     // ── 1. Bootstrap ──────────────────────────────────────────────────────────
     let hwId;
@@ -2319,6 +2342,18 @@ ipcMain.handle('fees:send-receipt-pdf', async (event, { studentId, txRef, txId }
     }
 
     // Path B: Manual payment (cash / transfer / POS / bank teller) — no payment session
+    const feeSettings = _parseFeeSettings(db);
+    let identity = {};
+    try { identity = JSON.parse(fs.readFileSync(identityFilePath, "utf8")); } catch (_) {}
+    const isGrandfathered = identity?.portalSlug === 'thepotters' || identity?.name?.toLowerCase()?.includes('potter');
+    const allowManualReceipts = feeSettings.allow_manual_receipts !== undefined
+        ? Boolean(feeSettings.allow_manual_receipts)
+        : isGrandfathered;
+
+    if (!allowManualReceipts) {
+        return { ok: false, error: 'Automated WhatsApp receipts for manual entries are disabled for this school. Receipts are reserved for online Paystack payments.' };
+    }
+
     let tx = null;
     if (txId) {
         tx = db.prepare("SELECT * FROM fee_transactions WHERE id = ?").get(txId);
@@ -6329,7 +6364,16 @@ ipcMain.handle("fees:get-summary", (event, { academic_session, term, search = ""
       ? `AND (UPPER(replace(s.class_name, ' ', '')) = ? OR UPPER(replace(s.class_name || COALESCE(' ' || NULLIF(s.class_arm, ''), ''), ' ', '')) = ?)`
       : '';
 
-    const sumParams = [academic_session, term, academic_session, term, query, query, query, query, query, query, query];
+    const sumParams = [
+      academic_session, term, // for prior_outstanding
+      academic_session, term, query, query, query, query, query, query, query, // for manual_paid
+    ];
+    if (classNorm) sumParams.push(classNorm, classNorm);
+
+    sumParams.push(academic_session, term, query, query, query, query, query, query, query); // for total_adjustments
+    if (classNorm) sumParams.push(classNorm, classNorm);
+
+    sumParams.push(academic_session, term, query, query, query, query, query, query, query); // for main query
     if (classNorm) sumParams.push(classNorm, classNorm);
 
     const summary = db.prepare(`
@@ -6343,6 +6387,25 @@ ipcMain.handle("fees:get-summary", (event, { academic_session, term, search = ""
             AND (pf.academic_session != ? OR pf.term != ?)
             AND (pf.total_billed - pf.total_paid) > 0
         ) AS prior_outstanding,
+        COALESCE(SUM(f.total_billed), 0) AS total_billed,
+        COALESCE(SUM(f.total_paid), 0) AS total_paid,
+        (
+          SELECT COALESCE(SUM(t.amount), 0)
+          FROM fee_transactions t
+          JOIN students st ON st.id = t.student_id
+          WHERE t.academic_session = ? AND t.term = ?
+            AND t.payment_method IN ('cash', 'transfer', 'pos', 'bank_teller')
+            AND (st.name LIKE ? OR st.id LIKE ? OR st.admission_no LIKE ? OR st.reg_no LIKE ? OR st.parent_name LIKE ? OR st.parent_phone LIKE ? OR st.parent_phone_2 LIKE ?)
+            ${classClause.replace(/s\./g, 'st.')}
+        ) AS manual_paid,
+        (
+          SELECT COALESCE(SUM(a.amount), 0)
+          FROM fee_adjustments a
+          JOIN students sa ON sa.id = a.student_id
+          WHERE a.academic_session = ? AND a.term = ?
+            AND (sa.name LIKE ? OR sa.id LIKE ? OR sa.admission_no LIKE ? OR sa.reg_no LIKE ? OR sa.parent_name LIKE ? OR sa.parent_phone LIKE ? OR sa.parent_phone_2 LIKE ?)
+            ${classClause.replace(/s\./g, 'sa.')}
+        ) AS total_adjustments,
         SUM(CASE WHEN COALESCE(f.total_billed, 0) <= COALESCE(f.total_paid, 0) AND COALESCE(f.total_billed, 0) > 0 THEN 1 ELSE 0 END) AS cleared,
         SUM(CASE WHEN COALESCE(f.total_paid, 0) > 0 AND COALESCE(f.total_billed, 0) > COALESCE(f.total_paid, 0) THEN 1 ELSE 0 END) AS partial,
         SUM(CASE WHEN COALESCE(f.total_paid, 0) = 0 AND COALESCE(f.total_billed, 0) > 0 THEN 1 ELSE 0 END) AS unpaid,
@@ -6356,7 +6419,8 @@ ipcMain.handle("fees:get-summary", (event, { academic_session, term, search = ""
         ${classClause}
     `).get(...sumParams);
 
-    return { ok: true, data: summary || { outstanding: 0, cleared: 0, partial: 0, unpaid: 0, total: 0 } };
+    const fallback = { outstanding: 0, prior_outstanding: 0, cleared: 0, partial: 0, unpaid: 0, total: 0, total_billed: 0, total_paid: 0, manual_paid: 0, total_adjustments: 0 };
+    return { ok: true, data: summary ? { ...fallback, ...summary } : fallback };
   } catch (err) {
     console.error("[Fees] get-summary error:", err);
     return { ok: false, error: err.message, data: { outstanding: 0, cleared: 0, partial: 0, unpaid: 0, total: 0 } };
@@ -6537,12 +6601,24 @@ ipcMain.handle("fees:record-payment", async (event, { student_id, academic_sessi
 
     // Non-blocking receipt dispatch — UI gets { ok: true } immediately
     if (send_receipt === true) {
-      const botStatus = pulseBot?.getPulseStatus?.();
-      if (botStatus?.status === "ready") {
-        setImmediate(() =>
-          sendManualReceiptHelper(db, { student_id, academic_session, term, amount: amt, payment_method, reference_number, note })
-            .catch(err => console.error("[Manual Receipt] dispatch error:", err.message))
-        );
+      const feeSettings = _parseFeeSettings(db);
+      let identity = {};
+      try { identity = JSON.parse(fs.readFileSync(identityFilePath, "utf8")); } catch (_) {}
+      const isGrandfathered = identity?.portalSlug === 'thepotters' || identity?.name?.toLowerCase()?.includes('potter');
+      const allowManualReceipts = feeSettings.allow_manual_receipts !== undefined
+        ? Boolean(feeSettings.allow_manual_receipts)
+        : isGrandfathered;
+
+      if (!allowManualReceipts) {
+        console.log("[Manual Receipt] Skipped: manual receipts are disabled for this school.");
+      } else {
+        const botStatus = pulseBot?.getPulseStatus?.();
+        if (botStatus?.status === "ready") {
+          setImmediate(() =>
+            sendManualReceiptHelper(db, { student_id, academic_session, term, amount: amt, payment_method, reference_number, note })
+              .catch(err => console.error("[Manual Receipt] dispatch error:", err.message))
+          );
+        }
       }
     }
 
@@ -6861,6 +6937,13 @@ ipcMain.handle("fees:get-settings", () => {
   try {
     const db = database.getDb();
     const settings = _parseFeeSettings(db);
+
+    let identity = {};
+    try { identity = JSON.parse(fs.readFileSync(identityFilePath, "utf8")); } catch (_) {}
+    const isGrandfathered = identity?.portalSlug === 'thepotters' || identity?.name?.toLowerCase()?.includes('potter');
+    settings.allow_manual_receipts = settings.allow_manual_receipts !== undefined
+      ? Boolean(settings.allow_manual_receipts)
+      : isGrandfathered;
     
     // Fetch bank accounts from DB
     const bankAccounts = db.prepare(`
@@ -9964,7 +10047,7 @@ function createWindow() {
   // or restoring from backup. Prioritising this avoids an impossible license lockout.
   let isFirstRun = false;
   try {
-    const db = database.getDb();
+    const db = ensureDatabaseInitialized();
     const adminCount = db.prepare('SELECT COUNT(*) as c FROM admin_users').get().c;
     if (adminCount === 0) isFirstRun = true;
   } catch (e) {
@@ -9974,7 +10057,7 @@ function createWindow() {
 
   if (process.env.DEV_AUTO_LOGIN === 'true') {
     try {
-      const db = database.getDb();
+      const db = ensureDatabaseInitialized();
       const firstSuper = db.prepare('SELECT id, username, role_level FROM admin_users WHERE role_level = 9 LIMIT 1').get();
       if (firstSuper) {
         currentAdminSession = { id: firstSuper.id, username: firstSuper.username, role_level: firstSuper.role_level, loginAt: Date.now() };

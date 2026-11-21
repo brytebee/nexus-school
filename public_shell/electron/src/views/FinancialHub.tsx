@@ -174,7 +174,18 @@ export function FinancialHub() {
   const [sessions,        setSessions]        = useState<string[]>([]);
   const [selectedSession, setSelectedSession] = useState('');
   const [selectedTerm,    setSelectedTerm]    = useState('First Term');
-  const [dbSummary, setDbSummary] = useState<{ outstanding: number; cleared: number; partial: number; unpaid: number; total: number } | null>(null);
+  const [dbSummary, setDbSummary] = useState<{
+    outstanding: number;
+    prior_outstanding?: number;
+    cleared: number;
+    partial: number;
+    unpaid: number;
+    total: number;
+    total_billed?: number;
+    total_paid?: number;
+    manual_paid?: number;
+    total_adjustments?: number;
+  } | null>(null);
   const [searchVal, setSearchVal] = useState('');
   const [adjMatchedStudents, setAdjMatchedStudents] = useState<{ id: string; name: string; class_name: string }[]>([]);
 
@@ -281,6 +292,7 @@ export function FinancialHub() {
   const [installPlans,     setInstallPlans]     = useState<InstallPlan[]>([{ label:'', percent:0 }]);
   const [allowManualPayments, setAllowManualPayments] = useState(true);
   const [allowCustomPayments, setAllowCustomPayments] = useState(true);
+  const [allowManualReceipts, setAllowManualReceipts] = useState(true);
   const [gateEnabled,      setGateEnabled]      = useState(true);
   const [gateMode,         setGateMode]         = useState<'any'|'fixed'|'percent'>('fixed');
   const [gateThreshold,    setGateThreshold]    = useState('');
@@ -549,10 +561,15 @@ export function FinancialHub() {
         try {
           if (window.electronAPI?.fees?.getSettings) {
             const settingsRes = await window.electronAPI.fees.getSettings();
-            if (settingsRes?.ok && settingsRes.data?.bank_accounts) {
-              setBankAccounts(settingsRes.data.bank_accounts);
-              if (settingsRes.data.active_bank_account_id) {
-                setActiveBankAccountId(settingsRes.data.active_bank_account_id);
+            if (settingsRes?.ok) {
+              if (settingsRes.data?.bank_accounts) {
+                setBankAccounts(settingsRes.data.bank_accounts);
+                if (settingsRes.data.active_bank_account_id) {
+                  setActiveBankAccountId(settingsRes.data.active_bank_account_id);
+                }
+              }
+              if (settingsRes.data?.allow_manual_receipts !== undefined) {
+                setAllowManualReceipts(Boolean(settingsRes.data.allow_manual_receipts));
               }
             }
           }
@@ -1924,6 +1941,7 @@ export function FinancialHub() {
       })) : [{ label:'', percent:0, max_occurrences: 1 }]);
       setAllowManualPayments(s.allow_manual_payments !== false);
       setAllowCustomPayments(s.allow_custom_payments !== false);
+      setAllowManualReceipts(s.allow_manual_receipts !== false);
       const thresh = Number(s.fee_gate_threshold)||0;
       setGateEnabled(s.fee_gate_enabled !== false);
       setGateMode(thresh===0 && s.fee_gate_mode==='fixed' ? 'any' : (s.fee_gate_mode||'fixed'));
@@ -2534,10 +2552,10 @@ export function FinancialHub() {
               </div>
             </div>
 
-            {/* Metric KPI Cards Grid */}
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:'16px' }}>
+            {/* Metric KPI Cards Ribbon (Horizontal Scroll) */}
+            <div style={{ display:'flex', gap:'16px', overflowX:'auto', paddingBottom:'12px', scrollSnapType:'x mandatory' }}>
               {/* Card 1: Outstanding Debt */}
-              <div style={{ background:'linear-gradient(135deg, rgba(239,68,68,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
+              <div style={{ minWidth:'240px', flexShrink:0, scrollSnapAlign:'start', background:'linear-gradient(135deg, rgba(239,68,68,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                   <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#f87171', letterSpacing:'0.5px' }}>Total Outstanding</span>
                   <span style={{ fontSize:'16px' }}>⚠️</span>
@@ -2550,45 +2568,84 @@ export function FinancialHub() {
                 </div>
               </div>
 
-              {/* Card 2: Cleared Students */}
-              <div style={{ background:'linear-gradient(135deg, rgba(34,197,94,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(34,197,94,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
+              {/* Card 2: Total Billed */}
+              <div style={{ minWidth:'240px', flexShrink:0, scrollSnapAlign:'start', background:'linear-gradient(135deg, rgba(148,163,184,0.1), rgba(15,23,42,0.6))', border:'1px solid rgba(148,163,184,0.2)', borderRadius:'14px', padding:'18px 20px' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                  <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#4ade80', letterSpacing:'0.5px' }}>Fully Cleared</span>
-                  <span style={{ fontSize:'16px' }}>✅</span>
+                  <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#94a3b8', letterSpacing:'0.5px' }}>Total Billed</span>
+                  <span style={{ fontSize:'16px' }}>🎓</span>
+                </div>
+                <div style={{ fontSize:'24px', fontWeight:800, color:'#f1f5f9', fontFamily:'var(--font-mono)', marginTop:'8px' }}>
+                  ₦{fmt(dbSummary?.total_billed || 0)}
+                </div>
+                <div style={{ fontSize:'11px', color:'var(--text-dim)', marginTop:'6px' }}>
+                  Gross tuition &amp; levies across {dbSummary?.total || 0} students
+                </div>
+              </div>
+
+              {/* Card 3: Total Collected */}
+              <div style={{ minWidth:'240px', flexShrink:0, scrollSnapAlign:'start', background:'linear-gradient(135deg, rgba(34,197,94,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(34,197,94,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#4ade80', letterSpacing:'0.5px' }}>Total Collected</span>
+                  <span style={{ fontSize:'16px' }}>💰</span>
                 </div>
                 <div style={{ fontSize:'24px', fontWeight:800, color:'#86efac', fontFamily:'var(--font-mono)', marginTop:'8px' }}>
-                  {dbSummary?.cleared || 0}
+                  ₦{fmt(dbSummary?.total_paid || 0)}
                 </div>
                 <div style={{ fontSize:'11px', color:'rgba(74,222,128,0.8)', marginTop:'6px' }}>
-                  {dbSummary?.total ? Math.round(((dbSummary.cleared || 0) / dbSummary.total) * 100) : 0}% of student body settled
+                  {(dbSummary?.total_billed || 0) > 0 ? Math.round(((dbSummary?.total_paid || 0) / (dbSummary?.total_billed || 1)) * 100) : 0}% collected
                 </div>
               </div>
 
-              {/* Card 3: Partially Paid */}
-              <div style={{ background:'linear-gradient(135deg, rgba(245,158,11,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
+              {/* Card 4: Manual Entry */}
+              <div style={{ minWidth:'240px', flexShrink:0, scrollSnapAlign:'start', background:'linear-gradient(135deg, rgba(6,182,212,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(6,182,212,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                  <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#fbbf24', letterSpacing:'0.5px' }}>Partial Debtors</span>
-                  <span style={{ fontSize:'16px' }}>⏳</span>
+                  <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#22d3ee', letterSpacing:'0.5px' }}>Manual Entry</span>
+                  <span style={{ fontSize:'16px' }}>👛</span>
+                </div>
+                <div style={{ fontSize:'24px', fontWeight:800, color:'#a5f3fc', fontFamily:'var(--font-mono)', marginTop:'8px' }}>
+                  ₦{fmt(dbSummary?.manual_paid || 0)}
+                </div>
+                <div style={{ fontSize:'11px', color:'rgba(34,211,238,0.8)', marginTop:'6px' }}>
+                  Cash · Transfer · POS · Bank Teller
+                </div>
+              </div>
+
+              {/* Card 5: Total Adjustments */}
+              <div style={{ minWidth:'240px', flexShrink:0, scrollSnapAlign:'start', background:'linear-gradient(135deg, rgba(245,158,11,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#fbbf24', letterSpacing:'0.5px' }}>Total Adjustments</span>
+                  <span style={{ fontSize:'16px' }}>🏷️</span>
                 </div>
                 <div style={{ fontSize:'24px', fontWeight:800, color:'#fde68a', fontFamily:'var(--font-mono)', marginTop:'8px' }}>
-                  {dbSummary?.partial || 0}
+                  ₦{fmt(dbSummary?.total_adjustments || 0)}
                 </div>
                 <div style={{ fontSize:'11px', color:'rgba(251,191,36,0.8)', marginTop:'6px' }}>
-                  Installment plans in progress
+                  Scholarships, Waivers &amp; Discounts
                 </div>
               </div>
 
-              {/* Card 4: Unpaid Debtors */}
-              <div style={{ background:'linear-gradient(135deg, rgba(168,85,247,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(168,85,247,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
+              {/* Card 6: Status Breakdown */}
+              <div style={{ minWidth:'260px', flexShrink:0, scrollSnapAlign:'start', background:'linear-gradient(135deg, rgba(168,85,247,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(168,85,247,0.25)', borderRadius:'14px', padding:'18px 20px', display:'flex', flexDirection:'column', justifyContent:'space-between' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                  <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#c084fc', letterSpacing:'0.5px' }}>Total Enrolled</span>
-                  <span style={{ fontSize:'16px' }}>👥</span>
+                  <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#c084fc', letterSpacing:'0.5px' }}>Status Breakdown</span>
+                  <span style={{ fontSize:'16px' }}>📊</span>
                 </div>
-                <div style={{ fontSize:'24px', fontWeight:800, color:'#e9d5ff', fontFamily:'var(--font-mono)', marginTop:'8px' }}>
-                  {dbSummary?.total || 0}
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'8px', marginTop:'10px', textAlign:'center' }}>
+                  <div>
+                    <div style={{ fontSize:'10px', color:'#4ade80', fontWeight:700 }}>Cleared</div>
+                    <div style={{ fontSize:'18px', fontWeight:800, color:'#fff', fontFamily:'var(--font-mono)' }}>{dbSummary?.cleared || 0}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:'10px', color:'#fbbf24', fontWeight:700 }}>Partial</div>
+                    <div style={{ fontSize:'18px', fontWeight:800, color:'#fff', fontFamily:'var(--font-mono)' }}>{dbSummary?.partial || 0}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:'10px', color:'#f87171', fontWeight:700 }}>Unpaid</div>
+                    <div style={{ fontSize:'18px', fontWeight:800, color:'#fff', fontFamily:'var(--font-mono)' }}>{dbSummary?.unpaid || 0}</div>
+                  </div>
                 </div>
-                <div style={{ fontSize:'11px', color:'rgba(192,132,252,0.8)', marginTop:'6px' }}>
-                  Active profiles in active term
+                <div style={{ fontSize:'11px', color:'rgba(192,132,252,0.8)', marginTop:'8px', textAlign:'center' }}>
+                  {dbSummary?.total || 0} active student profiles
                 </div>
               </div>
             </div>
@@ -4472,6 +4529,26 @@ export function FinancialHub() {
                     <input type="checkbox" checked={allowCustomPayments} onChange={e => setAllowCustomPayments(e.target.checked)} style={{ width:'14px', height:'14px', accentColor:'var(--accent)' }} />
                     <span>Allow Custom Amount entry on WhatsApp</span>
                   </label>
+
+                  <div style={{ marginTop:'6px', paddingTop:'10px', borderTop:'1px solid var(--glass-border)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                    <div>
+                      <div style={{ fontSize:'12px', fontWeight:600, color:'var(--text-main)' }}>Automated Manual Receipts</div>
+                      <div style={{ fontSize:'11px', color:'var(--text-dim)', marginTop:'2px' }}>
+                        Automated WhatsApp dispatch for bursar manual entries.
+                      </div>
+                    </div>
+                    <span style={{
+                      fontSize:'11px',
+                      fontWeight:700,
+                      padding:'3px 8px',
+                      borderRadius:'6px',
+                      background: allowManualReceipts ? 'rgba(76,175,80,0.15)' : 'rgba(255,82,82,0.15)',
+                      color: allowManualReceipts ? '#4CAF50' : '#FF5252',
+                      border: `1px solid ${allowManualReceipts ? 'rgba(76,175,80,0.3)' : 'rgba(255,82,82,0.3)'}`
+                    }} title="Platform-controlled grant. Governed by Sovereign tier policy.">
+                      {allowManualReceipts ? 'Enabled (Platform Grant)' : 'Disabled (Paystack Only)'}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -4801,22 +4878,24 @@ export function FinancialHub() {
               <div><Lbl>Note <span style={{ color:'var(--text-dim)', fontWeight:'normal', textTransform:'none' }}>(optional)</span></Lbl><input type="text" id="payment-note" placeholder="e.g. Part payment" value={payNote} onChange={e => setPayNote(e.target.value)} className="modern-input" style={{ width:'100%' }} /></div>
 
               {/* ── WhatsApp receipt gate ────────────────────────────── */}
-              <div style={{ background: botLive ? 'rgba(76,175,80,0.08)' : 'rgba(255,82,82,0.08)', border: `1px solid ${botLive ? 'rgba(76,175,80,0.25)' : 'rgba(255,82,82,0.25)'}`, borderRadius:'8px', padding:'10px 12px', display:'flex', alignItems:'center', gap:'10px' }}>
-                <span style={{ fontSize:'16px' }}>{botLive ? '🟢' : '🔴'}</span>
-                <div style={{ flex:1, fontSize:'12px', color:'var(--text-dim)' }}>
-                  {botLive ? 'WhatsApp bot is live' : 'WhatsApp bot is offline — receipt will not be sent'}
+              {allowManualReceipts && (
+                <div style={{ background: botLive ? 'rgba(76,175,80,0.08)' : 'rgba(255,82,82,0.08)', border: `1px solid ${botLive ? 'rgba(76,175,80,0.25)' : 'rgba(255,82,82,0.25)'}`, borderRadius:'8px', padding:'10px 12px', display:'flex', alignItems:'center', gap:'10px' }}>
+                  <span style={{ fontSize:'16px' }}>{botLive ? '🟢' : '🔴'}</span>
+                  <div style={{ flex:1, fontSize:'12px', color:'var(--text-dim)' }}>
+                    {botLive ? 'WhatsApp bot is live' : 'WhatsApp bot is offline — receipt will not be sent'}
+                  </div>
+                  <label style={{ display:'flex', alignItems:'center', gap:'6px', cursor: botLive ? 'pointer' : 'default', fontSize:'12px', fontWeight:600, color: botLive ? 'var(--accent)' : 'var(--text-dim)', whiteSpace:'nowrap' }}>
+                    <input
+                      type="checkbox"
+                      checked={sendReceipt}
+                      disabled={!botLive}
+                      onChange={e => setSendReceipt(e.target.checked)}
+                      style={{ accentColor:'var(--accent)', width:'14px', height:'14px' }}
+                    />
+                    Send receipt
+                  </label>
                 </div>
-                <label style={{ display:'flex', alignItems:'center', gap:'6px', cursor: botLive ? 'pointer' : 'default', fontSize:'12px', fontWeight:600, color: botLive ? 'var(--accent)' : 'var(--text-dim)', whiteSpace:'nowrap' }}>
-                  <input
-                    type="checkbox"
-                    checked={sendReceipt}
-                    disabled={!botLive}
-                    onChange={e => setSendReceipt(e.target.checked)}
-                    style={{ accentColor:'var(--accent)', width:'14px', height:'14px' }}
-                  />
-                  Send receipt
-                </label>
-              </div>
+              )}
             </div>
             <div style={{ display:'flex', gap:'10px', marginTop:'22px', justifyContent:'flex-end' }}>
               <button id="btn-payment-cancel" className="secondary-btn" onClick={() => setPayStudent(null)}>Cancel</button>
@@ -5037,24 +5116,30 @@ export function FinancialHub() {
               >
                 🧾 Local Print (80mm Thermal)
               </button>
-              <button 
-                onClick={handleSendReceiptPdf} 
-                disabled={sendingReceipt || !botLive}
-                className="primary-btn"
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  justifyContent: 'center',
-                  background: botLive ? 'rgba(0,229,255,0.1)' : 'rgba(255,255,255,0.03)',
-                  borderColor: botLive ? 'rgba(0,229,255,0.3)' : 'var(--glass-border)',
-                  color: botLive ? '#00e5ff' : 'var(--text-dim)',
-                  cursor: botLive ? 'pointer' : 'not-allowed',
-                  opacity: botLive ? 1 : 0.6
-                }}
-                title={botLive ? 'Dispatch PDF receipt directly to parent WhatsApp' : 'WhatsApp bot is offline — connect Nexus Pulse first'}
-              >
-                💬 {sendingReceipt ? 'Sending PDF...' : botLive ? 'Send Branded PDF to Parent (WhatsApp)' : 'WhatsApp Bot Offline'}
-              </button>
+              {(receiptTarget.isOnline || allowManualReceipts) ? (
+                <button 
+                  onClick={handleSendReceiptPdf} 
+                  disabled={sendingReceipt || !botLive}
+                  className="primary-btn"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    justifyContent: 'center',
+                    background: botLive ? 'rgba(0,229,255,0.1)' : 'rgba(255,255,255,0.03)',
+                    borderColor: botLive ? 'rgba(0,229,255,0.3)' : 'var(--glass-border)',
+                    color: botLive ? '#00e5ff' : 'var(--text-dim)',
+                    cursor: botLive ? 'pointer' : 'not-allowed',
+                    opacity: botLive ? 1 : 0.6
+                  }}
+                  title={botLive ? 'Dispatch PDF receipt directly to parent WhatsApp' : 'WhatsApp bot is offline — connect Nexus Pulse first'}
+                >
+                  💬 {sendingReceipt ? 'Sending PDF...' : botLive ? 'Send Branded PDF to Parent (WhatsApp)' : 'WhatsApp Bot Offline'}
+                </button>
+              ) : (
+                <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)', fontSize: '11px', color: 'var(--text-dim)', lineHeight: 1.4 }}>
+                  🔒 WhatsApp automation is reserved for online payments via Paystack. Use Local Print above for cash/transfer ledger slips.
+                </div>
+              )}
             </div>
 
             <div style={{ marginTop:'20px', display:'flex', justifyContent:'center' }}>
