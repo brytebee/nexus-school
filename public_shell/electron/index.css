@@ -1216,6 +1216,20 @@ code {
 }
 
 /* ── Financial Hub tab rail (bottom-border underline style) ── */
+.fees-tab-rail::-webkit-scrollbar {
+  height: 4px;
+}
+.fees-tab-rail::-webkit-scrollbar-track {
+  background: transparent;
+}
+.fees-tab-rail::-webkit-scrollbar-thumb {
+  background: rgba(0, 229, 255, 0.25);
+  border-radius: 2px;
+}
+.fees-tab-rail::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 229, 255, 0.6);
+}
+
 .fees-tab-btn {
   background: transparent;
   border: none;
@@ -1229,6 +1243,7 @@ code {
   margin-bottom: -1px; /* overlap parent border-bottom */
   white-space: nowrap;
   position: relative;
+  flex-shrink: 0;
 }
 .fees-tab-btn:hover {
   color: var(--text-main);

@@ -2423,7 +2423,25 @@ export function FinancialHub() {
       </div>
 
       {/* ── TAB RAIL (V1 exact) ── */}
-      <div style={{ display:'flex', gap:'4px', padding:'0 20px', borderBottom:'1px solid var(--glass-border)', flexShrink:0 }}>
+      <div
+        className="fees-tab-rail"
+        onWheel={(e) => {
+          if (e.deltaY !== 0) {
+            e.currentTarget.scrollLeft += e.deltaY;
+          }
+        }}
+        style={{
+          display: 'flex',
+          gap: '4px',
+          padding: '0 20px',
+          borderBottom: '1px solid var(--glass-border)',
+          flexShrink: 0,
+          overflowX: 'auto',
+          overflowY: 'hidden',
+          whiteSpace: 'nowrap',
+          scrollbarWidth: 'thin',
+        }}
+      >
         <button
           id="fees-tab-btn-dashboard"
           className={`fees-tab-btn${activeTab==='dashboard'?' active':''}`}
