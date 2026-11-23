@@ -352,6 +352,11 @@ function App() {
   }
 
   const showBanner = ((license?.in_grace || license?.server_revoked) && showGraceBanner);
+  const showInstallmentBanner = Boolean(
+    (license as any)?.installment_in_grace ||
+    (identity as any)?.contractStatus === 'MATURED_IN_GRACE' ||
+    (identity as any)?.contract_status === 'MATURED_IN_GRACE'
+  );
 
   // 3. Valid license — full app
   return (
@@ -403,13 +408,51 @@ function App() {
         </div>
       )}
 
+      {/* ── Installment Balance Grace Period Warning Banner ── */}
+      {showInstallmentBanner && (
+        <div style={{
+          position: 'fixed',
+          top: showBanner ? '40px' : '0px',
+          left: 0, right: 0, zIndex: 9000,
+          background: 'linear-gradient(90deg, #3d2500, #1f1200)',
+          borderBottom: '1px solid rgba(245, 158, 11, 0.4)',
+          padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '12px',
+          height: '40px', boxSizing: 'border-box'
+        }}>
+          <span style={{ fontSize: '15px' }}>⚠️</span>
+          <p style={{ color: '#fbbf24', fontSize: '12px', margin: 0, flex: 1 }}>
+            <strong>Installment Balance Due</strong> — Cloud sync will be suspended upon grace period expiration.
+          </p>
+          <button
+            onClick={() => {
+              const slug = (identity as any)?.portalSlug || (identity as any)?.slug;
+              const url = slug
+                ? `https://${slug}.nexusos.com.ng/admin/billing/settle-balance`
+                : 'https://crestmont.nexusos.com.ng/admin/billing/settle-balance';
+              if (window.nexusAPI?.openExternal) {
+                window.nexusAPI.openExternal(url);
+              } else {
+                window.open(url, '_blank');
+              }
+            }}
+            style={{
+              background: '#f59e0b', color: '#000', border: 'none',
+              borderRadius: '6px', padding: '4px 12px', cursor: 'pointer',
+              fontSize: '11px', fontWeight: 700, whiteSpace: 'nowrap'
+            }}
+          >
+            Pay Balance Online →
+          </button>
+        </div>
+      )}
+
       {/* Unactivated Warning Banner removed — enforcement suspended in v1.0.78 */}
 
       {/* ── Quota Warning Banner ── */}
       {quotaStatus && quotaStatus.overQuota && (
         <div style={{
           position: 'fixed',
-          top: showBanner ? '40px' : '0px',
+          top: `${((showBanner ? 1 : 0) + (showInstallmentBanner ? 1 : 0)) * 40}px`,
           left: 0, right: 0, zIndex: 9000,
           background: quotaStatus.quotaEnforced
             ? 'linear-gradient(90deg, #8b0000, #4a0000)'
@@ -449,7 +492,7 @@ function App() {
 
       <div
         className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""} flex h-screen w-screen overflow-hidden text-nexus-text font-inter select-none`}
-        style={{ paddingTop: `${((showBanner ? 1 : 0) + (quotaStatus && quotaStatus.overQuota ? 1 : 0)) * 40}px` }}
+        style={{ paddingTop: `${((showBanner ? 1 : 0) + (showInstallmentBanner ? 1 : 0) + (quotaStatus && quotaStatus.overQuota ? 1 : 0)) * 40}px` }}
       >
         {/* Sidebar Layout */}
         <NavSidebar
