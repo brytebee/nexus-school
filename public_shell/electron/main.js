@@ -1475,7 +1475,7 @@ ipcMain.handle("department-managers:list", () => {
 
 ipcMain.handle("department-managers:save", (event, manager) => {
     try {
-        const { id, section_name, class_prefixes, manager_title, manager_name, sign_base64 } = manager || {};
+        const { id, section_name, class_prefixes, manager_title, manager_name, sign_base64, grading_scale, gradingScale } = manager || {};
         if (!section_name || !section_name.trim()) {
             return { ok: false, error: "Section name is required." };
         }
@@ -1484,25 +1484,28 @@ ipcMain.handle("department-managers:save", (event, manager) => {
         const title = manager_title || 'Principal';
         const name = manager_name || '';
         const sign = sign_base64 || null;
+        const scaleVal = grading_scale !== undefined ? grading_scale : gradingScale;
+        const scaleStr = scaleVal ? (typeof scaleVal === 'string' ? scaleVal : JSON.stringify(scaleVal)) : null;
 
         if (id) {
             db.prepare(`
                 UPDATE department_managers
-                SET section_name = ?, class_prefixes = ?, manager_title = ?, manager_name = ?, sign_base64 = ?, updated_at = datetime('now')
+                SET section_name = ?, class_prefixes = ?, manager_title = ?, manager_name = ?, sign_base64 = ?, grading_scale = ?, updated_at = datetime('now')
                 WHERE id = ?
-            `).run(section_name.trim(), prefixesStr, title.trim(), name.trim(), sign, id);
+            `).run(section_name.trim(), prefixesStr, title.trim(), name.trim(), sign, scaleStr, id);
             return { ok: true, id };
         } else {
             const res = db.prepare(`
-                INSERT INTO department_managers (section_name, class_prefixes, manager_title, manager_name, sign_base64)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO department_managers (section_name, class_prefixes, manager_title, manager_name, sign_base64, grading_scale)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(section_name) DO UPDATE SET
                     class_prefixes = excluded.class_prefixes,
                     manager_title = excluded.manager_title,
                     manager_name = excluded.manager_name,
                     sign_base64 = excluded.sign_base64,
+                    grading_scale = excluded.grading_scale,
                     updated_at = datetime('now')
-            `).run(section_name.trim(), prefixesStr, title.trim(), name.trim(), sign);
+            `).run(section_name.trim(), prefixesStr, title.trim(), name.trim(), sign, scaleStr);
             return { ok: true, id: res.lastInsertRowid };
         }
     } catch (err) {

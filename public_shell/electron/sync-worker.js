@@ -1680,6 +1680,33 @@ async function pullStaffGradesFromWebsite() {
       }
     }
 
+    // ── 5b. Reconcile student_domains (Affective & Psychomotor traits) ──────
+    if (Array.isArray(data.domains) && data.domains.length > 0) {
+      try {
+        const upsertDomain = db.prepare(`
+          INSERT INTO student_domains (student_id, academic_session, term, domain_type, trait, grade)
+          VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(student_id, academic_session, term, domain_type, trait) DO UPDATE SET
+            grade = excluded.grade
+        `);
+        db.transaction(() => {
+          for (const d of data.domains) {
+            if (!d.student_id || !d.trait || !d.grade) continue;
+            upsertDomain.run(
+              String(d.student_id).trim(),
+              String(d.academic_session || '2026/2027').trim(),
+              String(d.term || 'First Term').trim(),
+              String(d.domain_type || 'affective').toLowerCase().trim(),
+              String(d.trait).trim(),
+              String(d.grade).trim()
+            );
+          }
+        })();
+      } catch (domainErr) {
+        console.warn('[Sync Worker] Failed to reconcile student_domains:', domainErr.message);
+      }
+    }
+
     // ── 6. Update pull watermark ───────────────────────────────────────────
     if (data.serverTime) {
       try {
@@ -1783,6 +1810,16 @@ async function gatherSyncPackage() {
       } catch (_) {
         prefixes = [];
       }
+      let gradingScale = null;
+      if (r.grading_scale) {
+        try {
+          gradingScale = typeof r.grading_scale === 'string'
+            ? JSON.parse(r.grading_scale)
+            : r.grading_scale;
+        } catch (_) {
+          gradingScale = null;
+        }
+      }
       return {
         id: String(r.id),
         sectionName: (r.section_name || '').trim(),
@@ -1790,6 +1827,7 @@ async function gatherSyncPackage() {
         managerTitle: (r.manager_title || 'Section Head').trim(),
         managerName: (r.manager_name || '').trim(),
         signBase64: r.sign_base64 || null,
+        gradingScale,
       };
     }).filter((d) => Boolean(d.sectionName));
   } catch (err) {

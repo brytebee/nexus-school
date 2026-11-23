@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-const { database } = require('@nexus/engine');
+const { database } = require('../../../private_engine');
 
 describe('Phase 5 — Multi-Department Manager Signatures', () => {
   let db;
 
   beforeEach(() => {
-    db = database.init(':memory:');
+    db = database.init(':memory:', require('better-sqlite3'));
     try {
       db.prepare('DELETE FROM department_managers').run();
     } catch (_) {}
@@ -14,8 +14,8 @@ describe('Phase 5 — Multi-Department Manager Signatures', () => {
   it('creates department_managers table and performs CRUD operations', () => {
     // 1. CREATE (Insert)
     const insertStmt = db.prepare(`
-      INSERT INTO department_managers (section_name, class_prefixes, manager_title, manager_name, sign_base64)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO department_managers (section_name, class_prefixes, manager_title, manager_name, sign_base64, grading_scale)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
     
     const secRes = insertStmt.run(
@@ -23,16 +23,25 @@ describe('Phase 5 — Multi-Department Manager Signatures', () => {
       JSON.stringify(['JSS', 'SSS']),
       'Principal',
       'Dr. A. B. Cole',
-      'data:image/png;base64,fakeSecSig'
+      'data:image/png;base64,fakeSecSig',
+      null
     );
     expect(secRes.lastInsertRowid).toBeDefined();
 
+    const primScale = JSON.stringify([
+      { grade: 'A', min: 80, max: 100, remark: 'Distinction' },
+      { grade: 'B', min: 70, max: 79, remark: 'Very Good' },
+      { grade: 'C', min: 60, max: 69, remark: 'Good' },
+      { grade: 'D', min: 50, max: 59, remark: 'Fair' },
+      { grade: 'E', min: 0, max: 49, remark: 'Needs Improvement' },
+    ]);
     const primRes = insertStmt.run(
       'Primary',
       JSON.stringify(['Primary', 'Basic']),
       'Headmaster',
       'Mrs. C. D. Adeleke',
-      'data:image/png;base64,fakePrimSig'
+      'data:image/png;base64,fakePrimSig',
+      primScale
     );
     expect(primRes.lastInsertRowid).toBeDefined();
 
@@ -43,6 +52,7 @@ describe('Phase 5 — Multi-Department Manager Signatures', () => {
     expect(managers[0].manager_title).toBe('Principal');
     expect(managers[1].section_name).toBe('Primary');
     expect(managers[1].manager_title).toBe('Headmaster');
+    expect(managers[1].grading_scale).toBe(primScale);
 
     // 3. UPDATE
     db.prepare(`
