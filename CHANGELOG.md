@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.07] - 2026-11-24
+
+### Added
+- **Dynamic Affective & Psychomotor Domain Matrices**: Royal, Prestige, Azure, and Monarch templates dynamically bind paired domain rows without multi-tick glitches.
+- **Department-Scoped Grading Scales**: Dynamic grading scale resolution per student based on assigned department managers.
+- **Financial Hub Dashboard**: Premier desktop tab featuring live financial KPIs and fast navigation shortcuts.
+- **Advance Credit Badges & Negative Balance Clamping**: Clear cyan credit badges for overpaid students and zero-floor balance clamping.
+- **Horizontal Scroll Rail with Wheel Delegation**: Seamless horizontal tab scrolling with wheel delegation for compact viewports.
+- **Installment Grace Period Warning Banner**: Amber alert banner for matured installment contracts with one-click online balance payment.
+
+### Changed
+- **Pristine Official Transcripts**: Purged legacy GOLD TIER and DIAMOND TIER watermark arc texts and titles.
+- **Sovereign ILS Layout**: Repositioned serial number box to center-right beside QR code to prevent signature overlap.
+- **100% Student Vault Sync**: Removed parent phone restriction in `sync-worker.js` so all active students sync with safe fallback.
+
+---
+
 ## [1.0.85] - 2026-08-27
 
 ### Added

@@ -1,3 +1,34 @@
+## What's New in v1.2.07
+
+This release delivers **Report Template Harmonization, Dynamic Affective & Psychomotor Domain Matrices, Department-Scoped Grading Scales, Financial Hub Desktop Dashboard, and 100% Student Vault Sync**.
+
+### 🎨 Report Card Templates & Printing Engine
+- **Dynamic Affective & Psychomotor Domain Matrix**: Royal, Prestige, Azure, and Monarch templates dynamically bind paired rows of Affective Traits (Punctuality, Decorum, Integrity, Leadership) and Psychomotor Traits (Handwriting, Fluency, Athletics, Creative Crafts).
+- **Glitch-Free Single-Tick Rating**: Eliminated legacy multi-tick checkmark duplication across the 1–5 rating scales in Royal, Azure, and Prestige templates, guaranteeing clean single checkmarks.
+- **Department-Scoped Grading Scales**: Added `grading_scale` to department managers. Result compilation now resolves grading boundaries dynamically per student based on their class's assigned department (e.g. Primary vs Secondary).
+- **Commercial De-Branding & Watermark Purge**: Purged legacy GOLD TIER and DIAMOND TIER watermark arc texts, background watermarks, and tier badges from Royal, Monarch, and Sterling templates.
+- **Sovereign ILS & Signature Alignment**: Repositioned Sovereign ILS serial number box to center-right beside the verification QR code, resolving visual overlap with the Principal's stamp.
+- **Live Form Teacher Signatures**: Multi-tier form teacher and signature lookup ensures live teacher signatures render reliably across all departmentalized student report cards.
+- **Strict 0px Overflow Containment**: Preserved strict 0px print overflow containment on both A4 portrait and landscape exports across all 18 variations.
+
+### 💳 Desktop Financial Hub Dashboard & Experience
+- **Executive Dashboard Tab**: Added a dedicated Dashboard Tab as the first view in the tab rail, with live KPI summary cards and fast-nav shortcuts to Fee Roster, Fee Structures, Adjustments, and Receipts.
+- **Negative Balance Clamping**: Clamped balance calculation (`Math.max(0, bal)`), eliminating negative balances for cleared and advance-paying students.
+- **Advance Credit Badges**: Overpaid accounts now clearly display a prominent cyan `(+₦N credit)` badge.
+- **Horizontal Scroll Rail with Wheel Delegation**: Enabled smooth horizontal scrolling with trackpad/mouse wheel vertical-to-horizontal delegation and custom sleek scrollbars for compact displays.
+- **SQLite ABI 125 Resilience**: Restored Electron SQLite ABI 125 compatibility and added defensive database initialization during Cloud Connect.
+
+### 🔄 Student Vault & Offline Sync
+- **100% Active Student Vault Sync**: Removed restrictive parent phone filter in `sync-worker.js`, ensuring all active students sync to the cloud vault with safe empty-phone fallback.
+- **Bi-Directional Domain Sync**: Real-time serialization and reconciliation of department grading scales and domain ratings, with dual camelCase and snake_case payload compatibility.
+- **Parent WhatsApp Phone Mandatory**: Marked Parent WhatsApp Phone as mandatory in local desktop registration.
+
+### 🏛️ Sovereign Installment & Contract Enforcement
+- **Grace Period Warning Banner**: Amber contract status warning banner in desktop shell when a school's installment contract is in `MATURED_IN_GRACE`.
+- **Direct Online Settlement**: "Pay Balance Online" button opens the balance settlement portal directly via `nexusAPI.openExternal`.
+
+---
+
 ## What's New in v1.2.05
 
 This release delivers **Class-Scoped Ranking, Ordinal Numbering Fixes, and Official Template Preservation on Portal Publishing**.
