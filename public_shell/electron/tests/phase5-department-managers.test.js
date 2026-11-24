@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-const { database } = require('../../../private_engine');
+const { database } = (() => {
+  try { return require('../../../private_engine'); } catch (_) {
+    return require('@nexus/engine');
+  }
+})();
 
 describe('Phase 5 — Multi-Department Manager Signatures', () => {
   let db;
