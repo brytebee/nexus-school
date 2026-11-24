@@ -11,6 +11,9 @@ describe('Phase 5 — Multi-Department Manager Signatures', () => {
   beforeEach(() => {
     db = database.init(':memory:', require('better-sqlite3'));
     try {
+      db.prepare('ALTER TABLE department_managers ADD COLUMN grading_scale TEXT DEFAULT NULL').run();
+    } catch (_) {}
+    try {
       db.prepare('DELETE FROM department_managers').run();
     } catch (_) {}
   });
