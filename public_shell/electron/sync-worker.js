@@ -1691,14 +1691,17 @@ async function pullStaffGradesFromWebsite() {
         `);
         db.transaction(() => {
           for (const d of data.domains) {
-            if (!d.student_id || !d.trait || !d.grade) continue;
+            const sid = d.student_id || d.studentId;
+            const trait = d.trait;
+            const grade = d.grade;
+            if (!sid || !trait || !grade) continue;
             upsertDomain.run(
-              String(d.student_id).trim(),
-              String(d.academic_session || '2026/2027').trim(),
+              String(sid).trim(),
+              String(d.academic_session || d.academicSession || '2026/2027').trim(),
               String(d.term || 'First Term').trim(),
-              String(d.domain_type || 'affective').toLowerCase().trim(),
-              String(d.trait).trim(),
-              String(d.grade).trim()
+              String(d.domain_type || d.domainType || 'affective').toLowerCase().trim(),
+              String(trait).trim(),
+              String(grade).trim()
             );
           }
         })();
