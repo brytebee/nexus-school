@@ -169,6 +169,7 @@ export function FinancialHub() {
   const [loadingBatchDetails, setLoadingBatchDetails] = useState<boolean>(false);
   const [pulseStatusFilter, setPulseStatusFilter] = useState<string>('ALL');
   const [pulseSearch, setPulseSearch] = useState<string>('');
+  const [retryingBatchId, setRetryingBatchId] = useState<string | null>(null);
 
   // ── Session/Term ──────────────────────────────────────────────────────────
   const [sessions,        setSessions]        = useState<string[]>([]);
@@ -1783,6 +1784,62 @@ export function FinancialHub() {
       loadBatchDetails(selectedBatchId);
     }
   }, [selectedBatchId, activeTab, loadBatchDetails]);
+
+  useEffect(() => {
+    if (activeTab !== 'pulse-reports') return;
+    const api = (window as any).electronAPI;
+    if (!api?.on) return;
+    const unlisten = api.on('fee-reminders-complete', () => {
+      loadPulseBatches();
+      if (selectedBatchId) {
+        loadBatchDetails(selectedBatchId);
+      }
+    });
+    return () => {
+      if (typeof unlisten === 'function') unlisten();
+    };
+  }, [activeTab, selectedBatchId, loadPulseBatches, loadBatchDetails]);
+
+  const handleRetryFailedBatch = async (batchId: string) => {
+    if (!batchId || retryingBatchId) return;
+    const api = (window as any).electronAPI;
+    if (!api?.invoke) return;
+    setRetryingBatchId(batchId);
+    try {
+      const res = await api.invoke('pulse:retry-failed-batch', batchId);
+      if (!res?.ok) {
+        if (Swal) {
+          Swal.fire({
+            title: 'Retry Blocked',
+            text: res?.error || 'Could not retry failed messages.',
+            icon: 'warning',
+            background: '#0b0f19',
+            color: '#fff',
+            confirmButtonColor: '#00E5FF'
+          });
+        } else {
+          alert(res?.error || 'Could not retry failed messages.');
+        }
+        return;
+      }
+      await Promise.all([loadPulseBatches(), loadBatchDetails(batchId)]);
+      showIndicator(`✅ Retried: ${res.sent || 0} sent${res.cleared ? `, ${res.cleared} cleared` : ''}`);
+    } catch (err: any) {
+      console.error('[FinancialHub] Failed to retry batch:', err);
+      if (Swal) {
+        Swal.fire({
+          title: 'Retry Error',
+          text: err?.message || 'An unexpected error occurred.',
+          icon: 'error',
+          background: '#0b0f19',
+          color: '#fff',
+          confirmButtonColor: '#ef4444'
+        });
+      }
+    } finally {
+      setRetryingBatchId(null);
+    }
+  };
 
   useEffect(() => {
     const handleFeesNav = (e: any) => {
@@ -4047,7 +4104,14 @@ export function FinancialHub() {
                         </div>
 
                         <div style={{ display:'flex', justifyContent:'space-between', fontSize:'11px', color:'var(--text-dim)' }}>
-                          <span>Targeted: <b style={{ color:'#cbd5e1' }}>{b.total_targeted}</b></span>
+                          <span>
+                            Targeted: <b style={{ color:'#cbd5e1' }}>{b.total_targeted}</b>
+                            {Number(b.total_failed || 0) > 0 && (
+                              <span style={{ color:'#f87171', fontWeight:600, marginLeft:'6px' }}>
+                                • {b.total_failed} failed
+                              </span>
+                            )}
+                          </span>
                           <span style={{ color:'#10b981', fontWeight:700 }}>
                             +₦{Number(b.total_debt_recovered || 0).toLocaleString('en-NG')} ROI
                           </span>
@@ -4120,43 +4184,75 @@ export function FinancialHub() {
                       </div>
 
                       {/* Filter Bar & Search */}
-                      <div style={{ padding:'12px 20px', borderBottom:'1px solid var(--glass-border)', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'12px', flexWrap:'wrap' }}>
-                        <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
-                          {[
-                            { key: 'ALL', label: `All (${logs.length})` },
-                            { key: 'READ', label: `🔵 Read (${logs.filter((l: any) => l.status === 'READ').length})` },
-                            { key: 'DELIVERED', label: `🟡 Delivered (${logs.filter((l: any) => l.status === 'DELIVERED').length})` },
-                            { key: 'SENT_OFFLINE', label: `🟢 Sent / Offline (${logs.filter((l: any) => l.status === 'SENT_OFFLINE').length})` },
-                            { key: 'NOT_ON_WHATSAPP', label: `🔴 Not on WA (${logs.filter((l: any) => l.status === 'NOT_ON_WHATSAPP').length})` },
-                            { key: 'FAILED', label: `❌ Failed (${logs.filter((l: any) => l.status === 'FAILED').length})` },
-                          ].map(f => (
-                            <button
-                              key={f.key}
-                              onClick={() => setPulseStatusFilter(f.key)}
-                              style={{
-                                background: pulseStatusFilter === f.key ? 'rgba(0,229,255,0.2)' : 'rgba(255,255,255,0.04)',
-                                border: pulseStatusFilter === f.key ? '1px solid #00e5ff' : '1px solid rgba(255,255,255,0.08)',
-                                color: pulseStatusFilter === f.key ? '#fff' : 'var(--text-dim)',
-                                borderRadius:'6px',
-                                padding:'4px 10px',
-                                fontSize:'11px',
-                                cursor:'pointer'
-                              }}
-                            >
-                              {f.label}
-                            </button>
-                          ))}
-                        </div>
+                      {(() => {
+                        const failedCount = logs.filter((l: any) => l.status === 'FAILED').length;
+                        const clearedCount = logs.filter((l: any) => l.status === 'CLEARED').length;
+                        const filters = [
+                          { key: 'ALL', label: `All (${logs.length})` },
+                          { key: 'READ', label: `🔵 Read (${logs.filter((l: any) => l.status === 'READ').length})` },
+                          { key: 'DELIVERED', label: `🟡 Delivered (${logs.filter((l: any) => l.status === 'DELIVERED').length})` },
+                          { key: 'SENT_OFFLINE', label: `🟢 Sent / Offline (${logs.filter((l: any) => l.status === 'SENT_OFFLINE').length})` },
+                          { key: 'NOT_ON_WHATSAPP', label: `🔴 Not on WA (${logs.filter((l: any) => l.status === 'NOT_ON_WHATSAPP').length})` },
+                          { key: 'FAILED', label: `❌ Failed (${failedCount})` },
+                          ...(clearedCount > 0 ? [{ key: 'CLEARED', label: `✅ Paid / Cleared (${clearedCount})` }] : []),
+                        ];
+                        return (
+                          <div style={{ padding:'12px 20px', borderBottom:'1px solid var(--glass-border)', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'12px', flexWrap:'wrap' }}>
+                            <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+                              {filters.map(f => (
+                                <button
+                                  key={f.key}
+                                  onClick={() => setPulseStatusFilter(f.key)}
+                                  style={{
+                                    background: pulseStatusFilter === f.key ? 'rgba(0,229,255,0.2)' : 'rgba(255,255,255,0.04)',
+                                    border: pulseStatusFilter === f.key ? '1px solid #00e5ff' : '1px solid rgba(255,255,255,0.08)',
+                                    color: pulseStatusFilter === f.key ? '#fff' : 'var(--text-dim)',
+                                    borderRadius:'6px',
+                                    padding:'4px 10px',
+                                    fontSize:'11px',
+                                    cursor:'pointer'
+                                  }}
+                                >
+                                  {f.label}
+                                </button>
+                              ))}
+                            </div>
 
-                        <input
-                          type="text"
-                          placeholder="Search student, class, phone..."
-                          value={pulseSearch}
-                          onChange={e => setPulseSearch(e.target.value)}
-                          className="modern-input"
-                          style={{ width:'220px', fontSize:'12px', padding:'6px 12px' }}
-                        />
-                      </div>
+                            <div style={{ display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap' }}>
+                              {failedCount > 0 && (
+                                <button
+                                  id="btn-retry-failed-pulse"
+                                  onClick={() => handleRetryFailedBatch(b.id)}
+                                  disabled={retryingBatchId === b.id}
+                                  className="small-btn"
+                                  title="Re-dispatch failed messages in this batch using the local WhatsApp bot"
+                                  style={{
+                                    background: 'rgba(248, 113, 113, 0.15)',
+                                    border: '1px solid rgba(248, 113, 113, 0.45)',
+                                    color: '#fca5a5',
+                                    borderRadius: '6px',
+                                    padding: '6px 12px',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    cursor: retryingBatchId === b.id ? 'not-allowed' : 'pointer',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                >
+                                  {retryingBatchId === b.id ? '⌛ Retrying...' : `🔄 Retry Failed (${failedCount})`}
+                                </button>
+                              )}
+                              <input
+                                type="text"
+                                placeholder="Search student, class, phone..."
+                                value={pulseSearch}
+                                onChange={e => setPulseSearch(e.target.value)}
+                                className="modern-input"
+                                style={{ width:'220px', fontSize:'12px', padding:'6px 12px' }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* Recipient Audit Table */}
                       <div style={{ flex:1, overflowY:'auto' }}>
@@ -4205,6 +4301,10 @@ export function FinancialHub() {
                                   badgeColor = '#f87171';
                                   badgeBg = 'rgba(248, 113, 113, 0.15)';
                                   statusLabel = '❌ Failed';
+                                } else if (l.status === 'CLEARED') {
+                                  badgeColor = '#10b981';
+                                  badgeBg = 'rgba(16, 185, 129, 0.15)';
+                                  statusLabel = '✅ Paid / Cleared';
                                 }
 
                                 return (
@@ -4220,14 +4320,17 @@ export function FinancialHub() {
                                       ₦{Number(l.original_balance || 0).toLocaleString('en-NG')}
                                     </td>
                                     <td style={{ padding:'10px 16px' }}>
-                                      <span style={{
-                                        fontSize:'11px',
-                                        fontWeight:600,
-                                        padding:'3px 8px',
-                                        borderRadius:'12px',
-                                        background: badgeBg,
-                                        color: badgeColor
-                                      }}>
+                                      <span
+                                        title={l.error_message || undefined}
+                                        style={{
+                                          fontSize:'11px',
+                                          fontWeight:600,
+                                          padding:'3px 8px',
+                                          borderRadius:'12px',
+                                          background: badgeBg,
+                                          color: badgeColor
+                                        }}
+                                      >
                                         {statusLabel}
                                       </span>
                                     </td>

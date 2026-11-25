@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 interface ProgressPayload {
   batchId: string;
@@ -7,6 +7,7 @@ interface ProgressPayload {
   percentage: number;
   studentName: string;
   status: string;
+  isRetry?: boolean;
 }
 
 interface CompletePayload {
@@ -18,7 +19,10 @@ interface CompletePayload {
   offline: number;
   notOnWa: number;
   failed: number;
+  cleared?: number;
   alreadyReminded?: number;
+  isRetry?: boolean;
+  abortedDisconnected?: boolean;
   duration?: number;
   error?: string;
 }
@@ -33,12 +37,21 @@ export default function FeePulseBanner({ onNavigateToReports }: FeePulseBannerPr
   const [state, setState] = useState<'running' | 'completed' | 'error'>('running');
   const [progress, setProgress] = useState<ProgressPayload | null>(null);
   const [completeSummary, setCompleteSummary] = useState<CompletePayload | null>(null);
+  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const api = (window as any).electronAPI;
     if (!api?.on) return;
 
+    const clearDismissTimer = () => {
+      if (dismissTimerRef.current) {
+        clearTimeout(dismissTimerRef.current);
+        dismissTimerRef.current = null;
+      }
+    };
+
     const unlistenProgress = api.on('fee-reminders-progress', (data: ProgressPayload) => {
+      clearDismissTimer();
       setProgress(data);
       setState('running');
       setIsVisible(true);
@@ -46,6 +59,7 @@ export default function FeePulseBanner({ onNavigateToReports }: FeePulseBannerPr
     });
 
     const unlistenComplete = api.on('fee-reminders-complete', (data: CompletePayload) => {
+      clearDismissTimer();
       if (data.error) {
         setState('error');
       } else {
@@ -55,14 +69,13 @@ export default function FeePulseBanner({ onNavigateToReports }: FeePulseBannerPr
       setIsVisible(true);
 
       // Auto-dismiss 15s after completion if not clicked
-      const timer = setTimeout(() => {
+      dismissTimerRef.current = setTimeout(() => {
         setIsVisible(false);
       }, 15000);
-
-      return () => clearTimeout(timer);
     });
 
     return () => {
+      clearDismissTimer();
       if (typeof unlistenProgress === 'function') unlistenProgress();
       if (typeof unlistenComplete === 'function') unlistenComplete();
     };
@@ -133,10 +146,18 @@ export default function FeePulseBanner({ onNavigateToReports }: FeePulseBannerPr
           <span style={{ fontSize: '16px' }}>{state === 'completed' ? '✅' : state === 'error' ? '⚠️' : '📡'}</span>
           <div>
             <div style={{ fontSize: '13px', fontWeight: 700, color: '#f8fafc' }}>
-              {state === 'completed' ? 'Fee Pulse Complete' : state === 'error' ? 'Fee Pulse Alert' : 'Fee Pulse in Progress'}
+              {state === 'completed'
+                ? (completeSummary?.isRetry ? 'Fee Pulse Retry Complete' : 'Fee Pulse Complete')
+                : state === 'error'
+                  ? 'Fee Pulse Alert'
+                  : (progress?.isRetry ? 'Retrying Failed Fee Pulse' : 'Fee Pulse in Progress')}
             </div>
             <div style={{ fontSize: '11px', color: '#94a3b8' }}>
-              {state === 'running' && progress ? `Targeting ${progress.total} outstanding debtors` : state === 'completed' ? 'Reminders processed successfully' : 'Batch finished'}
+              {state === 'running' && progress
+                ? `${progress.isRetry ? 'Retrying' : 'Targeting'} ${progress.total} outstanding debtors`
+                : state === 'completed'
+                  ? 'Reminders processed successfully'
+                  : 'Batch finished'}
             </div>
           </div>
         </div>
@@ -202,7 +223,15 @@ export default function FeePulseBanner({ onNavigateToReports }: FeePulseBannerPr
       {state === 'completed' && completeSummary && (
         <div>
           <div style={{ fontSize: '12px', color: '#cbd5e1', marginBottom: '12px', lineHeight: 1.5 }}>
-            {completeSummary.sent > 0 ? (
+            {completeSummary.isRetry ? (
+              <>
+                Retried <b>{completeSummary.total}</b> failed reminder(s): <b>{completeSummary.sent}</b> sent
+                {completeSummary.cleared ? `, ${completeSummary.cleared} already cleared` : ''}
+                {completeSummary.notOnWa ? `, ${completeSummary.notOnWa} not on WhatsApp` : ''}
+                {completeSummary.failed ? `, ${completeSummary.failed} still failed` : ''}.
+                {completeSummary.abortedDisconnected ? ' Bot disconnected mid-retry; remaining items will resume on reconnect.' : ''}
+              </>
+            ) : completeSummary.sent > 0 ? (
               <>Dispatched <b>{completeSummary.sent}</b> reminders ({completeSummary.offline} queued offline, {completeSummary.notOnWa} not on WhatsApp).</>
             ) : completeSummary.alreadyReminded ? (
               <>All debtors were already reminded within the last 24 hours.</>

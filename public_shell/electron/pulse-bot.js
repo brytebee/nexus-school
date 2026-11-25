@@ -90,8 +90,21 @@ function _clearTimeout(key) {
 }
 
 // ─── WhatsApp Client Lifecycle ─────────────────────────────────────────────────
+const _readyHandlers = new Set();
+
 function initPulseBot(mainWindow) {
   mainWindowRef = mainWindow;
+}
+
+/**
+ * Registers a main-process callback invoked whenever the local WhatsApp bot
+ * transitions to the `ready` state. Returns an unsubscribe function.
+ */
+function onBotReady(handler) {
+  if (typeof handler === "function") {
+    _readyHandlers.add(handler);
+  }
+  return () => _readyHandlers.delete(handler);
 }
 
 function sendStatus(status, data = null) {
@@ -269,6 +282,16 @@ async function startPulse() {
       qrCodeData = null;
       await ensureLidSafetyPatch(client);
       sendStatus("ready");
+
+      for (const handler of _readyHandlers) {
+        try {
+          Promise.resolve(handler()).catch((err) => {
+            console.error("[Pulse Bot] Ready handler error:", err);
+          });
+        } catch (err) {
+          console.error("[Pulse Bot] Ready handler sync error:", err);
+        }
+      }
 
       // Guard against WhatsApp Web silently reloading its page (version pushes,
       // service-worker restarts). When the frame detaches, pupPage.evaluate calls
@@ -2607,6 +2630,7 @@ async function ensureLidSafetyPatch(botClient) {
 // ─── Module Exports ────────────────────────────────────────────────────────────
 module.exports = {
   initPulseBot,
+  onBotReady,
   startPulse,
   destroyPulse,
   sendFeeStatus,

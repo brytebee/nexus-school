@@ -31,6 +31,7 @@ const { startServer, setSchoolConfig, setSchoolLicense, setActivationStatus, rev
         validateCSVDryRun, clearData } = server;
 const address = require("address");
 const pulseBot     = require('./pulse-bot.js');
+const { ensureFeePulseTables, createFeePulseService } = require('./fee-pulse-service.js');
 const pulseExporter = require('./pulse-exporter.js');
 const syncWorker   = require('./sync-worker.js');
 let receiptAnalysis = null;
@@ -3731,276 +3732,37 @@ ipcMain.handle('pulse-inbox:reply', async (event, { id, phone, replyText }) => {
 });
 
 // ── Fee Pulse Engine (Deductions, Idempotency & Delivery Audit) ─────────────
-let isFeePulseRunning = false;
+const feePulseService = createFeePulseService({
+  getDb: () => database.getDb(),
+  pulseBot,
+  getMainWindow: () => mainWindow,
+  getSchoolName: () => identityPacket?.name || 'Nexus School'
+});
 
-function ensureFeePulseTables(db) {
-  if (!db) return;
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS fee_pulse_batches (
-      id TEXT PRIMARY KEY,
-      academic_session TEXT NOT NULL,
-      term TEXT NOT NULL,
-      trigger_source TEXT NOT NULL,
-      total_targeted INTEGER DEFAULT 0,
-      total_sent INTEGER DEFAULT 0,
-      total_delivered INTEGER DEFAULT 0,
-      total_read INTEGER DEFAULT 0,
-      total_failed INTEGER DEFAULT 0,
-      total_offline INTEGER DEFAULT 0,
-      total_not_on_wa INTEGER DEFAULT 0,
-      total_debt_targeted REAL DEFAULT 0,
-      total_debt_recovered REAL DEFAULT 0,
-      status TEXT DEFAULT 'in_progress',
-      started_at TEXT DEFAULT (datetime('now')),
-      completed_at TEXT
-    );
+const runFeePulseBatch = (opts) => feePulseService.runFeePulseBatch(opts);
+const retryFailedFeePulseLogs = (opts) => feePulseService.retryFailedFeePulseLogs(opts);
 
-    CREATE TABLE IF NOT EXISTS fee_pulse_logs (
-      id TEXT PRIMARY KEY,
-      batch_id TEXT NOT NULL,
-      student_id INTEGER NOT NULL,
-      student_name TEXT NOT NULL,
-      class_name TEXT,
-      parent_phone TEXT NOT NULL,
-      original_balance REAL NOT NULL,
-      wa_message_id TEXT,
-      ack_level INTEGER DEFAULT 0,
-      status TEXT DEFAULT 'DISPATCHED',
-      dispatched_at TEXT DEFAULT (datetime('now')),
-      delivered_at TEXT,
-      read_at TEXT,
-      FOREIGN KEY(batch_id) REFERENCES fee_pulse_batches(id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_fee_pulse_logs_batch_id ON fee_pulse_logs(batch_id);
-    CREATE INDEX IF NOT EXISTS idx_fee_pulse_logs_student_id ON fee_pulse_logs(student_id);
-    CREATE INDEX IF NOT EXISTS idx_fee_pulse_logs_wa_msg_id ON fee_pulse_logs(wa_message_id);
-  `);
-}
-
-async function runFeePulseBatch({ triggerSource = 'desktop_manual' } = {}) {
-  if (isFeePulseRunning) {
-    console.warn('[Fee Pulse] Batch is already running. Concurrent trigger prevented.');
-    return { ok: false, error: 'A Fee Pulse batch is already in progress.' };
-  }
-
-  const db = database.getDb();
-  if (!db) return { ok: false, error: 'Database not initialized.' };
-
-  ensureFeePulseTables(db);
-  isFeePulseRunning = true;
-
-  try {
-    const termConfig = db.prepare('SELECT * FROM school_term_config WHERE id = 1').get() || {
-      academic_session: '2025/2026',
-      term: 'First Term'
-    };
-    const session = termConfig.academic_session;
-    const term = termConfig.term;
-
-    // 1. Query debtors with net positive balance
-    const allDebtors = db.prepare(`
-      SELECT s.id as student_id, s.name, s.class_name, s.class_arm, s.parent_phone, f.total_billed, f.total_paid
-      FROM students s
-      JOIN student_fees f ON s.id = f.student_id
-      WHERE f.academic_session = ? AND f.term = ?
-        AND (f.total_billed - f.total_paid) > 0
-        AND s.parent_phone IS NOT NULL AND TRIM(s.parent_phone) != ''
-        AND COALESCE(s.is_active, 1) = 1
-    `).all(session, term);
-
-    // 2. Idempotency Guard: 24h cooldown to prevent repeated sends on same day
-    const recentSentRows = db.prepare(`
-      SELECT DISTINCT l.student_id
-      FROM fee_pulse_logs l
-      JOIN fee_pulse_batches b ON l.batch_id = b.id
-      WHERE b.academic_session = ? AND b.term = ?
-        AND l.dispatched_at > datetime('now', '-24 hours')
-    `).all(session, term);
-    const recentlyRemindedIds = new Set(recentSentRows.map(r => r.student_id));
-
-    const eligibleDebtors = allDebtors.filter(d => !recentlyRemindedIds.has(d.student_id));
-
-    if (eligibleDebtors.length === 0) {
-      console.log(`[Fee Pulse] No debtors to remind (Total debtors: ${allDebtors.length}, already reminded in last 24h: ${recentlyRemindedIds.size})`);
-      if (mainWindow) {
-        mainWindow.webContents.send('fee-reminders-complete', {
-          batchId: null,
-          total: allDebtors.length,
-          sent: 0,
-          delivered: 0,
-          offline: 0,
-          notOnWa: 0,
-          failed: 0,
-          alreadyReminded: recentlyRemindedIds.size,
-          duration: 0
-        });
-        mainWindow.webContents.send('fee-reminders-sent', { count: 0 });
-      }
-      isFeePulseRunning = false;
-      return { ok: true, count: 0, message: 'All debtors were already reminded within the last 24 hours.' };
-    }
-
-    // 3. Create batch record
-    const batchId = `fp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const totalDebtTargeted = eligibleDebtors.reduce((sum, d) => sum + (d.total_billed - d.total_paid), 0);
-
-    db.prepare(`
-      INSERT INTO fee_pulse_batches (
-        id, academic_session, term, trigger_source, total_targeted, total_debt_targeted, status, started_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'in_progress', datetime('now'))
-    `).run(batchId, session, term, triggerSource, eligibleDebtors.length, totalDebtTargeted);
-
-    const schoolName = identityPacket.name || 'Nexus School';
-    const totalCount = eligibleDebtors.length;
-    let notOnWaCount = 0;
-    let failedCount = 0;
-    let offlineCount = 0;
-    let sentCount = 0;
-    const startTime = Date.now();
-
-    console.log(`[Fee Pulse] Starting batch ${batchId} for ${totalCount} debtors (${triggerSource})...`);
-
-    // 4. Dispatch loop with rate-limiting & progress emissions
-    for (let i = 0; i < totalCount; i++) {
-      const debtor = eligibleDebtors[i];
-      const balance = Math.max(0, debtor.total_billed - debtor.total_paid);
-      const balanceStr = balance.toLocaleString('en-NG');
-      const studentClass = debtor.class_name + (debtor.class_arm ? ' ' + debtor.class_arm : '');
-      const msg = `Hello! This is a reminder from ${schoolName}.\n\nStudent: *${debtor.name}*\nOutstanding Balance: *₦${balanceStr}*\n\nKindly make payment to avoid any inconvenience. Thank you! 📚`;
-
-      const logId = `log_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`;
-      let sendResult;
-
-      try {
-        sendResult = await pulseBot.sendFeeReminderRaw(debtor.parent_phone, msg);
-      } catch (sendErr) {
-        sendResult = { ok: false, error: sendErr.message, status: 'FAILED' };
-      }
-
-      let logStatus = 'SENT_OFFLINE';
-      let ackLevel = 1;
-      let waMessageId = null;
-
-      if (!sendResult.ok) {
-        if (sendResult.status === 'NOT_ON_WHATSAPP') {
-          logStatus = 'NOT_ON_WHATSAPP';
-          ackLevel = -2;
-          notOnWaCount++;
-        } else {
-          logStatus = 'FAILED';
-          ackLevel = -1;
-          failedCount++;
-        }
-      } else {
-        waMessageId = sendResult.wa_message_id || null;
-        ackLevel = sendResult.ack || 1;
-        logStatus = sendResult.status || 'SENT_OFFLINE';
-        sentCount++;
-        if (logStatus === 'SENT_OFFLINE') {
-          offlineCount++;
-        }
-      }
-
-      // Record log row
-      db.prepare(`
-        INSERT INTO fee_pulse_logs (
-          id, batch_id, student_id, student_name, class_name, parent_phone,
-          original_balance, wa_message_id, ack_level, status, dispatched_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).run(logId, batchId, debtor.student_id, debtor.name, studentClass, debtor.parent_phone, balance, waMessageId, ackLevel, logStatus);
-
-      // Emit real-time progress to UI banner
-      const progressPayload = {
-        batchId,
-        current: i + 1,
-        total: totalCount,
-        percentage: Math.round(((i + 1) / totalCount) * 100),
-        studentName: debtor.name,
-        status: logStatus
-      };
-
-      if (mainWindow) {
-        mainWindow.webContents.send('fee-reminders-progress', progressPayload);
-      }
-
-      // Safety delay between sends (1.5s)
-      if (i < totalCount - 1) {
-        await new Promise(r => setTimeout(r, 1500));
-      }
-    }
-
-    // 5. Finalize batch summary in SQLite
-    const summary = db.prepare(`
-      SELECT
-        COUNT(*) as total,
-        SUM(CASE WHEN ack_level >= 1 THEN 1 ELSE 0 END) as sent,
-        SUM(CASE WHEN ack_level = 2 THEN 1 ELSE 0 END) as delivered,
-        SUM(CASE WHEN ack_level >= 3 THEN 1 ELSE 0 END) as read_count,
-        SUM(CASE WHEN status = 'SENT_OFFLINE' THEN 1 ELSE 0 END) as offline,
-        SUM(CASE WHEN status = 'NOT_ON_WHATSAPP' THEN 1 ELSE 0 END) as not_on_wa,
-        SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) as failed
-      FROM fee_pulse_logs
-      WHERE batch_id = ?
-    `).get(batchId);
-
-    db.prepare(`
-      UPDATE fee_pulse_batches
-      SET total_sent = ?,
-          total_delivered = ?,
-          total_read = ?,
-          total_offline = ?,
-          total_not_on_wa = ?,
-          total_failed = ?,
-          status = 'completed',
-          completed_at = datetime('now')
-      WHERE id = ?
-    `).run(
-      summary.sent || 0,
-      summary.delivered || 0,
-      summary.read_count || 0,
-      summary.offline || 0,
-      summary.not_on_wa || 0,
-      summary.failed || 0,
-      batchId
-    );
-
-    const duration = Math.round((Date.now() - startTime) / 1000);
-    console.log(`[Fee Pulse] Batch ${batchId} complete in ${duration}s: ${summary.sent} sent, ${summary.offline} offline, ${summary.not_on_wa} not on WA, ${summary.failed} failed.`);
-
-    const completePayload = {
-      batchId,
-      total: totalCount,
-      sent: summary.sent || 0,
-      delivered: summary.delivered || 0,
-      read: summary.read_count || 0,
-      offline: summary.offline || 0,
-      notOnWa: summary.not_on_wa || 0,
-      failed: summary.failed || 0,
-      duration
-    };
-
-    if (mainWindow) {
-      mainWindow.webContents.send('fee-reminders-complete', completePayload);
-      mainWindow.webContents.send('fee-reminders-sent', { count: summary.sent || 0 });
-    }
-
-    isFeePulseRunning = false;
-    return { ok: true, ...completePayload };
-  } catch (err) {
-    console.error('[Fee Pulse] Batch execution error:', err);
-    isFeePulseRunning = false;
-    if (mainWindow) {
-      mainWindow.webContents.send('fee-reminders-complete', { error: err.message });
-    }
-    return { ok: false, error: err.message };
-  }
+if (typeof pulseBot.onBotReady === 'function') {
+  pulseBot.onBotReady(() => {
+    retryFailedFeePulseLogs({ reason: 'bot_ready' }).catch((err) => {
+      console.error('[Fee Pulse Retry] Auto-retry on bot ready failed:', err);
+    });
+  });
 }
 
 // Overwrite the old trigger-fee-reminders to use the unified Fee Pulse runner
 ipcMain.removeAllListeners('trigger-fee-reminders');
 ipcMain.on('trigger-fee-reminders', () => {
   runFeePulseBatch({ triggerSource: 'desktop_manual' });
+});
+
+ipcMain.handle('pulse:retry-failed-batch', async (_event, batchId) => {
+  try {
+    if (!batchId) return { ok: false, error: 'batchId required' };
+    return await retryFailedFeePulseLogs({ batchId, reason: 'manual_batch_retry' });
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 ipcMain.handle('pulse:get-batches', () => {
