@@ -14,6 +14,8 @@ interface RosterRow {
   name: string;
   class_name: string;
   total_billed: number;
+  term_billed?: number;
+  prior_arrears?: number;
   total_paid: number;
   balance: number;
   prior_balance?: number;
@@ -185,7 +187,9 @@ export function FinancialHub() {
     total_billed?: number;
     total_paid?: number;
     manual_paid?: number;
+    online_paid?: number;
     total_adjustments?: number;
+    net_billable?: number;
   } | null>(null);
   const [searchVal, setSearchVal] = useState('');
   const [adjMatchedStudents, setAdjMatchedStudents] = useState<{ id: string; name: string; class_name: string }[]>([]);
@@ -2628,7 +2632,7 @@ export function FinancialHub() {
             </div>
 
             {/* Metric KPI Cards Ribbon (Horizontal Scroll) */}
-            <div style={{ display:'flex', gap:'16px', overflowX:'auto', paddingBottom:'12px', scrollSnapType:'x mandatory' }}>
+            <div style={{ display:'flex', gap:'16px', overflowX:'auto', overflowY:'hidden', flexShrink:0, minHeight:'125px', paddingBottom:'12px', scrollSnapType:'x mandatory' }}>
               {/* Card 1: Outstanding Debt */}
               <div style={{ minWidth:'240px', flexShrink:0, scrollSnapAlign:'start', background:'linear-gradient(135deg, rgba(239,68,68,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(239,68,68,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
@@ -2657,7 +2661,21 @@ export function FinancialHub() {
                 </div>
               </div>
 
-              {/* Card 3: Total Collected */}
+              {/* Card 3: Net Billable Target */}
+              <div style={{ minWidth:'240px', flexShrink:0, scrollSnapAlign:'start', background:'linear-gradient(135deg, rgba(99,102,241,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(99,102,241,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#818cf8', letterSpacing:'0.5px' }}>Net Billable Target</span>
+                  <span style={{ fontSize:'16px' }}>🎯</span>
+                </div>
+                <div style={{ fontSize:'24px', fontWeight:800, color:'#c7d2fe', fontFamily:'var(--font-mono)', marginTop:'8px' }}>
+                  ₦{fmt(dbSummary?.net_billable ?? Math.max(0, (dbSummary?.total_billed || 0) - (dbSummary?.total_adjustments || 0)))}
+                </div>
+                <div style={{ fontSize:'11px', color:'rgba(165,180,252,0.8)', marginTop:'6px' }}>
+                  Target after ₦{fmt(dbSummary?.total_adjustments || 0)} waivers
+                </div>
+              </div>
+
+              {/* Card 4: Total Collected */}
               <div style={{ minWidth:'240px', flexShrink:0, scrollSnapAlign:'start', background:'linear-gradient(135deg, rgba(34,197,94,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(34,197,94,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                   <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#4ade80', letterSpacing:'0.5px' }}>Total Collected</span>
@@ -2667,11 +2685,25 @@ export function FinancialHub() {
                   ₦{fmt(dbSummary?.total_paid || 0)}
                 </div>
                 <div style={{ fontSize:'11px', color:'rgba(74,222,128,0.8)', marginTop:'6px' }}>
-                  {(dbSummary?.total_billed || 0) > 0 ? Math.round(((dbSummary?.total_paid || 0) / (dbSummary?.total_billed || 1)) * 100) : 0}% collected
+                  {(dbSummary?.net_billable || dbSummary?.total_billed || 0) > 0 ? Math.round(((dbSummary?.total_paid || 0) / (dbSummary?.net_billable || dbSummary?.total_billed || 1)) * 100) : 0}% of net target
                 </div>
               </div>
 
-              {/* Card 4: Manual Entry */}
+              {/* Card 5: Online Payments (Paystack) */}
+              <div style={{ minWidth:'240px', flexShrink:0, scrollSnapAlign:'start', background:'linear-gradient(135deg, rgba(16,185,129,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(16,185,129,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#34d399', letterSpacing:'0.5px' }}>Online (Paystack)</span>
+                  <span style={{ fontSize:'16px' }}>⚡</span>
+                </div>
+                <div style={{ fontSize:'24px', fontWeight:800, color:'#6ee7b7', fontFamily:'var(--font-mono)', marginTop:'8px' }}>
+                  ₦{fmt(dbSummary?.online_paid || 0)}
+                </div>
+                <div style={{ fontSize:'11px', color:'rgba(52,211,153,0.8)', marginTop:'6px' }}>
+                  Auto-verified portal payments
+                </div>
+              </div>
+
+              {/* Card 6: Manual Entry */}
               <div style={{ minWidth:'240px', flexShrink:0, scrollSnapAlign:'start', background:'linear-gradient(135deg, rgba(6,182,212,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(6,182,212,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                   <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#22d3ee', letterSpacing:'0.5px' }}>Manual Entry</span>
@@ -2685,7 +2717,7 @@ export function FinancialHub() {
                 </div>
               </div>
 
-              {/* Card 5: Total Adjustments */}
+              {/* Card 7: Total Adjustments */}
               <div style={{ minWidth:'240px', flexShrink:0, scrollSnapAlign:'start', background:'linear-gradient(135deg, rgba(245,158,11,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'14px', padding:'18px 20px' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                   <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#fbbf24', letterSpacing:'0.5px' }}>Total Adjustments</span>
@@ -2699,7 +2731,7 @@ export function FinancialHub() {
                 </div>
               </div>
 
-              {/* Card 6: Status Breakdown */}
+              {/* Card 8: Status Breakdown */}
               <div style={{ minWidth:'260px', flexShrink:0, scrollSnapAlign:'start', background:'linear-gradient(135deg, rgba(168,85,247,0.12), rgba(15,23,42,0.6))', border:'1px solid rgba(168,85,247,0.25)', borderRadius:'14px', padding:'18px 20px', display:'flex', flexDirection:'column', justifyContent:'space-between' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                   <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', color:'#c084fc', letterSpacing:'0.5px' }}>Status Breakdown</span>
@@ -2719,7 +2751,7 @@ export function FinancialHub() {
                     <div style={{ fontSize:'18px', fontWeight:800, color:'#fff', fontFamily:'var(--font-mono)' }}>{dbSummary?.unpaid || 0}</div>
                   </div>
                 </div>
-                <div style={{ fontSize:'11px', color:'rgba(192,132,252,0.8)', marginTop:'8px', textAlign:'center' }}>
+                <div style={{ fontSize:'11px', color:'rgba(192,132,252,0.8)', marginTop:'6px', textAlign:'center' }}>
                   {dbSummary?.total || 0} active student profiles
                 </div>
               </div>

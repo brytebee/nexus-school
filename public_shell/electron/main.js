@@ -2799,10 +2799,17 @@ async function processSuccessfulPayment(ref, amountInKobo, transactionId = null)
       const allocation = Math.min(remainingPaid, balance);
       remainingPaid -= allocation;
 
-      db.prepare(`
-        INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(studentId, academicSession, term, allocation, "transfer", ref, "Online Payment via Paystack (Auto-Verified)");
+      try {
+        db.prepare(`
+          INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note)
+          VALUES (?, ?, ?, ?, 'paystack', ?, ?)
+        `).run(studentId, academicSession, term, allocation, ref, "Online Payment via Paystack (Auto-Verified)");
+      } catch (pmErr) {
+        db.prepare(`
+          INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note)
+          VALUES (?, ?, ?, ?, 'transfer', ?, ?)
+        `).run(studentId, academicSession, term, allocation, ref, "Online Payment via Paystack (Auto-Verified)");
+      }
 
       const { total_paid_sum } = db.prepare(`
         SELECT COALESCE(SUM(amount), 0) AS total_paid_sum FROM fee_transactions
@@ -2841,10 +2848,17 @@ async function processSuccessfulPayment(ref, amountInKobo, transactionId = null)
         console.warn(`[Payment Processor] Failed to record advance excess:`, advErr.message);
       }
 
-      db.prepare(`
-        INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(studentId, academicSession, term, remainingPaid, "transfer", ref, session.payment_type || "Online Payment Leftover / Advance (Paystack)");
+      try {
+        db.prepare(`
+          INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note)
+          VALUES (?, ?, ?, ?, 'paystack', ?, ?)
+        `).run(studentId, academicSession, term, remainingPaid, ref, session.payment_type || "Online Payment Leftover / Advance (Paystack)");
+      } catch (pmErr) {
+        db.prepare(`
+          INSERT INTO fee_transactions (student_id, academic_session, term, amount, payment_method, reference_number, note)
+          VALUES (?, ?, ?, ?, 'transfer', ?, ?)
+        `).run(studentId, academicSession, term, remainingPaid, ref, session.payment_type || "Online Payment Leftover / Advance (Paystack)");
+      }
 
       const { total_paid_sum } = db.prepare(`
         SELECT COALESCE(SUM(amount), 0) AS total_paid_sum FROM fee_transactions
@@ -6084,6 +6098,8 @@ ipcMain.handle("fees:get-roster", (event, { academic_session, term, limit = 15, 
         s.parent_name,
         s.parent_phone,
         COALESCE(f.total_billed, 0)                              AS total_billed,
+        COALESCE(f.term_billed, 0)                               AS term_billed,
+        COALESCE(f.prior_arrears, 0)                             AS prior_arrears,
         COALESCE(f.total_paid,   0)                              AS total_paid,
         COALESCE(f.total_billed, 0) - COALESCE(f.total_paid, 0) AS balance,
         (
@@ -6135,6 +6151,9 @@ ipcMain.handle("fees:get-summary", (event, { academic_session, term, search = ""
     ];
     if (classNorm) sumParams.push(classNorm, classNorm);
 
+    sumParams.push(academic_session, term, query, query, query, query, query, query, query); // for online_paid
+    if (classNorm) sumParams.push(classNorm, classNorm);
+
     sumParams.push(academic_session, term, query, query, query, query, query, query, query); // for total_adjustments
     if (classNorm) sumParams.push(classNorm, classNorm);
 
@@ -6159,10 +6178,27 @@ ipcMain.handle("fees:get-summary", (event, { academic_session, term, search = ""
           FROM fee_transactions t
           JOIN students st ON st.id = t.student_id
           WHERE t.academic_session = ? AND t.term = ?
-            AND t.payment_method IN ('cash', 'transfer', 'pos', 'bank_teller')
+            AND (
+              t.payment_method IN ('cash', 'transfer', 'pos', 'bank_teller')
+              AND (t.reference_number NOT LIKE 'PAY-%' OR t.reference_number IS NULL)
+              AND (t.note IS NULL OR t.note NOT LIKE '%Paystack%')
+            )
             AND (st.name LIKE ? OR st.id LIKE ? OR st.admission_no LIKE ? OR st.reg_no LIKE ? OR st.parent_name LIKE ? OR st.parent_phone LIKE ? OR st.parent_phone_2 LIKE ?)
             ${classClause.replace(/s\./g, 'st.')}
         ) AS manual_paid,
+        (
+          SELECT COALESCE(SUM(t.amount), 0)
+          FROM fee_transactions t
+          JOIN students st ON st.id = t.student_id
+          WHERE t.academic_session = ? AND t.term = ?
+            AND (
+              t.payment_method IN ('paystack', 'online')
+              OR t.reference_number LIKE 'PAY-%'
+              OR t.note LIKE '%Paystack%'
+            )
+            AND (st.name LIKE ? OR st.id LIKE ? OR st.admission_no LIKE ? OR st.reg_no LIKE ? OR st.parent_name LIKE ? OR st.parent_phone LIKE ? OR st.parent_phone_2 LIKE ?)
+            ${classClause.replace(/s\./g, 'st.')}
+        ) AS online_paid,
         (
           SELECT COALESCE(SUM(a.amount), 0)
           FROM fee_adjustments a
@@ -6184,8 +6220,22 @@ ipcMain.handle("fees:get-summary", (event, { academic_session, term, search = ""
         ${classClause}
     `).get(...sumParams);
 
-    const fallback = { outstanding: 0, prior_outstanding: 0, cleared: 0, partial: 0, unpaid: 0, total: 0, total_billed: 0, total_paid: 0, manual_paid: 0, total_adjustments: 0 };
-    return { ok: true, data: summary ? { ...fallback, ...summary } : fallback };
+    const net_billable = summary ? Math.max(0, (summary.total_billed || 0) - (summary.total_adjustments || 0)) : 0;
+    const fallback = {
+      outstanding: 0,
+      prior_outstanding: 0,
+      cleared: 0,
+      partial: 0,
+      unpaid: 0,
+      total: 0,
+      total_billed: 0,
+      total_paid: 0,
+      manual_paid: 0,
+      online_paid: 0,
+      total_adjustments: 0,
+      net_billable: 0
+    };
+    return { ok: true, data: summary ? { ...fallback, ...summary, net_billable } : fallback };
   } catch (err) {
     console.error("[Fees] get-summary error:", err);
     return { ok: false, error: err.message, data: { outstanding: 0, cleared: 0, partial: 0, unpaid: 0, total: 0 } };

@@ -183,9 +183,12 @@ async function pushSchoolDelta() {
            COALESCE(s.parent_phone_2, NULL) as parent_phone_2,
            s.parent_email,
            COALESCE(sf.total_billed, 0) as total_billed,
+           COALESCE(sf.term_billed, 0) as term_billed,
+           COALESCE(sf.prior_arrears, 0) as prior_arrears,
            COALESCE(sf.total_paid, 0) as total_paid,
            COALESCE(sf.total_billed - sf.total_paid, 0) as fee_balance,
-           COALESCE(adv.advance_balance, 0) as advance_balance
+           COALESCE(adv.advance_balance, 0) as advance_balance,
+           COALESCE(adj.total_adjustments, 0) as total_adjustments
     FROM students s
     LEFT JOIN student_fees sf ON sf.student_id = s.id
       AND sf.academic_session = ? AND sf.term = ?
@@ -195,8 +198,14 @@ async function pushSchoolDelta() {
       WHERE status != 'exhausted' AND (amount - amount_used) > 0
       GROUP BY student_id
     ) adv ON adv.student_id = s.id
+    LEFT JOIN (
+      SELECT student_id, SUM(amount) AS total_adjustments
+      FROM fee_adjustments
+      WHERE academic_session = ? AND term = ?
+      GROUP BY student_id
+    ) adj ON adj.student_id = s.id
     WHERE COALESCE(s.is_active, 1) = 1
-  `).all(termConfig.academic_session, termConfig.term);
+  `).all(termConfig.academic_session, termConfig.term, termConfig.academic_session, termConfig.term);
 
   const studentPayload = students.map((st) => {
     // Query published result summary for active term
@@ -235,8 +244,11 @@ async function pushSchoolDelta() {
       parent_phone_2: st.parent_phone_2 || null,
       parent_email: st.parent_email || null,
       total_billed: st.total_billed,
+      term_billed: st.term_billed || 0,
+      prior_arrears: st.prior_arrears || 0,
       total_paid: st.total_paid,
       fee_balance: st.fee_balance,
+      total_adjustments: st.total_adjustments || 0,
       advance_balance: st.advance_balance || 0,
       results_summary: resultsSummary,
       attendance_stats: attendanceStats
