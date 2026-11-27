@@ -1,3 +1,18 @@
+## What's New in v1.2.08
+
+This release delivers the **Arm-Priority Fee Structure Resolution Engine, Safe Scholarship & Fee Adjustment Recalculation, Un-Armed Fallback Preservation, and WhatsApp Pulse Bot Billing Accuracy**.
+
+### 💳 Financial & Bursary Billing Engine
+- **Arm-Priority Candidate Resolution**: Completely eliminated bare+armed fee structure double-counting. Billing queries now evaluate candidates in strict specificity order: `Class Arm` (e.g. `Learning to Read ACE`, `Reading Readiness 2 A`) → `Class-Arm` → bare `Class` (`Learning to Read`). Halts at the first match, preventing sum-duplication across duplicate bare and armed fee schedules.
+- **Scholarship & Fee Adjustment Recalculation**: Startup reconciliations (`reconcileExistingFeeAdjustments`, `reconcileExistingStudentExtras`) and batch billing handlers (`apply-to-class` / `POST /api/admin/finance/apply-structure`) now factor active scholarships/waivers (`fee_adjustments`) and optional extras (`fee_extras`) dynamically. Scholarships survive repeated app reboots without being overwritten by un-adjusted schedule totals.
+- **Un-Armed Fallback Integrity**: Bare class fee schedules are safely preserved as fallback defaults for un-armed students (e.g., `STU-033` Eunice Yakubu in `Reading Readiness 2`), ensuring zero data loss and accurate billing across mixed-arm cohorts.
+- **Manual Billing Guard**: Engine recalculation skips students without an active fee structure configuration (`applied: false`), preventing manually assigned tuition bills from being inadvertently zeroed out during batch operations.
+
+### 🤖 WhatsApp Pulse Bot & Billing Dispatch
+- **Accurate Itemized Breakdown**: Replaced legacy multi-candidate SQL `OR` joins in `sendFeeStatus` with the priority candidate resolver. Inbound parent fee inquiries receive exact itemized fee items and accurate total estimates without phantom duplicate line items.
+
+---
+
 ## What's New in v1.2.07
 
 This release delivers **Report Template Harmonization, Dynamic Affective & Psychomotor Domain Matrices, Department-Scoped Grading Scales, Financial Hub Desktop Dashboard, and 100% Student Vault Sync**.

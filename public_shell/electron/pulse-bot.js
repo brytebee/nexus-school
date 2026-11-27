@@ -11,6 +11,7 @@ const fs   = require("fs");
 const QRCode = require("qrcode");
 const paystackService = require("./paystack-service");
 const { calculatePaystackCharge, calculatePaymentBreakdown, getHostedCheckoutSplitParams, formatNaira } = require("./src/lib/paystackUtils");
+const { buildClassCandidates } = require("./src/lib/fee-calculator");
 
 // Suppress Puppeteer "Execution context was destroyed" noise that fires
 // when WhatsApp LOGOUT causes a page navigation mid-inject. This is expected
@@ -1044,17 +1045,24 @@ async function sendFeeStatus(msg, session, matchable) {
         AND  term             = ?
     `).get(student.id, termConfig.academic_session, termConfig.term);
 
-    // Fetch fee breakdown — try arm-qualified name first, fall back to plain class name
-    // so fee items are found regardless of how the school entered the class name.
+    // Fetch fee breakdown — arm-specific candidate first, bare class only as fallback
+    // so bare + arm fee_structures rows never double-count in WhatsApp breakdowns.
     let breakdown = [];
     try {
-      breakdown = db.prepare(`
+      const feeStructStmt = db.prepare(`
         SELECT item_name, amount
         FROM   fee_structures
-        WHERE  (class_name = ? OR class_name = ?)
-          AND  (term = 'All Terms' OR term = ?)
+        WHERE  UPPER(replace(class_name, ' ', '')) = UPPER(replace(?, ' ', ''))
+          AND  (LOWER(TRIM(term)) IN ('all terms', 'all term') OR LOWER(TRIM(term)) = LOWER(TRIM(?)))
         ORDER BY item_name ASC
-      `).all(studentClassNameWithArm, student.class_name, termConfig.term);
+      `);
+      for (const candidate of buildClassCandidates(student.class_name, student.class_arm)) {
+        const rows = feeStructStmt.all(candidate, termConfig.term);
+        if (rows && rows.length > 0) {
+          breakdown = rows;
+          break;
+        }
+      }
 
       // Also append active assigned extras for this student
       const extraItems = db.prepare(`

@@ -1212,29 +1212,15 @@ ipcMain.handle('sync:cloud-connect', async (_event, { slug, email, pin, authType
                     ON CONFLICT(student_id, academic_session, term) DO UPDATE SET
                         total_billed = CASE WHEN student_fees.total_billed = 0 THEN excluded.total_billed ELSE student_fees.total_billed END
                 `);
-                const feeQuery = db.prepare(`
-                    SELECT COALESCE(SUM(amount), 0) AS total FROM fee_structures
-                    WHERE (UPPER(REPLACE(class_name, ' ', '')) = UPPER(REPLACE(?, ' ', '')))
-                      AND (LOWER(TRIM(term)) IN ('all terms', 'all term') OR term = ?)
-                `);
-
                 let autoBilledCount = 0;
                 for (const termConfig of allTerms) {
                     for (const st of allStudents) {
-                        const candidates = [
+                        const billed = feeCalculator.resolveBaseFeeTotal(
+                            db,
                             st.class_name,
-                            `${st.class_name || ''} ${st.class_arm || ''}`.trim(),
-                            (st.class_name || '').split(' ')[0], // base class fallback
-                        ].filter(Boolean);
-
-                        let billed = 0;
-                        for (const c of candidates) {
-                            const r = feeQuery.get(c, termConfig.term);
-                            if (r && r.total > 0) {
-                                billed = r.total;
-                                break;
-                            }
-                        }
+                            st.class_arm,
+                            termConfig.term
+                        );
 
                         if (billed > 0) {
                             upsertStudentFee.run(st.id, termConfig.academic_session, termConfig.term, billed);
@@ -2170,13 +2156,11 @@ ipcMain.handle('fee-structure:apply-to-class', (event, { className, academicSess
     const session = academicSession || termConfig.academic_session;
     const activeTerm = term || termConfig.term;
 
-    const { total } = db.prepare(`
-        SELECT COALESCE(SUM(amount), 0) as total FROM fee_structures
-        WHERE class_name = ? AND (LOWER(TRIM(term)) IN ('all terms', 'all term') OR term = ?)
-    `).get(className, activeTerm);
-
-    const students = db.prepare("SELECT id FROM students WHERE UPPER(replace(class_name || COALESCE(' ' || NULLIF(class_arm, ''), ''), ' ', '')) = ?").all(className.replace(/\s+/g, '').toUpperCase());
+    const students = db.prepare("SELECT id, class_name, class_arm FROM students WHERE UPPER(replace(class_name || COALESCE(' ' || NULLIF(class_arm, ''), ''), ' ', '')) = ?").all(className.replace(/\s+/g, '').toUpperCase());
     if (students.length === 0) return { ok: false, error: 'No students in class', count: 0 };
+
+    const total = feeCalculator.resolveBaseFeeTotal(db, className, null, activeTerm)
+        || feeCalculator.resolveBaseFeeTotal(db, students[0].class_name, students[0].class_arm, activeTerm);
 
     db.transaction(() => {
         for (const s of students) {
@@ -2426,7 +2410,7 @@ ipcMain.handle('fees:print-receipt', async (event, { txRef, studentId, txId, for
     }
 
     const targetStudentId = studentId || tx.student_id;
-    const sRow = db.prepare("SELECT name, class_name, parent_email, parent_name FROM students WHERE id = ?").get(targetStudentId);
+    const sRow = db.prepare("SELECT name, class_name, class_arm, parent_email, parent_name FROM students WHERE id = ?").get(targetStudentId);
     const studentName = sRow?.name || "Student";
     const studentClass = sRow?.class_name || "—";
     const parentEmail = sRow?.parent_email || "—";
@@ -2487,15 +2471,13 @@ ipcMain.handle('fees:print-receipt', async (event, { txRef, studentId, txId, for
     };
 
     try {
-        // 1. Fetch standard fee structure items for the student's class + term
-        const structRows = db.prepare(`
-            SELECT fs.item_name, fs.amount, fs.bank_account_id,
-                   ba.bank_name AS bank_name, ba.account_name AS account_name
-            FROM fee_structures fs
-            LEFT JOIN bank_accounts ba ON ba.id = fs.bank_account_id
-            WHERE fs.class_name = ?
-              AND (fs.term = ? OR fs.term = 'All Terms')
-        `).all(studentClass, tx.term);
+        // 1. Fetch standard fee structure items for the student's class (+ optional arm) & term
+        const structRows = feeCalculator.resolveBaseFeeStructureItems(
+            db,
+            sRow?.class_name,
+            sRow?.class_arm,
+            tx.term
+        );
 
         for (const row of structRows) {
             const key = row.bank_account_id ?? CASH_KEY;
@@ -3141,11 +3123,15 @@ async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null
   let amountPaid = session.total_amount;
   let receiptRecords = [];
   const primaryStudentId = targetStudentId || studentIds[0];
+  let primaryStudentClass = null;
+  let primaryStudentArm = null;
 
   if (targetStudentId) {
-    const sRow = db.prepare("SELECT name, class_name, parent_email, parent_name FROM students WHERE id = ?").get(targetStudentId);
+    const sRow = db.prepare("SELECT name, class_name, class_arm, parent_email, parent_name FROM students WHERE id = ?").get(targetStudentId);
     studentName = sRow?.name || "Student";
     studentClass = sRow?.class_name || "—";
+    primaryStudentClass = sRow?.class_name || null;
+    primaryStudentArm = sRow?.class_arm || null;
     parentEmail = sRow?.parent_email || "—";
     parentName = sRow?.parent_name?.trim() || null;
 
@@ -3165,9 +3151,13 @@ async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null
     const names = [];
     const classes = [];
     for (const studentId of studentIds) {
-      const sRow = db.prepare("SELECT name, class_name, parent_email, parent_name FROM students WHERE id = ?").get(studentId);
+      const sRow = db.prepare("SELECT name, class_name, class_arm, parent_email, parent_name FROM students WHERE id = ?").get(studentId);
       if (sRow?.name) names.push(sRow.name);
       if (sRow?.class_name && !classes.includes(sRow.class_name)) classes.push(sRow.class_name);
+      if (!primaryStudentClass && sRow?.class_name) {
+        primaryStudentClass = sRow.class_name;
+        primaryStudentArm = sRow.class_arm || null;
+      }
       if (sRow?.parent_email && parentEmail === "—") parentEmail = sRow.parent_email;
       if (sRow?.parent_name && !parentName) parentName = sRow.parent_name.trim();
 
@@ -3194,15 +3184,12 @@ async function sendBrandedReceiptHelper(db, ref, session, targetStudentId = null
   const feeItems = [];
   try {
     // 1. Standard mandatory fee items
-    const structRows = db.prepare(`
-      SELECT fs.item_name, fs.amount, fs.bank_account_id,
-             ba.account_name AS account_name, ba.bank_name AS bank_name
-      FROM fee_structures fs
-      LEFT JOIN bank_accounts ba ON ba.id = fs.bank_account_id
-      WHERE fs.class_name = ?
-        AND (fs.term = ? OR fs.term = 'All Terms')
-      ORDER BY fs.item_name ASC
-    `).all(studentClass, term);
+    const structRows = feeCalculator.resolveBaseFeeStructureItems(
+      db,
+      primaryStudentClass,
+      primaryStudentArm,
+      term
+    );
 
     for (const row of structRows) {
       const bankLabel = row.bank_account_id
@@ -4808,19 +4795,15 @@ ipcMain.handle("add-student-form", (event, { id, name, class_name, class_arm, su
       const termConfig = db.prepare('SELECT academic_session, term FROM school_term_config WHERE id = 1').get();
       if (termConfig && termConfig.academic_session && termConfig.term) {
         const fullClassName = class_name + (class_arm ? ' ' + class_arm : '');
+        const inheritedTotal = feeCalculator.resolveBaseFeeTotal(db, class_name, class_arm, termConfig.term);
 
-        const feeRow = db.prepare(`
-          SELECT COALESCE(SUM(amount), 0) as total FROM fee_structures
-          WHERE class_name = ? AND (LOWER(TRIM(term)) IN ('all terms', 'all term') OR term = ?)
-        `).get(fullClassName, termConfig.term);
-
-        if (feeRow && feeRow.total > 0) {
+        if (inheritedTotal > 0) {
           db.prepare(`
             INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status)
             VALUES (?, ?, ?, ?, 0, 'unpaid')
             ON CONFLICT(student_id, academic_session, term) DO NOTHING
-          `).run(id, termConfig.academic_session, termConfig.term, feeRow.total);
-          console.log(`[Form] Auto-applied ₦${feeRow.total.toLocaleString()} fee for ${name} in ${fullClassName} (add)`);
+          `).run(id, termConfig.academic_session, termConfig.term, inheritedTotal);
+          console.log(`[Form] Auto-applied ₦${inheritedTotal.toLocaleString()} fee for ${name} in ${fullClassName} (add)`);
         }
       }
     } catch (feeErr) {
@@ -4922,19 +4905,15 @@ ipcMain.handle("update-student", (event, { id, name, class_name, class_arm, subj
       const termConfig = db.prepare('SELECT academic_session, term FROM school_term_config WHERE id = 1').get();
       if (termConfig && termConfig.academic_session && termConfig.term) {
         const fullClassName = class_name + (class_arm ? ' ' + class_arm : '');
+        const inheritedTotal = feeCalculator.resolveBaseFeeTotal(db, class_name, class_arm, termConfig.term);
 
-        const feeRow = db.prepare(`
-          SELECT COALESCE(SUM(amount), 0) as total FROM fee_structures
-          WHERE class_name = ? AND (LOWER(TRIM(term)) IN ('all terms', 'all term') OR term = ?)
-        `).get(fullClassName, termConfig.term);
-
-        if (feeRow && feeRow.total > 0) {
+        if (inheritedTotal > 0) {
           db.prepare(`
             INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status)
             VALUES (?, ?, ?, ?, 0, 'unpaid')
             ON CONFLICT(student_id, academic_session, term) DO NOTHING
-          `).run(id, termConfig.academic_session, termConfig.term, feeRow.total);
-          console.log(`[Form] Auto-applied ₦${feeRow.total.toLocaleString()} fee for student ${id} in ${fullClassName} (update)`);
+          `).run(id, termConfig.academic_session, termConfig.term, inheritedTotal);
+          console.log(`[Form] Auto-applied ₦${inheritedTotal.toLocaleString()} fee for student ${id} in ${fullClassName} (update)`);
         }
       }
     } catch (feeErr) {
@@ -7170,90 +7149,11 @@ ipcMain.handle('fees:dry-run-recovery-pulse', (event, { academic_session, term }
 
 /**
  * recalculateStudentTotalBilled — Recalculates student_fees.total_billed from:
- * base fee_structures + assigned student_extra_selections.
+ * base fee_structures (priority fallback: arm-specific -> bare class) + active extras - adjustments.
  * MUST ALWAYS be called within an existing db.transaction() or active transaction!
  */
 function recalculateStudentTotalBilled(db, studentId, academicSession, term) {
-  if (!studentId || !academicSession || !term) return null;
-
-  // 1. Get student class (normalize class name and class arm)
-  const student = db.prepare('SELECT class_name, class_arm FROM students WHERE id = ?').get(studentId);
-  const rawClass = student?.class_name ? String(student.class_name).trim() : '';
-  const rawArm = student?.class_arm ? String(student.class_arm).trim() : '';
-  const fullClassName = (rawClass + (rawArm ? ' ' + rawArm : '')).trim();
-
-  // 2. Base class fee from fee_structures (match full class name e.g. "Beginners A" or raw class "Beginners")
-  let baseFee = 0;
-  if (rawClass) {
-    const feeRow = db.prepare(`
-      SELECT COALESCE(SUM(amount), 0) as total FROM fee_structures
-      WHERE (
-        UPPER(replace(class_name, ' ', '')) = UPPER(replace(?, ' ', ''))
-        OR UPPER(replace(class_name, ' ', '')) = UPPER(replace(?, ' ', ''))
-      ) AND (
-        LOWER(TRIM(term)) IN ('all terms', 'all term')
-        OR LOWER(TRIM(term)) = LOWER(TRIM(?))
-      )
-    `).get(fullClassName, rawClass, term);
-    baseFee = Number(feeRow?.total || 0);
-  }
-
-  // 3. Extras fee from student_extra_selections joined with fee_extras
-  const extrasRow = db.prepare(`
-    SELECT COALESCE(SUM(fe.amount), 0) as total
-    FROM student_extra_selections ses
-    JOIN fee_extras fe ON fe.id = ses.extra_id
-    WHERE ses.student_id = ?
-      AND TRIM(ses.academic_session) = TRIM(?)
-      AND LOWER(TRIM(ses.term)) = LOWER(TRIM(?))
-      AND fe.is_active = 1
-  `).get(studentId, academicSession, term);
-  const extrasFee = Number(extrasRow?.total || 0);
-
-  // 3b. Fee adjustments (scholarships, discounts, bursaries, waivers)
-  let adjFee = 0;
-  try {
-    const adjRow = db.prepare(`
-      SELECT COALESCE(SUM(amount), 0) as total
-      FROM fee_adjustments
-      WHERE student_id = ?
-        AND TRIM(academic_session) = TRIM(?)
-        AND LOWER(TRIM(term)) = LOWER(TRIM(?))
-    `).get(studentId, academicSession, term);
-    adjFee = Number(adjRow?.total || 0);
-  } catch (_) {}
-
-  const newTotalBilled = Math.max(0, baseFee + extrasFee - adjFee);
-
-  // 4. Update student_fees row atomically
-  const existing = db.prepare(`
-    SELECT total_paid FROM student_fees
-    WHERE student_id = ?
-      AND TRIM(academic_session) = TRIM(?)
-      AND LOWER(TRIM(term)) = LOWER(TRIM(?))
-  `).get(studentId, academicSession, term);
-
-  const totalPaid = Number(existing?.total_paid || 0);
-  const status = totalPaid >= newTotalBilled && newTotalBilled > 0
-    ? 'cleared'
-    : (totalPaid > 0 ? 'partial' : (newTotalBilled > 0 ? 'unpaid' : 'cleared'));
-
-  if (existing) {
-    db.prepare(`
-      UPDATE student_fees
-      SET total_billed = ?, status = ?, updated_at = datetime('now')
-      WHERE student_id = ?
-        AND TRIM(academic_session) = TRIM(?)
-        AND LOWER(TRIM(term)) = LOWER(TRIM(?))
-    `).run(newTotalBilled, status, studentId, academicSession, term);
-  } else {
-    db.prepare(`
-      INSERT INTO student_fees (student_id, academic_session, term, total_billed, total_paid, status, updated_at)
-      VALUES (?, ?, ?, ?, 0, ?, datetime('now'))
-    `).run(studentId, academicSession, term, newTotalBilled, status);
-  }
-
-  return { baseFee, extrasFee, adjFee, totalBilled: newTotalBilled, totalPaid, status };
+  return feeCalculator.recalculateStudentTotalBilled(db, studentId, academicSession, term);
 }
 
 /**
@@ -7497,12 +7397,8 @@ ipcMain.handle('fee-extras:get-student-extras-summary', (event, { student_id, ac
 
     const fullClassName = student.class_name + (student.class_arm ? ' ' + student.class_arm : '');
 
-    // Base fee from fee_structures
-    const feeRow = db.prepare(`
-      SELECT COALESCE(SUM(amount), 0) as total FROM fee_structures
-      WHERE class_name = ? AND (LOWER(TRIM(term)) IN ('all terms', 'all term') OR term = ?)
-    `).get(fullClassName, term);
-    const baseFee = Number(feeRow?.total || 0);
+    // Base fee from fee_structures (priority fallback: arm-specific -> bare class)
+    const baseFee = feeCalculator.resolveBaseFeeTotal(db, student.class_name, student.class_arm, term);
 
     // Assigned extras
     const assignedExtras = db.prepare(`
@@ -7516,16 +7412,32 @@ ipcMain.handle('fee-extras:get-student-extras-summary', (event, { student_id, ac
     `).all(student_id, academic_session, term);
 
     const extrasFee = assignedExtras.reduce((sum, e) => sum + Number(e.amount || 0), 0);
-    const totalBilled = baseFee + extrasFee;
+
+    let adjFee = 0;
+    try {
+      const adjRow = db.prepare(`
+        SELECT COALESCE(SUM(amount), 0) AS total
+        FROM fee_adjustments
+        WHERE student_id = ?
+          AND TRIM(academic_session) = TRIM(?)
+          AND LOWER(TRIM(term)) = LOWER(TRIM(?))
+      `).get(student_id, academic_session, term);
+      adjFee = Number(adjRow?.total || 0);
+    } catch (_) {}
+
+    const totalBilled = Math.max(0, baseFee + extrasFee - adjFee);
 
     const sfRow = db.prepare(`
       SELECT total_billed, total_paid, status
       FROM student_fees
-      WHERE student_id = ? AND academic_session = ? AND term = ?
+      WHERE student_id = ?
+        AND TRIM(academic_session) = TRIM(?)
+        AND LOWER(TRIM(term)) = LOWER(TRIM(?))
     `).get(student_id, academic_session, term);
 
     const totalPaid = Number(sfRow?.total_paid || 0);
-    const balance = Math.max(0, (sfRow?.total_billed ?? totalBilled) - totalPaid);
+    const resolvedTotalBilled = sfRow?.total_billed ?? totalBilled;
+    const balance = Math.max(0, resolvedTotalBilled - totalPaid);
 
     return {
       ok: true,
@@ -7535,10 +7447,11 @@ ipcMain.handle('fee-extras:get-student-extras-summary', (event, { student_id, ac
         term,
         baseFee,
         extrasFee,
-        totalBilled: sfRow?.total_billed ?? totalBilled,
+        adjFee,
+        totalBilled: resolvedTotalBilled,
         totalPaid,
         balance,
-        status: sfRow?.status || (totalPaid >= totalBilled && totalBilled > 0 ? 'cleared' : (totalPaid > 0 ? 'partial' : 'unpaid')),
+        status: sfRow?.status || (totalPaid >= resolvedTotalBilled ? 'cleared' : (totalPaid > 0 ? 'partial' : 'unpaid')),
         assignedExtras
       }
     };
