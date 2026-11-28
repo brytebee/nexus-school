@@ -221,16 +221,47 @@ async function pushSchoolDelta() {
     // Query attendance summary for active term
     let attendanceStats = { present: 0, total: 0, absent_dates: [] };
     try {
-      const attRows = db.prepare(`
+      let attRows = db.prepare(`
         SELECT date, status
-        FROM attendance
+        FROM daily_attendance
         WHERE student_id = ? AND academic_session = ? AND term = ?
       `).all(st.id, termConfig.academic_session, termConfig.term);
 
-      const total = attRows.length;
-      const present = attRows.filter(r => r.status === "Present").length;
-      const absentDates = attRows.filter(r => r.status === "Absent").map(r => r.date);
-      attendanceStats = { present, total, absent_dates: absentDates };
+      // Case/whitespace-insensitive fallback
+      if (!attRows || attRows.length === 0) {
+        attRows = db.prepare(`
+          SELECT date, status
+          FROM daily_attendance
+          WHERE student_id = ?
+            AND LOWER(TRIM(COALESCE(academic_session, ''))) = LOWER(TRIM(?))
+            AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
+        `).all(st.id, termConfig.academic_session, termConfig.term);
+      }
+
+      // Fallback to student_attendance summary table if roll-call daily_attendance is empty
+      if (!attRows || attRows.length === 0) {
+        try {
+          const saRow = db.prepare(`
+            SELECT times_present, times_opened
+            FROM student_attendance
+            WHERE student_id = ? AND academic_session = ? AND term = ?
+          `).get(st.id, termConfig.academic_session, termConfig.term);
+          if (saRow && saRow.times_opened > 0) {
+            attendanceStats = {
+              present: Number(saRow.times_present || 0),
+              total: Number(saRow.times_opened || 0),
+              absent_dates: []
+            };
+          }
+        } catch (_) {}
+      }
+
+      if (attRows && attRows.length > 0) {
+        const total = attRows.length;
+        const present = attRows.filter(r => r.status === "Present" || r.status === "Late").length;
+        const absentDates = attRows.filter(r => r.status === "Absent").map(r => r.date);
+        attendanceStats = { present, total, absent_dates: absentDates };
+      }
     } catch (_) {}
 
     return {
